@@ -1,9 +1,9 @@
 pub mod io;
-use crate::{Arena, ArenaHandle, Bounds, Corner, IndexPath, Voxel};
+use crate::{Arena, Handle, Bounds, Corner, IndexPath, Voxel};
 use glam::Vec3;
 
 struct NodeInner<T: Voxel> {
-    handle: ArenaHandle<T>,
+    handle: Handle<T>,
     index_path: IndexPath,
     bounds: Bounds,
     data: T,
@@ -16,7 +16,7 @@ impl<T: Voxel> NodeInner<T> {
         if self.handle.is_none() {
             // Virtual Node
             NodeInner {
-                handle: ArenaHandle::none(),
+                handle: Handle::none(),
                 index_path: new_index_path,
                 data: self.data,
                 bounds: new_bounds,
@@ -24,7 +24,7 @@ impl<T: Voxel> NodeInner<T> {
         } else {
             let node_ref = &octree.arena[self.handle];
             let new_handle = if node_ref.freemask & (1 << (dir as u8)) == 0 {
-                ArenaHandle::none()
+                Handle::none()
             } else {
                 node_ref.child(dir)
             };
@@ -112,7 +112,7 @@ impl<'a, T: Voxel> NodeRefMut<'a, T> {
 
 pub struct Octree<T: Voxel> {
     arena: Arena<T>,
-    root: ArenaHandle<T>,
+    root: Handle<T>,
     root_data: T,
 }
 
@@ -193,7 +193,7 @@ impl<T: Voxel> Octree<T> {
 
     fn set_internal(
         &mut self,
-        handle: ArenaHandle<T>,
+        handle: Handle<T>,
         mut x: u32,
         mut y: u32,
         mut z: u32,
