@@ -1,0 +1,10 @@
+[package]
+name = "gfx_block_alloc"
+version = "0.1.0"
+authors = ["Zhixing Zhang <me@neoto.xin>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gfx-hal = { git = "https://github.com/gfx-rs/gfx" }
