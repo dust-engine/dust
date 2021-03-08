@@ -1,0 +1,16 @@
+[package]
+name = "dust"
+version = "0.1.0"
+edition = "2018"
+authors = [
+    "Zhixing Zhang <me@neoto.xin>",
+]
+categories = ["game-engines", "graphics", "rendering"]
+description = "A large scale voxel rendering framework"
+exclude = [".github/**/*", "crates/**/*"]
+keywords = ["game", "engine", "gamedev", "graphics", "voxel"]
+readme = "README.md"
+
+
+[workspace]
+members = ["crates/*"]
