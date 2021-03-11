@@ -8,3 +8,7 @@ edition = "2018"
 
 [dependencies]
 gfx-hal = { git = "https://github.com/gfx-rs/gfx" }
+
+[dev-dependencies]
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx" }
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx" }

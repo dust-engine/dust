@@ -3,6 +3,7 @@ use std::ops::{Index, IndexMut};
 use crate::Corner;
 
 mod handle;
+mod allocator;
 pub use handle::Handle;
 
 const BLOCK_SIZE: u32 = 13;
