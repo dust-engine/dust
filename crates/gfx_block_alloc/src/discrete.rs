@@ -1,4 +1,4 @@
-use crate::{AllocError, BlockAllocator, MAX_BUFFER_SIZE};
+use crate::{AllocError, AllocatorBlock, BlockAllocator, MAX_BUFFER_SIZE};
 use gfx_hal as hal;
 use gfx_hal::prelude::*;
 use std::ops::Range;
@@ -14,6 +14,12 @@ pub struct DiscreteBlock<B: hal::Backend, const SIZE: usize> {
     device_mem: B::Memory,
     ptr: NonNull<[u8; SIZE]>,
     offset: usize,
+}
+
+impl<B: hal::Backend, const SIZE: usize> AllocatorBlock<SIZE> for DiscreteBlock<B, SIZE> {
+    fn ptr(&self) -> NonNull<[u8; SIZE]> {
+        self.ptr
+    }
 }
 
 pub struct DiscreteBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
@@ -60,10 +66,12 @@ impl<'a, B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<'a, B, SIZE>
                 &device_buf_requirements,
             );
 
-            let mut command_pool = device.create_command_pool(
-                transfer_queue_family,
-                hal::pool::CommandPoolCreateFlags::TRANSIENT
-            ).unwrap();
+            let mut command_pool = device
+                .create_command_pool(
+                    transfer_queue_family,
+                    hal::pool::CommandPoolCreateFlags::TRANSIENT,
+                )
+                .unwrap();
             let command_buffer = command_pool.allocate_one(hal::command::Level::Primary);
             Ok(Self {
                 device,
@@ -76,13 +84,15 @@ impl<'a, B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<'a, B, SIZE>
                 current_offset: 0,
                 free_offsets: Vec::new(),
                 command_pool,
-                command_buffer
+                command_buffer,
             })
         }
     }
 }
 
-impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for DiscreteBlockAllocator<'_, B, SIZE> {
+impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
+    for DiscreteBlockAllocator<'_, B, SIZE>
+{
     type Block = DiscreteBlock<B, SIZE>;
 
     unsafe fn allocate_block(&mut self) -> Result<Self::Block, AllocError> {
@@ -113,7 +123,8 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for DiscreteBlockA
                     size: SIZE as u64,
                     memory: Some((&device_mem, 0)),
                 }),
-            )).chain(std::iter::once((
+            ))
+            .chain(std::iter::once((
                 &mut self.system_buf,
                 std::iter::once(&hal::memory::SparseBind {
                     resource_offset: (resource_offset * SIZE) as u64,
@@ -148,7 +159,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for DiscreteBlockA
         }
     }
 
-    unsafe fn updated_block(&mut self, block: &Self::Block, block_range: Range<u64>) {
+    unsafe fn updated_block(&mut self, _block: &Self::Block, _block_range: Range<u64>) {
         self.copy_regions.push(hal::command::BufferCopy {
             src: 0,
             dst: 0,
@@ -159,20 +170,20 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for DiscreteBlockA
     unsafe fn flush(&mut self) {
         self.command_buffer.reset(false);
         // todo: wait for semaphores
-        self.command_buffer.begin_primary(hal::command::CommandBufferFlags::ONE_TIME_SUBMIT);
+        self.command_buffer
+            .begin_primary(hal::command::CommandBufferFlags::ONE_TIME_SUBMIT);
         self.command_buffer.copy_buffer(
             &self.system_buf,
             &self.device_buf,
             self.copy_regions.drain(..),
         );
         self.command_buffer.finish();
-        self.bind_queue
-            .submit(
-                std::iter::once(&self.command_buffer),
-                std::iter::empty(),
-                std::iter::empty(),
-                None
-            );
+        self.bind_queue.submit(
+            std::iter::once(&self.command_buffer),
+            std::iter::empty(),
+            std::iter::empty(),
+            None,
+        );
     }
 }
 
@@ -198,7 +209,7 @@ fn select_discrete_memtype(
         .into();
 
     // Search for the largest DEVICE_LOCAL heap
-    let (device_heap_index, device_heap) = memory_properties
+    let (device_heap_index, _device_heap) = memory_properties
         .memory_heaps
         .iter()
         .filter(|heap| heap.flags.contains(hal::memory::HeapFlags::DEVICE_LOCAL))
@@ -223,55 +234,65 @@ fn select_discrete_memtype(
     (system_buf_mem_type, device_buf_mem_type)
 }
 
-
 #[cfg(test)]
 mod tests {
-    use gfx_backend_vulkan as back;
-    use gfx_hal::prelude::*;
-    use gfx_hal as hal;
     use crate::discrete::DiscreteBlockAllocator;
     use crate::BlockAllocator;
+    use gfx_backend_vulkan as back;
+    use gfx_hal as hal;
+    use gfx_hal::prelude::*;
 
     #[test]
     fn test_discrete() {
         let instance = back::Instance::create("gfx_test", 1).expect("Unable to create an instance");
-        let mut adapters = instance.enumerate_adapters();
+        let adapters = instance.enumerate_adapters();
         let adapter = {
             for adapter in &instance.enumerate_adapters() {
                 println!("{:?}", adapter);
             }
-            adapters.iter().find(|adapter| adapter.info.device_type == hal::adapter::DeviceType::DiscreteGpu)
-        }.expect("Unable to find a discrete GPU");
+            adapters
+                .iter()
+                .find(|adapter| adapter.info.device_type == hal::adapter::DeviceType::DiscreteGpu)
+        }
+        .expect("Unable to find a discrete GPU");
 
         let physical_device = &adapter.physical_device;
         let memory_properties = physical_device.memory_properties();
         let family = adapter
             .queue_families
             .iter()
-            .find(|family| {
-                family.queue_type() == hal::queue::QueueType::Transfer
-            })
+            .find(|family| family.queue_type() == hal::queue::QueueType::Transfer)
             .expect("Can't find transfer queue family!");
         let mut gpu = unsafe {
             physical_device.open(
                 &[(family, &[1.0])],
                 hal::Features::SPARSE_BINDING | hal::Features::SPARSE_RESIDENCY_IMAGE_2D,
             )
-        }.expect("Unable to open the physical device!");
+        }
+        .expect("Unable to open the physical device!");
         let mut queue_group = gpu.queue_groups.pop().unwrap();
         let device = gpu.device;
-        let mut allocator: DiscreteBlockAllocator<back::Backend, 16777216> = DiscreteBlockAllocator::new(
-            &device,
-            &mut queue_group.queues[0],
-            queue_group.family,
-            &memory_properties,
-        ).unwrap();
+        let mut allocator: DiscreteBlockAllocator<back::Backend, 16777216> =
+            DiscreteBlockAllocator::new(
+                &device,
+                &mut queue_group.queues[0],
+                queue_group.family,
+                &memory_properties,
+            )
+            .unwrap();
 
+        unsafe {
+            let _block1 = allocator.allocate_block().unwrap();
+            let block2 = allocator.allocate_block().unwrap();
+            let block3 = allocator.allocate_block().unwrap();
+            allocator.deallocate_block(block2);
 
-         unsafe {
-             let block = allocator.allocate_block().unwrap();
-             allocator.deallocate_block(block);
-         };
+            let block4 = allocator.allocate_block().unwrap();
+            assert_eq!(block4.offset, 1);
 
+            allocator.deallocate_block(block3);
+            let block5 = allocator.allocate_block().unwrap();
+            assert_eq!(block5.offset, 2);
+        };
     }
 }

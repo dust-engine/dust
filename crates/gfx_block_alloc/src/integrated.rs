@@ -1,4 +1,4 @@
-use crate::{AllocError, BlockAllocator, MAX_BUFFER_SIZE};
+use crate::{AllocError, AllocatorBlock, BlockAllocator, MAX_BUFFER_SIZE};
 use gfx_hal as hal;
 use gfx_hal::prelude::*;
 use std::ops::Range;
@@ -12,6 +12,12 @@ use std::ptr::NonNull;
 pub struct IntegratedBlock<B: hal::Backend, const SIZE: usize> {
     mem: B::Memory,
     ptr: NonNull<[u8; SIZE]>,
+}
+
+impl<B: hal::Backend, const SIZE: usize> AllocatorBlock<SIZE> for IntegratedBlock<B, SIZE> {
+    fn ptr(&self) -> NonNull<[u8; SIZE]> {
+        self.ptr
+    }
 }
 
 pub struct IntegratedBlockAllocator<'a, B: hal::Backend> {
@@ -66,7 +72,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for IntegratedBloc
         self.device.free_memory(block.mem);
     }
 
-    unsafe fn updated_block(&mut self, block: &Self::Block, block_range: Range<u64>) {
+    unsafe fn updated_block(&mut self, _block: &Self::Block, _block_range: Range<u64>) {
         // Do exactly nothing. Nothing needs to be done to sync data to the GPU.
         unimplemented!()
     }
@@ -82,7 +88,7 @@ fn select_integrated_memtype(
     requirements: &hal::memory::Requirements,
 ) -> hal::MemoryTypeId {
     // Search for the largest DEVICE_LOCAL heap
-    let (device_heap_index, device_heap) = memory_properties
+    let (device_heap_index, _device_heap) = memory_properties
         .memory_heaps
         .iter()
         .filter(|heap| heap.flags.contains(hal::memory::HeapFlags::DEVICE_LOCAL))
