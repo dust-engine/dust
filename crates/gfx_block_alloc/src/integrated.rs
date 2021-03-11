@@ -20,15 +20,19 @@ impl<B: hal::Backend, const SIZE: usize> AllocatorBlock<SIZE> for IntegratedBloc
     }
 }
 
-pub struct IntegratedBlockAllocator<'a, B: hal::Backend> {
+pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     device: &'a B::Device,
+    bind_queue: &'a mut B::Queue,
     buf: B::Buffer,
     memtype: hal::MemoryTypeId,
+    current_offset: usize,
+    free_offsets: Vec<usize>,
 }
 
-impl<'a, B: hal::Backend> IntegratedBlockAllocator<'a, B> {
+impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZE> {
     pub fn new(
         device: &'a B::Device,
+        bind_queue: &'a mut B::Queue,
         memory_properties: &hal::adapter::MemoryProperties,
     ) -> Result<Self, hal::buffer::CreationError> {
         unsafe {
@@ -42,17 +46,25 @@ impl<'a, B: hal::Backend> IntegratedBlockAllocator<'a, B> {
             let memtype = select_integrated_memtype(memory_properties, &requirements);
             Ok(Self {
                 device,
+                bind_queue,
                 buf,
                 memtype,
+                free_offsets: Vec::new(),
+                current_offset: 0,
             })
         }
     }
 }
 
-impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for IntegratedBlockAllocator<'_, B> {
+impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for IntegratedBlockAllocator<'_, B, SIZE> {
     type Block = IntegratedBlock<B, SIZE>;
 
     unsafe fn allocate_block(&mut self) -> Result<Self::Block, AllocError> {
+        let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
+            let val = self.current_offset;
+            self.current_offset += 1;
+            val
+        });
         let mut mem = self
             .device
             .allocate_memory(self.memtype, SIZE as u64)
@@ -61,6 +73,26 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for IntegratedBloc
             .device
             .map_memory(&mut mem, hal::memory::Segment::ALL)
             .map_err(crate::utils::map_map_err)?;
+
+        self.bind_queue.bind_sparse(
+            std::iter::empty::<&B::Semaphore>(),
+            std::iter::empty::<&B::Semaphore>(),
+            std::iter::once((
+                &mut self.buf,
+                std::iter::once(&hal::memory::SparseBind {
+                    resource_offset: (resource_offset * SIZE) as u64,
+                    size: SIZE as u64,
+                    memory: Some((&mem, 0)),
+                }),
+            )),
+            std::iter::empty(),
+            std::iter::empty::<(
+                &mut B::Image,
+                std::iter::Empty<&hal::memory::SparseImageBind<&B::Memory>>,
+            )>(),
+            self.device,
+            None,
+        );
         Ok(Self::Block {
             mem,
             ptr: NonNull::new_unchecked(ptr as *mut [u8; SIZE]),
@@ -74,11 +106,9 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for IntegratedBloc
 
     unsafe fn updated_block(&mut self, _block: &Self::Block, _block_range: Range<u64>) {
         // Do exactly nothing. Nothing needs to be done to sync data to the GPU.
-        unimplemented!()
     }
 
     unsafe fn flush(&mut self) {
-        unimplemented!()
     }
 }
 
@@ -124,4 +154,64 @@ fn select_integrated_memtype(
         })
         .unwrap()
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IntegratedBlockAllocator;
+    use crate::BlockAllocator;
+    use gfx_backend_vulkan as back;
+    use gfx_hal as hal;
+    use gfx_hal::prelude::*;
+
+    #[test]
+    fn test_integrated() {
+        let instance = back::Instance::create("gfx_test", 1).expect("Unable to create an instance");
+        let adapters = instance.enumerate_adapters();
+        let adapter = {
+            for adapter in &instance.enumerate_adapters() {
+                println!("{:?}", adapter);
+            }
+            adapters
+                .iter()
+                .find(|adapter| adapter.info.device_type == hal::adapter::DeviceType::DiscreteGpu)
+        }
+        .expect("Unable to find a discrete GPU");
+
+        let physical_device = &adapter.physical_device;
+        let memory_properties = physical_device.memory_properties();
+        let family = adapter
+            .queue_families
+            .iter()
+            .find(|family| family.queue_type() == hal::queue::QueueType::Transfer)
+            .expect("Can't find transfer queue family!");
+        let mut gpu = unsafe {
+            physical_device.open(
+                &[(family, &[1.0])],
+                hal::Features::SPARSE_BINDING | hal::Features::SPARSE_RESIDENCY_IMAGE_2D,
+            )
+        }
+        .expect("Unable to open the physical device!");
+        let mut queue_group = gpu.queue_groups.pop().unwrap();
+        let device = gpu.device;
+        let mut allocator: IntegratedBlockAllocator<back::Backend, 16777216> =
+            IntegratedBlockAllocator::new(
+                &device,
+                &mut queue_group.queues[0],
+                &memory_properties,
+            )
+            .unwrap();
+
+        unsafe {
+            let _block1 = allocator.allocate_block().unwrap();
+            let block2 = allocator.allocate_block().unwrap();
+            let block3 = allocator.allocate_block().unwrap();
+            allocator.deallocate_block(block2);
+
+            let _block4 = allocator.allocate_block().unwrap();
+
+            allocator.deallocate_block(block3);
+            let _block5 = allocator.allocate_block().unwrap();
+        };
+    }
 }

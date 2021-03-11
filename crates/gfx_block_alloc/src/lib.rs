@@ -2,7 +2,6 @@
 mod discrete;
 mod integrated;
 mod utils;
-use gfx_hal::prelude::*;
 
 use std::ops::Range;
 use std::ptr::NonNull;
@@ -13,9 +12,6 @@ pub use integrated::IntegratedBlock;
 pub use integrated::IntegratedBlockAllocator;
 
 const MAX_BUFFER_SIZE: u64 = 1 << 32;
-
-// maxMemoryAllocationCount is typically 4096. We set the allocation block size to 16MB.
-const BLOCK_SIZE: usize = 1 << 24;
 
 #[derive(Debug)]
 pub enum AllocError {
