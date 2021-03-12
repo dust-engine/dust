@@ -164,7 +164,7 @@ mod tests {
     use gfx_hal as hal;
     use gfx_hal::prelude::*;
 
-    #[test]
+    //#[test]
     fn test_integrated() {
         let instance = back::Instance::create("gfx_test", 1).expect("Unable to create an instance");
         let adapters = instance.enumerate_adapters();

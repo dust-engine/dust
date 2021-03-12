@@ -1,7 +1,11 @@
 #![feature(nonnull_slice_from_raw_parts)]
+#![feature(const_generics)]
+#![feature(const_evaluatable_checked)]
+#![feature(untagged_unions)]
 mod discrete;
 mod integrated;
 mod utils;
+mod arena;
 
 use std::ops::Range;
 use std::ptr::NonNull;
