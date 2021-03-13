@@ -226,4 +226,27 @@ mod tests {
         assert_eq!(handle.get_slot_num(), num_slots_in_chunk as u32 - 8);
         assert_eq!(handle.get_chunk_num(), 0);
     }
+
+    #[test]
+    #[should_panic(expected = "Double free detected")]
+    fn test_doublefree() {
+        let (_instance, mut gpu, memory_properties) = crate::tests::get_gpu();
+        let allocator = crate::discrete::tests::get_block_allocator(&mut gpu, memory_properties);
+        type Data = u128;
+        let mut arena: ArenaAllocator<_, Data> = ArenaAllocator::new(allocator);
+        let handle = arena.alloc(3);
+        arena.free(handle);
+        arena.free(handle);
+    }
+
+    #[test]
+    #[should_panic(expected = "Overlapping handle detected")]
+    fn test_invalid_overlapping_handle() {
+        let (_instance, mut gpu, memory_properties) = crate::tests::get_gpu();
+        let allocator = crate::discrete::tests::get_block_allocator(&mut gpu, memory_properties);
+        type Data = u128;
+        let mut arena: ArenaAllocator<_, Data> = ArenaAllocator::new(allocator);
+        let handle = arena.alloc(8);
+        arena.free(handle.offset(4));
+    }
 }
