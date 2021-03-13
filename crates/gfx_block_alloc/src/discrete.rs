@@ -235,51 +235,32 @@ fn select_discrete_memtype(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::discrete::DiscreteBlockAllocator;
     use crate::BlockAllocator;
     use gfx_backend_vulkan as back;
     use gfx_hal as hal;
-    use gfx_hal::prelude::*;
+
+    pub(crate) fn get_block_allocator<const SIZE: usize>(
+        gpu: &mut hal::adapter::Gpu<back::Backend>,
+        memory_properties: hal::adapter::MemoryProperties,
+    ) -> DiscreteBlockAllocator<back::Backend, SIZE> {
+        let queue_group = gpu.queue_groups.first_mut().unwrap();
+        let device = &gpu.device;
+        DiscreteBlockAllocator::new(
+            device,
+            &mut queue_group.queues[0],
+            queue_group.family,
+            &memory_properties,
+        )
+        .unwrap()
+    }
 
     #[test]
     fn test_discrete() {
-        let instance = back::Instance::create("gfx_test", 1).expect("Unable to create an instance");
-        let adapters = instance.enumerate_adapters();
-        let adapter = {
-            for adapter in &instance.enumerate_adapters() {
-                println!("{:?}", adapter);
-            }
-            adapters
-                .iter()
-                .find(|adapter| adapter.info.device_type == hal::adapter::DeviceType::DiscreteGpu)
-        }
-        .expect("Unable to find a discrete GPU");
-
-        let physical_device = &adapter.physical_device;
-        let memory_properties = physical_device.memory_properties();
-        let family = adapter
-            .queue_families
-            .iter()
-            .find(|family| family.queue_type() == hal::queue::QueueType::Transfer)
-            .expect("Can't find transfer queue family!");
-        let mut gpu = unsafe {
-            physical_device.open(
-                &[(family, &[1.0])],
-                hal::Features::SPARSE_BINDING | hal::Features::SPARSE_RESIDENCY_IMAGE_2D,
-            )
-        }
-        .expect("Unable to open the physical device!");
-        let mut queue_group = gpu.queue_groups.pop().unwrap();
-        let device = gpu.device;
+        let (_instance, mut gpu, memory_properties) = crate::tests::get_gpu();
         let mut allocator: DiscreteBlockAllocator<back::Backend, 16777216> =
-            DiscreteBlockAllocator::new(
-                &device,
-                &mut queue_group.queues[0],
-                queue_group.family,
-                &memory_properties,
-            )
-            .unwrap();
+            get_block_allocator(&mut gpu, memory_properties);
 
         unsafe {
             let _block1 = allocator.allocate_block().unwrap();

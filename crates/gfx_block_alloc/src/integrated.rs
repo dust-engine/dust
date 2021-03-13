@@ -56,7 +56,9 @@ impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZ
     }
 }
 
-impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for IntegratedBlockAllocator<'_, B, SIZE> {
+impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
+    for IntegratedBlockAllocator<'_, B, SIZE>
+{
     type Block = IntegratedBlock<B, SIZE>;
 
     unsafe fn allocate_block(&mut self) -> Result<Self::Block, AllocError> {
@@ -108,8 +110,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for IntegratedBloc
         // Do exactly nothing. Nothing needs to be done to sync data to the GPU.
     }
 
-    unsafe fn flush(&mut self) {
-    }
+    unsafe fn flush(&mut self) {}
 }
 
 /// Returns SystemMemId, DeviceMemId
@@ -195,12 +196,8 @@ mod tests {
         let mut queue_group = gpu.queue_groups.pop().unwrap();
         let device = gpu.device;
         let mut allocator: IntegratedBlockAllocator<back::Backend, 16777216> =
-            IntegratedBlockAllocator::new(
-                &device,
-                &mut queue_group.queues[0],
-                &memory_properties,
-            )
-            .unwrap();
+            IntegratedBlockAllocator::new(&device, &mut queue_group.queues[0], &memory_properties)
+                .unwrap();
 
         unsafe {
             let _block1 = allocator.allocate_block().unwrap();
