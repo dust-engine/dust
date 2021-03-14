@@ -174,8 +174,8 @@ impl Iterator for AllDirectionIterator {
     }
 
     fn count(self) -> usize
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         8
     }

@@ -13,8 +13,8 @@ pub use dir::{Corner, Edge, Face, Quadrant};
 pub use index_path::IndexPath;
 //pub use octree::{NodeRef, NodeRefMut, Octree};
 
-use std::fmt::Debug;
 use gfx_alloc::ArenaAllocated;
+use std::fmt::Debug;
 
 pub trait Voxel: Copy + Clone + Default + Eq + Debug + ArenaAllocated {
     fn avg(voxels: &[Self; 8]) -> Self;

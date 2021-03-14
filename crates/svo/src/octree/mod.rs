@@ -1,7 +1,7 @@
-use crate::{Voxel, Corner};
-use gfx_alloc::{Handle, BlockAllocator, ArenaAllocated};
+use crate::{Corner, Voxel};
 use gfx_alloc::ArenaAllocator;
 use gfx_alloc::CHUNK_SIZE;
+use gfx_alloc::{ArenaAllocated, BlockAllocator, Handle};
 use std::mem::size_of;
 
 pub struct Node<T: Voxel> {
@@ -9,11 +9,10 @@ pub struct Node<T: Voxel> {
     freemask: u8,
     _reserved: u16,
     children: Handle,
-    data: [T; 8]
+    data: [T; 8],
 }
 
-unsafe impl<T: Voxel> ArenaAllocated for Node<T> {
-}
+unsafe impl<T: Voxel> ArenaAllocated for Node<T> {}
 
 impl<T: Voxel> Node<T> {
     pub fn child_handle(&self, corner: Corner) -> Handle {
@@ -28,16 +27,18 @@ impl<T: Voxel> Node<T> {
 }
 
 pub struct Octree<BA: BlockAllocator<CHUNK_SIZE>, T: Voxel>
-    where
-        [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized {
+where
+    [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized,
+{
     arena: ArenaAllocator<BA, Node<T>>,
     root: Handle,
     root_data: T,
 }
 
 impl<BA: BlockAllocator<CHUNK_SIZE>, T: Voxel> Octree<BA, T>
-    where
-        [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized {
+where
+    [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized,
+{
     pub fn new(mut arena: ArenaAllocator<BA, Node<T>>) -> Self {
         let root = arena.alloc(1);
         Octree {
@@ -160,10 +161,45 @@ impl<BA: BlockAllocator<CHUNK_SIZE>, T: Voxel> Octree<BA, T>
     }
 
     pub fn set(&mut self, x: u32, y: u32, z: u32, gridsize: u32, item: T) {
-        let (data, _collapsed) =
-            self.set_internal(self.root, x, y, z, gridsize, item);
+        let (data, _collapsed) = self.set_internal(self.root, x, y, z, gridsize, item);
         self.root_data = data;
     }
 
+    pub fn get(&self, mut x: u32, mut y: u32, mut z: u32, mut gridsize: u32) -> T {
+        let mut handle = self.root;
+        while gridsize > 2 {
+            gridsize = gridsize / 2;
+            let mut corner: u8 = 0;
+            if x >= gridsize {
+                corner |= 0b100;
+                x -= gridsize;
+            }
+            if y >= gridsize {
+                corner |= 0b010;
+                y -= gridsize;
+            }
+            if z >= gridsize {
+                corner |= 0b001;
+                z -= gridsize;
+            }
+            let node_ref = &self.arena[handle];
+            if node_ref.freemask & (1 << corner) == 0 {
+                return node_ref.data[corner as usize];
+            }
+            handle = node_ref.child_handle(corner.into());
+        }
+        // gridsize is now equal to 2
+        debug_assert_eq!(gridsize, 2);
+        let mut corner: u8 = 0;
+        if x >= 1 {
+            corner |= 0b100;
+        }
+        if y >= 1 {
+            corner |= 0b010;
+        }
+        if z >= 1 {
+            corner |= 0b001;
+        }
+        self.arena[handle].data[corner as usize]
+    }
 }
-

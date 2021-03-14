@@ -70,22 +70,22 @@ impl Bounds {
         let vec = math::Vec3A::new(
             (self.x
                 + if corner.is_on_face(Face::Right) {
-                self.width
-            } else {
-                0
-            }) as f32,
+                    self.width
+                } else {
+                    0
+                }) as f32,
             (self.y
                 + if corner.is_on_face(Face::Top) {
-                self.width
-            } else {
-                0
-            }) as f32,
+                    self.width
+                } else {
+                    0
+                }) as f32,
             (self.z
                 + if corner.is_on_face(Face::Rear) {
-                self.width
-            } else {
-                0
-            }) as f32,
+                    self.width
+                } else {
+                    0
+                }) as f32,
         ) / (Self::MAX_WIDTH as f32);
         vec.into()
     }
