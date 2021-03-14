@@ -1,124 +1,44 @@
-pub mod io;
-use crate::{Arena, Handle, Bounds, Corner, IndexPath, Voxel};
-use glam::Vec3;
+use crate::{Voxel, Corner};
+use gfx_alloc::{Handle, BlockAllocator, ArenaAllocated};
+use gfx_alloc::ArenaAllocator;
+use gfx_alloc::CHUNK_SIZE;
+use std::mem::size_of;
 
-struct NodeInner<T: Voxel> {
-    handle: Handle<T>,
-    index_path: IndexPath,
-    bounds: Bounds,
-    data: T,
+pub struct Node<T: Voxel> {
+    block_size: u8,
+    freemask: u8,
+    _reserved: u16,
+    children: Handle,
+    data: [T; 8]
 }
 
-impl<T: Voxel> NodeInner<T> {
-    fn child(&self, dir: Corner, octree: &Octree<T>) -> NodeInner<T> {
-        let new_index_path = self.index_path.push(dir);
-        let new_bounds = self.bounds.half(dir);
-        if self.handle.is_none() {
-            // Virtual Node
-            NodeInner {
-                handle: Handle::none(),
-                index_path: new_index_path,
-                data: self.data,
-                bounds: new_bounds,
-            }
-        } else {
-            let node_ref = &octree.arena[self.handle];
-            let new_handle = if node_ref.freemask & (1 << (dir as u8)) == 0 {
-                Handle::none()
-            } else {
-                node_ref.child(dir)
-            };
-            NodeInner {
-                handle: new_handle,
-                index_path: new_index_path,
-                data: node_ref.data[dir as usize],
-                bounds: new_bounds,
-            }
+unsafe impl<T: Voxel> ArenaAllocated for Node<T> {
+}
+
+impl<T: Voxel> Node<T> {
+    pub fn child_handle(&self, corner: Corner) -> Handle {
+        // Given a mask and a location, returns n where the given '1' on the location
+        // is the nth '1' counting from the least significant bit.
+        fn mask_location_nth_one(mask: u8, location: u8) -> u8 {
+            (mask & ((1 << location) - 1)).count_ones() as u8
         }
+        self.children
+            .offset(mask_location_nth_one(self.freemask, corner as u8) as u32)
     }
 }
 
-pub struct NodeRef<'a, T: Voxel> {
-    inner: NodeInner<T>,
-    octree: &'a Octree<T>,
-}
-impl<'a, T: Voxel> NodeRef<'a, T> {
-    #[inline]
-    pub fn get(&self) -> T {
-        self.inner.data
-    }
-
-    #[inline]
-    pub fn child(&self, dir: Corner) -> NodeRef<T> {
-        NodeRef {
-            octree: self.octree,
-            inner: self.inner.child(dir, self.octree),
-        }
-    }
-
-    #[inline]
-    pub fn get_bounds(&self) -> &Bounds {
-        &self.inner.bounds
-    }
-
-    #[inline]
-    pub fn is_virtual(&self) -> bool {
-        self.inner.handle.is_none()
-    }
-}
-
-pub struct NodeRefMut<'a, T: Voxel> {
-    inner: NodeInner<T>,
-    octree: &'a mut Octree<T>,
-}
-impl<'a, T: Voxel> NodeRefMut<'a, T> {
-    pub fn get(&self) -> T {
-        self.inner.data
-    }
-    /// Only applicable on leaf nodes
-    pub fn set_leaf_child(&mut self, dir: Corner, value: T) {
-        let node_ref = &mut self.octree.arena[self.inner.handle];
-        node_ref.data[dir as usize] = value;
-    }
-    pub fn child(&mut self, dir: Corner) -> NodeRefMut<T> {
-        let inner = self.inner.child(dir, self.octree);
-        NodeRefMut {
-            octree: self.octree,
-            inner,
-        }
-    }
-    pub fn get_bounds(&self) -> &Bounds {
-        &self.inner.bounds
-    }
-    /// Only applicable on leaf nodes
-    /// Assuming that the current node is a leaf node (self.leafmask == 0),
-    /// this function allocates enough space for the given new leaf mask,
-    /// and update the current freemask and children pointer for the node.
-    pub fn set_leaf_childmask(&mut self, childmask: u8) {
-        if childmask == 0 {
-            return;
-        }
-        let new_child_handle = self.octree.arena.alloc(childmask.count_ones());
-        let handle = self.inner.handle;
-        let node_ref = &mut self.octree.arena[handle];
-        debug_assert_eq!(node_ref.freemask, 0);
-        node_ref.freemask = childmask;
-        node_ref.children = new_child_handle;
-    }
-    pub fn is_virtual(&self) -> bool {
-        self.inner.handle.is_none()
-    }
-}
-
-pub struct Octree<T: Voxel> {
-    arena: Arena<T>,
-    root: Handle<T>,
+pub struct Octree<BA: BlockAllocator<CHUNK_SIZE>, T: Voxel>
+    where
+        [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized {
+    arena: ArenaAllocator<BA, Node<T>>,
+    root: Handle,
     root_data: T,
 }
 
-impl<T: Voxel> Octree<T> {
-    pub fn new() -> Self {
-        let mut arena: Arena<T> = Arena::new();
+impl<BA: BlockAllocator<CHUNK_SIZE>, T: Voxel> Octree<BA, T>
+    where
+        [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized {
+    pub fn new(mut arena: ArenaAllocator<BA, Node<T>>) -> Self {
         let root = arena.alloc(1);
         Octree {
             arena,
@@ -126,74 +46,59 @@ impl<T: Voxel> Octree<T> {
             root_data: Default::default(),
         }
     }
-    pub fn root_mut(&mut self) -> NodeRefMut<T> {
-        let data = self.root_data;
-        let handle = self.root;
-        NodeRefMut {
-            octree: self,
-            inner: NodeInner {
-                handle,
-                index_path: IndexPath::new(),
-                bounds: Bounds::new(),
-                data,
-            },
-        }
-    }
-    pub fn root(&self) -> NodeRef<T> {
-        let data = self.root_data;
-        let handle = self.root;
-        NodeRef {
-            octree: self,
-            inner: NodeInner {
-                handle,
-                index_path: IndexPath::new(),
-                bounds: Bounds::new(),
-                data,
-            },
-        }
-    }
+    pub fn reshape(&mut self, node_handle: Handle, new_mask: u8) {
+        let node_ref = &mut self.arena[node_handle];
+        let old_mask = node_ref.freemask;
+        let old_child_handle = node_ref.children;
 
-    pub fn get(&self, mut x: u32, mut y: u32, mut z: u32, mut gridsize: u32) -> T {
-        let mut handle = self.root().inner.handle;
-        while gridsize > 2 {
-            gridsize = gridsize / 2;
-            let mut corner: u8 = 0;
-            if x >= gridsize {
-                corner |= 0b100;
-                x -= gridsize;
-            }
-            if y >= gridsize {
-                corner |= 0b010;
-                y -= gridsize;
-            }
-            if z >= gridsize {
-                corner |= 0b001;
-                z -= gridsize;
-            }
-            let node_ref = &self.arena[handle];
-            if node_ref.freemask & (1 << corner) == 0 {
-                return node_ref.data[corner as usize];
-            }
-            handle = node_ref.child(corner.into());
+        if old_mask == 0 && new_mask == 0 {
+            return;
         }
-        // gridsize is now equal to 2
-        assert_eq!(gridsize, 2);
-        let mut corner: u8 = 0;
-        if x >= 1 {
-            corner |= 0b100;
+        let new_num_items = new_mask.count_ones();
+        if old_mask == 0 {
+            let new_child_handle = self.arena.alloc(new_num_items);
+            let node_ref = &mut self.arena[node_handle];
+            node_ref.freemask = new_mask;
+            node_ref.children = new_child_handle;
+            return;
         }
-        if y >= 1 {
-            corner |= 0b010;
+        if new_mask == 0 {
+            let node_ref = &mut self.arena[node_handle];
+            node_ref.freemask = 0;
+            self.arena.free(old_child_handle);
+            return;
         }
-        if z >= 1 {
-            corner |= 0b001;
+        let new_child_handle = self.arena.alloc(new_num_items);
+        let mut new_slot_num: u8 = 0;
+        let mut old_slot_num: u8 = 0;
+        for i in 0..8 {
+            let old_have_children_at_i = old_mask & (1 << i) != 0;
+            let new_have_children_at_i = new_mask & (1 << i) != 0;
+            if old_have_children_at_i && new_have_children_at_i {
+                unsafe {
+                    std::ptr::copy(
+                        &mut self.arena[old_child_handle.offset(old_slot_num as u32)],
+                        &mut self.arena[new_child_handle.offset(new_slot_num as u32)],
+                        1,
+                    );
+                    // TODO: set block size
+                }
+            }
+            if old_have_children_at_i {
+                old_slot_num += 1;
+            }
+            if new_have_children_at_i {
+                new_slot_num += 1;
+            }
         }
-        self.arena[handle].data[corner as usize]
+        let node_ref = &mut self.arena[node_handle];
+        node_ref.freemask = new_mask;
+        node_ref.children = new_child_handle;
+        self.arena.free(old_child_handle);
     }
-
     fn set_internal(
         &mut self,
-        handle: Handle<T>,
+        handle: Handle,
         mut x: u32,
         mut y: u32,
         mut z: u32,
@@ -227,17 +132,18 @@ impl<T: Voxel> Octree<T> {
             let freemask = node_ref.freemask;
             if freemask & (1 << corner) == 0 {
                 // no children
-                self.arena.realloc(handle, freemask | (1 << corner));
+                self.reshape(handle, freemask | (1 << corner));
+                todo!()
             }
 
-            let new_handle = self.arena[handle].child(corner.into());
+            let new_handle = self.arena[handle].child_handle(corner.into());
             let (avg, collapsed) = self.set_internal(new_handle, x, y, z, gridsize, item);
 
             let node_ref = &mut self.arena[handle];
             let freemask = node_ref.freemask;
             node_ref.data[corner as usize] = avg;
             if collapsed {
-                self.arena.realloc(handle, freemask & !(1 << corner));
+                self.reshape(handle, freemask & !(1 << corner));
             }
         }
 
@@ -252,110 +158,12 @@ impl<T: Voxel> Octree<T> {
 
         return (T::avg(&node_ref.data), false);
     }
+
     pub fn set(&mut self, x: u32, y: u32, z: u32, gridsize: u32, item: T) {
         let (data, _collapsed) =
-            self.set_internal(self.root().inner.handle, x, y, z, gridsize, item);
+            self.set_internal(self.root, x, y, z, gridsize, item);
         self.root_data = data;
     }
-    #[inline]
-    pub fn total_data_size(&self) -> usize {
-        self.arena.total_data_size()
-    }
-    #[inline]
-    pub fn copy_into_slice(&self, slice: &mut [u8]) {
-        self.arena.copy_data_into_slice(slice)
-    }
+
 }
 
-impl<T: Voxel> Octree<T> {
-    fn signed_distance_field_recursive<F>(
-        signed_distance_field: &F,
-        fill: T,
-        lod: u8,
-        mut node: NodeRefMut<T>,
-    ) where
-        F: Fn(Vec3) -> f32,
-    {
-        assert!(!node.inner.handle.is_none()); // Can't be a virtual node
-        let mut childmask: u8 = 0;
-        for (i, dir) in Corner::all().enumerate() {
-            let child = node.child(dir);
-            let mut corners_flag: u8 = 0;
-            for (i, dir) in Corner::all().enumerate() {
-                let corner = child.get_bounds().corner(dir);
-                let value = signed_distance_field(corner);
-                if value > 0.0 {
-                    corners_flag |= 1 << i;
-                }
-            }
-            if corners_flag == 0 {
-                // All corners smaller than zero. Do not fill.
-            } else if corners_flag == std::u8::MAX {
-                // All corners larger than zero. Fill.
-                node.set_leaf_child(dir, fill);
-            } else {
-                // This child node needs to be subdivided
-                childmask |= 1 << i;
-                if corners_flag.count_ones() >= 4 {
-                    // relative full
-                    node.set_leaf_child(dir, fill);
-                }
-                // Set the childmask here so it can be handled later on.
-            }
-        }
-        if lod > 0 {
-            node.set_leaf_childmask(childmask);
-
-            for (i, dir) in Corner::all().enumerate() {
-                if (1 << i) & childmask == 0 {
-                    // No child on this corner
-                    continue;
-                }
-                let child = node.child(dir);
-                Octree::signed_distance_field_recursive(
-                    signed_distance_field,
-                    fill,
-                    lod - 1,
-                    child,
-                );
-            }
-        }
-    }
-    pub fn from_signed_distance_field<F>(field: F, fill: T, lod: u8) -> Octree<T>
-        where
-            F: Fn(Vec3) -> f32,
-    {
-        let mut octree = Octree::new();
-        Octree::signed_distance_field_recursive(&field, fill, lod, octree.root_mut());
-        octree
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_signed_distance_field() {
-        let _octree: Octree<u16> =
-            Octree::from_signed_distance_field(|l: Vec3| 3.0 - l.length(), 1, 2);
-    }
-
-    #[test]
-    fn test_set() {
-        let mut octree: Octree<u16> = Octree::new();
-        for (i, corner) in Corner::all().enumerate() {
-            let (x, y, z) = corner.position_offset();
-            octree.set(x as u32, y as u32, z as u32, 8, 3);
-            assert_eq!(octree.get(x as u32, y as u32, z as u32, 8), 3);
-
-            if i < 7 {
-                assert_eq!(octree.arena.size, 3);
-                assert_eq!(octree.arena.num_blocks, 3);
-            } else {
-                assert_eq!(octree.arena.size, 2);
-                assert_eq!(octree.arena.num_blocks, 2);
-            }
-        }
-    }
-}

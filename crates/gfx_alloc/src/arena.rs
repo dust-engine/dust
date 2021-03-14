@@ -2,9 +2,10 @@ use crate::AllocatorBlock;
 use crate::BlockAllocator;
 use std::mem::{size_of, ManuallyDrop};
 use std::ptr::NonNull;
+use std::ops::{Index, IndexMut};
 
-const CHUNK_DEGREE: usize = 24;
-const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
+pub const CHUNK_DEGREE: usize = 24;
+pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Handle(u32);
@@ -16,7 +17,7 @@ impl Handle {
     pub fn is_none(&self) -> bool {
         self.0 == std::u32::MAX
     }
-    pub(crate) fn offset(&self, n: u32) -> Self {
+    pub fn offset(&self, n: u32) -> Self {
         Handle(self.0 + n)
     }
     pub fn get_slot_num(&self) -> u32 {
@@ -185,6 +186,28 @@ where
             let slice = self.chunks[chunk_index as usize].as_mut();
             &mut slice[slot_index as usize]
         }
+    }
+}
+
+impl<BA: BlockAllocator<CHUNK_SIZE>, T: ArenaAllocated> Index<Handle> for ArenaAllocator<BA, T>
+    where
+        [T; CHUNK_SIZE / size_of::<T>()]: Sized,
+{
+    type Output = T;
+
+    fn index(&self, index: Handle) -> &Self::Output {
+        // TODO: check that the chunk was allocated
+        unsafe { &self.get_slot(index).occupied }
+    }
+}
+
+impl<BA: BlockAllocator<CHUNK_SIZE>, T: ArenaAllocated> IndexMut<Handle> for ArenaAllocator<BA, T>
+    where
+        [T; CHUNK_SIZE / size_of::<T>()]: Sized,
+{
+    fn index_mut(&mut self, index: Handle) -> &mut Self::Output {
+        // TODO: check that the chunk was allocated
+        unsafe { &mut self.get_slot_mut(index).occupied }
     }
 }
 

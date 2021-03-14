@@ -1,5 +1,5 @@
 [package]
-name = "gfx_block_alloc"
+name = "gfx_alloc"
 version = "0.1.0"
 authors = ["Zhixing Zhang <me@neoto.xin>"]
 edition = "2018"

@@ -198,7 +198,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gfx_block_alloc"
+name = "gfx_alloc"
 version = "0.1.0"
 dependencies = [
  "gfx-backend-dx12",
@@ -428,6 +428,7 @@ dependencies = [
 name = "svo"
 version = "0.1.0"
 dependencies = [
+ "gfx_alloc",
  "glam",
 ]
 

@@ -13,6 +13,8 @@ use std::ptr::NonNull;
 pub use arena::{ArenaAllocated, ArenaAllocator, Handle};
 pub use discrete::{DiscreteBlock, DiscreteBlockAllocator};
 pub use integrated::{IntegratedBlock, IntegratedBlockAllocator};
+pub use arena::CHUNK_SIZE;
+pub use arena::CHUNK_DEGREE;
 
 const MAX_BUFFER_SIZE: u64 = 1 << 32;
 

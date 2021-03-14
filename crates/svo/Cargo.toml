@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 glam = "0.13"
+gfx_alloc = { path = "../gfx_alloc" }
