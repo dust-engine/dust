@@ -12,7 +12,7 @@ use std::ptr::NonNull;
 
 pub use arena::{ArenaAllocated, ArenaAllocator, Handle};
 pub use discrete::{DiscreteBlock, DiscreteBlockAllocator};
-pub use integrated::{IntegratedBlock, IntegratedBlockAllocator};
+//pub use integrated::{IntegratedBlock, IntegratedBlockAllocator};
 pub use arena::CHUNK_SIZE;
 pub use arena::CHUNK_DEGREE;
 
@@ -26,16 +26,11 @@ pub enum AllocError {
     TooManyObjects,
 }
 
-pub trait AllocatorBlock<const SIZE: usize> {
-    fn ptr(&self) -> NonNull<[u8; SIZE]>;
-}
-
 /// This is responsible for
 pub trait BlockAllocator<const SIZE: usize> {
-    type Block: AllocatorBlock<SIZE>;
-    unsafe fn allocate_block(&mut self) -> Result<Self::Block, AllocError>;
-    unsafe fn deallocate_block(&mut self, block: Self::Block);
-    unsafe fn updated_block(&mut self, block: &Self::Block, block_range: Range<u64>);
+    unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError>;
+    unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>);
+    unsafe fn updated_block(&mut self, block: NonNull<[u8; SIZE]>, block_range: Range<u64>);
     unsafe fn flush(&mut self);
 }
 

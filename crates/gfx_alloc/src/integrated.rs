@@ -1,8 +1,9 @@
-use crate::{AllocError, AllocatorBlock, BlockAllocator, MAX_BUFFER_SIZE};
+use crate::{AllocError, BlockAllocator, MAX_BUFFER_SIZE};
 use gfx_hal as hal;
 use gfx_hal::prelude::*;
 use std::ops::Range;
 use std::ptr::NonNull;
+use std::collections::HashMap;
 
 /// The voxel repository resides on both system RAM and VRAM
 ///
@@ -14,12 +15,6 @@ pub struct IntegratedBlock<B: hal::Backend, const SIZE: usize> {
     ptr: NonNull<[u8; SIZE]>,
 }
 
-impl<B: hal::Backend, const SIZE: usize> AllocatorBlock<SIZE> for IntegratedBlock<B, SIZE> {
-    fn ptr(&self) -> NonNull<[u8; SIZE]> {
-        self.ptr
-    }
-}
-
 pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     device: &'a B::Device,
     bind_queue: &'a mut B::Queue,
@@ -27,6 +22,8 @@ pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     memtype: hal::MemoryTypeId,
     current_offset: usize,
     free_offsets: Vec<usize>,
+
+    allocations: HashMap<NonNull<[u8; SIZE]>, IntegratedBlock<B, SIZE>>
 }
 
 impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZE> {
@@ -51,6 +48,7 @@ impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZ
                 memtype,
                 free_offsets: Vec::new(),
                 current_offset: 0,
+                allocations: HashMap::new()
             })
         }
     }
@@ -59,9 +57,8 @@ impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZ
 impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
     for IntegratedBlockAllocator<'_, B, SIZE>
 {
-    type Block = IntegratedBlock<B, SIZE>;
 
-    unsafe fn allocate_block(&mut self) -> Result<Self::Block, AllocError> {
+    unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError> {
         let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
             let val = self.current_offset;
             self.current_offset += 1;
@@ -95,18 +92,21 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
             self.device,
             None,
         );
-        Ok(Self::Block {
+        let ptr = NonNull::new_unchecked(ptr as *mut [u8; SIZE]);
+        self.allocations.insert(ptr, IntegratedBlock {
             mem,
-            ptr: NonNull::new_unchecked(ptr as *mut [u8; SIZE]),
-        })
+            ptr,
+        });
+        Ok(ptr)
     }
 
-    unsafe fn deallocate_block(&mut self, mut block: Self::Block) {
+    unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>) {
+        let mut block = self.allocations.remove(&block).unwrap();
         self.device.unmap_memory(&mut block.mem);
         self.device.free_memory(block.mem);
     }
 
-    unsafe fn updated_block(&mut self, _block: &Self::Block, _block_range: Range<u64>) {
+    unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u64>) {
         // Do exactly nothing. Nothing needs to be done to sync data to the GPU.
     }
 

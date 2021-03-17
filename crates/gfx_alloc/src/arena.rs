@@ -1,4 +1,3 @@
-use crate::AllocatorBlock;
 use crate::BlockAllocator;
 use std::mem::{size_of, ManuallyDrop};
 use std::ptr::NonNull;
@@ -106,7 +105,7 @@ where
                 // We've run out of newspace.
                 // Allocate a new memory chunk from the underlying block allocator.
                 let chunk_index = self.chunks.len() as u32;
-                let chunk = unsafe { self.block_allocator.allocate_block().unwrap().ptr() };
+                let chunk = unsafe { self.block_allocator.allocate_block().unwrap() };
                 self.chunks.push(chunk.cast());
                 self.capacity += Self::NUM_SLOTS_IN_CHUNK as u32;
                 self.newspace_top = Handle::from_index(chunk_index, len);
