@@ -48,11 +48,11 @@ union ArenaSlot<T: ArenaAllocated> {
 
 pub unsafe trait ArenaAllocated: Sized {}
 
-pub struct ArenaAllocator<BA: BlockAllocator<CHUNK_SIZE>, T: ArenaAllocated>
+pub struct ArenaAllocator<T: ArenaAllocated>
 where
     [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
-    block_allocator: BA,
+    block_allocator: Box<dyn BlockAllocator<CHUNK_SIZE>>,
     chunks: Vec<NonNull<ArenaAllocatorChunk<T>>>,
     freelist_heads: [Handle; 8],
     newspace_top: Handle,       // new space to be allocated
@@ -61,12 +61,12 @@ where
     pub(crate) capacity: u32,   // number of available slots
 }
 
-impl<BA: BlockAllocator<CHUNK_SIZE>, T: ArenaAllocated> ArenaAllocator<BA, T>
+impl<T: ArenaAllocated> ArenaAllocator<T>
 where
     [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
     const NUM_SLOTS_IN_CHUNK: usize = CHUNK_SIZE / size_of::<T>();
-    pub fn new(block_allocator: BA) -> Self {
+    pub fn new(block_allocator: Box<dyn BlockAllocator<CHUNK_SIZE>>) -> Self {
         debug_assert_eq!(CHUNK_SIZE % size_of::<T>(), 0);
         debug_assert!(
             size_of::<T>() >= size_of::<FreeSlot>(),
@@ -188,7 +188,7 @@ where
     }
 }
 
-impl<BA: BlockAllocator<CHUNK_SIZE>, T: ArenaAllocated> Index<Handle> for ArenaAllocator<BA, T>
+impl<T: ArenaAllocated> Index<Handle> for ArenaAllocator<T>
     where
         [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
@@ -200,7 +200,7 @@ impl<BA: BlockAllocator<CHUNK_SIZE>, T: ArenaAllocated> Index<Handle> for ArenaA
     }
 }
 
-impl<BA: BlockAllocator<CHUNK_SIZE>, T: ArenaAllocated> IndexMut<Handle> for ArenaAllocator<BA, T>
+impl<T: ArenaAllocated> IndexMut<Handle> for ArenaAllocator<T>
     where
         [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {

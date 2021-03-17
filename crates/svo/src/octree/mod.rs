@@ -26,20 +26,20 @@ impl<T: Voxel> Node<T> {
     }
 }
 
-pub struct Octree<BA: BlockAllocator<CHUNK_SIZE>, T: Voxel>
+pub struct Octree<T: Voxel>
 where
     [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized,
 {
-    arena: ArenaAllocator<BA, Node<T>>,
+    arena: ArenaAllocator<Node<T>>,
     root: Handle,
     root_data: T,
 }
 
-impl<BA: BlockAllocator<CHUNK_SIZE>, T: Voxel> Octree<BA, T>
+impl<T: Voxel> Octree<T>
 where
     [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized,
 {
-    pub fn new(mut arena: ArenaAllocator<BA, Node<T>>) -> Self {
+    pub fn new(mut arena: ArenaAllocator<Node<T>>) -> Self {
         let root = arena.alloc(1);
         Octree {
             arena,
