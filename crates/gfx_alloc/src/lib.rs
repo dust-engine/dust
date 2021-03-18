@@ -2,17 +2,18 @@
 #![feature(const_generics)]
 #![feature(const_evaluatable_checked)]
 #![feature(untagged_unions)]
+#![feature(allocator_api)]
+
 mod arena;
-mod discrete;
-mod integrated;
+pub mod discrete;
+pub mod system;
+pub mod integrated;
 mod utils;
 
 use std::ops::Range;
 use std::ptr::NonNull;
 
 pub use arena::{ArenaAllocated, ArenaAllocator, Handle};
-pub use discrete::{DiscreteBlock, DiscreteBlockAllocator};
-//pub use integrated::{IntegratedBlock, IntegratedBlockAllocator};
 pub use arena::CHUNK_SIZE;
 pub use arena::CHUNK_DEGREE;
 
