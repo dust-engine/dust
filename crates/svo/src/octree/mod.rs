@@ -4,6 +4,10 @@ use crate::alloc::{ArenaAllocated, Handle};
 use crate::{Corner, Voxel};
 use std::mem::size_of;
 
+//mod sdf;
+//mod accessor;
+
+#[derive(Default)]
 pub struct Node<T: Voxel> {
     block_size: u8,
     freemask: u8,
@@ -12,7 +16,7 @@ pub struct Node<T: Voxel> {
     data: [T; 8],
 }
 
-unsafe impl<T: Voxel> ArenaAllocated for Node<T> {}
+impl<T: Voxel> ArenaAllocated for Node<T> {}
 
 impl<T: Voxel> Node<T> {
     pub fn child_handle(&self, corner: Corner) -> Handle {
@@ -66,7 +70,7 @@ where
         if new_mask == 0 {
             let node_ref = &mut self.arena[node_handle];
             node_ref.freemask = 0;
-            self.arena.free(old_child_handle);
+            unsafe { self.arena.free(old_child_handle, old_mask.count_ones() as u8) };
             return;
         }
         let new_child_handle = self.arena.alloc(new_num_items);
@@ -82,7 +86,6 @@ where
                         &mut self.arena[new_child_handle.offset(new_slot_num as u32)],
                         1,
                     );
-                    // TODO: set block size
                 }
             }
             if old_have_children_at_i {
@@ -95,7 +98,7 @@ where
         let node_ref = &mut self.arena[node_handle];
         node_ref.freemask = new_mask;
         node_ref.children = new_child_handle;
-        self.arena.free(old_child_handle);
+        unsafe { self.arena.free(old_child_handle, old_mask.count_ones() as u8) };
     }
     fn set_internal(
         &mut self,
@@ -134,7 +137,6 @@ where
             if freemask & (1 << corner) == 0 {
                 // no children
                 self.reshape(handle, freemask | (1 << corner));
-                todo!()
             }
 
             let new_handle = self.arena[handle].child_handle(corner.into());
@@ -201,5 +203,51 @@ where
             corner |= 0b001;
         }
         self.arena[handle].data[corner as usize]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set() {
+        let block_allocator = crate::alloc::SystemBlockAllocator::new();
+        let arena: ArenaAllocator<Node<u16>> = ArenaAllocator::new(Box::new(block_allocator));
+        let mut octree: Octree<u16> = Octree::new(arena);
+        for (i, corner) in Corner::all().enumerate() {
+            let (x, y, z) = corner.position_offset();
+            octree.set(x as u32, y as u32, z as u32, 8, 3);
+            assert_eq!(octree.get(x as u32, y as u32, z as u32, 8), 3);
+            if i < 4 {
+                assert_eq!(octree.get(0, 0, 0, 4), 0);
+            } else if i > 4 {
+                assert_eq!(octree.get(0, 0, 0, 4), 3);
+            }
+            if i < 7 {
+                assert_eq!(octree.arena.size, 3);
+                assert_eq!(octree.arena.num_blocks, 3);
+            } else {
+                assert_eq!(octree.arena.size, 2);
+                assert_eq!(octree.arena.num_blocks, 2);
+            }
+        }
+        for (i, corner) in Corner::all().enumerate() {
+            let (x, y, z) = corner.position_offset();
+            octree.set(2+x as u32, y as u32, z as u32, 8, 5);
+            assert_eq!(octree.get(2+x as u32, y as u32, z as u32, 8), 5);
+            if i < 4 {
+                assert_eq!(octree.get(1, 0, 0, 4), 0);
+            } else if i > 4 {
+                assert_eq!(octree.get(1, 0, 0, 4), 5);
+            }
+            if i < 7 {
+                assert_eq!(octree.arena.size, 3);
+                assert_eq!(octree.arena.num_blocks, 3);
+            } else {
+                assert_eq!(octree.arena.size, 2);
+                assert_eq!(octree.arena.num_blocks, 2);
+            }
+        }
     }
 }

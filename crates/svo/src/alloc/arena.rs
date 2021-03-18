@@ -2,6 +2,7 @@ use super::BlockAllocator;
 use std::mem::{size_of, ManuallyDrop};
 use std::ops::{Index, IndexMut};
 use std::ptr::NonNull;
+use std::io::BufRead;
 
 pub const CHUNK_DEGREE: usize = 24;
 pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
@@ -31,13 +32,16 @@ impl Handle {
     }
 }
 
+impl Default for Handle {
+    fn default() -> Self {
+        Handle::none()
+    }
+}
+
 type ArenaAllocatorChunk<T> = [ArenaSlot<T>; CHUNK_SIZE / size_of::<T>()];
 
 #[repr(C)]
 struct FreeSlot {
-    block_size: u8, // This value is 0 for free blocks
-    freemask: u8,   // 0 means no children, 1 means has children
-    _reserved: u16,
     next: Handle, // 32 bits
 }
 
@@ -46,7 +50,7 @@ union ArenaSlot<T: ArenaAllocated> {
     free: FreeSlot,
 }
 
-pub unsafe trait ArenaAllocated: Sized {}
+pub trait ArenaAllocated: Sized + Default {}
 
 pub struct ArenaAllocator<T: ArenaAllocated>
 where
@@ -67,7 +71,6 @@ where
 {
     const NUM_SLOTS_IN_CHUNK: usize = CHUNK_SIZE / size_of::<T>();
     pub fn new(block_allocator: Box<dyn BlockAllocator<CHUNK_SIZE>>) -> Self {
-        debug_assert_eq!(CHUNK_SIZE % size_of::<T>(), 0);
         debug_assert!(
             size_of::<T>() >= size_of::<FreeSlot>(),
             "Improper implementation of ArenaAllocated"
@@ -98,7 +101,7 @@ where
         self.num_blocks += 1;
 
         // Retrieve the head of the freelist
-        let sized_head = self.freelist_heads[len as usize - 1];
+        let sized_head = self.freelist_pop(len as u8);
         let handle: Handle = if sized_head.is_none() {
             // If the head is none, it means we need to allocate some new slots
             if self.newspace_top.is_none() {
@@ -130,45 +133,42 @@ where
             }
         } else {
             // There's previously used blocks stored in the freelist. Use them first.
-            self.freelist_heads[len as usize - 1] = unsafe {
-                // TODO: function?
-                self.get_slot(sized_head).free.next
-            };
             sized_head
         };
 
-        for i in 0..len {
-            // TODO: Get rid of the loop here
-            // TODO: Use occupied here.
-            let slot_handle = handle.offset(i);
-            let mut slot = self.get_slot_mut(slot_handle);
-            slot.free.block_size = len as u8;
-            slot.free.freemask = 0;
+
+        // initialize to zero
+        let slot_index = handle.get_slot_num();
+        let chunk_index = handle.get_chunk_num();
+        unsafe {
+            let slice = &mut self.chunks[chunk_index as usize].as_mut()[slot_index as usize..(slot_index+len) as usize];
+            for i in slice {
+                i.occupied = Default::default();
+            }
         }
         handle
     }
-    pub fn free(&mut self, handle: Handle) {
-        let block_size = unsafe { self.get_slot(handle).free.block_size }; // TODO: use occupied here
-        assert!(block_size > 0, "Double free detected");
-        for i in 0..block_size {
-            let new_handle = handle.offset(i as u32);
-            let slot = self.get_slot_mut(new_handle);
-            unsafe {
-                debug_assert_eq!(
-                    slot.free.block_size, block_size,
-                    "Overlapping handle detected"
-                );
-                slot.occupied = std::mem::zeroed();
-            }
-        }
+    pub unsafe fn free(&mut self, handle: Handle, block_size: u8) {
         self.freelist_push(block_size, handle);
         self.size -= block_size as u32;
         self.num_blocks -= 1;
     }
     fn freelist_push(&mut self, n: u8, handle: Handle) {
         assert!(1 <= n && n <= 8);
-        self.get_slot_mut(handle).free.next = self.freelist_heads[(n - 1) as usize];
-        self.freelist_heads[(n - 1) as usize] = handle;
+        let index: usize = (n - 1) as usize;
+        self.get_slot_mut(handle).free.next = self.freelist_heads[index];
+        self.freelist_heads[index] = handle;
+    }
+    fn freelist_pop(&mut self, n: u8) -> Handle {
+        let index: usize = (n - 1) as usize;
+        let sized_head = self.freelist_heads[index];
+        if !sized_head.is_none() {
+            self.freelist_heads[index] = unsafe {
+                // TODO: function?
+                self.get_slot(sized_head).free.next
+            };
+        }
+        sized_head
     }
     fn get_slot(&self, handle: Handle) -> &ArenaSlot<T> {
         let slot_index = handle.get_slot_num();
@@ -216,7 +216,7 @@ mod tests {
 
     use std::mem::size_of;
 
-    unsafe impl ArenaAllocated for u128 {}
+    impl ArenaAllocated for u128 {}
 
     #[test]
     fn test_alloc() {
@@ -246,25 +246,5 @@ mod tests {
         let handle = arena.alloc(8);
         assert_eq!(handle.get_slot_num(), num_slots_in_chunk as u32 - 8);
         assert_eq!(handle.get_chunk_num(), 0);
-    }
-    #[test]
-    #[should_panic(expected = "Double free detected")]
-    fn test_doublefree() {
-        let block_allocator = crate::alloc::SystemBlockAllocator::new();
-        type Data = u128;
-        let mut arena: ArenaAllocator<Data> = ArenaAllocator::new(Box::new(block_allocator));
-        let handle = arena.alloc(3);
-        arena.free(handle);
-        arena.free(handle);
-    }
-
-    #[test]
-    #[should_panic(expected = "Overlapping handle detected")]
-    fn test_invalid_overlapping_handle() {
-        let block_allocator = crate::alloc::SystemBlockAllocator::new();
-        type Data = u128;
-        let mut arena: ArenaAllocator<Data> = ArenaAllocator::new(Box::new(block_allocator));
-        let handle = arena.alloc(8);
-        arena.free(handle.offset(4));
     }
 }
