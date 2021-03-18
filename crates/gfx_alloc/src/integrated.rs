@@ -11,8 +11,8 @@ pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     bind_queue: &'a mut B::Queue,
     buf: B::Buffer,
     memtype: hal::MemoryTypeId,
-    current_offset: usize,
-    free_offsets: Vec<usize>,
+    current_offset: u64,
+    free_offsets: Vec<u64>,
 
     allocations: HashMap<NonNull<[u8; SIZE]>, B::Memory>,
 }
@@ -69,7 +69,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
             std::iter::once((
                 &mut self.buf,
                 std::iter::once(&hal::memory::SparseBind {
-                    resource_offset: (resource_offset * SIZE) as u64,
+                    resource_offset: resource_offset * SIZE as u64,
                     size: SIZE as u64,
                     memory: Some((&mem, 0)),
                 }),
@@ -93,7 +93,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
         self.device.free_memory(mem);
     }
 
-    unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u64>) {
+    unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u32>) {
         // Do exactly nothing. Nothing needs to be done to sync data to the GPU.
     }
 

@@ -19,6 +19,6 @@ pub enum AllocError {
 pub trait BlockAllocator<const SIZE: usize> {
     unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError>;
     unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>);
-    unsafe fn updated_block(&mut self, block: NonNull<[u8; SIZE]>, block_range: Range<u64>);
+    unsafe fn updated_block(&mut self, block: NonNull<[u8; SIZE]>, block_range: Range<u32>);
     unsafe fn flush(&mut self);
 }

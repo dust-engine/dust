@@ -30,7 +30,7 @@ impl<const SIZE: usize> BlockAllocator<SIZE> for SystemBlockAllocator<SIZE> {
         self.allocator.deallocate(block.cast(), layout);
     }
 
-    unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u64>) {}
+    unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u32>) {}
 
     unsafe fn flush(&mut self) {}
 }

@@ -14,7 +14,7 @@ use svo::alloc::{AllocError, BlockAllocator};
 pub struct DiscreteBlock<B: hal::Backend, const SIZE: usize> {
     system_mem: B::Memory,
     device_mem: B::Memory,
-    offset: usize,
+    offset: u64,
 }
 
 pub struct DiscreteBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
@@ -26,8 +26,8 @@ pub struct DiscreteBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     system_memtype: hal::MemoryTypeId,
 
     copy_regions: Vec<hal::command::BufferCopy>,
-    current_offset: usize,
-    free_offsets: Vec<usize>,
+    current_offset: u64,
+    free_offsets: Vec<u64>,
 
     command_pool: B::CommandPool,
     command_buffer: B::CommandBuffer,
@@ -115,7 +115,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
             std::iter::once((
                 &mut self.device_buf,
                 std::iter::once(&hal::memory::SparseBind {
-                    resource_offset: (resource_offset * SIZE) as u64,
+                    resource_offset: resource_offset * SIZE as u64,
                     size: SIZE as u64,
                     memory: Some((&device_mem, 0)),
                 }),
@@ -123,7 +123,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
             .chain(std::iter::once((
                 &mut self.system_buf,
                 std::iter::once(&hal::memory::SparseBind {
-                    resource_offset: (resource_offset * SIZE) as u64,
+                    resource_offset: resource_offset * SIZE as u64,
                     size: SIZE as u64,
                     memory: Some((&system_mem, 0)),
                 }),
@@ -159,11 +159,12 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
         }
     }
 
-    unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u64>) {
+    unsafe fn updated_block(&mut self, block: NonNull<[u8; SIZE]>, range: Range<u32>) {
+        let location = self.allocations[&block].offset * SIZE as u64 + range.start;
         self.copy_regions.push(hal::command::BufferCopy {
-            src: 0,
-            dst: 0,
-            size: 0,
+            src: location,
+            dst: location,
+            size: range.end - range.start,
         });
     }
 

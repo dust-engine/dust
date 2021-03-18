@@ -182,6 +182,18 @@ where
             &mut slice[slot_index as usize]
         }
     }
+    pub fn slot_updated(&mut self, handle: Handle, n: u8) {
+        debug_assert!(n > 0);
+        let slot_index = handle.get_slot_num();
+        let chunk_index = handle.get_chunk_num();
+        let block = self.chunks[chunk_index as usize];
+        let size = size_of::<ArenaSlot<T>>() as u32;
+        let start = size * slot_index;
+        let end = start + size * n as u32;
+        unsafe {
+            self.block_allocator.updated_block(block.cast(), start..end);
+        }
+    }
 }
 
 impl<T: ArenaAllocated> Index<Handle> for ArenaAllocator<T>
