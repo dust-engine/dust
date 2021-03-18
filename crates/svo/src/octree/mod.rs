@@ -8,10 +8,11 @@ use std::mem::size_of;
 //mod accessor;
 
 #[derive(Default)]
+#[repr(C)]
 pub struct Node<T: Voxel> {
-    block_size: u8,
+    _reserved: u8,
     freemask: u8,
-    _reserved: u16,
+    _reserved2: u16,
     children: Handle,
     data: [T; 8],
 }
@@ -70,7 +71,10 @@ where
         if new_mask == 0 {
             let node_ref = &mut self.arena[node_handle];
             node_ref.freemask = 0;
-            unsafe { self.arena.free(old_child_handle, old_mask.count_ones() as u8) };
+            unsafe {
+                self.arena
+                    .free(old_child_handle, old_mask.count_ones() as u8);
+            }
             return;
         }
         let new_child_handle = self.arena.alloc(new_num_items);
@@ -98,7 +102,10 @@ where
         let node_ref = &mut self.arena[node_handle];
         node_ref.freemask = new_mask;
         node_ref.children = new_child_handle;
-        unsafe { self.arena.free(old_child_handle, old_mask.count_ones() as u8) };
+        unsafe {
+            self.arena
+                .free(old_child_handle, old_mask.count_ones() as u8);
+        }
     }
     fn set_internal(
         &mut self,
@@ -234,8 +241,8 @@ mod tests {
         }
         for (i, corner) in Corner::all().enumerate() {
             let (x, y, z) = corner.position_offset();
-            octree.set(2+x as u32, y as u32, z as u32, 8, 5);
-            assert_eq!(octree.get(2+x as u32, y as u32, z as u32, 8), 5);
+            octree.set(2 + x as u32, y as u32, z as u32, 8, 5);
+            assert_eq!(octree.get(2 + x as u32, y as u32, z as u32, 8), 5);
             if i < 4 {
                 assert_eq!(octree.get(1, 0, 0, 4), 0);
             } else if i > 4 {

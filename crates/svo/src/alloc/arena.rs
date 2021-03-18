@@ -2,7 +2,6 @@ use super::BlockAllocator;
 use std::mem::{size_of, ManuallyDrop};
 use std::ops::{Index, IndexMut};
 use std::ptr::NonNull;
-use std::io::BufRead;
 
 pub const CHUNK_DEGREE: usize = 24;
 pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
@@ -136,12 +135,12 @@ where
             sized_head
         };
 
-
         // initialize to zero
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let slice = &mut self.chunks[chunk_index as usize].as_mut()[slot_index as usize..(slot_index+len) as usize];
+            let slice = &mut self.chunks[chunk_index as usize].as_mut()
+                [slot_index as usize..(slot_index + len) as usize];
             for i in slice {
                 i.occupied = Default::default();
             }
@@ -154,7 +153,7 @@ where
         self.num_blocks -= 1;
     }
     fn freelist_push(&mut self, n: u8, handle: Handle) {
-        assert!(1 <= n && n <= 8);
+        debug_assert!(1 <= n && n <= 8);
         let index: usize = (n - 1) as usize;
         self.get_slot_mut(handle).free.next = self.freelist_heads[index];
         self.freelist_heads[index] = handle;
@@ -163,10 +162,7 @@ where
         let index: usize = (n - 1) as usize;
         let sized_head = self.freelist_heads[index];
         if !sized_head.is_none() {
-            self.freelist_heads[index] = unsafe {
-                // TODO: function?
-                self.get_slot(sized_head).free.next
-            };
+            self.freelist_heads[index] = unsafe { self.get_slot(sized_head).free.next };
         }
         sized_head
     }
@@ -195,8 +191,10 @@ where
     type Output = T;
 
     fn index(&self, index: Handle) -> &Self::Output {
-        // TODO: check that the chunk was allocated
-        unsafe { &self.get_slot(index).occupied }
+        unsafe {
+            let slot = self.get_slot(index);
+            &slot.occupied
+        }
     }
 }
 
@@ -205,8 +203,10 @@ where
     [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
     fn index_mut(&mut self, index: Handle) -> &mut Self::Output {
-        // TODO: check that the chunk was allocated
-        unsafe { &mut self.get_slot_mut(index).occupied }
+        unsafe {
+            let slot = self.get_slot_mut(index);
+            &mut slot.occupied
+        }
     }
 }
 
@@ -221,9 +221,8 @@ mod tests {
     #[test]
     fn test_alloc() {
         let block_allocator = crate::alloc::SystemBlockAllocator::new();
-        type Data = u128;
-        let mut arena: ArenaAllocator<Data> = ArenaAllocator::new(Box::new(block_allocator));
-        let num_slots_in_chunk = CHUNK_SIZE / size_of::<Data>();
+        let mut arena: ArenaAllocator<u128> = ArenaAllocator::new(Box::new(block_allocator));
+        let num_slots_in_chunk = CHUNK_SIZE / size_of::<u128>();
         for i in 0..(num_slots_in_chunk as u32 - 8) {
             let handle = arena.alloc(1);
             assert_eq!(handle.get_slot_num(), i);
@@ -246,5 +245,20 @@ mod tests {
         let handle = arena.alloc(8);
         assert_eq!(handle.get_slot_num(), num_slots_in_chunk as u32 - 8);
         assert_eq!(handle.get_chunk_num(), 0);
+    }
+
+    #[test]
+    fn test_free() {
+        let block_allocator = crate::alloc::SystemBlockAllocator::new();
+        let mut arena: ArenaAllocator<u128> = ArenaAllocator::new(Box::new(block_allocator));
+        let handles: Vec<Handle> = (0..8).map(|_| arena.alloc(4)).collect();
+        for handle in handles.iter().rev() {
+            unsafe { arena.free(*handle, 4) };
+        }
+        assert_eq!(arena.alloc(1), Handle(8 * 4));
+        for handle in handles.iter() {
+            let new_handle = arena.alloc(4);
+            assert_eq!(*handle, new_handle);
+        }
     }
 }

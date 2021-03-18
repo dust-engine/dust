@@ -11,9 +11,7 @@ pub struct SystemBlockAllocator<const SIZE: usize, A: Allocator = Global> {
 
 impl<const SIZE: usize> SystemBlockAllocator<SIZE> {
     pub fn new() -> SystemBlockAllocator<SIZE, Global> {
-        SystemBlockAllocator {
-            allocator: Global
-        }
+        SystemBlockAllocator { allocator: Global }
     }
 }
 
