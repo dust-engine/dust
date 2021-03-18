@@ -1,7 +1,7 @@
+use crate::alloc::ArenaAllocator;
+use crate::alloc::CHUNK_SIZE;
+use crate::alloc::{ArenaAllocated, Handle};
 use crate::{Corner, Voxel};
-use gfx_alloc::ArenaAllocator;
-use gfx_alloc::CHUNK_SIZE;
-use gfx_alloc::{ArenaAllocated, BlockAllocator, Handle};
 use std::mem::size_of;
 
 pub struct Node<T: Voxel> {

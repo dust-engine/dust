@@ -1,22 +1,22 @@
+#![allow(incomplete_features)]
 #![feature(untagged_unions)]
 #![feature(const_fn)]
 #![feature(const_generics)]
 #![feature(const_evaluatable_checked)]
+#![feature(allocator_api)]
 
+pub mod alloc;
 pub mod bounds;
 pub mod dir;
-pub mod index_path;
 pub mod octree;
 
 pub use bounds::Bounds;
 pub use dir::{Corner, Edge, Face, Quadrant};
-pub use index_path::IndexPath;
 //pub use octree::{NodeRef, NodeRefMut, Octree};
 
-use gfx_alloc::ArenaAllocated;
 use std::fmt::Debug;
 
-pub trait Voxel: Copy + Clone + Default + Eq + Debug + ArenaAllocated {
+pub trait Voxel: Copy + Clone + Default + Eq + Debug {
     fn avg(voxels: &[Self; 8]) -> Self;
 }
 

@@ -1,4 +1,4 @@
-use crate::{Corner, Face, IndexPath};
+use crate::{Corner, Face};
 use glam as math;
 use std::convert::TryInto;
 
@@ -122,16 +122,6 @@ impl Bounds {
             return BoundsSpacialRelationship::Contain;
         }
         return BoundsSpacialRelationship::Intersect;
-    }
-}
-
-impl From<IndexPath> for Bounds {
-    fn from(index_path: IndexPath) -> Self {
-        let mut bounds = Bounds::new();
-        for dir in index_path {
-            bounds = bounds.half(dir);
-        }
-        bounds
     }
 }
 

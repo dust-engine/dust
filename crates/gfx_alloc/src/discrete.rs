@@ -1,9 +1,10 @@
-use crate::{AllocError, BlockAllocator, MAX_BUFFER_SIZE};
+use super::MAX_BUFFER_SIZE;
 use gfx_hal as hal;
 use gfx_hal::prelude::*;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::ptr::NonNull;
-use std::collections::HashMap;
+use svo::alloc::{AllocError, BlockAllocator};
 
 /// The voxel repository resides on both system RAM and VRAM
 ///
@@ -13,7 +14,6 @@ use std::collections::HashMap;
 pub struct DiscreteBlock<B: hal::Backend, const SIZE: usize> {
     system_mem: B::Memory,
     device_mem: B::Memory,
-    ptr: NonNull<[u8; SIZE]>,
     offset: usize,
 }
 
@@ -32,7 +32,7 @@ pub struct DiscreteBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     command_pool: B::CommandPool,
     command_buffer: B::CommandBuffer,
 
-    allocations: HashMap<NonNull<[u8; SIZE]>, DiscreteBlock<B, SIZE>>
+    allocations: HashMap<NonNull<[u8; SIZE]>, DiscreteBlock<B, SIZE>>,
 }
 
 impl<'a, B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<'a, B, SIZE> {
@@ -82,15 +82,15 @@ impl<'a, B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<'a, B, SIZE>
                 free_offsets: Vec::new(),
                 command_pool,
                 command_buffer,
-                allocations: HashMap::new()
+                allocations: HashMap::new(),
             })
         }
     }
 }
 
 impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
-    for DiscreteBlockAllocator<'_, B, SIZE> {
-
+    for DiscreteBlockAllocator<'_, B, SIZE>
+{
     unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError> {
         let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
             let val = self.current_offset;
@@ -139,16 +139,15 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
 
         let ptr = NonNull::new_unchecked(ptr as *mut [u8; SIZE]);
         let block = DiscreteBlock {
-            system_mem: system_mem,
-            device_mem: device_mem,
-            ptr,
+            system_mem,
+            device_mem,
             offset: resource_offset,
         };
         self.allocations.insert(ptr, block);
         Ok(ptr)
     }
 
-    unsafe fn deallocate_block(&mut self, mut block: NonNull<[u8; SIZE]>) {
+    unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>) {
         let mut block = self.allocations.remove(&block).unwrap();
         self.device.unmap_memory(&mut block.system_mem);
         self.device.free_memory(block.system_mem);
@@ -233,48 +232,4 @@ fn select_discrete_memtype(
         .into();
 
     (system_buf_mem_type, device_buf_mem_type)
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use crate::discrete::DiscreteBlockAllocator;
-    use crate::BlockAllocator;
-    use gfx_backend_vulkan as back;
-    use gfx_hal as hal;
-
-    pub(crate) fn get_block_allocator<const SIZE: usize>(
-        gpu: &mut hal::adapter::Gpu<back::Backend>,
-        memory_properties: hal::adapter::MemoryProperties,
-    ) -> DiscreteBlockAllocator<back::Backend, SIZE> {
-        let queue_group = gpu.queue_groups.first_mut().unwrap();
-        let device = &gpu.device;
-        DiscreteBlockAllocator::new(
-            device,
-            &mut queue_group.queues[0],
-            queue_group.family,
-            &memory_properties,
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn test_discrete() {
-        let (_instance, mut gpu, memory_properties) = crate::tests::get_gpu();
-        let mut allocator: DiscreteBlockAllocator<back::Backend, 16777216> =
-            get_block_allocator(&mut gpu, memory_properties);
-
-        unsafe {
-            let _block1 = allocator.allocate_block().unwrap();
-            let block2 = allocator.allocate_block().unwrap();
-            let block3 = allocator.allocate_block().unwrap();
-            allocator.deallocate_block(block2);
-
-            let block4 = allocator.allocate_block().unwrap();
-            assert_eq!(block4.offset, 1);
-
-            allocator.deallocate_block(block3);
-            let block5 = allocator.allocate_block().unwrap();
-            assert_eq!(block5.offset, 2);
-        };
-    }
 }

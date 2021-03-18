@@ -1,5 +1,5 @@
-use crate::AllocError;
 use gfx_hal::device as hal;
+use svo::alloc::AllocError;
 fn map_out_of_memory_err(err: hal::OutOfMemory) -> AllocError {
     match err {
         hal::OutOfMemory::Device => AllocError::OutOfDeviceMemory,

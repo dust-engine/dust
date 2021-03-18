@@ -1,19 +1,10 @@
-use crate::{AllocError, BlockAllocator, MAX_BUFFER_SIZE};
+use super::MAX_BUFFER_SIZE;
 use gfx_hal as hal;
 use gfx_hal::prelude::*;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::ptr::NonNull;
-use std::collections::HashMap;
-
-/// The voxel repository resides on both system RAM and VRAM
-///
-/// This provides support for discrete graphics cards, such as
-/// NVIDIA, AMD where an explicit copy command needs to be issued
-/// to initiate transfer between system RAM and VRAM
-pub struct IntegratedBlock<B: hal::Backend, const SIZE: usize> {
-    mem: B::Memory,
-    ptr: NonNull<[u8; SIZE]>,
-}
+use svo::alloc::{AllocError, BlockAllocator};
 
 pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     device: &'a B::Device,
@@ -23,7 +14,7 @@ pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     current_offset: usize,
     free_offsets: Vec<usize>,
 
-    allocations: HashMap<NonNull<[u8; SIZE]>, IntegratedBlock<B, SIZE>>
+    allocations: HashMap<NonNull<[u8; SIZE]>, B::Memory>,
 }
 
 impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZE> {
@@ -48,7 +39,7 @@ impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZ
                 memtype,
                 free_offsets: Vec::new(),
                 current_offset: 0,
-                allocations: HashMap::new()
+                allocations: HashMap::new(),
             })
         }
     }
@@ -57,7 +48,6 @@ impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZ
 impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
     for IntegratedBlockAllocator<'_, B, SIZE>
 {
-
     unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError> {
         let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
             let val = self.current_offset;
@@ -93,17 +83,14 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
             None,
         );
         let ptr = NonNull::new_unchecked(ptr as *mut [u8; SIZE]);
-        self.allocations.insert(ptr, IntegratedBlock {
-            mem,
-            ptr,
-        });
+        self.allocations.insert(ptr, mem);
         Ok(ptr)
     }
 
     unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>) {
-        let mut block = self.allocations.remove(&block).unwrap();
-        self.device.unmap_memory(&mut block.mem);
-        self.device.free_memory(block.mem);
+        let mut mem = self.allocations.remove(&block).unwrap();
+        self.device.unmap_memory(&mut mem);
+        self.device.free_memory(mem);
     }
 
     unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u64>) {
@@ -155,60 +142,4 @@ fn select_integrated_memtype(
         })
         .unwrap()
         .into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::IntegratedBlockAllocator;
-    use crate::BlockAllocator;
-    use gfx_backend_vulkan as back;
-    use gfx_hal as hal;
-    use gfx_hal::prelude::*;
-
-    //#[test]
-    fn test_integrated() {
-        let instance = back::Instance::create("gfx_test", 1).expect("Unable to create an instance");
-        let adapters = instance.enumerate_adapters();
-        let adapter = {
-            for adapter in &instance.enumerate_adapters() {
-                println!("{:?}", adapter);
-            }
-            adapters
-                .iter()
-                .find(|adapter| adapter.info.device_type == hal::adapter::DeviceType::DiscreteGpu)
-        }
-        .expect("Unable to find a discrete GPU");
-
-        let physical_device = &adapter.physical_device;
-        let memory_properties = physical_device.memory_properties();
-        let family = adapter
-            .queue_families
-            .iter()
-            .find(|family| family.queue_type() == hal::queue::QueueType::Transfer)
-            .expect("Can't find transfer queue family!");
-        let mut gpu = unsafe {
-            physical_device.open(
-                &[(family, &[1.0])],
-                hal::Features::SPARSE_BINDING | hal::Features::SPARSE_RESIDENCY_IMAGE_2D,
-            )
-        }
-        .expect("Unable to open the physical device!");
-        let mut queue_group = gpu.queue_groups.pop().unwrap();
-        let device = gpu.device;
-        let mut allocator: IntegratedBlockAllocator<back::Backend, 16777216> =
-            IntegratedBlockAllocator::new(&device, &mut queue_group.queues[0], &memory_properties)
-                .unwrap();
-
-        unsafe {
-            let _block1 = allocator.allocate_block().unwrap();
-            let block2 = allocator.allocate_block().unwrap();
-            let block3 = allocator.allocate_block().unwrap();
-            allocator.deallocate_block(block2);
-
-            let _block4 = allocator.allocate_block().unwrap();
-
-            allocator.deallocate_block(block3);
-            let _block5 = allocator.allocate_block().unwrap();
-        };
-    }
 }

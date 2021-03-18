@@ -1,39 +1,8 @@
-#![feature(nonnull_slice_from_raw_parts)]
-#![feature(const_generics)]
-#![feature(const_evaluatable_checked)]
-#![feature(untagged_unions)]
-#![feature(allocator_api)]
-
-mod arena;
 pub mod discrete;
-pub mod system;
 pub mod integrated;
 mod utils;
 
-use std::ops::Range;
-use std::ptr::NonNull;
-
-pub use arena::{ArenaAllocated, ArenaAllocator, Handle};
-pub use arena::CHUNK_SIZE;
-pub use arena::CHUNK_DEGREE;
-
 const MAX_BUFFER_SIZE: u64 = 1 << 32;
-
-#[derive(Debug)]
-pub enum AllocError {
-    OutOfHostMemory,
-    OutOfDeviceMemory,
-    MappingFailed,
-    TooManyObjects,
-}
-
-/// This is responsible for
-pub trait BlockAllocator<const SIZE: usize> {
-    unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError>;
-    unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>);
-    unsafe fn updated_block(&mut self, block: NonNull<[u8; SIZE]>, block_range: Range<u64>);
-    unsafe fn flush(&mut self);
-}
 
 #[cfg(test)]
 mod tests {

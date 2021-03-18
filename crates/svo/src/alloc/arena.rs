@@ -1,7 +1,7 @@
-use crate::BlockAllocator;
+use super::BlockAllocator;
 use std::mem::{size_of, ManuallyDrop};
-use std::ptr::NonNull;
 use std::ops::{Index, IndexMut};
+use std::ptr::NonNull;
 
 pub const CHUNK_DEGREE: usize = 24;
 pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
@@ -189,8 +189,8 @@ where
 }
 
 impl<T: ArenaAllocated> Index<Handle> for ArenaAllocator<T>
-    where
-        [T; CHUNK_SIZE / size_of::<T>()]: Sized,
+where
+    [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
     type Output = T;
 
@@ -201,8 +201,8 @@ impl<T: ArenaAllocated> Index<Handle> for ArenaAllocator<T>
 }
 
 impl<T: ArenaAllocated> IndexMut<Handle> for ArenaAllocator<T>
-    where
-        [T; CHUNK_SIZE / size_of::<T>()]: Sized,
+where
+    [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
     fn index_mut(&mut self, index: Handle) -> &mut Self::Output {
         // TODO: check that the chunk was allocated
@@ -220,10 +220,9 @@ mod tests {
 
     #[test]
     fn test_alloc() {
-        let (_instance, mut gpu, memory_properties) = crate::tests::get_gpu();
-        let allocator = crate::discrete::tests::get_block_allocator(&mut gpu, memory_properties);
+        let block_allocator = crate::alloc::SystemBlockAllocator::new();
         type Data = u128;
-        let mut arena: ArenaAllocator<_, Data> = ArenaAllocator::new(allocator);
+        let mut arena: ArenaAllocator<Data> = ArenaAllocator::new(Box::new(block_allocator));
         let num_slots_in_chunk = CHUNK_SIZE / size_of::<Data>();
         for i in 0..(num_slots_in_chunk as u32 - 8) {
             let handle = arena.alloc(1);
@@ -248,14 +247,12 @@ mod tests {
         assert_eq!(handle.get_slot_num(), num_slots_in_chunk as u32 - 8);
         assert_eq!(handle.get_chunk_num(), 0);
     }
-
     #[test]
     #[should_panic(expected = "Double free detected")]
     fn test_doublefree() {
-        let (_instance, mut gpu, memory_properties) = crate::tests::get_gpu();
-        let allocator = crate::discrete::tests::get_block_allocator(&mut gpu, memory_properties);
+        let block_allocator = crate::alloc::SystemBlockAllocator::new();
         type Data = u128;
-        let mut arena: ArenaAllocator<_, Data> = ArenaAllocator::new(allocator);
+        let mut arena: ArenaAllocator<Data> = ArenaAllocator::new(Box::new(block_allocator));
         let handle = arena.alloc(3);
         arena.free(handle);
         arena.free(handle);
@@ -264,10 +261,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "Overlapping handle detected")]
     fn test_invalid_overlapping_handle() {
-        let (_instance, mut gpu, memory_properties) = crate::tests::get_gpu();
-        let allocator = crate::discrete::tests::get_block_allocator(&mut gpu, memory_properties);
+        let block_allocator = crate::alloc::SystemBlockAllocator::new();
         type Data = u128;
-        let mut arena: ArenaAllocator<_, Data> = ArenaAllocator::new(allocator);
+        let mut arena: ArenaAllocator<Data> = ArenaAllocator::new(Box::new(block_allocator));
         let handle = arena.alloc(8);
         arena.free(handle.offset(4));
     }
