@@ -1,5 +1,5 @@
 [package]
-name = "render"
+name = "dust-render"
 version = "0.1.0"
 authors = ["Zhixing Zhang <me@neoto.xin>"]
 edition = "2018"
@@ -8,3 +8,15 @@ edition = "2018"
 
 [dependencies]
 svo = { path = "../svo" }
+gfx-hal = { git = "https://github.com/gfx-rs/gfx" }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx", optional = true }
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true }
+tracing = "*"
+
+[lib]
+name = "dust_render"
+
+[features]
+vulkan = ["gfx-backend-vulkan"]
+dx12 = ["gfx-backend-dx12"]
+default = ["vulkan"]

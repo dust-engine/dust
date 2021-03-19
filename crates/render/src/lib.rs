@@ -1,8 +1,13 @@
-pub struct RenderContext {
-    // device, command encoder, render resource context
-}
+pub use gfx_hal as hal;
 
-pub struct Renderer {
-    // instance, arc device, queue, window resized event reader, window created event reader, initliazed
-}
+#[cfg(feature = "vulkan")]
+pub use gfx_backend_vulkan as back;
 
+#[cfg(feature = "dx12")]
+pub use gfx_backend_dx12 as back;
+
+
+mod renderer;
+mod raytracer;
+pub use renderer::Renderer;
+pub use renderer::Config;

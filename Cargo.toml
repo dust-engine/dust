@@ -14,3 +14,7 @@ readme = "README.md"
 
 [workspace]
 members = ["crates/*"]
+
+[dependencies]
+bevy = { git = "https://github.com/bevyengine/bevy.git" }
+dust-render = { path = "./crates/render" }
