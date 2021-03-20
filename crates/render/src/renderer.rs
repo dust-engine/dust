@@ -12,15 +12,18 @@ pub struct RenderState {
     pub graphics_queue: <back::Backend as hal::Backend>::Queue,
     pub transfer_binding_queue: <back::Backend as hal::Backend>::Queue,
     pub surface_format: hal::format::Format,
+
+    pub shared_staging_memory: Option<<back::Backend as hal::Backend>::Memory>
 }
 
 pub struct Renderer {
     pub instance: ManuallyDrop<back::Instance>,
     pub adapter: hal::adapter::Adapter<back::Backend>,
     // arc device, queue, window resized event reader, window created event reader, initliazed
-    state: Option<RenderState>,
+    pub state: Option<RenderState>,
     raytracer: Option<Raytracer>,
-    device_properties: hal::PhysicalDeviceProperties,
+    pub device_properties: hal::PhysicalDeviceProperties,
+    pub memory_properties: hal::adapter::MemoryProperties,
 }
 
 impl Drop for Renderer {
@@ -47,12 +50,14 @@ impl Renderer {
         let adapter = instance.enumerate_adapters().pop().unwrap();
 
         let device_properties = adapter.physical_device.properties();
+        let memory_properties = adapter.physical_device.memory_properties();
         Renderer {
             instance: ManuallyDrop::new(instance),
             adapter,
             state: None,
             raytracer: None,
             device_properties,
+            memory_properties,
         }
     }
     pub fn set_surface(&mut self, surface: <back::Backend as hal::Backend>::Surface) {
@@ -124,12 +129,33 @@ impl Renderer {
             device.create_command_pool(transfer_binding_queue_group.family, hal::pool::CommandPoolCreateFlags::empty())
         }.unwrap();
 
+        // Allocate some memory
+        let shared_staging_memory = unsafe {
+            let staging_type = self.memory_properties
+                .memory_types
+                .iter()
+                .position(|memory_type| {
+                    memory_type.properties.contains(
+                        hal::memory::Properties::CPU_VISIBLE
+                            | hal::memory::Properties::COHERENT,
+                    )
+                })
+                .unwrap()
+                .into();
+
+            device.allocate_memory(
+                staging_type,
+                128, //TODO
+            ).unwrap()
+        };
+
         let mut state = RenderState {
             surface,
             device,
             graphics_queue,
             transfer_binding_queue,
             surface_format,
+            shared_staging_memory: Some(shared_staging_memory)
         };
 
         let surface_capabilities = state.surface.capabilities(&self.adapter.physical_device);
@@ -142,13 +168,15 @@ impl Renderer {
             });
 
         tracing::trace!("Swapchain initialized with size {}x{}", config.extent.width, config.extent.height);
-        self.raytracer = Some(Raytracer::new(&state, &config, &self.device_properties));
+
+        self.state = Some(state);
+        self.raytracer = Some(Raytracer::new(self, &config));
         unsafe {
+            let state = self.state.as_mut().unwrap();
             state.surface
                 .configure_swapchain(&state.device, config)
                 .unwrap()
         }
-        self.state = Some(state);
     }
     fn rebuild_swapchain(&mut self) {
         if self.state.is_none() {

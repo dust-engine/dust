@@ -11,5 +11,6 @@ pub use gfx_backend_dx12 as back;
 
 mod renderer;
 mod raytracer;
+mod shared_buffer;
 pub use renderer::Renderer;
 pub use renderer::Config;

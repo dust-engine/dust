@@ -1,9 +1,10 @@
-use crate::back;
+use crate::{back, Renderer};
 use crate::hal;
 use hal::prelude::*;
 use crate::renderer::RenderState;
 use tracing;
 use std::io::Cursor;
+use std::alloc::Layout;
 
 pub struct Raytracer {
     ray_pass: <back::Backend as hal::Backend>::RenderPass,
@@ -28,10 +29,10 @@ const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
 
 impl Raytracer {
     pub fn new(
-        state: &RenderState,
+        renderer: &Renderer,
         swap_config: &hal::window::SwapchainConfig,
-        physical_device_properties: &hal::PhysicalDeviceProperties,
     ) -> Raytracer {
+        let state = renderer.state.as_ref().unwrap();
         let ray_pass = unsafe {
             state.device.create_render_pass(
                 std::iter::once(
@@ -94,8 +95,19 @@ impl Raytracer {
             };
             let mut pipeline_desc = hal::pso::GraphicsPipelineDesc::new(
                 hal::pso::PrimitiveAssemblerDesc::Vertex {
-                    buffers: &[],
-                    attributes: &[],
+                    buffers: &[hal::pso::VertexBufferDesc {
+                        binding: 0,
+                        stride: std::mem::size_of::<(f32, f32, f32)>() as u32,
+                        rate: hal::pso::VertexInputRate::Vertex,
+                    }],
+                    attributes: &[hal::pso::AttributeDesc {
+                        location: 0,
+                        binding: 0,
+                        element: hal::pso::Element {
+                            format: hal::format::Format::Rgb32Sfloat,
+                            offset: 0
+                        }
+                    }],
                     input_assembler: hal::pso::InputAssemblerDesc {
                         primitive: hal::pso::Primitive::TriangleStrip,
                         with_adjacency: false,
