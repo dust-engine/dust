@@ -9,9 +9,13 @@ edition = "2018"
 [dependencies]
 svo = { path = "../svo" }
 gfx-hal = { git = "https://github.com/gfx-rs/gfx" }
+gfx-auxil = { git = "https://github.com/gfx-rs/gfx" }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx", optional = true }
 gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true }
 tracing = "*"
+
+[build-dependencies]
+naga = { git = "https://github.com/gfx-rs/naga", features = ["spv-out", "glsl-in"] }
 
 [lib]
 name = "dust_render"

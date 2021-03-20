@@ -20,6 +20,7 @@ pub struct Renderer {
     // arc device, queue, window resized event reader, window created event reader, initliazed
     state: Option<RenderState>,
     raytracer: Option<Raytracer>,
+    device_properties: hal::PhysicalDeviceProperties,
 }
 
 impl Drop for Renderer {
@@ -44,11 +45,14 @@ impl Renderer {
             options.version
         ).unwrap();
         let adapter = instance.enumerate_adapters().pop().unwrap();
+
+        let device_properties = adapter.physical_device.properties();
         Renderer {
             instance: ManuallyDrop::new(instance),
             adapter,
             state: None,
-            raytracer: None
+            raytracer: None,
+            device_properties,
         }
     }
     pub fn set_surface(&mut self, surface: <back::Backend as hal::Backend>::Surface) {
@@ -138,7 +142,7 @@ impl Renderer {
             });
 
         tracing::trace!("Swapchain initialized with size {}x{}", config.extent.width, config.extent.height);
-        self.raytracer = Some(Raytracer::new(&state, &config));
+        self.raytracer = Some(Raytracer::new(&state, &config, &self.device_properties));
         unsafe {
             state.surface
                 .configure_swapchain(&state.device, config)

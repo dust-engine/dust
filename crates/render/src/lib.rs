@@ -1,3 +1,5 @@
+#![feature(array_methods)]
+
 pub use gfx_hal as hal;
 
 #[cfg(feature = "vulkan")]
