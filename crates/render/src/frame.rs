@@ -1,5 +1,5 @@
-use crate::back as back;
-use crate::hal as hal;
+use crate::back;
+use crate::hal;
 use hal::prelude::*;
 
 pub struct Frame {
@@ -9,26 +9,22 @@ pub struct Frame {
     pub submission_complete_semaphore: <back::Backend as hal::Backend>::Semaphore,
 }
 
-
 impl Frame {
     pub fn new(
         device: &<back::Backend as hal::Backend>::Device,
-        graphics_queue_family: hal::queue::QueueFamilyId
+        graphics_queue_family: hal::queue::QueueFamilyId,
     ) -> Frame {
         let mut command_pool = unsafe {
-            device.create_command_pool(
-                graphics_queue_family,
-                hal::pool::CommandPoolCreateFlags::TRANSIENT).unwrap()
+            device
+                .create_command_pool(
+                    graphics_queue_family,
+                    hal::pool::CommandPoolCreateFlags::TRANSIENT,
+                )
+                .unwrap()
         };
-        let command_buffer = unsafe {
-            command_pool.allocate_one(hal::command::Level::Primary)
-        };
-        let submission_complete_fence = unsafe {
-            device.create_fence(false)
-        }.unwrap();
-        let submission_complete_semaphore = unsafe {
-            device.create_semaphore().unwrap()
-        };
+        let command_buffer = unsafe { command_pool.allocate_one(hal::command::Level::Primary) };
+        let submission_complete_fence = unsafe { device.create_fence(false) }.unwrap();
+        let submission_complete_semaphore = unsafe { device.create_semaphore().unwrap() };
         Frame {
             command_pool,
             command_buffer,

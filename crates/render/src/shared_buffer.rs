@@ -1,5 +1,5 @@
-use crate::back as back;
-use crate::hal as hal;
+use crate::back;
+use crate::hal;
 use hal::prelude::*;
 use std::alloc::Layout;
 
@@ -13,16 +13,17 @@ pub struct SharedBuffer<'a> {
 }
 
 impl<'a> SharedBuffer<'a> {
-    pub unsafe fn alloc_buffer(&mut self, data: &mut [u8], usage: hal::buffer::Usage)
-        -> Result<<back::Backend as hal::Backend>::Buffer, hal::buffer::CreationError> {
-        let buffer_layout = Layout::for_value(data)
-            .align_to(self.alignment)
-            .unwrap();
+    pub unsafe fn alloc_buffer(
+        &mut self,
+        data: &mut [u8],
+        usage: hal::buffer::Usage,
+    ) -> Result<<back::Backend as hal::Backend>::Buffer, hal::buffer::CreationError> {
+        let buffer_layout = Layout::for_value(data).align_to(self.alignment).unwrap();
         let layout = buffer_layout.pad_to_align();
-        let buffer = self.device.create_buffer(
+        let _buffer = self.device.create_buffer(
             layout.size() as u64,
             usage,
-            hal::memory::SparseFlags::empty()
+            hal::memory::SparseFlags::empty(),
         )?;
 
         todo!()

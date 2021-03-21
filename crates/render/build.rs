@@ -1,9 +1,4 @@
-use std::path::Path;
-
-const GLSL_SHADER_FILES: [&str; 2] = [
-    "./src/ray.frag",
-    "./src/ray.vert",
-];
+const GLSL_SHADER_FILES: [&str; 2] = ["./src/ray.frag", "./src/ray.vert"];
 
 fn main() {
     /*
