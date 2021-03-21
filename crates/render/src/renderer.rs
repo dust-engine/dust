@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::borrow::{Cow, Borrow};
 use crate::back;
 use crate::hal;
 use hal::prelude::*;
@@ -7,13 +7,14 @@ use crate::hal::window::Extent2D;
 use crate::raytracer::Raytracer;
 
 pub struct RenderState {
+    pub extent: Extent2D,
     pub surface: <back::Backend as hal::Backend>::Surface,
     pub device: <back::Backend as hal::Backend>::Device,
-    pub graphics_queue: <back::Backend as hal::Backend>::Queue,
-    pub transfer_binding_queue: <back::Backend as hal::Backend>::Queue,
+    pub graphics_queue_group: hal::queue::QueueGroup<back::Backend>,
+    pub transfer_binding_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub surface_format: hal::format::Format,
 
-    pub shared_staging_memory: Option<<back::Backend as hal::Backend>::Memory>
+    pub shared_staging_memory: Option<<back::Backend as hal::Backend>::Memory>,
 }
 
 pub struct Renderer {
@@ -118,16 +119,7 @@ impl Renderer {
         assert_eq!(gpu.queue_groups.len(), 2);
         tracing::info!("queues returned:\n{:?}\n", gpu.queue_groups);
         let mut transfer_binding_queue_group = gpu.queue_groups.pop().unwrap();
-        let transfer_binding_queue = transfer_binding_queue_group.queues.pop().unwrap();
         let mut graphics_queue_group = gpu.queue_groups.pop().unwrap();
-        let graphics_queue = graphics_queue_group.queues.pop().unwrap();
-
-        let graphics_command_pool = unsafe {
-            device.create_command_pool(graphics_queue_group.family, hal::pool::CommandPoolCreateFlags::empty())
-        }.unwrap();
-        let transfer_command_pool = unsafe {
-            device.create_command_pool(transfer_binding_queue_group.family, hal::pool::CommandPoolCreateFlags::empty())
-        }.unwrap();
 
         // Allocate some memory
         let shared_staging_memory = unsafe {
@@ -150,43 +142,29 @@ impl Renderer {
         };
 
         let mut state = RenderState {
-            surface,
-            device,
-            graphics_queue,
-            transfer_binding_queue,
-            surface_format,
-            shared_staging_memory: Some(shared_staging_memory)
-        };
-
-        let surface_capabilities = state.surface.capabilities(&self.adapter.physical_device);
-        let config = hal::window::SwapchainConfig::from_caps(
-            &surface_capabilities,
-            state.surface_format,
-            Extent2D {
+            extent: Extent2D {
                 width: 1024,
                 height: 768
-            });
-
-        tracing::trace!("Swapchain initialized with size {}x{}", config.extent.width, config.extent.height);
-
+            },
+            surface,
+            device,
+            graphics_queue_group,
+            transfer_binding_queue_group,
+            surface_format,
+            shared_staging_memory: Some(shared_staging_memory),
+        };
         self.state = Some(state);
-        self.raytracer = Some(Raytracer::new(self, &config));
-        unsafe {
-            let state = self.state.as_mut().unwrap();
-            state.surface
-                .configure_swapchain(&state.device, config)
-                .unwrap()
-        }
+        let framebuffer_attachment = self.rebuild_swapchain();
+        let raytracer = Raytracer::new(self, framebuffer_attachment);
+        self.raytracer = Some(raytracer);
     }
-    fn rebuild_swapchain(&mut self) {
-        if self.state.is_none() {
-            return;
-        }
+    pub fn on_resize(&mut self) {
+        let framebuffer_attachment = self.rebuild_swapchain();
+        let state = self.state.as_ref().unwrap();
+        self.raytracer.as_mut().unwrap().rebuild_framebuffer(state, framebuffer_attachment);
+    }
+    fn rebuild_swapchain(&mut self) -> hal::image::FramebufferAttachment {
         let mut state = self.state.as_mut().unwrap();
-        if self.raytracer.is_none() {
-            return;
-        }
-        let mut raytracer = self.raytracer.as_mut().unwrap();
 
         let surface_capabilities = state.surface.capabilities(&self.adapter.physical_device);
         let config = hal::window::SwapchainConfig::from_caps(
@@ -197,31 +175,31 @@ impl Renderer {
                 height: 768
             });
         tracing::trace!("Swapchain rebuilt with size {}x{}", config.extent.width, config.extent.height);
-        raytracer.rebuild_framebuffer(state, &config);
+        state.extent = config.extent;
+        let framebuffer = config.framebuffer_attachment();
         unsafe {
             state.surface
                 .configure_swapchain(&state.device, config)
-                .unwrap()
+                .unwrap();
         }
+        framebuffer
     }
     pub fn update(&mut self) {
         if self.state.is_none() {
             return;
         }
-        let mut state = self.state.as_mut().unwrap();
+        let state = self.state.as_mut().unwrap();
+        if self.raytracer.is_none() {
+            return;
+        }
+        let raytracer = self.raytracer.as_mut().unwrap();
         unsafe {
             let (surface_image, suboptimal) = state.surface.acquire_image(!0).unwrap();
             if suboptimal.is_some() {
                 tracing::warn!("Suboptimal swapchain image acquired");
             }
-            let suboptimal = state.graphics_queue.present(
-                &mut state.surface,
-                surface_image,
-                None
-            ).unwrap();
-            if suboptimal.is_some() {
-                tracing::warn!("Suboptimal surface presented");
-            }
+
+            raytracer.update(state, surface_image)
         }
     }
 }

@@ -5,11 +5,16 @@ use crate::renderer::RenderState;
 use tracing;
 use std::io::Cursor;
 use std::alloc::Layout;
+use crate::frame::Frame;
+use std::borrow::Borrow;
 
 pub struct Raytracer {
     ray_pass: <back::Backend as hal::Backend>::RenderPass,
     framebuffer: <back::Backend as hal::Backend>::Framebuffer,
     pipeline: <back::Backend as hal::Backend>::GraphicsPipeline,
+    viewport: hal::pso::Viewport,
+    frames: [Frame; 3],
+    current_frame: u8,
 }
 const CUBE_INDICES: [u16; 14] = [
     3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6,
@@ -30,7 +35,7 @@ const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
 impl Raytracer {
     pub fn new(
         renderer: &Renderer,
-        swap_config: &hal::window::SwapchainConfig,
+        framebuffer_attachment: hal::image::FramebufferAttachment,
     ) -> Raytracer {
         let state = renderer.state.as_ref().unwrap();
         let ray_pass = unsafe {
@@ -65,9 +70,9 @@ impl Raytracer {
                 .create_framebuffer(
                     &ray_pass,
                     std::iter::once(
-                        swap_config.framebuffer_attachment()
+                        framebuffer_attachment
                     ),
-                    swap_config.extent.to_extent()
+                    state.extent.to_extent()
                 )
                 .unwrap()
         };
@@ -149,36 +154,117 @@ impl Raytracer {
             state.device.destroy_shader_module(fragment_module);
             pipeline
         };
-
-        // Populate initial data
+        let viewport = hal::pso::Viewport {
+            rect: hal::pso::Rect {
+                x: 0,
+                y: 0,
+                w: state.extent.width as i16,
+                h: state.extent.height as i16
+            },
+            depth: 0.0..1.0
+        };
+        let frames = [
+            Frame::new(&state.device, state.graphics_queue_group.family),
+            Frame::new(&state.device, state.graphics_queue_group.family),
+            Frame::new(&state.device, state.graphics_queue_group.family),
+        ];
         Self {
             ray_pass,
             framebuffer,
             pipeline,
+            viewport,
+            frames,
+            current_frame: 0
         }
     }
 
     pub fn rebuild_framebuffer(
         &mut self,
         state: &RenderState,
-        swap_config: &hal::window::SwapchainConfig,
+        framebuffer_attachment: hal::image::FramebufferAttachment
     ) {
+        self.viewport = hal::pso::Viewport {
+            rect: hal::pso::Rect {
+                x: 0,
+                y: 0,
+                w: state.extent.width as i16,
+                h: state.extent.height as i16
+            },
+            depth: 0.0..1.0
+        };
         state.device.wait_idle().unwrap();
-        tracing::trace!("Rebuilt framebuffer with size {}x{}", swap_config.extent.width, swap_config.extent.height);
+        tracing::trace!("Rebuilt framebuffer with size {}x{}", state.extent.width, state.extent.height);
         unsafe {
             let mut framebuffer = state.device
                 .create_framebuffer(
                     &self.ray_pass,
                     std::iter::once(
-                        swap_config.framebuffer_attachment()
+                        framebuffer_attachment
                     ),
-                    swap_config.extent.to_extent()
+                    state.extent.to_extent()
                 )
                 .unwrap();
             std::mem::swap(&mut self.framebuffer, &mut framebuffer);
             state.device
                 .destroy_framebuffer(framebuffer);
         }
+    }
 
+    pub unsafe fn update(
+        &mut self,
+        state: &mut RenderState,
+        target: <<back::Backend as hal::Backend>::Surface as hal::window::PresentationSurface<back::Backend>>::SwapchainImage,
+    ) {
+        let current_frame: &mut Frame = &mut self.frames[self.current_frame as usize];
+
+        // First, wait for the previous submission to complete.
+        unsafe {
+            state.device.wait_for_fence(&current_frame.submission_complete_fence, !0).unwrap();
+            state.device.reset_fence(&mut current_frame.submission_complete_fence).unwrap();
+            current_frame.command_pool.reset(false);
+        }
+
+        let mut clear_value = hal::command::ClearValue::default();
+        unsafe {
+            clear_value.color.float32 = [0.5, 0.7, 0.0, 1.0];
+        }
+
+        let cmd_buffer = &mut current_frame.command_buffer;
+        cmd_buffer.begin_primary(hal::command::CommandBufferFlags::empty());
+        cmd_buffer.set_viewports(0, std::iter::once(self.viewport.clone()));
+        cmd_buffer.set_scissors(0, std::iter::once(self.viewport.rect));
+        cmd_buffer.bind_graphics_pipeline(&self.pipeline);
+        cmd_buffer.begin_render_pass(
+            &self.ray_pass,
+            &self.framebuffer,
+            self.viewport.rect,
+            std::iter::once(hal::command::RenderAttachmentInfo {
+                image_view: target.borrow(),
+                clear_value
+            }),
+            hal::command::SubpassContents::Inline
+        );
+        cmd_buffer.draw(0..9, 0..1);
+        cmd_buffer.end_render_pass();
+        cmd_buffer.finish();
+
+        state.graphics_queue_group.queues[0].submit(
+            std::iter::once(&*cmd_buffer),
+            std::iter::empty(),
+            std::iter::once(&current_frame.submission_complete_semaphore),
+            Some(&mut current_frame.submission_complete_fence)
+        );
+        let suboptimal = state.graphics_queue_group.queues[0].present(
+            &mut state.surface,
+            target,
+            Some(&mut current_frame.submission_complete_semaphore)
+        ).unwrap();
+        if suboptimal.is_some() {
+            //tracing::warn!("Suboptimal surface presented");
+        }
+        self.current_frame += 1;
+        if self.current_frame >= 3 {
+            self.current_frame = 0;
+        }
     }
 }

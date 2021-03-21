@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::app::Events;
-use bevy::window::{WindowCreated, WindowResized};
+use bevy::window::{WindowCreated, WindowResized, WindowScaleFactorChanged};
 use bevy::winit::WinitWindows;
 use dust_render::{Renderer, Config};
 use dust_render::hal::Instance;
@@ -37,6 +37,7 @@ fn setup(
 
 fn game_update(
     mut window_created_events: EventReader<WindowCreated>,
+    mut window_resized_events: EventReader<WindowResized>,
     winit_windows: Res<WinitWindows>,
     mut renderer: ResMut<Renderer>
 ) {
