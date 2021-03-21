@@ -17,6 +17,7 @@ fn main() {
             height: 1080.0,
             scale_factor_override: Some(1.0),
             title: "Dust Engine".to_string(),
+            mode: bevy::window::WindowMode::Windowed,
             ..Default::default()
         })
         .add_plugin(bevy::log::LogPlugin::default())

@@ -6,7 +6,6 @@ use std::alloc::Layout;
 pub struct SharedBuffer<'a> {
     alignment: usize,
     current_size: usize,
-    integrated: bool,
     device: &'a <back::Backend as hal::Backend>::Device,
     mem: <back::Backend as hal::Backend>::Memory,
     staging_mem: Option<<back::Backend as hal::Backend>::Memory>,

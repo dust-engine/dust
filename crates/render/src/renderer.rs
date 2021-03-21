@@ -216,8 +216,7 @@ impl Renderer {
                     Some(raytracer_submission_semaphore),
                 )
                 .unwrap();
-            if suboptimal.is_none() {
-                // TODO: needs the PR to be merged.
+            if suboptimal.is_some() {
                 tracing::warn!("Suboptimal surface presented");
             }
         }
