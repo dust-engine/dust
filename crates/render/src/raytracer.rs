@@ -6,8 +6,10 @@ use hal::prelude::*;
 
 use std::io::Cursor;
 use tracing;
+use crate::shared_buffer::SharedBuffer;
 
 pub struct Raytracer {
+    shared_buffer: SharedBuffer,
     ray_pass: <back::Backend as hal::Backend>::RenderPass,
     framebuffer: <back::Backend as hal::Backend>::Framebuffer,
     pipeline: <back::Backend as hal::Backend>::GraphicsPipeline,
@@ -158,7 +160,14 @@ impl Raytracer {
             Frame::new(&state.device, state.graphics_queue_group.family),
             Frame::new(&state.device, state.graphics_queue_group.family),
         ];
+        let shared_buffer = SharedBuffer::new(
+            &state.device,
+            &CUBE_POSITIONS,
+            &CUBE_INDICES,
+            &renderer.memory_properties
+        ).unwrap();
         Self {
+            shared_buffer,
             ray_pass,
             framebuffer,
             pipeline,
@@ -231,6 +240,24 @@ impl Raytracer {
         cmd_buffer.begin_primary(hal::command::CommandBufferFlags::empty());
         cmd_buffer.set_viewports(0, std::iter::once(self.viewport.clone()));
         cmd_buffer.set_scissors(0, std::iter::once(self.viewport.rect));
+        cmd_buffer.bind_vertex_buffers(
+            0,
+            std::iter::once((
+                &self.shared_buffer.vertex_index_buffer,
+                hal::buffer::SubRange {
+                    offset: 0,
+                    size: Some(std::mem::size_of_val(&CUBE_POSITIONS) as u64)
+                }
+            ))
+        );
+        cmd_buffer.bind_index_buffer(
+            &self.shared_buffer.vertex_index_buffer,
+            hal::buffer::SubRange {
+                offset: std::mem::size_of_val(&CUBE_POSITIONS) as u64,
+                size: Some(std::mem::size_of_val(&CUBE_INDICES) as u64),
+            },
+            hal::IndexType::U16
+        );
         cmd_buffer.bind_graphics_pipeline(&self.pipeline);
         cmd_buffer.begin_render_pass(
             &self.ray_pass,
@@ -242,7 +269,7 @@ impl Raytracer {
             }),
             hal::command::SubpassContents::Inline,
         );
-        cmd_buffer.draw(0..9, 0..1);
+        cmd_buffer.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
         cmd_buffer.end_render_pass();
         cmd_buffer.finish();
 

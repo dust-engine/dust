@@ -13,6 +13,7 @@ gfx-auxil = { git = "https://github.com/gfx-rs/gfx" }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx", optional = true }
 gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true }
 tracing = "*"
+glam = "0.13"
 
 [build-dependencies]
 naga = { git = "https://github.com/gfx-rs/naga", features = ["spv-out", "glsl-in"] }
