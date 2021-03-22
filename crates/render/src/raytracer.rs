@@ -4,9 +4,9 @@ use crate::renderer::RenderState;
 use crate::{back, Renderer};
 use hal::prelude::*;
 
-use std::io::Cursor;
-use tracing;
+use crate::descriptor_pool::DescriptorPool;
 use crate::shared_buffer::SharedBuffer;
+use std::io::Cursor;
 
 pub struct Raytracer {
     shared_buffer: SharedBuffer,
@@ -17,6 +17,8 @@ pub struct Raytracer {
     viewport: hal::pso::Viewport,
     frames: [Frame; 3],
     current_frame: u8,
+    desc_pool: DescriptorPool,
+    desc_set: <back::Backend as hal::Backend>::DescriptorSet,
 }
 const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -36,6 +38,13 @@ impl Raytracer {
         framebuffer_attachment: hal::image::FramebufferAttachment,
     ) -> Raytracer {
         let state = renderer.state.as_ref().unwrap();
+        let shared_buffer = SharedBuffer::new(
+            &state.device,
+            &CUBE_POSITIONS,
+            &CUBE_INDICES,
+            &renderer.memory_properties,
+        )
+        .unwrap();
         let ray_pass = unsafe {
             state.device.create_render_pass(
                 std::iter::once(hal::pass::Attachment {
@@ -71,10 +80,49 @@ impl Raytracer {
                 .unwrap()
         };
 
+        let mut desc_pool = DescriptorPool::new(
+            &state.device,
+            "Uniform",
+            std::iter::once(
+                // Camera
+                hal::pso::DescriptorSetLayoutBinding {
+                    binding: 0,
+                    ty: hal::pso::DescriptorType::Buffer {
+                        ty: hal::pso::BufferDescriptorType::Uniform,
+                        format: hal::pso::BufferDescriptorFormat::Structured {
+                            dynamic_offset: false,
+                        },
+                    },
+                    count: 1,
+                    stage_flags: hal::pso::ShaderStageFlags::VERTEX
+                        | hal::pso::ShaderStageFlags::FRAGMENT,
+                    immutable_samplers: false,
+                },
+            ),
+        );
+        let desc_set = unsafe {
+            let mut desc_set = desc_pool.allocate_one(&state.device, "Camera").unwrap();
+            state
+                .device
+                .write_descriptor_set(hal::pso::DescriptorSetWrite {
+                    set: &mut desc_set,
+                    binding: 0,
+                    array_offset: 0,
+                    descriptors: std::iter::once(hal::pso::Descriptor::Buffer(
+                        &shared_buffer.buffer,
+                        hal::buffer::SubRange {
+                            offset: 128,
+                            size: Some(128),
+                        },
+                    )),
+                });
+            desc_set
+        };
+
         let pipeline_layout = unsafe {
             state
                 .device
-                .create_pipeline_layout(std::iter::empty(), std::iter::empty())
+                .create_pipeline_layout(std::iter::once(&desc_pool.layout), std::iter::empty())
                 .unwrap()
         };
         let (pipeline_layout, pipeline) = unsafe {
@@ -161,12 +209,6 @@ impl Raytracer {
             Frame::new(&state.device, state.graphics_queue_group.family),
             Frame::new(&state.device, state.graphics_queue_group.family),
         ];
-        let shared_buffer = SharedBuffer::new(
-            &state.device,
-            &CUBE_POSITIONS,
-            &CUBE_INDICES,
-            &renderer.memory_properties
-        ).unwrap();
         Self {
             shared_buffer,
             ray_pass,
@@ -175,6 +217,8 @@ impl Raytracer {
             pipeline_layout,
             viewport,
             frames,
+            desc_pool,
+            desc_set,
             current_frame: 0,
         }
     }
@@ -184,15 +228,8 @@ impl Raytracer {
         state: &RenderState,
         framebuffer_attachment: hal::image::FramebufferAttachment,
     ) {
-        self.viewport = hal::pso::Viewport {
-            rect: hal::pso::Rect {
-                x: 0,
-                y: 0,
-                w: state.extent.width as i16,
-                h: state.extent.height as i16,
-            },
-            depth: 0.0..1.0,
-        };
+        self.viewport.rect.w = state.extent.width as i16;
+        self.viewport.rect.h = state.extent.height as i16;
         state.device.wait_idle().unwrap();
         tracing::trace!(
             "Rebuilt framebuffer with size {}x{}",
@@ -218,6 +255,9 @@ impl Raytracer {
         state: &mut RenderState,
         target: &<back::Backend as hal::Backend>::ImageView,
     ) -> &mut <back::Backend as hal::Backend>::Semaphore {
+        self.shared_buffer
+            .update_camera(&state.device, &state.camera, &state.camera_transform);
+
         let current_frame: &mut Frame = &mut self.frames[self.current_frame as usize];
 
         // First, wait for the previous submission to complete.
@@ -238,15 +278,21 @@ impl Raytracer {
         cmd_buffer.begin_primary(hal::command::CommandBufferFlags::ONE_TIME_SUBMIT);
         cmd_buffer.set_viewports(0, std::iter::once(self.viewport.clone()));
         cmd_buffer.set_scissors(0, std::iter::once(self.viewport.rect));
+        cmd_buffer.bind_graphics_descriptor_sets(
+            &self.pipeline_layout,
+            0,
+            std::iter::once(&self.desc_set),
+            std::iter::empty(),
+        );
         cmd_buffer.bind_vertex_buffers(
             0,
             std::iter::once((
                 &self.shared_buffer.buffer,
                 hal::buffer::SubRange {
                     offset: 0,
-                    size: Some(std::mem::size_of_val(&CUBE_POSITIONS) as u64)
-                }
-            ))
+                    size: Some(std::mem::size_of_val(&CUBE_POSITIONS) as u64),
+                },
+            )),
         );
         cmd_buffer.bind_index_buffer(
             &self.shared_buffer.buffer,
@@ -254,7 +300,7 @@ impl Raytracer {
                 offset: std::mem::size_of_val(&CUBE_POSITIONS) as u64,
                 size: Some(std::mem::size_of_val(&CUBE_INDICES) as u64),
             },
-            hal::IndexType::U16
+            hal::IndexType::U16,
         );
         cmd_buffer.bind_graphics_pipeline(&self.pipeline);
         cmd_buffer.begin_render_pass(
@@ -267,7 +313,7 @@ impl Raytracer {
             }),
             hal::command::SubpassContents::Inline,
         );
-        cmd_buffer.draw_indexed(0..CUBE_INDICES.len() as u32, 0,0..1);
+        cmd_buffer.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
         cmd_buffer.end_render_pass();
         cmd_buffer.finish();
 

@@ -1,4 +1,5 @@
 use crate::back;
+use crate::camera_projection::CameraProjection;
 use crate::hal;
 use crate::hal::window::Extent2D;
 use crate::raytracer::Raytracer;
@@ -13,6 +14,8 @@ pub struct RenderState {
     pub graphics_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub transfer_binding_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub surface_format: hal::format::Format,
+    pub camera: CameraProjection,
+    pub camera_transform: glam::TransformRT,
 }
 
 pub struct Renderer {
@@ -70,7 +73,7 @@ impl Renderer {
                         format.base_format().1 == hal::format::ChannelType::Srgb
                             && format.base_format().0 == hal::format::SurfaceType::R8_G8_B8_A8
                     })
-                    .map(|format| *format)
+                    .copied()
                     .unwrap_or(formats[0])
             });
         tracing::info!("selected surface formats: {:?}", surface_format);
@@ -126,6 +129,11 @@ impl Renderer {
             graphics_queue_group,
             transfer_binding_queue_group,
             surface_format,
+            camera: Default::default(),
+            camera_transform: glam::TransformRT {
+                rotation: glam::Quat::IDENTITY,
+                translation: glam::Vec3::new(0.0, 0.0, 0.0),
+            },
         };
         self.state = Some(state);
         let framebuffer_attachment = self.rebuild_swapchain();
@@ -158,6 +166,13 @@ impl Renderer {
             config.extent.height
         );
         state.extent = config.extent;
+        state
+            .camera
+            .update_aspect_ratio(state.extent.width as f32, state.extent.height as f32);
+        tracing::info!(
+            "Camera aspect ratio changed to {}",
+            state.camera.aspect_ratio
+        );
         let framebuffer = config.framebuffer_attachment();
         unsafe {
             state
