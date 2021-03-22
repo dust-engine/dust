@@ -13,6 +13,7 @@ pub struct Raytracer {
     ray_pass: <back::Backend as hal::Backend>::RenderPass,
     framebuffer: <back::Backend as hal::Backend>::Framebuffer,
     pipeline: <back::Backend as hal::Backend>::GraphicsPipeline,
+    pipeline_layout: <back::Backend as hal::Backend>::PipelineLayout,
     viewport: hal::pso::Viewport,
     frames: [Frame; 3],
     current_frame: u8,
@@ -76,7 +77,7 @@ impl Raytracer {
                 .create_pipeline_layout(std::iter::empty(), std::iter::empty())
                 .unwrap()
         };
-        let pipeline = unsafe {
+        let (pipeline_layout, pipeline) = unsafe {
             let vertex_module = {
                 let spirv =
                     gfx_auxil::read_spirv(Cursor::new(&include_bytes!("./ray.vert.spv"))).unwrap();
@@ -144,7 +145,7 @@ impl Raytracer {
                 .unwrap();
             state.device.destroy_shader_module(vertex_module);
             state.device.destroy_shader_module(fragment_module);
-            pipeline
+            (pipeline_layout, pipeline)
         };
         let viewport = hal::pso::Viewport {
             rect: hal::pso::Rect {
@@ -171,6 +172,7 @@ impl Raytracer {
             ray_pass,
             framebuffer,
             pipeline,
+            pipeline_layout,
             viewport,
             frames,
             current_frame: 0,
@@ -219,31 +221,27 @@ impl Raytracer {
         let current_frame: &mut Frame = &mut self.frames[self.current_frame as usize];
 
         // First, wait for the previous submission to complete.
-        unsafe {
-            state
-                .device
-                .wait_for_fence(&current_frame.submission_complete_fence, !0)
-                .unwrap();
-            state
-                .device
-                .reset_fence(&mut current_frame.submission_complete_fence)
-                .unwrap();
-            current_frame.command_pool.reset(false);
-        }
+        state
+            .device
+            .wait_for_fence(&current_frame.submission_complete_fence, !0)
+            .unwrap();
+        state
+            .device
+            .reset_fence(&mut current_frame.submission_complete_fence)
+            .unwrap();
+        current_frame.command_pool.reset(false);
 
         let mut clear_value = hal::command::ClearValue::default();
-        unsafe {
-            clear_value.color.float32 = [0.5, 0.7, 0.0, 1.0];
-        }
+        clear_value.color.float32 = [0.0, 0.0, 0.0, 1.0];
 
         let cmd_buffer = &mut current_frame.command_buffer;
-        cmd_buffer.begin_primary(hal::command::CommandBufferFlags::empty());
+        cmd_buffer.begin_primary(hal::command::CommandBufferFlags::ONE_TIME_SUBMIT);
         cmd_buffer.set_viewports(0, std::iter::once(self.viewport.clone()));
         cmd_buffer.set_scissors(0, std::iter::once(self.viewport.rect));
         cmd_buffer.bind_vertex_buffers(
             0,
             std::iter::once((
-                &self.shared_buffer.vertex_index_buffer,
+                &self.shared_buffer.buffer,
                 hal::buffer::SubRange {
                     offset: 0,
                     size: Some(std::mem::size_of_val(&CUBE_POSITIONS) as u64)
@@ -251,7 +249,7 @@ impl Raytracer {
             ))
         );
         cmd_buffer.bind_index_buffer(
-            &self.shared_buffer.vertex_index_buffer,
+            &self.shared_buffer.buffer,
             hal::buffer::SubRange {
                 offset: std::mem::size_of_val(&CUBE_POSITIONS) as u64,
                 size: Some(std::mem::size_of_val(&CUBE_INDICES) as u64),
@@ -269,7 +267,7 @@ impl Raytracer {
             }),
             hal::command::SubpassContents::Inline,
         );
-        cmd_buffer.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
+        cmd_buffer.draw_indexed(0..CUBE_INDICES.len() as u32, 0,0..1);
         cmd_buffer.end_render_pass();
         cmd_buffer.finish();
 

@@ -160,11 +160,11 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
     }
 
     unsafe fn updated_block(&mut self, block: NonNull<[u8; SIZE]>, range: Range<u32>) {
-        let location = self.allocations[&block].offset * SIZE as u64 + range.start;
+        let location = self.allocations[&block].offset * SIZE as u64 + range.start as u64;
         self.copy_regions.push(hal::command::BufferCopy {
             src: location,
             dst: location,
-            size: range.end - range.start,
+            size: (range.end - range.start) as u64,
         });
     }
 

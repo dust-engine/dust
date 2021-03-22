@@ -1,7 +1,7 @@
 use crate::back;
 use crate::hal;
 use hal::prelude::*;
-use std::alloc::Layout;
+
 use tracing;
 
 pub struct SharedBuffer {
@@ -10,7 +10,7 @@ pub struct SharedBuffer {
         <back::Backend as hal::Backend>::Memory,
         <back::Backend as hal::Backend>::Buffer
     )>,
-    pub vertex_index_buffer: <back::Backend as hal::Backend>::Buffer,
+    pub buffer: <back::Backend as hal::Backend>::Buffer,
 }
 
 impl SharedBuffer {
@@ -28,8 +28,7 @@ impl SharedBuffer {
             .find(|ty| {
                 ty.properties.contains(
                     hal::memory::Properties::DEVICE_LOCAL
-                        | hal::memory::Properties::CPU_VISIBLE
-                        | hal::memory::Properties::COHERENT,
+                        | hal::memory::Properties::CPU_VISIBLE,
                 )
             })
             .is_none();
@@ -38,34 +37,20 @@ impl SharedBuffer {
             std::mem::size_of_val(vertex_buffer) + std::mem::size_of_val(index_buffer),
             124
         );
-        let mut vertex_index_buffer = unsafe {
+        let mut buffer = unsafe {
             device.create_buffer(
-                124,
+                256,
+                hal::buffer::Usage::INDEX | hal::buffer::Usage::VERTEX | hal::buffer::Usage::UNIFORM |
                 if needs_staging {
-                    hal::buffer::Usage::INDEX
-                        | hal::buffer::Usage::VERTEX
-                        | hal::buffer::Usage::TRANSFER_DST
+                    hal::buffer::Usage::TRANSFER_DST
                 } else {
-                    hal::buffer::Usage::INDEX | hal::buffer::Usage::VERTEX
+                    hal::buffer::Usage::empty()
                 },
                 hal::memory::SparseFlags::empty(),
             )
         }?;
-        let vertex_index_requirements =
-            unsafe { device.get_buffer_requirements(&vertex_index_buffer) };
-        let mut uniform_buffer = unsafe {
-            device.create_buffer(
-                (std::mem::size_of::<glam::Mat4>() * 2) as u64,
-                if needs_staging {
-                    hal::buffer::Usage::UNIFORM | hal::buffer::Usage::TRANSFER_DST
-                } else {
-                    hal::buffer::Usage::UNIFORM
-                },
-                hal::memory::SparseFlags::empty(),
-            )
-        }?;
-        let uniform_buffer_requirements =
-            unsafe { device.get_buffer_requirements(&uniform_buffer) };
+        let buffer_requirements =
+            unsafe { device.get_buffer_requirements(&buffer) };
         let memory_type: hal::MemoryTypeId = memory_properties
             .memory_types
             .iter()
@@ -77,17 +62,15 @@ impl SharedBuffer {
                     } else {
                         hal::memory::Properties::DEVICE_LOCAL
                             | hal::memory::Properties::CPU_VISIBLE
-                            | hal::memory::Properties::COHERENT
                     },
-                ) && vertex_index_requirements.type_mask & (1 << id) != 0
-                    && uniform_buffer_requirements.type_mask & (1 << id) != 0
+                ) && buffer_requirements.type_mask & (1 << id) != 0
             })
             .unwrap()
             .into();
-        let mut memory = unsafe {
+        let memory = unsafe {
             device.allocate_memory(
                 memory_type,
-                256,
+                buffer_requirements.size,
             ).unwrap()
         };
         unsafe {
@@ -95,18 +78,13 @@ impl SharedBuffer {
             device.bind_buffer_memory(
                 &memory,
                 0,
-                &mut vertex_index_buffer
-            ).unwrap();
-            device.bind_buffer_memory(
-                &memory,
-                128,
-                &mut uniform_buffer
+                &mut buffer
             ).unwrap();
         }
         let mut shared_buffer = Self {
             mem: memory,
             staging: None,
-            vertex_index_buffer,
+            buffer,
         };
         unsafe {
             // Write data into buffer
@@ -124,7 +102,7 @@ impl SharedBuffer {
                     .enumerate()
                     .position(|(id, ty)| {
                         ty.properties.contains(
-                            hal::memory::Properties::CPU_VISIBLE | hal::memory::Properties::COHERENT,
+                            hal::memory::Properties::CPU_VISIBLE,
                         ) && staging_buffer_requirements.type_mask & (1 << id) != 0
                     })
                     .unwrap()
@@ -144,12 +122,13 @@ impl SharedBuffer {
                 // Directly map and write
                 &mut shared_buffer.mem
             };
+            let segment = hal::memory::Segment{
+                offset: 0,
+                size: Some((std::mem::size_of_val(vertex_buffer) + std::mem::size_of_val(index_buffer)) as u64)
+            };
             let ptr = device.map_memory(
                 mem_to_write,
-                hal::memory::Segment{
-                    offset: (std::mem::size_of_val(vertex_buffer) + std::mem::size_of_val(index_buffer)) as u64,
-                    size: None
-                }
+                segment.clone()
             ).unwrap();
             std::ptr::copy_nonoverlapping(
                 vertex_buffer.as_ptr() as *const u8,
@@ -161,6 +140,11 @@ impl SharedBuffer {
                 ptr.offset(std::mem::size_of_val(vertex_buffer) as isize),
                 std::mem::size_of_val(index_buffer),
             );
+            device.flush_mapped_memory_ranges(
+                std::iter::once(
+                    (&*mem_to_write, segment)
+                )
+            ).unwrap();
             device.unmap_memory(
                 mem_to_write,
             );

@@ -23,8 +23,8 @@ impl Frame {
                 .unwrap()
         };
         let command_buffer = unsafe { command_pool.allocate_one(hal::command::Level::Primary) };
-        let submission_complete_fence = unsafe { device.create_fence(false) }.unwrap();
-        let submission_complete_semaphore = unsafe { device.create_semaphore().unwrap() };
+        let submission_complete_fence = device.create_fence(true).unwrap();
+        let submission_complete_semaphore = device.create_semaphore().unwrap();
         Frame {
             command_pool,
             command_buffer,

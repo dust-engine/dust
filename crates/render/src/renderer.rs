@@ -13,8 +13,6 @@ pub struct RenderState {
     pub graphics_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub transfer_binding_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub surface_format: hal::format::Format,
-
-    pub shared_staging_memory: Option<<back::Backend as hal::Backend>::Memory>,
 }
 
 pub struct Renderer {
@@ -118,28 +116,6 @@ impl Renderer {
         let transfer_binding_queue_group = gpu.queue_groups.pop().unwrap();
         let graphics_queue_group = gpu.queue_groups.pop().unwrap();
 
-        // Allocate some memory
-        let shared_staging_memory = unsafe {
-            let staging_type = self
-                .memory_properties
-                .memory_types
-                .iter()
-                .position(|memory_type| {
-                    memory_type.properties.contains(
-                        hal::memory::Properties::CPU_VISIBLE | hal::memory::Properties::COHERENT,
-                    )
-                })
-                .unwrap()
-                .into();
-
-            device
-                .allocate_memory(
-                    staging_type,
-                    128, //TODO
-                )
-                .unwrap()
-        };
-
         let state = RenderState {
             extent: Extent2D {
                 width: 1920,
@@ -150,7 +126,6 @@ impl Renderer {
             graphics_queue_group,
             transfer_binding_queue_group,
             surface_format,
-            shared_staging_memory: Some(shared_staging_memory),
         };
         self.state = Some(state);
         let framebuffer_attachment = self.rebuild_swapchain();
