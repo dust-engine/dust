@@ -1,10 +1,10 @@
-use crate::hal;
-use crate::{back, Renderer};
+use crate::{back, hal};
 use hal::prelude::*;
 
 use crate::camera_projection::CameraProjection;
 use crate::renderer::RenderState;
 use glam::{Mat4, TransformRT};
+use std::sync::Arc;
 
 pub struct SharedStagingBuffer {
     memory: <back::Backend as hal::Backend>::Memory,
@@ -12,6 +12,7 @@ pub struct SharedStagingBuffer {
 }
 
 pub struct SharedBuffer {
+    device: Arc<<back::Backend as hal::Backend>::Device>,
     mem: <back::Backend as hal::Backend>::Memory,
     staging: Option<SharedStagingBuffer>,
     pub buffer: <back::Backend as hal::Backend>::Buffer,
@@ -86,6 +87,7 @@ impl SharedBuffer {
                 .unwrap();
         }
         let mut shared_buffer = Self {
+            device: state.device.clone(),
             mem: memory,
             staging: None,
             buffer,
@@ -189,7 +191,7 @@ impl SharedBuffer {
                     std::iter::empty(),
                     Some(&mut fence),
                 );
-                state.device.wait_for_fence(&mut fence, !0);
+                state.device.wait_for_fence(&mut fence, !0).unwrap();
                 state.device.destroy_command_pool(pool);
                 state.device.destroy_fence(fence);
             }
@@ -197,12 +199,7 @@ impl SharedBuffer {
         Ok(shared_buffer)
     }
 
-    pub fn update_camera(
-        &mut self,
-        device: &<back::Backend as hal::Backend>::Device,
-        camera_projection: &CameraProjection,
-        transform: &TransformRT,
-    ) {
+    pub fn update_camera(&mut self, camera_projection: &CameraProjection, transform: &TransformRT) {
         let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
         let view_proj = camera_projection.get_projection_matrix() * transform.inverse();
         let transform_cols_arr = transform.to_cols_array();
@@ -227,7 +224,10 @@ impl SharedBuffer {
             )
         };
         unsafe {
-            let ptr = device.map_memory(mem_to_write, segment.clone()).unwrap();
+            let ptr = self
+                .device
+                .map_memory(mem_to_write, segment.clone())
+                .unwrap();
             std::ptr::copy_nonoverlapping(
                 view_proj_cols_arr.as_ptr() as *const u8,
                 ptr,
@@ -238,10 +238,10 @@ impl SharedBuffer {
                 ptr.add(std::mem::size_of_val(&view_proj_cols_arr)),
                 std::mem::size_of_val(&transform_cols_arr),
             );
-            device
+            self.device
                 .flush_mapped_memory_ranges(std::iter::once((&*mem_to_write, segment)))
                 .unwrap();
-            device.unmap_memory(mem_to_write);
+            self.device.unmap_memory(mem_to_write);
         }
     }
 

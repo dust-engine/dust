@@ -14,7 +14,6 @@ mod frame;
 mod raytracer;
 mod renderer;
 mod shared_buffer;
-pub use renderer::Config;
 pub use renderer::Renderer;
 
 pub use crate::camera_projection::CameraProjection;

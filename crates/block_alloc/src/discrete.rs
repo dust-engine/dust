@@ -4,6 +4,7 @@ use gfx_hal::prelude::*;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::ptr::NonNull;
+use std::sync::Arc;
 use svo::alloc::{AllocError, BlockAllocator};
 
 /// The voxel repository resides on both system RAM and VRAM
@@ -17,9 +18,9 @@ pub struct DiscreteBlock<B: hal::Backend, const SIZE: usize> {
     offset: u64,
 }
 
-pub struct DiscreteBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
-    device: &'a B::Device,
-    bind_queue: &'a mut B::Queue,
+pub struct DiscreteBlockAllocator<B: hal::Backend, const SIZE: usize> {
+    device: Arc<B::Device>,
+    bind_queue: B::Queue,
     device_buf: B::Buffer,
     device_memtype: hal::MemoryTypeId,
     system_buf: B::Buffer,
@@ -35,10 +36,10 @@ pub struct DiscreteBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     allocations: HashMap<NonNull<[u8; SIZE]>, DiscreteBlock<B, SIZE>>,
 }
 
-impl<'a, B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<'a, B, SIZE> {
+impl<B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<B, SIZE> {
     pub fn new(
-        device: &'a B::Device,
-        bind_queue: &'a mut B::Queue,
+        device: Arc<B::Device>,
+        bind_queue: B::Queue,
         transfer_queue_family: hal::queue::QueueFamilyId,
         memory_properties: &hal::adapter::MemoryProperties,
     ) -> Result<Self, hal::buffer::CreationError> {
@@ -88,9 +89,7 @@ impl<'a, B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<'a, B, SIZE>
     }
 }
 
-impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
-    for DiscreteBlockAllocator<'_, B, SIZE>
-{
+impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for DiscreteBlockAllocator<B, SIZE> {
     unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError> {
         let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
             let val = self.current_offset;
@@ -133,7 +132,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
                 &mut B::Image,
                 std::iter::Empty<&hal::memory::SparseImageBind<&B::Memory>>,
             )>(),
-            self.device,
+            &self.device,
             None,
         );
 

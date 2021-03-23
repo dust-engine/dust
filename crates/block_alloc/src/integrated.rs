@@ -4,11 +4,12 @@ use gfx_hal::prelude::*;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::ptr::NonNull;
+use std::sync::Arc;
 use svo::alloc::{AllocError, BlockAllocator};
 
-pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
-    device: &'a B::Device,
-    bind_queue: &'a mut B::Queue,
+pub struct IntegratedBlockAllocator<B: hal::Backend, const SIZE: usize> {
+    device: Arc<B::Device>,
+    bind_queue: B::Queue,
     buf: B::Buffer,
     memtype: hal::MemoryTypeId,
     current_offset: u64,
@@ -17,10 +18,10 @@ pub struct IntegratedBlockAllocator<'a, B: hal::Backend, const SIZE: usize> {
     allocations: HashMap<NonNull<[u8; SIZE]>, B::Memory>,
 }
 
-impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZE> {
+impl<B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<B, SIZE> {
     pub fn new(
-        device: &'a B::Device,
-        bind_queue: &'a mut B::Queue,
+        device: Arc<B::Device>,
+        bind_queue: B::Queue,
         memory_properties: &hal::adapter::MemoryProperties,
     ) -> Result<Self, hal::buffer::CreationError> {
         unsafe {
@@ -46,7 +47,7 @@ impl<'a, B: hal::Backend, const SIZE: usize> IntegratedBlockAllocator<'a, B, SIZ
 }
 
 impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
-    for IntegratedBlockAllocator<'_, B, SIZE>
+    for IntegratedBlockAllocator<B, SIZE>
 {
     unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError> {
         let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
@@ -79,7 +80,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
                 &mut B::Image,
                 std::iter::Empty<&hal::memory::SparseImageBind<&B::Memory>>,
             )>(),
-            self.device,
+            &self.device,
             None,
         );
         let ptr = NonNull::new_unchecked(ptr as *mut [u8; SIZE]);

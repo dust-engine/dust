@@ -12,7 +12,6 @@ pub mod octree;
 
 pub use bounds::Bounds;
 pub use dir::{Corner, Edge, Face, Quadrant};
-//pub use octree::{NodeRef, NodeRefMut, Octree};
 
 use std::fmt::Debug;
 

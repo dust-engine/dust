@@ -1,18 +1,16 @@
 use crate::back;
-use crate::camera_projection::CameraProjection;
-use crate::frame::Frame;
 use crate::hal;
 use crate::hal::window::Extent2D;
 use crate::raytracer::Raytracer;
-use glam::{Quat, TransformRT, Vec3};
 use hal::prelude::*;
-use std::borrow::{Borrow, Cow};
+use std::borrow::Borrow;
 use std::mem::ManuallyDrop;
+use std::sync::Arc;
 
 pub struct RenderState {
     pub extent: Extent2D,
-    pub surface: <back::Backend as hal::Backend>::Surface,
-    pub device: <back::Backend as hal::Backend>::Device,
+    pub surface: ManuallyDrop<<back::Backend as hal::Backend>::Surface>,
+    pub device: Arc<<back::Backend as hal::Backend>::Device>,
     pub graphics_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub transfer_binding_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub surface_format: hal::format::Format,
@@ -22,8 +20,8 @@ pub struct Renderer {
     pub instance: ManuallyDrop<back::Instance>,
     pub adapter: hal::adapter::Adapter<back::Backend>,
     // arc device, queue, window resized event reader, window created event reader, initliazed
-    pub state: Option<RenderState>,
-    raytracer: Option<Raytracer>,
+    pub state: RenderState,
+    raytracer: ManuallyDrop<Raytracer>,
     pub device_properties: hal::PhysicalDeviceProperties,
     pub memory_properties: hal::adapter::MemoryProperties,
 }
@@ -31,42 +29,30 @@ pub struct Renderer {
 impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
-            if let Some(state) = self.state.take() {
-                state.device.wait_idle().unwrap();
-                if let Some(mut raytracer) = self.raytracer.take() {
-                    raytracer.destroy(&state.device);
-                }
-                self.instance.destroy_surface(state.surface);
-            }
+            self.state.device.wait_idle().unwrap();
+
+            let raytracer = ManuallyDrop::take(&mut self.raytracer);
+            raytracer.destroy();
+
+            let surface = ManuallyDrop::take(&mut self.state.surface);
+            self.instance.destroy_surface(surface);
         }
     }
 }
 
-pub struct Config {
-    pub name: Cow<'static, str>,
-    pub version: u32,
-}
 impl Renderer {
-    pub fn new(options: Config) -> Self {
-        let instance = back::Instance::create(options.name.as_ref(), options.version).unwrap();
+    pub fn new(window: &impl raw_window_handle::HasRawWindowHandle) -> Self {
+        let instance = back::Instance::create("dust engine", 0).unwrap();
+        let surface = unsafe { instance.create_surface(window).unwrap() };
         let adapter = instance.enumerate_adapters().pop().unwrap();
 
         let device_properties = adapter.physical_device.properties();
         let memory_properties = adapter.physical_device.memory_properties();
-        Renderer {
-            instance: ManuallyDrop::new(instance),
-            adapter,
-            state: None,
-            raytracer: None,
-            device_properties,
-            memory_properties,
-        }
-    }
-    pub fn set_surface(&mut self, surface: <back::Backend as hal::Backend>::Surface) {
-        let span = tracing::info_span!("set_surface");
+
+        let span = tracing::info_span!("renderer new");
         let _enter = span.enter();
 
-        let supported_surface_formats = surface.supported_formats(&self.adapter.physical_device);
+        let supported_surface_formats = surface.supported_formats(&adapter.physical_device);
         tracing::info!("supported surface formats: {:?}", supported_surface_formats);
         let surface_format =
             supported_surface_formats.map_or(hal::format::Format::Rgba8Srgb, |formats| {
@@ -83,17 +69,16 @@ impl Renderer {
 
         tracing::info!(
             "self.adapter.queue_families: \n{:?}\n",
-            self.adapter.queue_families
+            adapter.queue_families
         );
-        let graphics_queue_family = self.adapter.queue_families.iter().find(|family| {
-            surface.supports_queue_family(family) && family.queue_type().supports_graphics()
-        });
-        if graphics_queue_family.is_none() {
-            return;
-        }
-        let graphics_queue_family = graphics_queue_family.unwrap();
-        let transfer_binding_queue_family = self
-            .adapter
+        let graphics_queue_family = adapter
+            .queue_families
+            .iter()
+            .find(|family| {
+                surface.supports_queue_family(family) && family.queue_type().supports_graphics()
+            })
+            .unwrap();
+        let transfer_binding_queue_family = adapter
             .queue_families
             .iter()
             .find(|family| {
@@ -105,7 +90,7 @@ impl Renderer {
             })
             .expect("Can not find a queue family that supports sparse binding");
 
-        let physical_device = &self.adapter.physical_device;
+        let physical_device = &adapter.physical_device;
         let mut gpu = unsafe {
             physical_device.open(
                 &[
@@ -124,38 +109,47 @@ impl Renderer {
         let transfer_binding_queue_group = gpu.queue_groups.pop().unwrap();
         let graphics_queue_group = gpu.queue_groups.pop().unwrap();
 
-        let state = RenderState {
+        let mut state = RenderState {
             extent: Extent2D {
                 width: 1920,
                 height: 1080,
             },
-            surface,
-            device,
+            surface: ManuallyDrop::new(surface),
+            device: Arc::new(device),
             graphics_queue_group,
             transfer_binding_queue_group,
             surface_format,
         };
-        self.state = Some(state);
-        let framebuffer_attachment = self.rebuild_swapchain();
 
-        let state = self.state.as_mut().unwrap();
-        let raytracer = Raytracer::new(state, &self.memory_properties, framebuffer_attachment);
-        self.raytracer = Some(raytracer);
+        let surface_capabilities = state.surface.capabilities(&adapter.physical_device);
+        let framebuffer_attachment = Self::rebuild_swapchain(&mut state, &surface_capabilities);
+        let raytracer = Raytracer::new(&mut state, &memory_properties, framebuffer_attachment);
+
+        Renderer {
+            instance: ManuallyDrop::new(instance),
+            adapter,
+            state,
+            raytracer: ManuallyDrop::new(raytracer),
+            device_properties,
+            memory_properties,
+        }
     }
     pub fn on_resize(&mut self) {
-        let framebuffer_attachment = self.rebuild_swapchain();
-        let state = self.state.as_ref().unwrap();
+        let surface_capabilities = self
+            .state
+            .surface
+            .capabilities(&self.adapter.physical_device);
+        let framebuffer_attachment =
+            Self::rebuild_swapchain(&mut self.state, &surface_capabilities);
         self.raytracer
-            .as_mut()
-            .unwrap()
-            .rebuild_framebuffer(state, framebuffer_attachment);
+            .rebuild_framebuffer(self.state.extent, framebuffer_attachment);
     }
-    fn rebuild_swapchain(&mut self) -> hal::image::FramebufferAttachment {
-        let mut state = self.state.as_mut().unwrap();
-
-        let surface_capabilities = state.surface.capabilities(&self.adapter.physical_device);
+    fn rebuild_swapchain(
+        state: &mut RenderState,
+        surface_capabilities: &hal::window::SurfaceCapabilities,
+    ) -> hal::image::FramebufferAttachment {
         let config = hal::window::SwapchainConfig::from_caps(
-            &surface_capabilities,
+            surface_capabilities,
             state.surface_format,
             Extent2D {
                 width: 1920,
@@ -178,32 +172,65 @@ impl Renderer {
         framebuffer
     }
     pub fn update(&mut self, state: &crate::State) {
-        if self.state.is_none() {
-            return;
-        }
-        let render_state = self.state.as_mut().unwrap();
-        if self.raytracer.is_none() {
-            return;
-        }
-        let raytracer = self.raytracer.as_mut().unwrap();
         unsafe {
-            let (surface_image, suboptimal) = render_state.surface.acquire_image(!0).unwrap();
+            let (surface_image, suboptimal) = self.state.surface.acquire_image(!0).unwrap();
             if suboptimal.is_some() {
                 tracing::warn!("Suboptimal swapchain image acquired");
             }
 
-            let raytracer_submission_semaphore =
-                raytracer.update(render_state, surface_image.borrow(), state);
+            let raytracer_submission_semaphore = self.raytracer.update(
+                surface_image.borrow(),
+                &mut self.state.graphics_queue_group.queues[0],
+                state,
+            );
 
-            let suboptimal = render_state.graphics_queue_group.queues[0]
+            let suboptimal = self.state.graphics_queue_group.queues[0]
                 .present(
-                    &mut render_state.surface,
+                    &mut self.state.surface,
                     surface_image,
                     Some(raytracer_submission_semaphore),
                 )
                 .unwrap();
             if suboptimal.is_some() {
                 tracing::warn!("Suboptimal surface presented");
+            }
+        }
+    }
+
+    pub fn create_block_allocator(
+        &mut self,
+    ) -> Result<Box<svo::alloc::ArenaBlockAllocator>, hal::buffer::CreationError> {
+        use block_alloc::{DiscreteBlockAllocator, IntegratedBlockAllocator};
+        use hal::adapter::DeviceType;
+        const SIZE: usize = svo::alloc::CHUNK_SIZE;
+        match self.adapter.info.device_type {
+            DeviceType::DiscreteGpu | DeviceType::VirtualGpu | DeviceType::Other => {
+                let allocator: DiscreteBlockAllocator<back::Backend, SIZE> =
+                    DiscreteBlockAllocator::new(
+                        self.state.device.clone(),
+                        self.state
+                            .transfer_binding_queue_group
+                            .queues
+                            .pop()
+                            .unwrap(),
+                        self.state.transfer_binding_queue_group.family,
+                        &self.memory_properties,
+                    )?;
+                return Ok(Box::new(allocator));
+            }
+            DeviceType::IntegratedGpu | DeviceType::Cpu => {
+                let allocator: IntegratedBlockAllocator<back::Backend, SIZE> =
+                    IntegratedBlockAllocator::new(
+                        self.state.device.clone(),
+                        self.state
+                            .transfer_binding_queue_group
+                            .queues
+                            .pop()
+                            .unwrap(),
+                        &self.memory_properties,
+                    )?;
+
+                return Ok(Box::new(allocator));
             }
         }
     }

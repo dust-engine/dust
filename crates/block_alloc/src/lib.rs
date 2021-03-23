@@ -4,6 +4,9 @@ mod utils;
 
 const MAX_BUFFER_SIZE: u64 = 1 << 32;
 
+pub use discrete::DiscreteBlockAllocator;
+pub use integrated::IntegratedBlockAllocator;
+
 #[cfg(test)]
 mod tests {
 

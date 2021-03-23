@@ -1,14 +1,16 @@
 use crate::frame::Frame;
-use crate::hal;
 use crate::renderer::RenderState;
-use crate::{back, Renderer};
+use crate::{back, hal};
 use hal::prelude::*;
 
 use crate::descriptor_pool::DescriptorPool;
 use crate::shared_buffer::SharedBuffer;
+use gfx_hal::window::Extent2D;
 use std::io::Cursor;
+use std::sync::Arc;
 
 pub struct Raytracer {
+    pub device: Arc<<back::Backend as hal::Backend>::Device>,
     pub shared_buffer: SharedBuffer,
     pub ray_pass: <back::Backend as hal::Backend>::RenderPass,
     pub framebuffer: <back::Backend as hal::Backend>::Framebuffer,
@@ -205,6 +207,7 @@ impl Raytracer {
             Frame::new(&state.device, state.graphics_queue_group.family),
         ];
         Self {
+            device: state.device.clone(),
             shared_buffer,
             ray_pass,
             framebuffer,
@@ -220,52 +223,47 @@ impl Raytracer {
 
     pub fn rebuild_framebuffer(
         &mut self,
-        state: &RenderState,
+        extent: Extent2D,
         framebuffer_attachment: hal::image::FramebufferAttachment,
     ) {
-        self.viewport.rect.w = state.extent.width as i16;
-        self.viewport.rect.h = state.extent.height as i16;
-        state.device.wait_idle().unwrap();
+        self.viewport.rect.w = extent.width as i16;
+        self.viewport.rect.h = extent.height as i16;
+        self.device.wait_idle().unwrap();
         tracing::trace!(
             "Rebuilt framebuffer with size {}x{}",
-            state.extent.width,
-            state.extent.height
+            extent.width,
+            extent.height
         );
         unsafe {
-            let mut framebuffer = state
+            let mut framebuffer = self
                 .device
                 .create_framebuffer(
                     &self.ray_pass,
                     std::iter::once(framebuffer_attachment),
-                    state.extent.to_extent(),
+                    extent.to_extent(),
                 )
                 .unwrap();
             std::mem::swap(&mut self.framebuffer, &mut framebuffer);
-            state.device.destroy_framebuffer(framebuffer);
+            self.device.destroy_framebuffer(framebuffer);
         }
     }
 
     pub unsafe fn update(
         &mut self,
-        render_state: &mut RenderState,
         target: &<back::Backend as hal::Backend>::ImageView,
+        graphics_queue: &mut <back::Backend as hal::Backend>::Queue,
         state: &crate::State,
     ) -> &mut <back::Backend as hal::Backend>::Semaphore {
-        self.shared_buffer.update_camera(
-            &render_state.device,
-            &state.camera_projection,
-            &state.camera_transform,
-        );
+        self.shared_buffer
+            .update_camera(&state.camera_projection, &state.camera_transform);
 
         let current_frame: &mut Frame = &mut self.frames[self.current_frame as usize];
 
         // First, wait for the previous submission to complete.
-        render_state
-            .device
+        self.device
             .wait_for_fence(&current_frame.submission_complete_fence, !0)
             .unwrap();
-        render_state
-            .device
+        self.device
             .reset_fence(&mut current_frame.submission_complete_fence)
             .unwrap();
         current_frame.command_pool.reset(false);
@@ -317,7 +315,7 @@ impl Raytracer {
         cmd_buffer.end_render_pass();
         cmd_buffer.finish();
 
-        render_state.graphics_queue_group.queues[0].submit(
+        graphics_queue.submit(
             std::iter::once(&*cmd_buffer),
             std::iter::empty(),
             std::iter::once(&current_frame.submission_complete_semaphore),
@@ -330,15 +328,15 @@ impl Raytracer {
         &mut current_frame.submission_complete_semaphore
     }
 
-    pub unsafe fn destroy(self, device: &<back::Backend as hal::Backend>::Device) {
-        self.shared_buffer.destroy(device);
-        device.destroy_render_pass(self.ray_pass);
-        device.destroy_framebuffer(self.framebuffer);
-        device.destroy_graphics_pipeline(self.pipeline);
-        device.destroy_pipeline_layout(self.pipeline_layout);
+    pub unsafe fn destroy(self) {
+        self.shared_buffer.destroy(&self.device);
+        self.device.destroy_render_pass(self.ray_pass);
+        self.device.destroy_framebuffer(self.framebuffer);
+        self.device.destroy_graphics_pipeline(self.pipeline);
+        self.device.destroy_pipeline_layout(self.pipeline_layout);
         for frame in std::array::IntoIter::new(self.frames) {
-            frame.destroy(device);
+            frame.destroy(&self.device);
         }
-        self.desc_pool.destroy(device);
+        self.desc_pool.destroy(&self.device);
     }
 }

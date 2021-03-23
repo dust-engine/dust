@@ -38,6 +38,7 @@ impl Default for Handle {
 }
 
 type ArenaAllocatorChunk<T> = [ArenaSlot<T>; CHUNK_SIZE / size_of::<T>()];
+pub type ArenaBlockAllocator = dyn BlockAllocator<CHUNK_SIZE>;
 
 #[repr(C)]
 struct FreeSlot {
@@ -55,7 +56,7 @@ pub struct ArenaAllocator<T: ArenaAllocated>
 where
     [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
-    block_allocator: Box<dyn BlockAllocator<CHUNK_SIZE>>,
+    block_allocator: Box<ArenaBlockAllocator>,
     chunks: Vec<NonNull<ArenaAllocatorChunk<T>>>,
     freelist_heads: [Handle; 8],
     newspace_top: Handle,       // new space to be allocated
@@ -69,7 +70,7 @@ where
     [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
     const NUM_SLOTS_IN_CHUNK: usize = CHUNK_SIZE / size_of::<T>();
-    pub fn new(block_allocator: Box<dyn BlockAllocator<CHUNK_SIZE>>) -> Self {
+    pub fn new(block_allocator: Box<ArenaBlockAllocator>) -> Self {
         debug_assert!(
             size_of::<T>() >= size_of::<FreeSlot>(),
             "Improper implementation of ArenaAllocated"

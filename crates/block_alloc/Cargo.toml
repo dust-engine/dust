@@ -1,5 +1,5 @@
 [package]
-name = "gfx_alloc"
+name = "block-alloc"
 version = "0.1.0"
 authors = ["Zhixing Zhang <me@neoto.xin>"]
 edition = "2018"
@@ -9,6 +9,9 @@ edition = "2018"
 [dependencies]
 gfx-hal = { git = "https://github.com/gfx-rs/gfx" }
 svo = { path = "../svo" }
+
+[lib]
+name = "block_alloc"
 
 [dev-dependencies]
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx" }
