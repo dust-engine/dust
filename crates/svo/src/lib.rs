@@ -12,6 +12,7 @@ pub mod octree;
 
 pub use bounds::Bounds;
 pub use dir::{Corner, Edge, Face, Quadrant};
+pub type ArenaAllocator<T> = alloc::ArenaAllocator<octree::Node<T>>;
 
 use std::fmt::Debug;
 

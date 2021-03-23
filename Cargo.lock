@@ -322,6 +322,7 @@ dependencies = [
  "bevy",
  "dust-render",
  "glam",
+ "svo",
 ]
 
 [[package]]

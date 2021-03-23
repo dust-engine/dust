@@ -10,3 +10,4 @@ edition = "2018"
 bevy = { git = "https://github.com/bevyengine/bevy.git" }
 glam = { version = "0.13", features = ["transform-types"] }
 dust-render = { path = "../render" }
+svo = { path = "../svo" }

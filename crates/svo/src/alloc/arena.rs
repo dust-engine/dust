@@ -65,6 +65,19 @@ where
     pub(crate) capacity: u32,   // number of available slots
 }
 
+// ArenaAllocator contains NunNull which makes it !Send and !Sync.
+// NonNull is !Send and !Sync because the data they reference may be aliased.
+// Here we guarantee that NonNull will never be aliased.
+// Therefore ArenaAllocator should be Send and Sync.
+unsafe impl<T: ArenaAllocated> Send for ArenaAllocator<T> where
+    [T; CHUNK_SIZE / size_of::<T>()]: Sized
+{
+}
+unsafe impl<T: ArenaAllocated> Sync for ArenaAllocator<T> where
+    [T; CHUNK_SIZE / size_of::<T>()]: Sized
+{
+}
+
 impl<T: ArenaAllocated> ArenaAllocator<T>
 where
     [T; CHUNK_SIZE / size_of::<T>()]: Sized,
