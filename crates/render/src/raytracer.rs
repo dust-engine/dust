@@ -166,7 +166,7 @@ impl Raytracer {
                 },
                 hal::pso::Rasterizer {
                     front_face: hal::pso::FrontFace::Clockwise,
-                    cull_face: hal::pso::Face::FRONT,
+                    cull_face: hal::pso::Face::NONE,
                     ..hal::pso::Rasterizer::FILL
                 },
                 Some(hal::pso::EntryPoint {

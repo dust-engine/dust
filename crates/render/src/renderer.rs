@@ -109,7 +109,9 @@ impl Renderer {
                     (graphics_queue_family, &[1.0]),
                     (transfer_binding_queue_family, &[0.5]),
                 ],
-                hal::Features::SPARSE_BINDING | hal::Features::SPARSE_RESIDENCY_IMAGE_2D,
+                hal::Features::SPARSE_BINDING
+                    | hal::Features::SPARSE_RESIDENCY_BUFFER
+                    | hal::Features::NDC_Y_UP,
             )
         }
         .unwrap();
@@ -130,10 +132,10 @@ impl Renderer {
             transfer_binding_queue_group,
             surface_format,
             camera: Default::default(),
-            camera_transform: glam::TransformRT {
-                rotation: glam::Quat::IDENTITY,
-                translation: glam::Vec3::new(0.0, 0.0, 0.0),
-            },
+            camera_transform: glam::TransformRT::from_rotation_translation(
+                glam::Quat::IDENTITY,
+                glam::Vec3::new(5.0, 5.5, 15.0),
+            ),
         };
         self.state = Some(state);
         let framebuffer_attachment = self.rebuild_swapchain();
