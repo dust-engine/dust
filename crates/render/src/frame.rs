@@ -32,4 +32,9 @@ impl Frame {
             submission_complete_semaphore,
         }
     }
+    pub unsafe fn destroy(self, device: &<back::Backend as hal::Backend>::Device) {
+        device.destroy_fence(self.submission_complete_fence);
+        device.destroy_semaphore(self.submission_complete_semaphore);
+        device.destroy_command_pool(self.command_pool);
+    }
 }

@@ -179,4 +179,13 @@ impl SharedBuffer {
             device.unmap_memory(mem_to_write);
         }
     }
+
+    pub unsafe fn destroy(self, device: &<back::Backend as hal::Backend>::Device) {
+        device.destroy_buffer(self.buffer);
+        if let Some((staging_mem, staging_buf)) = self.staging {
+            device.destroy_buffer(staging_buf);
+            device.free_memory(staging_mem);
+        }
+        device.free_memory(self.mem);
+    }
 }

@@ -52,4 +52,9 @@ impl DescriptorPool {
         use hal::pso::DescriptorPool;
         unsafe { self.pool.free(std::iter::once(desc_set)) }
     }
+
+    pub unsafe fn destroy(self, device: &<back::Backend as hal::Backend>::Device) {
+        device.destroy_descriptor_pool(self.pool);
+        device.destroy_descriptor_set_layout(self.layout);
+    }
 }

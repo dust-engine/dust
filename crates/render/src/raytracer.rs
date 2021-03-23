@@ -9,16 +9,16 @@ use crate::shared_buffer::SharedBuffer;
 use std::io::Cursor;
 
 pub struct Raytracer {
-    shared_buffer: SharedBuffer,
-    ray_pass: <back::Backend as hal::Backend>::RenderPass,
-    framebuffer: <back::Backend as hal::Backend>::Framebuffer,
-    pipeline: <back::Backend as hal::Backend>::GraphicsPipeline,
-    pipeline_layout: <back::Backend as hal::Backend>::PipelineLayout,
-    viewport: hal::pso::Viewport,
-    frames: [Frame; 3],
-    current_frame: u8,
-    desc_pool: DescriptorPool,
-    desc_set: <back::Backend as hal::Backend>::DescriptorSet,
+    pub shared_buffer: SharedBuffer,
+    pub ray_pass: <back::Backend as hal::Backend>::RenderPass,
+    pub framebuffer: <back::Backend as hal::Backend>::Framebuffer,
+    pub pipeline: <back::Backend as hal::Backend>::GraphicsPipeline,
+    pub pipeline_layout: <back::Backend as hal::Backend>::PipelineLayout,
+    pub viewport: hal::pso::Viewport,
+    pub frames: [Frame; 3],
+    pub current_frame: u8,
+    pub desc_pool: DescriptorPool,
+    pub desc_set: <back::Backend as hal::Backend>::DescriptorSet,
 }
 const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -328,5 +328,17 @@ impl Raytracer {
             self.current_frame = 0;
         }
         &mut current_frame.submission_complete_semaphore
+    }
+
+    pub unsafe fn destroy(self, device: &<back::Backend as hal::Backend>::Device) {
+        self.shared_buffer.destroy(device);
+        device.destroy_render_pass(self.ray_pass);
+        device.destroy_framebuffer(self.framebuffer);
+        device.destroy_graphics_pipeline(self.pipeline);
+        device.destroy_pipeline_layout(self.pipeline_layout);
+        for frame in std::array::IntoIter::new(self.frames) {
+            frame.destroy(device);
+        }
+        self.desc_pool.destroy(device);
     }
 }

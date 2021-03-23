@@ -1,8 +1,10 @@
 use crate::back;
 use crate::camera_projection::CameraProjection;
+use crate::frame::Frame;
 use crate::hal;
 use crate::hal::window::Extent2D;
 use crate::raytracer::Raytracer;
+use glam::{Quat, TransformRT, Vec3};
 use hal::prelude::*;
 use std::borrow::{Borrow, Cow};
 use std::mem::ManuallyDrop;
@@ -15,7 +17,7 @@ pub struct RenderState {
     pub transfer_binding_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub surface_format: hal::format::Format,
     pub camera: CameraProjection,
-    pub camera_transform: glam::TransformRT,
+    pub camera_transform: TransformRT,
 }
 
 pub struct Renderer {
@@ -33,6 +35,9 @@ impl Drop for Renderer {
         unsafe {
             if let Some(state) = self.state.take() {
                 state.device.wait_idle().unwrap();
+                if let Some(mut raytracer) = self.raytracer.take() {
+                    raytracer.destroy(&state.device);
+                }
                 self.instance.destroy_surface(state.surface);
             }
         }
@@ -132,9 +137,9 @@ impl Renderer {
             transfer_binding_queue_group,
             surface_format,
             camera: Default::default(),
-            camera_transform: glam::TransformRT::from_rotation_translation(
-                glam::Quat::IDENTITY,
-                glam::Vec3::new(5.0, 5.5, 15.0),
+            camera_transform: TransformRT::from_rotation_translation(
+                Quat::IDENTITY,
+                Vec3::new(0.5, 0.5, 3.0),
             ),
         };
         self.state = Some(state);
