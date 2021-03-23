@@ -138,7 +138,7 @@ impl Renderer {
         self.state = Some(state);
         let framebuffer_attachment = self.rebuild_swapchain();
 
-        let state = self.state.as_ref().unwrap();
+        let state = self.state.as_mut().unwrap();
         let raytracer = Raytracer::new(state, &self.memory_properties, framebuffer_attachment);
         self.raytracer = Some(raytracer);
     }

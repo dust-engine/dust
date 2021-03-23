@@ -34,17 +34,12 @@ const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
 
 impl Raytracer {
     pub fn new(
-        state: &RenderState,
+        state: &mut RenderState,
         memory_properties: &hal::adapter::MemoryProperties,
         framebuffer_attachment: hal::image::FramebufferAttachment,
     ) -> Raytracer {
-        let shared_buffer = SharedBuffer::new(
-            &state.device,
-            &CUBE_POSITIONS,
-            &CUBE_INDICES,
-            memory_properties,
-        )
-        .unwrap();
+        let shared_buffer =
+            SharedBuffer::new(state, &CUBE_POSITIONS, &CUBE_INDICES, memory_properties).unwrap();
         let ray_pass = unsafe {
             state.device.create_render_pass(
                 std::iter::once(hal::pass::Attachment {
@@ -280,6 +275,7 @@ impl Raytracer {
 
         let cmd_buffer = &mut current_frame.command_buffer;
         cmd_buffer.begin_primary(hal::command::CommandBufferFlags::ONE_TIME_SUBMIT);
+        self.shared_buffer.record_cmd_buffer(cmd_buffer);
         cmd_buffer.set_viewports(0, std::iter::once(self.viewport.clone()));
         cmd_buffer.set_scissors(0, std::iter::once(self.viewport.rect));
         cmd_buffer.bind_graphics_descriptor_sets(
