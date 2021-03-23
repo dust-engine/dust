@@ -316,6 +316,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_dust"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "dust-render",
+ "glam",
+]
+
+[[package]]
 name = "bevy_dynamic_plugin"
 version = "0.4.0"
 source = "git+https://github.com/bevyengine/bevy.git#45b2db70705da24a89426e6b6e77d603a3983025"
@@ -1201,7 +1210,7 @@ name = "dust"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "dust-render",
+ "bevy_dust",
  "glam",
 ]
 

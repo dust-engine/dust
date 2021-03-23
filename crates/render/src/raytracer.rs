@@ -34,15 +34,15 @@ const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
 
 impl Raytracer {
     pub fn new(
-        renderer: &Renderer,
+        state: &RenderState,
+        memory_properties: &hal::adapter::MemoryProperties,
         framebuffer_attachment: hal::image::FramebufferAttachment,
     ) -> Raytracer {
-        let state = renderer.state.as_ref().unwrap();
         let shared_buffer = SharedBuffer::new(
             &state.device,
             &CUBE_POSITIONS,
             &CUBE_INDICES,
-            &renderer.memory_properties,
+            memory_properties,
         )
         .unwrap();
         let ray_pass = unsafe {

@@ -137,7 +137,9 @@ impl Renderer {
         };
         self.state = Some(state);
         let framebuffer_attachment = self.rebuild_swapchain();
-        let raytracer = Raytracer::new(self, framebuffer_attachment);
+
+        let state = self.state.as_ref().unwrap();
+        let raytracer = Raytracer::new(state, &self.memory_properties, framebuffer_attachment);
         self.raytracer = Some(raytracer);
     }
     pub fn on_resize(&mut self) {
