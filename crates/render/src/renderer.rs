@@ -16,8 +16,6 @@ pub struct RenderState {
     pub graphics_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub transfer_binding_queue_group: hal::queue::QueueGroup<back::Backend>,
     pub surface_format: hal::format::Format,
-    pub camera: CameraProjection,
-    pub camera_transform: TransformRT,
 }
 
 pub struct Renderer {
@@ -136,11 +134,6 @@ impl Renderer {
             graphics_queue_group,
             transfer_binding_queue_group,
             surface_format,
-            camera: Default::default(),
-            camera_transform: TransformRT::from_rotation_translation(
-                Quat::IDENTITY,
-                Vec3::new(0.5, 0.5, 3.0),
-            ),
         };
         self.state = Some(state);
         let framebuffer_attachment = self.rebuild_swapchain();
@@ -173,13 +166,6 @@ impl Renderer {
             config.extent.height
         );
         state.extent = config.extent;
-        state
-            .camera
-            .update_aspect_ratio(state.extent.width as f32, state.extent.height as f32);
-        tracing::info!(
-            "Camera aspect ratio changed to {}",
-            state.camera.aspect_ratio
-        );
         let framebuffer = config.framebuffer_attachment();
         unsafe {
             state
@@ -189,26 +175,27 @@ impl Renderer {
         }
         framebuffer
     }
-    pub fn update(&mut self) {
+    pub fn update(&mut self, state: &crate::State) {
         if self.state.is_none() {
             return;
         }
-        let state = self.state.as_mut().unwrap();
+        let render_state = self.state.as_mut().unwrap();
         if self.raytracer.is_none() {
             return;
         }
         let raytracer = self.raytracer.as_mut().unwrap();
         unsafe {
-            let (surface_image, suboptimal) = state.surface.acquire_image(!0).unwrap();
+            let (surface_image, suboptimal) = render_state.surface.acquire_image(!0).unwrap();
             if suboptimal.is_some() {
                 tracing::warn!("Suboptimal swapchain image acquired");
             }
 
-            let raytracer_submission_semaphore = raytracer.update(state, surface_image.borrow());
+            let raytracer_submission_semaphore =
+                raytracer.update(render_state, surface_image.borrow(), state);
 
-            let suboptimal = state.graphics_queue_group.queues[0]
+            let suboptimal = render_state.graphics_queue_group.queues[0]
                 .present(
-                    &mut state.surface,
+                    &mut render_state.surface,
                     surface_image,
                     Some(raytracer_submission_semaphore),
                 )

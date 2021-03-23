@@ -16,3 +16,11 @@ mod renderer;
 mod shared_buffer;
 pub use renderer::Config;
 pub use renderer::Renderer;
+
+pub use crate::camera_projection::CameraProjection;
+use glam::TransformRT;
+
+pub struct State<'a> {
+    pub camera_projection: &'a CameraProjection,
+    pub camera_transform: &'a TransformRT,
+}

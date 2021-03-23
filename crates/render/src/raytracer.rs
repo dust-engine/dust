@@ -22,14 +22,14 @@ pub struct Raytracer {
 }
 const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
-    (0.0, 0.0, 0.0), // 0
-    (0.0, 0.0, 1.0), // 1
-    (0.0, 1.0, 0.0), // 2
-    (0.0, 1.0, 1.0), // 3
-    (1.0, 0.0, 0.0), // 4
-    (1.0, 0.0, 1.0), // 5
-    (1.0, 1.0, 0.0), // 6
-    (1.0, 1.0, 1.0), // 7
+    (-1.0, -1.0, -1.0), // 0
+    (-1.0, -1.0, 1.0),  // 1
+    (-1.0, 1.0, -1.0),  // 2
+    (-1.0, 1.0, 1.0),   // 3
+    (1.0, -1.0, -1.0),  // 4
+    (1.0, -1.0, 1.0),   // 5
+    (1.0, 1.0, 0.0),    // 6
+    (1.0, 1.0, 1.0),    // 7
 ];
 
 impl Raytracer {
@@ -252,20 +252,24 @@ impl Raytracer {
 
     pub unsafe fn update(
         &mut self,
-        state: &mut RenderState,
+        render_state: &mut RenderState,
         target: &<back::Backend as hal::Backend>::ImageView,
+        state: &crate::State,
     ) -> &mut <back::Backend as hal::Backend>::Semaphore {
-        self.shared_buffer
-            .update_camera(&state.device, &state.camera, &state.camera_transform);
+        self.shared_buffer.update_camera(
+            &render_state.device,
+            &state.camera_projection,
+            &state.camera_transform,
+        );
 
         let current_frame: &mut Frame = &mut self.frames[self.current_frame as usize];
 
         // First, wait for the previous submission to complete.
-        state
+        render_state
             .device
             .wait_for_fence(&current_frame.submission_complete_fence, !0)
             .unwrap();
-        state
+        render_state
             .device
             .reset_fence(&mut current_frame.submission_complete_fence)
             .unwrap();
@@ -317,7 +321,7 @@ impl Raytracer {
         cmd_buffer.end_render_pass();
         cmd_buffer.finish();
 
-        state.graphics_queue_group.queues[0].submit(
+        render_state.graphics_queue_group.queues[0].submit(
             std::iter::once(&*cmd_buffer),
             std::iter::empty(),
             std::iter::once(&current_frame.submission_complete_semaphore),

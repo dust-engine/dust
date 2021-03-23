@@ -1,5 +1,6 @@
 use glam::Mat4;
 
+#[derive(Debug)]
 pub struct CameraProjection {
     pub fov: f32,
     pub aspect_ratio: f32,
@@ -20,8 +21,8 @@ impl Default for CameraProjection {
     fn default() -> Self {
         CameraProjection {
             fov: std::f32::consts::PI / 4.0,
-            near: 1.0,
-            far: 1000.0,
+            near: 0.1,
+            far: 10.0,
             aspect_ratio: 1.0,
         }
     }
