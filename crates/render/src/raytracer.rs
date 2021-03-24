@@ -67,6 +67,7 @@ impl Raytracer {
             use block_alloc::{DiscreteBlockAllocator, IntegratedBlockAllocator};
             use hal::adapter::DeviceType;
             const SIZE: usize = svo::alloc::CHUNK_SIZE;
+            let device_type = DeviceType::IntegratedGpu;
             let allocator: Box<svo::alloc::ArenaBlockAllocator> = match device_type {
                 DeviceType::DiscreteGpu | DeviceType::VirtualGpu | DeviceType::Other => {
                     let allocator: DiscreteBlockAllocator<back::Backend, SIZE> =
@@ -352,8 +353,9 @@ impl Raytracer {
         graphics_queue: &mut <back::Backend as hal::Backend>::Queue,
         state: &crate::State,
     ) -> &mut <back::Backend as hal::Backend>::Semaphore {
+        let aspect_ratio = self.viewport.rect.w as f32 / self.viewport.rect.h as f32;
         self.shared_buffer
-            .update_camera(&state.camera_projection, &state.camera_transform);
+            .update_camera(&state.camera_projection, &state.camera_transform, aspect_ratio);
 
         let current_frame: &mut Frame = &mut self.frames[self.current_frame as usize];
 

@@ -106,22 +106,10 @@ fn select_integrated_memtype(
     memory_properties: &hal::adapter::MemoryProperties,
     requirements: &hal::memory::Requirements,
 ) -> hal::MemoryTypeId {
-    // Search for the largest DEVICE_LOCAL heap
-    let (device_heap_index, _device_heap) = memory_properties
-        .memory_heaps
-        .iter()
-        .filter(|heap| heap.flags.contains(hal::memory::HeapFlags::DEVICE_LOCAL))
-        .enumerate()
-        .max_by_key(|(_, heap)| heap.size)
-        .unwrap();
-
-    let mut mem_properties = memory_properties
+    memory_properties
         .memory_types
         .iter()
-        .filter(|ty| ty.heap_index == device_heap_index)
-        .enumerate();
-
-    mem_properties
+        .enumerate()
         .position(|(id, memory_type)| {
             requirements.type_mask & (1 << id) != 0
                 && memory_type.properties.contains(
@@ -132,14 +120,18 @@ fn select_integrated_memtype(
                 )
         })
         .or_else(|| {
-            mem_properties.position(|(id, memory_type)| {
-                requirements.type_mask & (1 << id) != 0
-                    && memory_type.properties.contains(
-                        hal::memory::Properties::DEVICE_LOCAL
-                            | hal::memory::Properties::CPU_VISIBLE
-                            | hal::memory::Properties::COHERENT,
-                    )
-            })
+            memory_properties
+                .memory_types
+                .iter()
+                .enumerate()
+                .position(|(id, memory_type)| {
+                    requirements.type_mask & (1 << id) != 0
+                        && memory_type.properties.contains(
+                            hal::memory::Properties::DEVICE_LOCAL
+                                | hal::memory::Properties::CPU_VISIBLE
+                                | hal::memory::Properties::COHERENT,
+                        )
+                })
         })
         .unwrap()
         .into()

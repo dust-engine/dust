@@ -13,7 +13,7 @@ pub struct DustPlugin;
 
 impl Plugin for DustPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_startup_system(setup.exclusive_system())
+        app.add_startup_system_to_stage(StartupStage::PreStartup, setup.exclusive_system())
             .add_system(world_update.system());
     }
 }
@@ -33,15 +33,6 @@ fn setup(world: &mut World) {
         .next()
         .map(|event| event.id)
         .unwrap();
-
-    // Update camera projection
-    let windows = world.get_resource::<Windows>().unwrap();
-    let window = windows.get(window_id).unwrap();
-    let aspect_ratio = window.width() / window.height();
-    let mut query = world.query::<&mut CameraProjection>();
-    for mut camera_projection in query.iter_mut(world) {
-        camera_projection.aspect_ratio = aspect_ratio;
-    }
 
     let winit_windows = world.get_resource::<WinitWindows>().unwrap();
     let winit_window = winit_windows.get_window(window_id).unwrap();
@@ -63,8 +54,6 @@ fn world_update(
         .expect("Expecting an entity with RaytracerCameraBundle");
 
     for window_resized_event in window_resized_events.iter() {
-        let aspect_ratio = window_resized_event.width / window_resized_event.height;
-        camera_projection.aspect_ratio = aspect_ratio;
         renderer.on_resize();
     }
     let camera_transform = glam::TransformRT {

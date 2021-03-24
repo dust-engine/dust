@@ -45,7 +45,9 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
         );
     }
 
+    let mut bundle = RaytracerCameraBundle::default();
+    bundle.transform.translation.z = 2.0;
     commands
-        .spawn(RaytracerCameraBundle::default())
+        .spawn(bundle)
         .with(FlyCamera::default());
 }
