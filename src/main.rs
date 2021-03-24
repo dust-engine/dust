@@ -1,5 +1,8 @@
 use bevy::prelude::*;
 use bevy_dust::{Octree, RaytracerCameraBundle, Voxel};
+use crate::fly_camera::FlyCamera;
+
+mod fly_camera;
 
 fn main() {
     App::build()
@@ -24,6 +27,7 @@ fn main() {
         .add_plugin(bevy::window::WindowPlugin::default())
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(bevy_dust::DustPlugin::default())
+        .add_plugin(fly_camera::FlyCameraPlugin)
         .add_startup_system(setup.system())
         .run();
 }
@@ -41,5 +45,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
         );
     }
 
-    commands.spawn(RaytracerCameraBundle::default());
+    commands
+        .spawn(RaytracerCameraBundle::default())
+        .with(FlyCamera::default());
 }
