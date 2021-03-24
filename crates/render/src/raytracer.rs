@@ -41,7 +41,13 @@ impl Raytracer {
         framebuffer_attachment: hal::image::FramebufferAttachment,
     ) -> Raytracer {
         let shared_buffer =
-            SharedBuffer::new(state, &CUBE_POSITIONS, &CUBE_INDICES, memory_properties).unwrap();
+            SharedBuffer::new(
+                state.device.clone(),
+                &mut state.transfer_binding_queue_group,
+                &CUBE_POSITIONS,
+                &CUBE_INDICES,
+                memory_properties
+            ).unwrap();
         let ray_pass = unsafe {
             state.device.create_render_pass(
                 std::iter::once(hal::pass::Attachment {

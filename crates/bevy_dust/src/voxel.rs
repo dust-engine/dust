@@ -4,6 +4,9 @@ use svo::alloc::ArenaAllocated;
 pub struct Voxel(u16);
 impl Voxel {
     pub const AIR: Voxel = Voxel(0);
+    pub fn with_id(id: u16) -> Voxel {
+        Voxel(id)
+    }
 }
 impl Default for Voxel {
     fn default() -> Self {

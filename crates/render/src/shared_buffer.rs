@@ -20,7 +20,8 @@ pub struct SharedBuffer {
 
 impl SharedBuffer {
     pub fn new(
-        state: &mut RenderState,
+        device: Arc<<back::Backend as hal::Backend>::Device>,
+        transfer_queue: &mut hal::queue::QueueGroup<back::Backend>,
         vertex_buffer: &[(f32, f32, f32); 8],
         index_buffer: &[u16; 14],
         memory_properties: &hal::adapter::MemoryProperties,
@@ -42,7 +43,7 @@ impl SharedBuffer {
             124
         );
         let mut buffer = unsafe {
-            state.device.create_buffer(
+            device.create_buffer(
                 256,
                 hal::buffer::Usage::INDEX
                     | hal::buffer::Usage::VERTEX
@@ -55,7 +56,7 @@ impl SharedBuffer {
                 hal::memory::SparseFlags::empty(),
             )
         }?;
-        let buffer_requirements = unsafe { state.device.get_buffer_requirements(&buffer) };
+        let buffer_requirements = unsafe { device.get_buffer_requirements(&buffer) };
         let memory_type: hal::MemoryTypeId = memory_properties
             .memory_types
             .iter()
@@ -74,29 +75,27 @@ impl SharedBuffer {
             .unwrap()
             .into();
         let memory = unsafe {
-            state
-                .device
+            device
                 .allocate_memory(memory_type, buffer_requirements.size)
                 .unwrap()
         };
         unsafe {
             // Bind buffer with memory
-            state
-                .device
+            device
                 .bind_buffer_memory(&memory, 0, &mut buffer)
                 .unwrap();
         }
         let mut shared_buffer = Self {
-            device: state.device.clone(),
+            device,
             mem: memory,
             staging: None,
             buffer,
         };
+        let device = &shared_buffer.device;
         unsafe {
             // Write data into buffer
             let mem_to_write = if needs_staging {
-                let mut staging_buffer = state
-                    .device
+                let mut staging_buffer = device
                     .create_buffer(
                         128,
                         hal::buffer::Usage::TRANSFER_SRC,
@@ -104,7 +103,7 @@ impl SharedBuffer {
                     )
                     .unwrap();
                 let staging_buffer_requirements =
-                    state.device.get_buffer_requirements(&staging_buffer);
+                    device.get_buffer_requirements(&staging_buffer);
 
                 let memory_type: hal::MemoryTypeId = memory_properties
                     .memory_types
@@ -119,12 +118,10 @@ impl SharedBuffer {
                     })
                     .unwrap()
                     .into();
-                let staging_mem = state
-                    .device
+                let staging_mem = device
                     .allocate_memory(memory_type, staging_buffer_requirements.size)
                     .unwrap();
-                state
-                    .device
+                device
                     .bind_buffer_memory(&staging_mem, 0, &mut staging_buffer)
                     .unwrap();
                 shared_buffer.staging = Some(SharedStagingBuffer {
@@ -143,8 +140,7 @@ impl SharedBuffer {
                         as u64,
                 ),
             };
-            let ptr = state
-                .device
+            let ptr = device
                 .map_memory(mem_to_write, segment.clone())
                 .unwrap();
             std::ptr::copy_nonoverlapping(
@@ -157,18 +153,16 @@ impl SharedBuffer {
                 ptr.add(std::mem::size_of_val(vertex_buffer)),
                 std::mem::size_of_val(index_buffer),
             );
-            state
-                .device
+            device
                 .flush_mapped_memory_ranges(std::iter::once((&*mem_to_write, segment.clone())))
                 .unwrap();
-            state.device.unmap_memory(mem_to_write);
+            device.unmap_memory(mem_to_write);
             // copy buffer to buffer
             if let Some(ref staging) = shared_buffer.staging {
                 // TODO: Maybe a better way to initialize this?
-                let mut pool = state
-                    .device
+                let mut pool = device
                     .create_command_pool(
-                        state.transfer_binding_queue_group.family,
+                        transfer_queue.family,
                         hal::pool::CommandPoolCreateFlags::TRANSIENT,
                     )
                     .unwrap();
@@ -184,16 +178,16 @@ impl SharedBuffer {
                     }),
                 );
                 cmd_buf.finish();
-                let mut fence = state.device.create_fence(false).unwrap();
-                state.transfer_binding_queue_group.queues[0].submit(
+                let mut fence = device.create_fence(false).unwrap();
+                transfer_queue.queues[0].submit(
                     std::iter::once(&cmd_buf),
                     std::iter::empty(),
                     std::iter::empty(),
                     Some(&mut fence),
                 );
-                state.device.wait_for_fence(&mut fence, !0).unwrap();
-                state.device.destroy_command_pool(pool);
-                state.device.destroy_fence(fence);
+                device.wait_for_fence(&mut fence, !0).unwrap();
+                device.destroy_command_pool(pool);
+                device.destroy_fence(fence);
             }
         }
         Ok(shared_buffer)

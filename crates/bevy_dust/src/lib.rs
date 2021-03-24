@@ -21,17 +21,8 @@ enum RendererState {
 
 impl Plugin for DustPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_state(RendererState::WaitingForWindow)
-            .add_system_set(
-                SystemSet::on_enter(RendererState::WaitingForWindow).with_system(setup.system()),
-            )
-            .add_system_set(
-                SystemSet::on_update(RendererState::WaitingForWindow)
-                    .with_system(world_initialization.exclusive_system()),
-            )
-            .add_system_set(
-                SystemSet::on_update(RendererState::Rendering).with_system(world_update.system()),
-            );
+        app.add_startup_system(setup.exclusive_system())
+            .add_system(world_update.system());
     }
 }
 
@@ -42,32 +33,25 @@ pub struct RaytracerCameraBundle {
     pub transform: Transform,
 }
 
-fn setup(mut commands: Commands) {
-    commands.spawn(RaytracerCameraBundle::default());
-}
-
-fn world_initialization(world: &mut World) {
+fn setup(
+    world: &mut World,
+) {
     let window_created_events = world.get_resource_mut::<Events<WindowCreated>>().unwrap();
     let mut window_created_events_reader = window_created_events.get_reader();
-    let event_id = if let Some(event) = window_created_events_reader
-        .iter(&*window_created_events)
-        .next()
-    {
-        event.id
-    } else {
-        return;
-    };
+    let window_id = window_created_events_reader.iter(&window_created_events).next().map(|event| event.id).unwrap();
 
     // Update camera projection
     let windows = world.get_resource::<Windows>().unwrap();
-    let window = windows.get(event_id).unwrap();
+    let window = windows.get(window_id).unwrap();
     let aspect_ratio = window.width() / window.height();
     let mut query = world.query::<&mut CameraProjection>();
     for mut camera_projection in query.iter_mut(world) {
         camera_projection.aspect_ratio = aspect_ratio;
     }
+
+
     let winit_windows = world.get_resource::<WinitWindows>().unwrap();
-    let winit_window = winit_windows.get_window(event_id).unwrap();
+    let winit_window = winit_windows.get_window(window_id).unwrap();
     let mut renderer = Renderer::new(winit_window);
     let block_allocator = renderer.create_block_allocator().unwrap();
     let arena_allocator: svo::ArenaAllocator<Voxel> =
@@ -75,10 +59,6 @@ fn world_initialization(world: &mut World) {
     let octree: Octree = svo::octree::Octree::new(arena_allocator);
     world.insert_resource(octree);
     world.insert_resource(renderer);
-
-    // State transition
-    let mut renderer_state = world.get_resource_mut::<State<RendererState>>().unwrap();
-    renderer_state.set_next(RendererState::Rendering).unwrap();
 }
 
 fn world_update(
