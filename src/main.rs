@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_dust::{RaytracerCameraBundle, Octree, Voxel};
+use bevy_dust::{Octree, RaytracerCameraBundle, Voxel};
 
 fn main() {
     App::build()
@@ -28,10 +28,7 @@ fn main() {
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut octree: ResMut<Octree>,
-) {
+fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     let monument = dot_vox::load("assets/monu9.vox").unwrap();
     let model = &monument.models[0];
     for voxel in &model.voxels {

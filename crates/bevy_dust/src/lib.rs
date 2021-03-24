@@ -13,12 +13,6 @@ pub type Octree = svo::octree::Octree<Voxel>;
 #[derive(Default)]
 pub struct DustPlugin;
 
-#[derive(Clone, Eq, PartialEq)]
-enum RendererState {
-    WaitingForWindow,
-    Rendering,
-}
-
 impl Plugin for DustPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app.add_startup_system(setup.exclusive_system())
@@ -33,12 +27,14 @@ pub struct RaytracerCameraBundle {
     pub transform: Transform,
 }
 
-fn setup(
-    world: &mut World,
-) {
+fn setup(world: &mut World) {
     let window_created_events = world.get_resource_mut::<Events<WindowCreated>>().unwrap();
     let mut window_created_events_reader = window_created_events.get_reader();
-    let window_id = window_created_events_reader.iter(&window_created_events).next().map(|event| event.id).unwrap();
+    let window_id = window_created_events_reader
+        .iter(&window_created_events)
+        .next()
+        .map(|event| event.id)
+        .unwrap();
 
     // Update camera projection
     let windows = world.get_resource::<Windows>().unwrap();
@@ -48,7 +44,6 @@ fn setup(
     for mut camera_projection in query.iter_mut(world) {
         camera_projection.aspect_ratio = aspect_ratio;
     }
-
 
     let winit_windows = world.get_resource::<WinitWindows>().unwrap();
     let winit_window = winit_windows.get_window(window_id).unwrap();

@@ -86,8 +86,10 @@ where
             if old_have_children_at_i && new_have_children_at_i {
                 unsafe {
                     std::ptr::copy(
-                        self.arena.get_mut(old_child_handle.offset(old_slot_num as u32)),
-                        self.arena.get_mut(new_child_handle.offset(new_slot_num as u32)),
+                        self.arena
+                            .get_mut(old_child_handle.offset(old_slot_num as u32)),
+                        self.arena
+                            .get_mut(new_child_handle.offset(new_slot_num as u32)),
                         1,
                     );
                 }

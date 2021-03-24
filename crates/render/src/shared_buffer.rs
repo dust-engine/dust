@@ -2,7 +2,6 @@ use crate::{back, hal};
 use hal::prelude::*;
 
 use crate::camera_projection::CameraProjection;
-use crate::renderer::RenderState;
 use glam::{Mat4, TransformRT};
 use std::sync::Arc;
 
@@ -81,9 +80,7 @@ impl SharedBuffer {
         };
         unsafe {
             // Bind buffer with memory
-            device
-                .bind_buffer_memory(&memory, 0, &mut buffer)
-                .unwrap();
+            device.bind_buffer_memory(&memory, 0, &mut buffer).unwrap();
         }
         let mut shared_buffer = Self {
             device,
@@ -102,8 +99,7 @@ impl SharedBuffer {
                         hal::memory::SparseFlags::empty(),
                     )
                     .unwrap();
-                let staging_buffer_requirements =
-                    device.get_buffer_requirements(&staging_buffer);
+                let staging_buffer_requirements = device.get_buffer_requirements(&staging_buffer);
 
                 let memory_type: hal::MemoryTypeId = memory_properties
                     .memory_types
@@ -140,9 +136,7 @@ impl SharedBuffer {
                         as u64,
                 ),
             };
-            let ptr = device
-                .map_memory(mem_to_write, segment.clone())
-                .unwrap();
+            let ptr = device.map_memory(mem_to_write, segment.clone()).unwrap();
             std::ptr::copy_nonoverlapping(
                 vertex_buffer.as_ptr() as *const u8,
                 ptr,
