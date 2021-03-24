@@ -10,7 +10,7 @@ use svo::alloc::{AllocError, BlockAllocator};
 pub struct IntegratedBlockAllocator<B: hal::Backend, const SIZE: usize> {
     device: Arc<B::Device>,
     bind_queue: B::Queue,
-    buf: B::Buffer,
+    pub buf: B::Buffer,
     memtype: hal::MemoryTypeId,
     current_offset: u64,
     free_offsets: Vec<u64>,

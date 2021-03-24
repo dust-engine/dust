@@ -14,10 +14,14 @@ mod frame;
 mod raytracer;
 mod renderer;
 mod shared_buffer;
+mod voxel;
 pub use renderer::Renderer;
 
 pub use crate::camera_projection::CameraProjection;
 use glam::TransformRT;
+
+pub use voxel::Voxel;
+pub type Octree = svo::octree::Octree<Voxel>;
 
 pub struct State<'a> {
     pub camera_projection: &'a CameraProjection,

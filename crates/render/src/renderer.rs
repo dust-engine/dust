@@ -41,7 +41,9 @@ impl Drop for Renderer {
 }
 
 impl Renderer {
-    pub fn new(window: &impl raw_window_handle::HasRawWindowHandle) -> Self {
+    pub fn new(
+        window: &impl raw_window_handle::HasRawWindowHandle,
+    ) -> (Self, Box<svo::alloc::ArenaBlockAllocator>) {
         let instance = back::Instance::create("dust engine", 0).unwrap();
         let surface = unsafe { instance.create_surface(window).unwrap() };
         let adapter = instance.enumerate_adapters().pop().unwrap();
@@ -123,16 +125,22 @@ impl Renderer {
 
         let surface_capabilities = state.surface.capabilities(&adapter.physical_device);
         let framebuffer_attachment = Self::rebuild_swapchain(&mut state, &surface_capabilities);
-        let raytracer = Raytracer::new(&mut state, &memory_properties, framebuffer_attachment);
+        let (raytracer, block_allocator) = Raytracer::new(
+            &mut state,
+            &memory_properties,
+            framebuffer_attachment,
+            &adapter.info.device_type,
+        );
 
-        Renderer {
+        let renderer = Renderer {
             instance: ManuallyDrop::new(instance),
             adapter,
             state,
             raytracer: ManuallyDrop::new(raytracer),
             device_properties,
             memory_properties,
-        }
+        };
+        (renderer, block_allocator)
     }
     pub fn on_resize(&mut self) {
         let surface_capabilities = self
@@ -193,44 +201,6 @@ impl Renderer {
                 .unwrap();
             if suboptimal.is_some() {
                 tracing::warn!("Suboptimal surface presented");
-            }
-        }
-    }
-
-    pub fn create_block_allocator(
-        &mut self,
-    ) -> Result<Box<svo::alloc::ArenaBlockAllocator>, hal::buffer::CreationError> {
-        use block_alloc::{DiscreteBlockAllocator, IntegratedBlockAllocator};
-        use hal::adapter::DeviceType;
-        const SIZE: usize = svo::alloc::CHUNK_SIZE;
-        match self.adapter.info.device_type {
-            DeviceType::DiscreteGpu | DeviceType::VirtualGpu | DeviceType::Other => {
-                let allocator: DiscreteBlockAllocator<back::Backend, SIZE> =
-                    DiscreteBlockAllocator::new(
-                        self.state.device.clone(),
-                        self.state
-                            .transfer_binding_queue_group
-                            .queues
-                            .pop()
-                            .unwrap(),
-                        self.state.transfer_binding_queue_group.family,
-                        &self.memory_properties,
-                    )?;
-                return Ok(Box::new(allocator));
-            }
-            DeviceType::IntegratedGpu | DeviceType::Cpu => {
-                let allocator: IntegratedBlockAllocator<back::Backend, SIZE> =
-                    IntegratedBlockAllocator::new(
-                        self.state.device.clone(),
-                        self.state
-                            .transfer_binding_queue_group
-                            .queues
-                            .pop()
-                            .unwrap(),
-                        &self.memory_properties,
-                    )?;
-
-                return Ok(Box::new(allocator));
             }
         }
     }

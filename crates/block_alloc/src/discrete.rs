@@ -21,7 +21,7 @@ pub struct DiscreteBlock<B: hal::Backend, const SIZE: usize> {
 pub struct DiscreteBlockAllocator<B: hal::Backend, const SIZE: usize> {
     device: Arc<B::Device>,
     bind_queue: B::Queue,
-    device_buf: B::Buffer,
+    pub device_buf: B::Buffer,
     device_memtype: hal::MemoryTypeId,
     system_buf: B::Buffer,
     system_memtype: hal::MemoryTypeId,

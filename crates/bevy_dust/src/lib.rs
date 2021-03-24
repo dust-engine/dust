@@ -5,10 +5,8 @@ use bevy::window::{WindowCreated, WindowResized};
 use bevy::winit::WinitWindows;
 use dust_render::{CameraProjection, Renderer};
 
-mod voxel;
-pub use voxel::Voxel;
-
-pub type Octree = svo::octree::Octree<Voxel>;
+pub use dust_render::Octree;
+pub use dust_render::Voxel;
 
 #[derive(Default)]
 pub struct DustPlugin;
@@ -47,8 +45,7 @@ fn setup(world: &mut World) {
 
     let winit_windows = world.get_resource::<WinitWindows>().unwrap();
     let winit_window = winit_windows.get_window(window_id).unwrap();
-    let mut renderer = Renderer::new(winit_window);
-    let block_allocator = renderer.create_block_allocator().unwrap();
+    let (renderer, block_allocator) = Renderer::new(winit_window);
     let arena_allocator: svo::ArenaAllocator<Voxel> =
         svo::alloc::ArenaAllocator::new(block_allocator);
     let octree: Octree = svo::octree::Octree::new(arena_allocator);

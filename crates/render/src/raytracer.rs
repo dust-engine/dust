@@ -21,6 +21,8 @@ pub struct Raytracer {
     pub current_frame: u8,
     pub desc_pool: DescriptorPool,
     pub desc_set: <back::Backend as hal::Backend>::DescriptorSet,
+    pub octree_desc_pool: DescriptorPool,
+    pub octree_desc_set: <back::Backend as hal::Backend>::DescriptorSet,
 }
 const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -39,7 +41,90 @@ impl Raytracer {
         state: &mut RenderState,
         memory_properties: &hal::adapter::MemoryProperties,
         framebuffer_attachment: hal::image::FramebufferAttachment,
-    ) -> Raytracer {
+        device_type: &hal::adapter::DeviceType,
+    ) -> (Raytracer, Box<svo::alloc::ArenaBlockAllocator>) {
+        let mut octree_desc_pool = DescriptorPool::new(
+            &state.device,
+            "SSBOs",
+            std::iter::once(hal::pso::DescriptorSetLayoutBinding {
+                binding: 0,
+                ty: hal::pso::DescriptorType::Buffer {
+                    ty: hal::pso::BufferDescriptorType::Storage { read_only: true },
+                    format: hal::pso::BufferDescriptorFormat::Structured {
+                        dynamic_offset: false,
+                    },
+                },
+                count: 1,
+                stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
+            }),
+        );
+        let (block_allocator, octree_desc_set): (Box<svo::alloc::ArenaBlockAllocator>, _) = {
+            let mut desc_set = octree_desc_pool
+                .allocate_one(&state.device, "Octree")
+                .unwrap();
+
+            use block_alloc::{DiscreteBlockAllocator, IntegratedBlockAllocator};
+            use hal::adapter::DeviceType;
+            const SIZE: usize = svo::alloc::CHUNK_SIZE;
+            let allocator: Box<svo::alloc::ArenaBlockAllocator> = match device_type {
+                DeviceType::DiscreteGpu | DeviceType::VirtualGpu | DeviceType::Other => {
+                    let allocator: DiscreteBlockAllocator<back::Backend, SIZE> =
+                        DiscreteBlockAllocator::new(
+                            state.device.clone(),
+                            state.transfer_binding_queue_group.queues.pop().unwrap(),
+                            state.transfer_binding_queue_group.family,
+                            memory_properties,
+                        )
+                        .unwrap();
+                    unsafe {
+                        state
+                            .device
+                            .write_descriptor_set(hal::pso::DescriptorSetWrite {
+                                set: &mut desc_set,
+                                binding: 0,
+                                array_offset: 0,
+                                descriptors: std::iter::once(hal::pso::Descriptor::Buffer(
+                                    &allocator.device_buf,
+                                    hal::buffer::SubRange {
+                                        offset: 0,
+                                        size: None,
+                                    },
+                                )),
+                            })
+                    };
+                    Box::new(allocator)
+                }
+                DeviceType::IntegratedGpu | DeviceType::Cpu => {
+                    let allocator: IntegratedBlockAllocator<back::Backend, SIZE> =
+                        IntegratedBlockAllocator::new(
+                            state.device.clone(),
+                            state.transfer_binding_queue_group.queues.pop().unwrap(),
+                            memory_properties,
+                        )
+                        .unwrap();
+                    unsafe {
+                        state
+                            .device
+                            .write_descriptor_set(hal::pso::DescriptorSetWrite {
+                                set: &mut desc_set,
+                                binding: 0,
+                                array_offset: 0,
+                                descriptors: std::iter::once(hal::pso::Descriptor::Buffer(
+                                    &allocator.buf,
+                                    hal::buffer::SubRange {
+                                        offset: 0,
+                                        size: None,
+                                    },
+                                )),
+                            })
+                    };
+                    Box::new(allocator)
+                }
+            };
+            (allocator, desc_set)
+        };
+
         let shared_buffer = SharedBuffer::new(
             state.device.clone(),
             &mut state.transfer_binding_queue_group,
@@ -125,7 +210,11 @@ impl Raytracer {
         let pipeline_layout = unsafe {
             state
                 .device
-                .create_pipeline_layout(std::iter::once(&desc_pool.layout), std::iter::empty())
+                .create_pipeline_layout(
+                    std::iter::once(&desc_pool.layout)
+                        .chain(std::iter::once(&octree_desc_pool.layout)),
+                    std::iter::empty(),
+                )
                 .unwrap()
         };
         let (pipeline_layout, pipeline) = unsafe {
@@ -212,7 +301,7 @@ impl Raytracer {
             Frame::new(&state.device, state.graphics_queue_group.family),
             Frame::new(&state.device, state.graphics_queue_group.family),
         ];
-        Self {
+        let raytracer = Self {
             device: state.device.clone(),
             shared_buffer,
             ray_pass,
@@ -223,8 +312,11 @@ impl Raytracer {
             frames,
             desc_pool,
             desc_set,
+            octree_desc_pool,
             current_frame: 0,
-        }
+            octree_desc_set,
+        };
+        (raytracer, block_allocator)
     }
 
     pub fn rebuild_framebuffer(
@@ -285,7 +377,7 @@ impl Raytracer {
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
-            std::iter::once(&self.desc_set),
+            std::iter::once(&self.desc_set).chain(std::iter::once(&self.octree_desc_set)),
             std::iter::empty(),
         );
         cmd_buffer.bind_vertex_buffers(
