@@ -53,7 +53,7 @@ where
         }
     }
     pub fn reshape(&mut self, node_handle: Handle, new_mask: u8) {
-        let node_ref = &mut self.arena[node_handle];
+        let node_ref = self.arena.get_mut(node_handle);
         let old_mask = node_ref.freemask;
         let old_child_handle = node_ref.children;
 
@@ -63,13 +63,13 @@ where
         let new_num_items = new_mask.count_ones();
         if old_mask == 0 {
             let new_child_handle = self.arena.alloc(new_num_items);
-            let node_ref = &mut self.arena[node_handle];
+            let node_ref = self.arena.get_mut(node_handle);
             node_ref.freemask = new_mask;
             node_ref.children = new_child_handle;
             return;
         }
         if new_mask == 0 {
-            let node_ref = &mut self.arena[node_handle];
+            let node_ref = self.arena.get_mut(node_handle);
             node_ref.freemask = 0;
             unsafe {
                 self.arena
@@ -86,8 +86,8 @@ where
             if old_have_children_at_i && new_have_children_at_i {
                 unsafe {
                     std::ptr::copy(
-                        &mut self.arena[old_child_handle.offset(old_slot_num as u32)],
-                        &mut self.arena[new_child_handle.offset(new_slot_num as u32)],
+                        self.arena.get_mut(old_child_handle.offset(old_slot_num as u32)),
+                        self.arena.get_mut(new_child_handle.offset(new_slot_num as u32)),
                         1,
                     );
                 }
@@ -99,7 +99,7 @@ where
                 new_slot_num += 1;
             }
         }
-        let node_ref = &mut self.arena[node_handle];
+        let node_ref = self.arena.get_mut(node_handle);
         node_ref.freemask = new_mask;
         node_ref.children = new_child_handle;
         unsafe {
@@ -132,24 +132,24 @@ where
         }
         if gridsize <= 1 {
             // is leaf node
-            let node_ref = &mut self.arena[handle];
+            let node_ref = self.arena.get_mut(handle);
             node_ref.data[corner as usize] = item;
             if node_ref.freemask & (1 << corner) != 0 {
                 // has children. Cut them off.
                 todo!()
             }
         } else {
-            let node_ref = &mut self.arena[handle];
+            let node_ref = self.arena.get_mut(handle);
             let freemask = node_ref.freemask;
             if freemask & (1 << corner) == 0 {
                 // no children
                 self.reshape(handle, freemask | (1 << corner));
             }
 
-            let new_handle = self.arena[handle].child_handle(corner.into());
+            let new_handle = self.arena.get(handle).child_handle(corner.into());
             let (avg, collapsed) = self.set_internal(new_handle, x, y, z, gridsize, item);
 
-            let node_ref = &mut self.arena[handle];
+            let node_ref = self.arena.get_mut(handle);
             let freemask = node_ref.freemask;
             node_ref.data[corner as usize] = avg;
             if collapsed {
@@ -157,7 +157,7 @@ where
             }
         }
 
-        let node_ref = &mut self.arena[handle];
+        let node_ref = self.arena.get_mut(handle);
         if node_ref.freemask == 0 {
             // node has no children
             if node_ref.data.iter().all(|a| *a == item) {
@@ -191,7 +191,7 @@ where
                 corner |= 0b001;
                 z -= gridsize;
             }
-            let node_ref = &self.arena[handle];
+            let node_ref = &self.arena.get(handle);
             if node_ref.freemask & (1 << corner) == 0 {
                 return node_ref.data[corner as usize];
             }
@@ -209,7 +209,7 @@ where
         if z >= 1 {
             corner |= 0b001;
         }
-        self.arena[handle].data[corner as usize]
+        self.arena.get(handle).data[corner as usize]
     }
 }
 

@@ -208,8 +208,22 @@ where
             self.block_allocator.updated_block(block.cast(), start..end);
         }
     }
-}
 
+    // method here due to compiler bug
+    pub fn get(&self, index: Handle) -> &T {
+        unsafe {
+            let slot = self.get_slot(index);
+            &slot.occupied
+        }
+    }
+    pub fn get_mut(&mut self, index: Handle) -> &mut T {
+        unsafe {
+            let slot = self.get_slot_mut(index);
+            &mut slot.occupied
+        }
+    }
+}
+/* Disabled due to compiler bug
 impl<T: ArenaAllocated> Index<Handle> for ArenaAllocator<T>
 where
     [T; CHUNK_SIZE / size_of::<T>()]: Sized,
@@ -235,7 +249,7 @@ where
         }
     }
 }
-
+*/
 #[cfg(test)]
 mod tests {
     use super::*;
