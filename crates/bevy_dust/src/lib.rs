@@ -25,23 +25,24 @@ pub struct RaytracerCameraBundle {
     pub transform: Transform,
 }
 
-fn setup(world: &mut World) {
-    let window_created_events = world.get_resource_mut::<Events<WindowCreated>>().unwrap();
-    let mut window_created_events_reader = window_created_events.get_reader();
-    let window_id = window_created_events_reader
-        .iter(&window_created_events)
+fn setup(
+    mut commands: Commands,
+    mut window_created_events: EventReader<WindowCreated>,
+    winit_windows: Res<WinitWindows>,
+) {
+    let window_id = window_created_events
+        .iter()
         .next()
         .map(|event| event.id)
         .unwrap();
 
-    let winit_windows = world.get_resource::<WinitWindows>().unwrap();
     let winit_window = winit_windows.get_window(window_id).unwrap();
     let (renderer, block_allocator) = Renderer::new(winit_window);
     let arena_allocator: svo::ArenaAllocator<Voxel> =
         svo::alloc::ArenaAllocator::new(block_allocator);
     let octree: Octree = svo::octree::Octree::new(arena_allocator);
-    world.insert_resource(octree);
-    world.insert_resource(renderer);
+    commands.insert_resource(octree);
+    commands.insert_resource(renderer);
 }
 
 fn world_update(

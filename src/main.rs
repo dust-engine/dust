@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_dust::{Octree, RaytracerCameraBundle, Voxel};
-use crate::fly_camera::FlyCamera;
+use crate::fly_camera::{FlyCamera, FlyCameraPlugin};
 
 mod fly_camera;
 
@@ -48,6 +48,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation.z = 2.0;
     commands
-        .spawn(bundle)
-        .with(FlyCamera::default());
+        .spawn()
+        .insert_bundle(bundle)
+        .insert(FlyCamera::default());
 }
