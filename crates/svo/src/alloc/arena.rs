@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::mem::{size_of, ManuallyDrop};
 use std::ops::{Index, IndexMut};
 use std::ptr::NonNull;
+use crate::alloc::changeset::ChangeSet;
 
 pub const CHUNK_DEGREE: usize = 24;
 pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
@@ -61,6 +62,8 @@ pub struct ArenaAllocator<T: ArenaAllocated> {
     pub(crate) size: u32,       // number of allocated slots
     pub(crate) num_blocks: u32, // number of allocated blocks
     pub(crate) capacity: u32,   // number of available slots
+
+    pub changeset: ChangeSet,
 }
 
 // ArenaAllocator contains NunNull which makes it !Send and !Sync.
@@ -86,6 +89,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             size: 0,
             num_blocks: 0,
             capacity: 0,
+            changeset: ChangeSet::new(0),
         }
     }
     pub fn alloc(&mut self, len: u32) -> Handle {
@@ -103,6 +107,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
                 let chunk_index = self.chunks.len() as u32;
                 let chunk = unsafe { self.block_allocator.allocate_block().unwrap() };
                 self.chunks.push(chunk.cast());
+                self.changeset.add_chunk();
                 self.capacity += Self::NUM_SLOTS_IN_CHUNK as u32;
                 self.newspace_top = Handle::from_index(chunk_index, len);
                 Handle::from_index(chunk_index, 0)
@@ -203,6 +208,12 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             let slot = self.get_slot_mut(index);
             &mut slot.occupied
         }
+    }
+    pub fn changed(&mut self, index: Handle) {
+        self.changeset.changed(index)
+    }
+    pub fn changed_block(&mut self, index: Handle, len: u32) {
+        self.changeset.changed_block(index, len)
     }
 }
 /* Disabled due to compiler bug

@@ -48,13 +48,14 @@ impl<T: Voxel> Octree<T> {
         }
     }
     pub fn reshape(&mut self, node_handle: Handle, new_mask: u8) {
-        let node_ref = self.arena.get_mut(node_handle);
+        let node_ref = self.arena.get(node_handle);
         let old_mask = node_ref.freemask;
         let old_child_handle = node_ref.children;
 
         if old_mask == 0 && new_mask == 0 {
             return;
         }
+        self.arena.changed(node_handle);
         let new_num_items = new_mask.count_ones();
         if old_mask == 0 {
             let new_child_handle = self.arena.alloc(new_num_items);
@@ -82,7 +83,7 @@ impl<T: Voxel> Octree<T> {
                 unsafe {
                     std::ptr::copy(
                         self.arena
-                            .get_mut(old_child_handle.offset(old_slot_num as u32)),
+                            .get(old_child_handle.offset(old_slot_num as u32)),
                         self.arena
                             .get_mut(new_child_handle.offset(new_slot_num as u32)),
                         1,
@@ -96,6 +97,7 @@ impl<T: Voxel> Octree<T> {
                 new_slot_num += 1;
             }
         }
+        self.arena.changed_block(new_child_handle, new_num_items);
         let node_ref = self.arena.get_mut(node_handle);
         node_ref.freemask = new_mask;
         node_ref.children = new_child_handle;
@@ -104,109 +106,15 @@ impl<T: Voxel> Octree<T> {
                 .free(old_child_handle, old_mask.count_ones() as u8);
         }
     }
-    fn set_internal(
-        &mut self,
-        handle: Handle,
-        mut x: u32,
-        mut y: u32,
-        mut z: u32,
-        mut gridsize: u32,
-        item: T,
-    ) -> (T, bool) {
-        gridsize = gridsize / 2;
-        let mut corner: u8 = 0;
-        if x >= gridsize {
-            corner |= 0b100;
-            x -= gridsize;
+    pub fn get_random_accessor(&self) -> accessor::random::RandomAccessor<T> {
+        accessor::random::RandomAccessor {
+            octree: self
         }
-        if y >= gridsize {
-            corner |= 0b010;
-            y -= gridsize;
-        }
-        if z >= gridsize {
-            corner |= 0b001;
-            z -= gridsize;
-        }
-        if gridsize <= 1 {
-            // is leaf node
-            let node_ref = self.arena.get_mut(handle);
-            node_ref.data[corner as usize] = item;
-            if node_ref.freemask & (1 << corner) != 0 {
-                // has children. Cut them off.
-                todo!()
-            }
-        } else {
-            let node_ref = self.arena.get_mut(handle);
-            let freemask = node_ref.freemask;
-            if freemask & (1 << corner) == 0 {
-                // no children
-                self.reshape(handle, freemask | (1 << corner));
-            }
-
-            let new_handle = self.arena.get(handle).child_handle(corner.into());
-            let (avg, collapsed) = self.set_internal(new_handle, x, y, z, gridsize, item);
-
-            let node_ref = self.arena.get_mut(handle);
-            let freemask = node_ref.freemask;
-            node_ref.data[corner as usize] = avg;
-            if collapsed {
-                self.reshape(handle, freemask & !(1 << corner));
-            }
-        }
-
-        let node_ref = self.arena.get_mut(handle);
-        if node_ref.freemask == 0 {
-            // node has no children
-            if node_ref.data.iter().all(|a| *a == item) {
-                // collapse node
-                return (item, true);
-            }
-        }
-
-        return (T::avg(&node_ref.data), false);
     }
-
-    pub fn set(&mut self, x: u32, y: u32, z: u32, gridsize: u32, item: T) {
-        let (data, _collapsed) = self.set_internal(self.root, x, y, z, gridsize, item);
-        self.root_data = data;
-    }
-
-    pub fn get(&self, mut x: u32, mut y: u32, mut z: u32, mut gridsize: u32) -> T {
-        let mut handle = self.root;
-        while gridsize > 2 {
-            gridsize = gridsize / 2;
-            let mut corner: u8 = 0;
-            if x >= gridsize {
-                corner |= 0b100;
-                x -= gridsize;
-            }
-            if y >= gridsize {
-                corner |= 0b010;
-                y -= gridsize;
-            }
-            if z >= gridsize {
-                corner |= 0b001;
-                z -= gridsize;
-            }
-            let node_ref = &self.arena.get(handle);
-            if node_ref.freemask & (1 << corner) == 0 {
-                return node_ref.data[corner as usize];
-            }
-            handle = node_ref.child_handle(corner.into());
+    pub fn get_random_mutator(&mut self) -> accessor::random::RandomMutator<T> {
+        accessor::random::RandomMutator {
+            octree: self
         }
-        // gridsize is now equal to 2
-        debug_assert_eq!(gridsize, 2);
-        let mut corner: u8 = 0;
-        if x >= 1 {
-            corner |= 0b100;
-        }
-        if y >= 1 {
-            corner |= 0b010;
-        }
-        if z >= 1 {
-            corner |= 0b001;
-        }
-        self.arena.get(handle).data[corner as usize]
     }
 }
 
