@@ -131,7 +131,7 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
         let (data, _collapsed) = set_recursive(self.octree, self.octree.root, x, y, z, gridsize, item);
         self.octree.root_data = data;
     }
-    pub fn commit(self) {
-        // TODO
+    pub fn commit(&mut self) {
+        self.octree.arena.flush();
     }
 }

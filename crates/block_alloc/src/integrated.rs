@@ -89,16 +89,23 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
     }
 
     unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>) {
-        let mut mem = self.allocations.remove(&block).unwrap();
-        self.device.unmap_memory(&mut mem);
-        self.device.free_memory(mem);
+        let mut memory = self.allocations.remove(&block).unwrap();
+        self.device.unmap_memory(&mut memory);
+        self.device.free_memory(memory);
     }
 
-    unsafe fn updated_block(&mut self, _block: NonNull<[u8; SIZE]>, _block_range: Range<u32>) {
-        // Do exactly nothing. Nothing needs to be done to sync data to the GPU.
+    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>) {
+        let allocations = &self.allocations;
+        self.device.flush_mapped_memory_ranges(
+            ranges.map(|(ptr, range)| {
+                let memory = &allocations[&ptr];
+                (memory, hal::memory::Segment {
+                    offset: range.start as u64,
+                    size: Some((range.end - range.start) as u64)
+                })
+            })
+        );
     }
-
-    unsafe fn flush(&mut self) {}
 }
 
 /// Returns SystemMemId, DeviceMemId

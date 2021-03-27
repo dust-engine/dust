@@ -158,26 +158,26 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for DiscreteBlockA
         }
     }
 
-    unsafe fn updated_block(&mut self, block: NonNull<[u8; SIZE]>, range: Range<u32>) {
-        let location = self.allocations[&block].offset * SIZE as u64 + range.start as u64;
-        self.copy_regions.push(hal::command::BufferCopy {
-            src: location,
-            dst: location,
-            size: (range.end - range.start) as u64,
-        });
-    }
-
-    unsafe fn flush(&mut self) {
+    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>) {
         self.command_buffer.reset(false);
         // todo: wait for semaphores
         self.command_buffer
             .begin_primary(hal::command::CommandBufferFlags::ONE_TIME_SUBMIT);
+        let allocations = &self.allocations;
         self.command_buffer.copy_buffer(
             &self.system_buf,
             &self.device_buf,
-            self.copy_regions.drain(..),
+            ranges.map(|(block, range)| {
+                let location = allocations[&block].offset * SIZE as u64 + range.start as u64;
+                hal::command::BufferCopy {
+                    src: location,
+                    dst: location,
+                    size: (range.end - range.start) as u64,
+                }
+            }),
         );
         self.command_buffer.finish();
+
         self.bind_queue.submit(
             std::iter::once(&self.command_buffer),
             std::iter::empty(),

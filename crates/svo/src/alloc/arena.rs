@@ -107,7 +107,6 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
                 let chunk_index = self.chunks.len() as u32;
                 let chunk = unsafe { self.block_allocator.allocate_block().unwrap() };
                 self.chunks.push(chunk.cast());
-                self.changeset.add_chunk();
                 self.capacity += Self::NUM_SLOTS_IN_CHUNK as u32;
                 self.newspace_top = Handle::from_index(chunk_index, len);
                 Handle::from_index(chunk_index, 0)
@@ -183,18 +182,6 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             &mut *base.add(slot_index as usize)
         }
     }
-    pub fn slot_updated(&mut self, handle: Handle, n: u8) {
-        debug_assert!(n > 0);
-        let slot_index = handle.get_slot_num();
-        let chunk_index = handle.get_chunk_num();
-        let block = self.chunks[chunk_index as usize];
-        let size = size_of::<ArenaSlot<T>>() as u32;
-        let start = size * slot_index;
-        let end = start + size * n as u32;
-        unsafe {
-            self.block_allocator.updated_block(block.cast(), start..end);
-        }
-    }
 
     // method here due to compiler bug
     pub fn get(&self, index: Handle) -> &T {
@@ -214,6 +201,19 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
     }
     pub fn changed_block(&mut self, index: Handle, len: u32) {
         self.changeset.changed_block(index, len)
+    }
+    pub fn flush(&mut self) {
+        let chunks = &self.chunks;
+        let mut iter = self.changeset.drain()
+            .map(|(chunk_index, range)| {
+                let ptr = chunks[chunk_index];
+                let size: u32 = size_of::<T>() as u32;
+                let range = (range.start * size)..(range.end * size);
+                (ptr.cast(), range)
+            });
+        unsafe {
+            self.block_allocator.flush(&mut iter);
+        }
     }
 }
 /* Disabled due to compiler bug
