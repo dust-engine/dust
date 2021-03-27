@@ -5,8 +5,6 @@ use std::mem::size_of;
 use glam::Vec3;
 
 impl<T: Voxel> Octree<T>
-    where
-        [T; CHUNK_SIZE / size_of::<Node<T>>()]: Sized,
 {
 /*
     fn signed_distance_field_recursive<F>(

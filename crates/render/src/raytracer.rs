@@ -354,8 +354,11 @@ impl Raytracer {
         state: &crate::State,
     ) -> &mut <back::Backend as hal::Backend>::Semaphore {
         let aspect_ratio = self.viewport.rect.w as f32 / self.viewport.rect.h as f32;
-        self.shared_buffer
-            .update_camera(&state.camera_projection, &state.camera_transform, aspect_ratio);
+        self.shared_buffer.update_camera(
+            &state.camera_projection,
+            &state.camera_transform,
+            aspect_ratio,
+        );
 
         let current_frame: &mut Frame = &mut self.frames[self.current_frame as usize];
 

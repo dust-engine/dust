@@ -1,6 +1,6 @@
+use crate::fly_camera::{FlyCamera, FlyCameraPlugin};
 use bevy::prelude::*;
 use bevy_dust::{Octree, RaytracerCameraBundle, Voxel};
-use crate::fly_camera::{FlyCamera, FlyCameraPlugin};
 
 mod fly_camera;
 

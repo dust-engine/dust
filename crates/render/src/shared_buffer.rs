@@ -187,7 +187,12 @@ impl SharedBuffer {
         Ok(shared_buffer)
     }
 
-    pub fn update_camera(&mut self, camera_projection: &CameraProjection, transform: &TransformRT, aspect_ratio: f32) {
+    pub fn update_camera(
+        &mut self,
+        camera_projection: &CameraProjection,
+        transform: &TransformRT,
+        aspect_ratio: f32,
+    ) {
         let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
         let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * transform.inverse();
         let transform_cols_arr = transform.to_cols_array();

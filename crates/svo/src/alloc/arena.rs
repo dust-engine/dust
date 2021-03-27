@@ -1,4 +1,5 @@
 use super::BlockAllocator;
+use std::marker::PhantomData;
 use std::mem::{size_of, ManuallyDrop};
 use std::ops::{Index, IndexMut};
 use std::ptr::NonNull;
@@ -52,12 +53,9 @@ union ArenaSlot<T: ArenaAllocated> {
 
 pub trait ArenaAllocated: Sized + Default {}
 
-pub struct ArenaAllocator<T: ArenaAllocated>
-where
-    [T; CHUNK_SIZE / size_of::<T>()]: Sized,
-{
+pub struct ArenaAllocator<T: ArenaAllocated> {
     block_allocator: Box<ArenaBlockAllocator>,
-    chunks: Vec<NonNull<ArenaAllocatorChunk<T>>>,
+    chunks: Vec<NonNull<ArenaSlot<T>>>,
     freelist_heads: [Handle; 8],
     newspace_top: Handle,       // new space to be allocated
     pub(crate) size: u32,       // number of allocated slots
@@ -69,19 +67,10 @@ where
 // NonNull is !Send and !Sync because the data they reference may be aliased.
 // Here we guarantee that NonNull will never be aliased.
 // Therefore ArenaAllocator should be Send and Sync.
-unsafe impl<T: ArenaAllocated> Send for ArenaAllocator<T> where
-    [T; CHUNK_SIZE / size_of::<T>()]: Sized
-{
-}
-unsafe impl<T: ArenaAllocated> Sync for ArenaAllocator<T> where
-    [T; CHUNK_SIZE / size_of::<T>()]: Sized
-{
-}
+unsafe impl<T: ArenaAllocated> Send for ArenaAllocator<T> {}
+unsafe impl<T: ArenaAllocated> Sync for ArenaAllocator<T> {}
 
-impl<T: ArenaAllocated> ArenaAllocator<T>
-where
-    [T; CHUNK_SIZE / size_of::<T>()]: Sized,
-{
+impl<T: ArenaAllocated> ArenaAllocator<T> {
     const NUM_SLOTS_IN_CHUNK: usize = CHUNK_SIZE / size_of::<T>();
     pub fn new(block_allocator: Box<ArenaBlockAllocator>) -> Self {
         debug_assert!(
@@ -91,16 +80,7 @@ where
         Self {
             block_allocator,
             chunks: vec![],
-            freelist_heads: [
-                Handle::none(),
-                Handle::none(),
-                Handle::none(),
-                Handle::none(),
-                Handle::none(),
-                Handle::none(),
-                Handle::none(),
-                Handle::none(),
-            ],
+            freelist_heads: [Handle::none(); 8],
             // Space pointed by this is guaranteed to have free space > 8
             newspace_top: Handle::none(),
             size: 0,
@@ -153,9 +133,11 @@ where
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let slice = &mut self.chunks[chunk_index as usize].as_mut()
-                [slot_index as usize..(slot_index + len) as usize];
-            for i in slice {
+            let base = self.chunks[chunk_index as usize]
+                .as_ptr()
+                .add(slot_index as usize);
+            for i in 0..len {
+                let i = &mut *base.add(i as usize);
                 i.occupied = Default::default();
             }
         }
@@ -184,16 +166,16 @@ where
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let slice = self.chunks[chunk_index as usize].as_ref();
-            &slice[slot_index as usize]
+            let base = self.chunks[chunk_index as usize].as_ptr();
+            &*base.add(slot_index as usize)
         }
     }
     fn get_slot_mut(&mut self, handle: Handle) -> &mut ArenaSlot<T> {
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let slice = self.chunks[chunk_index as usize].as_mut();
-            &mut slice[slot_index as usize]
+            let base = self.chunks[chunk_index as usize].as_ptr();
+            &mut *base.add(slot_index as usize)
         }
     }
     pub fn slot_updated(&mut self, handle: Handle, n: u8) {
@@ -225,8 +207,6 @@ where
 }
 /* Disabled due to compiler bug
 impl<T: ArenaAllocated> Index<Handle> for ArenaAllocator<T>
-where
-    [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
     type Output = T;
 
@@ -239,8 +219,6 @@ where
 }
 
 impl<T: ArenaAllocated> IndexMut<Handle> for ArenaAllocator<T>
-where
-    [T; CHUNK_SIZE / size_of::<T>()]: Sized,
 {
     fn index_mut(&mut self, index: Handle) -> &mut Self::Output {
         unsafe {

@@ -8,7 +8,7 @@ pub struct CameraProjection {
 }
 
 impl CameraProjection {
-    pub fn get_projection_matrix(&self, aspect_ratio: f32,) -> Mat4 {
+    pub fn get_projection_matrix(&self, aspect_ratio: f32) -> Mat4 {
         Mat4::perspective_rh(self.fov, aspect_ratio, self.near, self.far)
     }
 }
