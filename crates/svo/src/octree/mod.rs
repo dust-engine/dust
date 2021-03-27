@@ -3,6 +3,7 @@ use crate::alloc::CHUNK_SIZE;
 use crate::alloc::{ArenaAllocated, Handle};
 use crate::{Corner, Voxel};
 use std::mem::size_of;
+mod accessor;
 
 //mod sdf;
 //mod accessor;
