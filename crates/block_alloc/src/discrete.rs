@@ -44,18 +44,20 @@ impl<B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<B, SIZE> {
         memory_properties: &hal::adapter::MemoryProperties,
     ) -> Result<Self, hal::buffer::CreationError> {
         unsafe {
-            let device_buf = device.create_buffer(
+            let mut device_buf = device.create_buffer(
                 MAX_BUFFER_SIZE,
                 hal::buffer::Usage::STORAGE | hal::buffer::Usage::TRANSFER_DST,
                 hal::memory::SparseFlags::SPARSE_BINDING
                     | hal::memory::SparseFlags::SPARSE_RESIDENCY,
             )?;
-            let system_buf = device.create_buffer(
+            device.set_buffer_name(&mut device_buf, "DiscreteBlockAllocatorDeviceBuffer");
+            let mut system_buf = device.create_buffer(
                 MAX_BUFFER_SIZE,
-                hal::buffer::Usage::STORAGE | hal::buffer::Usage::TRANSFER_SRC,
+                hal::buffer::Usage::TRANSFER_SRC,
                 hal::memory::SparseFlags::SPARSE_BINDING
                     | hal::memory::SparseFlags::SPARSE_RESIDENCY,
             )?;
+            device.set_buffer_name(&mut system_buf, "DiscreteBlockAllocatorSystemBuffer");
             let device_buf_requirements = device.get_buffer_requirements(&device_buf);
             let system_buf_requirements = device.get_buffer_requirements(&system_buf);
             let (system_memtype, device_memtype) = select_discrete_memtype(
@@ -63,6 +65,7 @@ impl<B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<B, SIZE> {
                 &system_buf_requirements,
                 &device_buf_requirements,
             );
+            println!("sys_memtype: {:?} \ndevice_memtype: {:?}", memory_properties.memory_types[system_memtype.0], memory_properties.memory_types[device_memtype.0]);
 
             let mut command_pool = device
                 .create_command_pool(
@@ -70,7 +73,8 @@ impl<B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<B, SIZE> {
                     hal::pool::CommandPoolCreateFlags::TRANSIENT,
                 )
                 .unwrap();
-            let command_buffer = command_pool.allocate_one(hal::command::Level::Primary);
+            let mut command_buffer = command_pool.allocate_one(hal::command::Level::Primary);
+            device.set_command_buffer_name(&mut command_buffer, "DiscreteBlockAllocatorCommandBuffer");
             Ok(Self {
                 device,
                 bind_queue,

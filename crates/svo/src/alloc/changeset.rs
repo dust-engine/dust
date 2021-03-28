@@ -10,7 +10,7 @@ struct BlockChangeSet {
 impl BlockChangeSet {
     fn changed(&mut self, num: u32, len: u32) {
         self.range.start = self.range.start.min(num);
-        self.range.end = self.range.end.max(num);
+        self.range.end = self.range.end.max(num + len);
     }
     fn new(to: u32, len: u32) -> Self {
         BlockChangeSet {

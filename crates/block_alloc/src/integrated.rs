@@ -55,6 +55,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
             self.current_offset += 1;
             val
         });
+        println!("Allocated {}", SIZE);
         let mut mem = self
             .device
             .allocate_memory(self.memtype, SIZE as u64)
@@ -95,6 +96,7 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
     }
 
     unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>) {
+        println!("Flushed {:?}", ranges.size_hint());
         let allocations = &self.allocations;
         self.device.flush_mapped_memory_ranges(
             ranges.map(|(ptr, range)| {

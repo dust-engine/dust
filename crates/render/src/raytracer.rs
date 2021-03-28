@@ -67,7 +67,7 @@ impl Raytracer {
             use block_alloc::{DiscreteBlockAllocator, IntegratedBlockAllocator};
             use hal::adapter::DeviceType;
             const SIZE: usize = svo::alloc::CHUNK_SIZE;
-            let device_type = DeviceType::IntegratedGpu;
+            // let device_type = DeviceType::IntegratedGpu;
             let allocator: Box<svo::alloc::ArenaBlockAllocator> = match device_type {
                 DeviceType::DiscreteGpu | DeviceType::VirtualGpu | DeviceType::Other => {
                     let allocator: DiscreteBlockAllocator<back::Backend, SIZE> =
@@ -135,7 +135,7 @@ impl Raytracer {
         )
         .unwrap();
         let ray_pass = unsafe {
-            state.device.create_render_pass(
+            let mut pass = state.device.create_render_pass(
                 std::iter::once(hal::pass::Attachment {
                     format: Some(state.surface_format),
                     samples: 1,
@@ -155,18 +155,21 @@ impl Raytracer {
                     preserves: &[],
                 }),
                 std::iter::empty(),
-            )
-        }
-        .unwrap();
+            ).unwrap();
+            state.device.set_render_pass_name(&mut pass, "RayPass");
+            pass
+        };
         let framebuffer = unsafe {
-            state
+            let mut framebuffer = state
                 .device
                 .create_framebuffer(
                     &ray_pass,
                     std::iter::once(framebuffer_attachment),
                     state.extent.to_extent(),
                 )
-                .unwrap()
+                .unwrap();
+            state.device.set_framebuffer_name(&mut framebuffer, "RaytracerFramebuffer");
+            framebuffer
         };
 
         let mut desc_pool = DescriptorPool::new(
@@ -209,14 +212,16 @@ impl Raytracer {
         };
 
         let pipeline_layout = unsafe {
-            state
+            let mut layout = state
                 .device
                 .create_pipeline_layout(
                     std::iter::once(&desc_pool.layout)
                         .chain(std::iter::once(&octree_desc_pool.layout)),
                     std::iter::empty(),
                 )
-                .unwrap()
+                .unwrap();
+            state.device.set_pipeline_layout_name(&mut layout, "RaytracerPipelineLayout");
+            layout
         };
         let (pipeline_layout, pipeline) = unsafe {
             let vertex_module = {

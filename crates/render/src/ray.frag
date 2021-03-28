@@ -17,7 +17,7 @@ struct Ray {
 
 
 layout (constant_id = 0) const uint MAX_ITERATION_VALUE = 1000;
-const vec4 bounding_box = vec4(0.0, 0.0, 0.0, 1.0);
+const vec4 bounding_box = vec4(0.0, 0.0, 0.0, 16.0);
 
 layout(location=0) out vec4 f_color;
 layout(location=0) in vec3 vWorldPosition;
@@ -101,7 +101,6 @@ uint RayMarch(vec4 initial_box, Ray ray, out vec3 hitpoint, out vec4 hitbox, out
     counter = 0;
     counter < MAX_ITERATION_VALUE && containsAABB(test_point, bounding_box);
     counter++) {
-        vec4 entry_point_camera_space = ViewProj * vec4(entry_point, 1.0);
         hitbox = initial_box;
         material_id = material_at_position(hitbox, test_point);
         if (material_id > 0) {
@@ -122,11 +121,28 @@ uint RayMarch(vec4 initial_box, Ray ray, out vec3 hitpoint, out vec4 hitbox, out
 void main() {
     Ray ray = generate_ray();
 
-    vec2 intersection = intersectAABB(ray.origin, ray.dir, bounding_box);
-    if (intersection.x >= intersection.y) {
-        f_color = vec4(0.1, 0.3, 0.7, 1.0);
+    float depth;
+    vec3 hitpoint;
+    vec4 hitbox;
+    uint iteration_times;
+    uint voxel_id = RayMarch(bounding_box, ray, hitpoint, hitbox, iteration_times);
+    float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE) * 10.0; // 0 to 1
+
+    f_color = vec4(iteration, iteration, iteration, 1.0);
+/*
+
+    vec4 output_color;
+    float scale;
+    if (voxel_id == 0) {
+        discard;
+        //output_color = vec4(1.0, 1.0, 1.0, 1.0);
     } else {
+        output_color = vec4(1.0, 0.5, 1.0, 1.0);
         // colored
-        f_color = vec4(0.5, 0.7, 0.9, 1.0);
+        //uint material_id = (voxel_id >> 8) & 0x7f;
+        //uint color = voxel_id & 0xff;
+        //output_color = coloredMaterials[material_id].palette[color];
     }
+    f_color = output_color;
+*/
 }
