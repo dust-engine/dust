@@ -1,207 +1,199 @@
-use crate::back;
-use crate::hal;
-use crate::hal::window::Extent2D;
-use crate::raytracer::Raytracer;
-use hal::prelude::*;
-use std::borrow::Borrow;
-use std::mem::ManuallyDrop;
+use ash::version::{EntryV1_0, InstanceV1_0, InstanceV1_1, DeviceV1_0, DeviceV1_2};
+use ash::vk;
+use std::ffi::{CStr, CString};
+use raw_window_handle::HasRawWindowHandle;
 use std::sync::Arc;
+use crate::swapchain::Swapchain;
+use crate::State;
 
-pub struct RenderState {
-    pub extent: Extent2D,
-    pub surface: ManuallyDrop<<back::Backend as hal::Backend>::Surface>,
-    pub device: Arc<<back::Backend as hal::Backend>::Device>,
-    pub graphics_queue_group: hal::queue::QueueGroup<back::Backend>,
-    pub transfer_binding_queue_group: hal::queue::QueueGroup<back::Backend>,
-    pub surface_format: hal::format::Format,
-}
 
 pub struct Renderer {
-    pub instance: ManuallyDrop<back::Instance>,
-    pub adapter: hal::adapter::Adapter<back::Backend>,
-    // arc device, queue, window resized event reader, window created event reader, initliazed
-    pub state: RenderState,
-    raytracer: ManuallyDrop<Raytracer>,
-    pub device_properties: hal::PhysicalDeviceProperties,
-    pub memory_properties: hal::adapter::MemoryProperties,
+    device: ash::Device,
+    swapchain: Swapchain
 }
 
-impl Drop for Renderer {
-    fn drop(&mut self) {
-        unsafe {
-            self.state.device.wait_idle().unwrap();
+struct RayTracer {
+}
 
-            let raytracer = ManuallyDrop::take(&mut self.raytracer);
-            raytracer.destroy();
+impl RayTracer {
+    pub unsafe fn new(
+        device: ash::Device,
+        swapchain: &Swapchain,
+    ) -> Self {
+        let desc_pool = device.create_descriptor_pool(
+            &vk::DescriptorPoolCreateInfo::builder()
+                .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+                .max_sets(2)
+                .pool_sizes(&[
+                    vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::UNIFORM_BUFFER,
+                        descriptor_count: 1
+                    },
+                    vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::STORAGE_BUFFER,
+                        descriptor_count: 1
+                    }
+                ]),
+            None
+        ).unwrap();
+        let uniform_desc_layout = device.create_descriptor_set_layout(
+            &vk::DescriptorSetLayoutCreateInfo::builder()
+                .flags(vk::DescriptorSetLayoutCreateFlags::empty())
+                .bindings(&[
+                    vk::DescriptorSetLayoutBinding::builder()
+                        .binding(0)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::VERTEX)
+                        .descriptor_count(1)
+                        .build()
+                ]),
+            None
+        ).unwrap();
+        let storage_desc_layout = device.create_descriptor_set_layout(
+            &vk::DescriptorSetLayoutCreateInfo::builder()
+                .flags(vk::DescriptorSetLayoutCreateFlags::empty())
+                .bindings(&[
+                    vk::DescriptorSetLayoutBinding::builder()
+                        .binding(0)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                        .descriptor_count(1)
+                        .build()
+                ]),
+            None
+        ).unwrap();
+        let mut desc_sets = device.allocate_descriptor_sets(
+            &vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(desc_pool)
+                .set_layouts(&[uniform_desc_layout, storage_desc_layout])
+                .build()
+        ).unwrap();
+        assert_eq!(desc_sets.len(), 2);
+        let storage_desc_set = desc_sets.pop().unwrap();
+        let uniform_desc_set = desc_sets.pop().unwrap();
 
-            let surface = ManuallyDrop::take(&mut self.state.surface);
-            self.instance.destroy_surface(surface);
+
+
+        let pipeline_layout = device.create_pipeline_layout(
+            &vk::PipelineLayoutCreateInfo::builder()
+                .set_layouts(&[uniform_desc_layout, storage_desc_layout]),
+            None
+        );
+        Self {
         }
     }
 }
 
 impl Renderer {
-    pub fn new(
-        window: &impl raw_window_handle::HasRawWindowHandle,
-    ) -> (Self, Box<svo::alloc::ArenaBlockAllocator>) {
-        let instance = back::Instance::create("dust engine", 0).unwrap();
-        let surface = unsafe { instance.create_surface(window).unwrap() };
-        let adapter = instance.enumerate_adapters().pop().unwrap();
-
-        let device_properties = adapter.physical_device.properties();
-        let memory_properties = adapter.physical_device.memory_properties();
-
-        let span = tracing::info_span!("renderer new");
-        let _enter = span.enter();
-
-        let supported_surface_formats = surface.supported_formats(&adapter.physical_device);
-        tracing::info!("supported surface formats: {:?}", supported_surface_formats);
-        let surface_format =
-            supported_surface_formats.map_or(hal::format::Format::Rgba8Srgb, |formats| {
-                formats
-                    .iter()
-                    .find(|format| {
-                        format.base_format().1 == hal::format::ChannelType::Srgb
-                            && format.base_format().0 == hal::format::SurfaceType::R8_G8_B8_A8
-                    })
-                    .copied()
-                    .unwrap_or(formats[0])
-            });
-        tracing::info!("selected surface formats: {:?}", surface_format);
-
-        tracing::info!(
-            "self.adapter.queue_families: \n{:?}\n",
-            adapter.queue_families
-        );
-        let graphics_queue_family = adapter
-            .queue_families
-            .iter()
-            .find(|family| {
-                surface.supports_queue_family(family) && family.queue_type().supports_graphics()
-            })
-            .unwrap();
-        let transfer_binding_queue_family = adapter
-            .queue_families
-            .iter()
-            .find(|family| {
-                family.id() != graphics_queue_family.id()
-                    && family.supports_sparse_binding()
-                    && family.queue_type().supports_transfer()
-                    && !family.queue_type().supports_graphics()
-                    && !family.queue_type().supports_compute()
-            })
-            .expect("Can not find a queue family that supports sparse binding");
-
-        let physical_device = &adapter.physical_device;
-        let mut gpu = unsafe {
-            physical_device.open(
-                &[
-                    (graphics_queue_family, &[1.0]),
-                    (transfer_binding_queue_family, &[0.5]),
-                ],
-                hal::Features::SPARSE_BINDING
-                    | hal::Features::SPARSE_RESIDENCY_BUFFER
-                    | hal::Features::NDC_Y_UP,
-            )
-        }
-        .unwrap();
-        let device = gpu.device;
-        assert_eq!(gpu.queue_groups.len(), 2);
-        tracing::info!("queues returned:\n{:?}\n", gpu.queue_groups);
-        let transfer_binding_queue_group = gpu.queue_groups.pop().unwrap();
-        let graphics_queue_group = gpu.queue_groups.pop().unwrap();
-
-        let mut state = RenderState {
-            extent: Extent2D {
-                width: 1920,
-                height: 1080,
-            },
-            surface: ManuallyDrop::new(surface),
-            device: Arc::new(device),
-            graphics_queue_group,
-            transfer_binding_queue_group,
-            surface_format,
-        };
-
-        let surface_capabilities = state.surface.capabilities(&adapter.physical_device);
-        let framebuffer_attachment = Self::rebuild_swapchain(&mut state, &surface_capabilities);
-        let (raytracer, block_allocator) = Raytracer::new(
-            &mut state,
-            &memory_properties,
-            framebuffer_attachment,
-            &adapter.info.device_type,
-        );
-
-        let renderer = Renderer {
-            instance: ManuallyDrop::new(instance),
-            adapter,
-            state,
-            raytracer: ManuallyDrop::new(raytracer),
-            device_properties,
-            memory_properties,
-        };
-        (renderer, block_allocator)
-    }
-    pub fn on_resize(&mut self) {
-        let surface_capabilities = self
-            .state
-            .surface
-            .capabilities(&self.adapter.physical_device);
-        let framebuffer_attachment =
-            Self::rebuild_swapchain(&mut self.state, &surface_capabilities);
-        self.raytracer
-            .rebuild_framebuffer(self.state.extent, framebuffer_attachment);
-    }
-    fn rebuild_swapchain(
-        state: &mut RenderState,
-        surface_capabilities: &hal::window::SurfaceCapabilities,
-    ) -> hal::image::FramebufferAttachment {
-        let config = hal::window::SwapchainConfig::from_caps(
-            surface_capabilities,
-            state.surface_format,
-            Extent2D {
-                width: 1920,
-                height: 1080,
-            },
-        );
-        tracing::info!(
-            "Swapchain rebuilt with size {}x{}",
-            config.extent.width,
-            config.extent.height
-        );
-        state.extent = config.extent;
-        let framebuffer = config.framebuffer_attachment();
+    pub fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Self {
         unsafe {
-            state
-                .surface
-                .configure_swapchain(&state.device, config)
+            let entry = ash::Entry::new().unwrap();
+            let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
+            extensions.push(ash::extensions::ext::DebugUtils::name());
+
+            let available_instance_extensions = entry.enumerate_instance_extension_properties().unwrap();
+            tracing::info!("Supported instance extensions: {:?}", available_instance_extensions);
+
+            let instance = entry.create_instance(
+                &vk::InstanceCreateInfo::builder()
+                    .application_info(
+                        &vk::ApplicationInfo::builder()
+                            .application_name(&CString::new("Dust Application").unwrap())
+                            .application_version(0)
+                            .engine_name(&CString::new("Dust Engine").unwrap())
+                            .engine_version(0)
+                            .api_version(vk::make_version(1, 2, 0))
+                    )
+                    .enabled_extension_names(&extensions.iter().map(|&str| str.as_ptr()).collect::<Vec<_>>()),
+                None
+            ).unwrap();
+
+            let surface = ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();
+            let mut physical_devices = instance
+                .enumerate_physical_devices()
                 .unwrap();
-        }
-        framebuffer
-    }
-    pub fn update(&mut self, state: &crate::State) {
-        unsafe {
-            let (surface_image, suboptimal) = self.state.surface.acquire_image(!0).unwrap();
-            if suboptimal.is_some() {
-                tracing::warn!("Suboptimal swapchain image acquired");
-            }
+            let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
+            let physical_device = physical_devices.pop().unwrap();
 
-            let raytracer_submission_semaphore = self.raytracer.update(
-                surface_image.borrow(),
-                &mut self.state.graphics_queue_group.queues[0],
-                state,
+
+            let available_queue_family = instance.get_physical_device_queue_family_properties(physical_device);
+            let graphics_queue_family = available_queue_family
+                .iter()
+                .enumerate()
+                .find(|&(i, family)| {
+                    family.queue_flags.contains(vk::QueueFlags::GRAPHICS) && surface_loader.get_physical_device_surface_support(
+                        physical_device,
+                        i as u32,
+                        surface,
+                    ).unwrap_or(false)
+                })
+                .unwrap();
+            let graphics_queue_family = (graphics_queue_family.0 as u32, graphics_queue_family.1);
+            let transfer_binding_queue_family = available_queue_family
+                .iter()
+                .enumerate()
+                .find(|&(i, family)| {
+                    !family.queue_flags.contains(vk::QueueFlags::GRAPHICS) &&
+                        !family.queue_flags.contains(vk::QueueFlags::COMPUTE) &&
+                        family.queue_flags.contains(vk::QueueFlags::SPARSE_BINDING)
+                })
+                .unwrap();
+            let transfer_binding_queue_family = (transfer_binding_queue_family.0 as u32, transfer_binding_queue_family.1);
+
+
+            let extension_names = [
+                ash::extensions::khr::Swapchain::name()
+            ];
+            let device = instance
+                .create_device(
+                    physical_device,
+                    &vk::DeviceCreateInfo::builder()
+                        .queue_create_infos(&[
+                            vk::DeviceQueueCreateInfo::builder()
+                                .queue_family_index(graphics_queue_family.0)
+                                .queue_priorities(&[1.0])
+                                .build(),
+                            vk::DeviceQueueCreateInfo::builder()
+                                .queue_family_index(transfer_binding_queue_family.0)
+                                .queue_priorities(&[0.5])
+                                .build(),
+                        ])
+                        .enabled_extension_names(&extension_names.map(|str| str.as_ptr()))
+                        .enabled_features(&vk::PhysicalDeviceFeatures {
+                            sparse_binding: 1,
+                            sparse_residency_buffer: 1,
+                            ..Default::default()
+                        }),
+                    None,
+                ).unwrap();
+            let graphics_queue = device.get_device_queue(graphics_queue_family.0, 0);
+            let transfer_binding_queue = device.get_device_queue(transfer_binding_queue_family.0, 0);
+
+            let swapchain = Swapchain::new(
+                &instance,
+                device.clone(),
+                physical_device,
+                surface,
+                surface_loader,
+                graphics_queue_family.0,
+                graphics_queue,
             );
-
-            let suboptimal = self.state.graphics_queue_group.queues[0]
-                .present(
-                    &mut self.state.surface,
-                    surface_image,
-                    Some(raytracer_submission_semaphore),
-                )
-                .unwrap();
-            if suboptimal.is_some() {
-                tracing::warn!("Suboptimal surface presented");
+            Self {
+                device,
+                swapchain
             }
         }
+
+    }
+
+    pub fn update(&mut self, state: &State) {
+        unsafe {
+            //self.swapchain.render_frame();
+            //self.device.cmd_bind_
+        }
+    }
+
+    pub fn resize(&mut self) {
+
     }
 }

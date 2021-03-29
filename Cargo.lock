@@ -157,6 +157,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ash-window"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d058436a3a8410c6e9b625c4e763ea6eaba97d771c303fc2c8e3595b666ffa3"
+dependencies = [
+ "ash 0.32.0",
+ "raw-window-handle",
+ "raw-window-metal",
+]
+
+[[package]]
 name = "async-channel"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1243,6 +1254,8 @@ dependencies = [
 name = "dust-render"
 version = "0.1.0"
 dependencies = [
+ "ash 0.32.0",
+ "ash-window",
  "block-alloc",
  "gfx-auxil 0.8.0 (git+https://github.com/gfx-rs/gfx)",
  "gfx-backend-dx12 0.7.0 (git+https://github.com/gfx-rs/gfx)",
@@ -2785,6 +2798,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a441a7a6c80ad6473bd4b74ec1c9a4c951794285bf941c2126f607c72e48211"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "raw-window-metal"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cd21ed1cdef7f1b1579b972148ba6058b5b545959a14d91ea83c4f0ea9f289b"
+dependencies = [
+ "cocoa",
+ "core-graphics 0.22.2",
+ "objc",
+ "raw-window-handle",
 ]
 
 [[package]]

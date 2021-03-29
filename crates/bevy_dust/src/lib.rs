@@ -13,8 +13,8 @@ pub struct DustPlugin;
 
 impl Plugin for DustPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_startup_system_to_stage(StartupStage::PreStartup, setup.exclusive_system())
-            .add_system(world_update.system());
+        app.add_startup_system_to_stage(StartupStage::PreStartup, setup.exclusive_system());
+            //.add_system(world_update.system());
     }
 }
 
@@ -37,11 +37,7 @@ fn setup(
         .unwrap();
 
     let winit_window = winit_windows.get_window(window_id).unwrap();
-    let (renderer, block_allocator) = Renderer::new(winit_window);
-    let arena_allocator: svo::ArenaAllocator<Voxel> =
-        svo::alloc::ArenaAllocator::new(block_allocator);
-    let octree: Octree = svo::octree::Octree::new(arena_allocator);
-    commands.insert_resource(octree);
+    let renderer = dust_render::renderer::Renderer::new(winit_window);
     commands.insert_resource(renderer);
 }
 
@@ -55,7 +51,7 @@ fn world_update(
         .expect("Expecting an entity with RaytracerCameraBundle");
 
     for window_resized_event in window_resized_events.iter() {
-        renderer.on_resize();
+        renderer.resize();
     }
     let camera_transform = glam::TransformRT {
         rotation: global_transform.rotation,

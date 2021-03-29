@@ -16,6 +16,9 @@ gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true }
 tracing = "*"
 raw-window-handle = "*"
 glam = { version = "0.13", features = ["transform-types"] }
+ash-window = "0.6.0"
+ash = "0.32.0"
+
 
 [build-dependencies]
 naga = { git = "https://github.com/gfx-rs/naga", features = ["spv-out", "glsl-in"] }

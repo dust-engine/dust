@@ -32,21 +32,7 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
-    let monument = dot_vox::load("assets/monu9.vox").unwrap();
-    let model = &monument.models[0];
-    let mut octree_mutator = octree.get_random_mutator();
-    octree_mutator.set(0, 0, 0, 16, Voxel::with_id(1));
-    /*for voxel in &model.voxels {
-        octree_mutator.set(
-            voxel.x as u32,
-            voxel.z as u32,
-            voxel.y as u32,
-            256,
-            Voxel::with_id(voxel.i as u16),
-        );
-    }*/
-    octree_mutator.commit();
+fn setup(mut commands: Commands) {
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation.z = 2.0;

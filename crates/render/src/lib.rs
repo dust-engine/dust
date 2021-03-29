@@ -1,4 +1,5 @@
 #![feature(array_methods)]
+#![feature(array_map)]
 
 pub use gfx_hal as hal;
 
@@ -9,13 +10,8 @@ pub use gfx_backend_vulkan as back;
 pub use gfx_backend_dx12 as back;
 
 mod camera_projection;
-mod descriptor_pool;
-mod frame;
-mod raytracer;
-mod renderer;
 mod shared_buffer;
 mod voxel;
-pub use renderer::Renderer;
 
 pub use crate::camera_projection::CameraProjection;
 use glam::TransformRT;
@@ -27,3 +23,7 @@ pub struct State<'a> {
     pub camera_projection: &'a CameraProjection,
     pub camera_transform: &'a TransformRT,
 }
+
+pub mod renderer;
+pub mod swapchain;
+pub use renderer::Renderer;
