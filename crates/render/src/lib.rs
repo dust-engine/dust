@@ -1,14 +1,6 @@
 #![feature(array_methods)]
 #![feature(array_map)]
 
-pub use gfx_hal as hal;
-
-#[cfg(feature = "vulkan")]
-pub use gfx_backend_vulkan as back;
-
-#[cfg(feature = "dx12")]
-pub use gfx_backend_dx12 as back;
-
 mod camera_projection;
 mod device_info;
 mod shared_buffer;

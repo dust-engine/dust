@@ -9,10 +9,6 @@ edition = "2018"
 [dependencies]
 svo = { path = "../svo" }
 block-alloc = { path = "../block_alloc" }
-gfx-hal = { git = "https://github.com/gfx-rs/gfx" }
-gfx-auxil = { git = "https://github.com/gfx-rs/gfx" }
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx", optional = true }
-gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx", optional = true }
 tracing = "*"
 raw-window-handle = "*"
 glam = { version = "0.13", features = ["transform-types"] }
@@ -25,8 +21,3 @@ naga = { git = "https://github.com/gfx-rs/naga", features = ["spv-out", "glsl-in
 
 [lib]
 name = "dust_render"
-
-[features]
-vulkan = ["gfx-backend-vulkan"]
-dx12 = ["gfx-backend-dx12"]
-default = ["vulkan"]
