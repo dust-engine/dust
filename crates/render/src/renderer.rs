@@ -102,7 +102,7 @@ impl RayTracer {
                         .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
                         .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
                         .initial_layout(vk::ImageLayout::UNDEFINED)
-                        .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                        .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
                         .build(),
                 ])
                 .subpasses(&[
@@ -478,6 +478,7 @@ impl Renderer {
 
     pub fn update(&mut self, state: &State) {
         unsafe {
+            self.swapchain.render_frame()
             //self.swapchain.render_frame();
             //self.device.cmd_bind_
         }

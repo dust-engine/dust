@@ -2,7 +2,7 @@ pub mod discrete;
 pub mod integrated;
 mod utils;
 
-const MAX_BUFFER_SIZE: u64 = 1 << 32;
+const MAX_BUFFER_SIZE: u64 = 1 << 32 - 1;
 
 pub use discrete::DiscreteBlockAllocator;
 pub use integrated::IntegratedBlockAllocator;

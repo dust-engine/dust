@@ -13,8 +13,8 @@ pub struct DustPlugin;
 
 impl Plugin for DustPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_startup_system_to_stage(StartupStage::PreStartup, setup.exclusive_system());
-            //.add_system(world_update.system());
+        app.add_startup_system_to_stage(StartupStage::PreStartup, setup.exclusive_system())
+            .add_system(world_update.system());
     }
 }
 

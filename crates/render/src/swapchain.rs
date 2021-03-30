@@ -9,6 +9,9 @@ struct Frame {
 struct SwapchainImage {
     view: vk::ImageView,
     fence: vk::Fence,
+    // The reason we need a separate command buffer for each swapchain image
+    // is that cmd_begin_render_pass contains a reference to the framebuffer
+    // which is unique to each swapchain image.
     command_buffer: vk::CommandBuffer,
     framebuffer: vk::Framebuffer,
 }
@@ -188,6 +191,7 @@ impl Swapchain {
                 );
                 record_cmd_buf_in_pass(&device, command_buffer);
                 device.cmd_end_render_pass(command_buffer);
+                device.end_command_buffer(command_buffer);
 
                 SwapchainImage {
                     view,
@@ -215,7 +219,6 @@ impl Swapchain {
     }
     pub unsafe fn render_frame(
         &mut self,
-        command_buffer: vk::CommandBuffer,
     ) {
         let frame_in_flight = &self.frames_in_flight[self.current_frame];
         self.device.wait_for_fences(
@@ -250,7 +253,7 @@ impl Swapchain {
                 vk::SubmitInfo::builder()
                     .wait_semaphores(&[frame_in_flight.swapchain_image_available_semaphore])
                     .signal_semaphores(&[frame_in_flight.render_finished_semaphore])
-                    .command_buffers(&[command_buffer])
+                    .command_buffers(&[swapchain_image.command_buffer])
                     .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
                     .build()
             ],
