@@ -33,7 +33,7 @@ pub struct Swapchain {
     swapchain_images: Vec<SwapchainImage>, // number of images in swapchain
     graphics_queue: vk::Queue,
     command_pool: vk::CommandPool,
-    config: SwapchainConfig
+    pub config: SwapchainConfig
 }
 pub struct SwapchainConfig {
     pub format: vk::Format,
@@ -171,7 +171,7 @@ impl Swapchain {
                     vk::ClearValue::default(),
                     vk::ClearValue::default(),
                 ];
-                clear_values[0].color.float32 = [0.5, 0.0, 0.0, 1.0];
+                clear_values[0].color.float32 = [0.0, 1.0, 0.0, 1.0];
                 clear_values[1].depth_stencil = vk::ClearDepthStencilValue {
                     depth: 1.0,
                     stencil: 0

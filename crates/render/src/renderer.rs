@@ -271,6 +271,7 @@ impl RayTracer {
                             .logic_op_enable(false)
                             .attachments(&[
                                 vk::PipelineColorBlendAttachmentState::builder()
+                                    .color_write_mask(vk::ColorComponentFlags::all())
                                     .blend_enable(false)
                                     .build()
                             ])
@@ -478,6 +479,11 @@ impl Renderer {
 
     pub fn update(&mut self, state: &State) {
         unsafe {
+            self.shared_buffer.update_camera(
+                state.camera_projection,
+                state.camera_transform,
+                self.swapchain.config.extent.width as f32 / self.swapchain.config.extent.height as f32
+            );
             self.swapchain.render_frame()
             //self.swapchain.render_frame();
             //self.device.cmd_bind_

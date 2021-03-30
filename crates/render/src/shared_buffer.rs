@@ -38,6 +38,7 @@ impl SharedBuffer {
                 break;
             }
         }
+        tracing::info!("SharedBuffer using staging: {:?}", needs_staging);
         debug_assert_eq!(
             std::mem::size_of_val(vertex_buffer) + std::mem::size_of_val(index_buffer),
             124
