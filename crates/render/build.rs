@@ -1,9 +1,9 @@
 const GLSL_SHADER_FILES: [&str; 2] = ["./src/ray.frag", "./src/ray.vert"];
 
 fn main() {
-    use shaderc::{CompileOptions, Compiler, ShaderKind};
+    use shaderc::{CompileOptions, Compiler, Error, ShaderKind};
     let mut compiler = Compiler::new().unwrap();
-    let mut options = CompileOptions::new().unwrap();
+    let options = CompileOptions::new().unwrap();
 
     let mut out_path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).to_path_buf();
     out_path.push("shaders");
@@ -22,26 +22,34 @@ fn main() {
             "comp" => ShaderKind::Compute,
             _ => panic!("Extension {:?} not recognized", extension),
         };
-        let binary_result = compiler
-            .compile_into_spirv(
-                &input,
-                stage,
-                path.file_name().unwrap().to_str().unwrap(),
-                "main",
-                Some(&options),
-            )
-            .unwrap();
+        let binary_result = compiler.compile_into_spirv(
+            &input,
+            stage,
+            path.file_name().unwrap().to_str().unwrap(),
+            "main",
+            Some(&options),
+        );
+
+        let binary_result = match binary_result {
+            Ok(result) => result,
+            Err(err) => match err {
+                Error::CompilationError(ty, err) => {
+                    panic!("Shader Error ({}): {}", ty, err)
+                }
+                Error::InternalError(err) => panic!("Shader Compilation Internal Error: {}", err),
+                _ => panic!("Shader Compilation Failed: {:?}", err),
+            },
+        };
 
         assert_eq!(*binary_result.as_binary().first().unwrap(), 0x07230203);
 
         out_path.set_file_name(path.file_name().unwrap());
         out_path.set_extension(match stage {
-                ShaderKind::Fragment => "frag.spv",
-                ShaderKind::Vertex => "vert.spv",
-                ShaderKind::Compute => "comp.spv",
-                _ => unreachable!()
-            });
-        println!("Writing to {:?}", out_path);
+            ShaderKind::Fragment => "frag.spv",
+            ShaderKind::Vertex => "vert.spv",
+            ShaderKind::Compute => "comp.spv",
+            _ => unreachable!(),
+        });
         std::fs::write(&out_path, &binary_result.as_binary_u8()).unwrap();
     }
 }

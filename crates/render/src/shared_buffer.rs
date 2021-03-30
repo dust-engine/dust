@@ -2,7 +2,7 @@ use ash::vk;
 
 use crate::camera_projection::CameraProjection;
 use ash::version::DeviceV1_0;
-use glam::{Mat4, TransformRT};
+use glam::{Mat4, TransformRT, Vec3};
 
 pub struct SharedStagingBuffer {
     memory: vk::DeviceMemory,
@@ -265,7 +265,7 @@ impl SharedBuffer {
         transform: &TransformRT,
         aspect_ratio: f32,
     ) {
-        let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
+        let transform = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
         let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * transform.inverse();
         let transform_cols_arr = transform.to_cols_array();
         let view_proj_cols_arr = view_proj.to_cols_array();

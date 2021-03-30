@@ -12,8 +12,8 @@ block-alloc = { path = "../block_alloc" }
 tracing = "*"
 raw-window-handle = "*"
 glam = { version = "0.13", features = ["transform-types"] }
-ash-window = "0.6.0"
-ash = "0.32.0"
+ash-window = { git = "https://github.com/MaikKlein/ash" }
+ash = { git = "https://github.com/MaikKlein/ash" } # wait for 0.33.0 for queue_bind_sparse
 
 
 [build-dependencies]
