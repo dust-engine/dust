@@ -1258,8 +1258,8 @@ dependencies = [
  "ash-window",
  "block-alloc",
  "glam",
- "naga 0.3.1 (git+https://github.com/gfx-rs/naga)",
  "raw-window-handle",
+ "shaderc",
  "svo",
  "tracing",
 ]
@@ -1635,7 +1635,7 @@ version = "0.7.0"
 source = "git+https://github.com/gfx-rs/gfx#dea7b054782460bfd348790523e3ac98a5dc251f"
 dependencies = [
  "bitflags",
- "naga 0.3.1 (git+https://github.com/gfx-rs/naga?tag=gfx-18)",
+ "naga 0.3.1",
  "raw-window-handle",
  "thiserror",
 ]
@@ -2252,22 +2252,6 @@ dependencies = [
 
 [[package]]
 name = "naga"
-version = "0.3.1"
-source = "git+https://github.com/gfx-rs/naga#c55bdf57bf9bc190ab4863b831547250e82cc9a6"
-dependencies = [
- "bit-set",
- "bitflags",
- "fxhash",
- "log",
- "num-traits",
- "pomelo",
- "pp-rs",
- "spirv_headers",
- "thiserror",
-]
-
-[[package]]
-name = "naga"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05089b2acdf0e6a962cdbf5e328402345a27f59fcde1a59fe97a73e8149d416f"
@@ -2677,31 +2661,6 @@ dependencies = [
  "deflate",
  "miniz_oxide",
 ]
-
-[[package]]
-name = "pomelo"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76dd249f63dbbc68c8caa9b5fd16b32c7ba5da56df93d40a9552c91ebfd2a1cd"
-dependencies = [
- "pomelo-impl",
-]
-
-[[package]]
-name = "pomelo-impl"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "597c3287a549da151aca6ada2795ecde089c7527bd5093114e8e0e1c3f0e52b1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "pp-rs"
-version = "0.1.0"
-source = "git+https://github.com/Kangz/glslpp-rs?rev=4f2f72a#4f2f72a22d74e712030fb8cec367ce9f65293d5a"
 
 [[package]]
 name = "ppv-lite86"

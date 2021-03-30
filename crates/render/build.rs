@@ -1,35 +1,47 @@
 const GLSL_SHADER_FILES: [&str; 2] = ["./src/ray.frag", "./src/ray.vert"];
 
 fn main() {
-    /*
-    for shader_file_path in &GLSL_SHADER_FILES {
-        let input = std::fs::read_to_string(shader_file_path)
-            .unwrap();
-        let stage = if shader_file_path.ends_with(".frag") {
-            naga::ShaderStage::Fragment
-        } else if shader_file_path.ends_with(".vert") {
-            naga::ShaderStage::Vertex
-        } else if shader_file_path.ends_with(".comp") {
-            naga::ShaderStage::Compute
-        } else {
-            panic!("Unknown shader type: {}", shader_file_path)
+    use shaderc::{CompileOptions, Compiler, ShaderKind};
+    let mut compiler = Compiler::new().unwrap();
+    let mut options = CompileOptions::new().unwrap();
+
+    let mut out_path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).to_path_buf();
+    out_path.push("shaders");
+    std::fs::create_dir_all(&out_path).unwrap();
+    out_path.push("shader.spv");
+
+    for &shader_file_path in &GLSL_SHADER_FILES {
+        let path = std::path::Path::new(shader_file_path);
+        println!("cargo:rerun-if-changed={}", path.to_str().unwrap());
+        let input = std::fs::read_to_string(path).unwrap();
+
+        let extension = path.extension().unwrap();
+        let stage = match extension.to_str().unwrap() {
+            "vert" => ShaderKind::Vertex,
+            "frag" => ShaderKind::Fragment,
+            "comp" => ShaderKind::Compute,
+            _ => panic!("Extension {:?} not recognized", extension),
         };
-        let mut entry_points = naga::FastHashMap::default();
-        entry_points.insert("main".to_string(), stage);
-        let module = naga::front::glsl::parse_str(
-            &input,
-            &naga::front::glsl::Options {
-                entry_points,
-                defines: Default::default()
-            }
-        )
+        let binary_result = compiler
+            .compile_into_spirv(
+                &input,
+                stage,
+                path.file_name().unwrap().to_str().unwrap(),
+                "main",
+                Some(&options),
+            )
             .unwrap();
-        let analysis = naga::proc::Validator::new().validate(&module).unwrap();
-        naga::back::spv::write_vec(
-            &module,
-            &analysis,
-            &naga::back::spv::Options::default()
-        );
+
+        assert_eq!(*binary_result.as_binary().first().unwrap(), 0x07230203);
+
+        out_path.set_file_name(path.file_name().unwrap());
+        out_path.set_extension(match stage {
+                ShaderKind::Fragment => "frag.spv",
+                ShaderKind::Vertex => "vert.spv",
+                ShaderKind::Compute => "comp.spv",
+                _ => unreachable!()
+            });
+        println!("Writing to {:?}", out_path);
+        std::fs::write(&out_path, &binary_result.as_binary_u8()).unwrap();
     }
-     */
 }

@@ -17,7 +17,7 @@ ash = "0.32.0"
 
 
 [build-dependencies]
-naga = { git = "https://github.com/gfx-rs/naga", features = ["spv-out", "glsl-in"] }
+shaderc = "0.7"
 
 [lib]
 name = "dust_render"

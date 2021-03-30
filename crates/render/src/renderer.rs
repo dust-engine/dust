@@ -175,7 +175,7 @@ impl RayTracer {
                 &vk::ShaderModuleCreateInfo::builder()
                     .code(
                         &ash::util::read_spv(&mut Cursor::new(
-                            &include_bytes!("./ray.vert.spv")[..],
+                            &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.vert.spv"))[..],
                         ))
                         .unwrap(),
                     )
@@ -188,7 +188,7 @@ impl RayTracer {
                 &vk::ShaderModuleCreateInfo::builder()
                     .code(
                         &ash::util::read_spv(&mut Cursor::new(
-                            &include_bytes!("./ray.frag.spv")[..],
+                            &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.frag.spv"))[..],
                         ))
                         .unwrap(),
                     )
