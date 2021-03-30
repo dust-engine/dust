@@ -1,5 +1,3 @@
-use svo::alloc::ArenaAllocated;
-
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Ord, PartialOrd)]
 pub struct Voxel(u16);
 impl Voxel {

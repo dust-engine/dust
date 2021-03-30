@@ -65,7 +65,11 @@ impl<B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<B, SIZE> {
                 &system_buf_requirements,
                 &device_buf_requirements,
             );
-            println!("sys_memtype: {:?} \ndevice_memtype: {:?}", memory_properties.memory_types[system_memtype.0], memory_properties.memory_types[device_memtype.0]);
+            println!(
+                "sys_memtype: {:?} \ndevice_memtype: {:?}",
+                memory_properties.memory_types[system_memtype.0],
+                memory_properties.memory_types[device_memtype.0]
+            );
 
             let mut command_pool = device
                 .create_command_pool(
@@ -74,7 +78,10 @@ impl<B: hal::Backend, const SIZE: usize> DiscreteBlockAllocator<B, SIZE> {
                 )
                 .unwrap();
             let mut command_buffer = command_pool.allocate_one(hal::command::Level::Primary);
-            device.set_command_buffer_name(&mut command_buffer, "DiscreteBlockAllocatorCommandBuffer");
+            device.set_command_buffer_name(
+                &mut command_buffer,
+                "DiscreteBlockAllocatorCommandBuffer",
+            );
             Ok(Self {
                 device,
                 bind_queue,
@@ -162,7 +169,10 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE> for DiscreteBlockA
         }
     }
 
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>) {
+    unsafe fn flush(
+        &mut self,
+        ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>,
+    ) {
         self.command_buffer.reset(false);
         // todo: wait for semaphores
         self.command_buffer

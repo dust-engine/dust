@@ -10,6 +10,7 @@ pub use gfx_backend_vulkan as back;
 pub use gfx_backend_dx12 as back;
 
 mod camera_projection;
+mod device_info;
 mod shared_buffer;
 mod voxel;
 

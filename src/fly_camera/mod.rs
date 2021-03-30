@@ -108,7 +108,7 @@ impl Default for FlyCamera {
             friction: 1.0,
             pitch: 0.0,
             yaw: 0.0,
-            velocity: Vec3::zero(),
+            velocity: Vec3::ZERO,
             key_forward: KeyCode::W,
             key_backward: KeyCode::S,
             key_left: KeyCode::A,
@@ -121,7 +121,7 @@ impl Default for FlyCamera {
 }
 
 fn forward_vector(rotation: &Quat) -> Vec3 {
-    rotation.mul_vec3(Vec3::unit_z()).normalize()
+    rotation.mul_vec3(Vec3::Z).normalize()
 }
 
 fn forward_walk_vector(rotation: &Quat) -> Vec3 {
@@ -146,11 +146,7 @@ fn camera_movement_system(
         let (axis_h, axis_v, axis_float) = if options.enabled {
             (
                 movement_axis(&keyboard_input, options.key_right, options.key_left),
-                movement_axis(
-                    &keyboard_input,
-                    options.key_backward,
-                    options.key_forward,
-                ),
+                movement_axis(&keyboard_input, options.key_backward, options.key_forward),
                 movement_axis(&keyboard_input, options.key_up, options.key_down),
             )
         } else {
@@ -160,17 +156,17 @@ fn camera_movement_system(
         let rotation = transform.rotation;
         let accel: Vec3 = (strafe_vector(&rotation) * axis_h)
             + (forward_walk_vector(&rotation) * axis_v)
-            + (Vec3::unit_y() * axis_float);
+            + (Vec3::Y * axis_float);
         let accel: Vec3 = if accel.length() != 0.0 {
             accel.normalize() * options.accel
         } else {
-            Vec3::zero()
+            Vec3::ZERO
         };
 
         let friction: Vec3 = if options.velocity.length() != 0.0 {
             options.velocity.normalize() * -1.0 * options.friction
         } else {
-            Vec3::zero()
+            Vec3::ZERO
         };
 
         options.velocity += accel * time.delta_seconds();
@@ -182,13 +178,12 @@ fn camera_movement_system(
 
         let delta_friction = friction * time.delta_seconds();
 
-        options.velocity = if (options.velocity + delta_friction).signum()
-            != options.velocity.signum()
-        {
-            Vec3::zero()
-        } else {
-            options.velocity + delta_friction
-        };
+        options.velocity =
+            if (options.velocity + delta_friction).signum() != options.velocity.signum() {
+                Vec3::ZERO
+            } else {
+                options.velocity + delta_friction
+            };
 
         transform.translation += options.velocity;
     }
@@ -199,7 +194,7 @@ fn mouse_motion_system(
     mut mouse_motion_event_reader: EventReader<MouseMotion>,
     mut query: Query<(&mut FlyCamera, &mut Transform)>,
 ) {
-    let mut delta: Vec2 = Vec2::zero();
+    let mut delta: Vec2 = Vec2::ZERO;
     for event in mouse_motion_event_reader.iter() {
         delta += event.delta;
     }
@@ -220,8 +215,8 @@ fn mouse_motion_system(
         let yaw_radians = options.yaw.to_radians();
         let pitch_radians = options.pitch.to_radians();
 
-        transform.rotation = Quat::from_axis_angle(Vec3::unit_y(), yaw_radians)
-            * Quat::from_axis_angle(-Vec3::unit_x(), pitch_radians);
+        transform.rotation = Quat::from_axis_angle(Vec3::Y, yaw_radians)
+            * Quat::from_axis_angle(-Vec3::X, pitch_radians);
     }
 }
 
@@ -229,7 +224,7 @@ fn mouse_motion_system(
 Include this plugin to add the systems for the FlyCamera bundle.
 ```no_compile
 fn main() {
-	App::build().add_plugin(FlyCameraPlugin);
+    App::build().add_plugin(FlyCameraPlugin);
 }
 ```
 **/
@@ -238,8 +233,7 @@ pub struct FlyCameraPlugin;
 
 impl Plugin for FlyCameraPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app
-            .add_system(camera_movement_system.system())
+        app.add_system(camera_movement_system.system())
             .add_system(camera_2d_movement_system.system())
             .add_system(mouse_motion_system.system());
     }

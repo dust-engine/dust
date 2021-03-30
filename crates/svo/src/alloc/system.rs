@@ -30,6 +30,9 @@ impl<const SIZE: usize> BlockAllocator<SIZE> for SystemBlockAllocator<SIZE> {
         self.allocator.deallocate(block.cast(), layout);
     }
 
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>) {
+    unsafe fn flush(
+        &mut self,
+        ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>,
+    ) {
     }
 }

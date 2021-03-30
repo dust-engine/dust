@@ -95,18 +95,23 @@ impl<B: hal::Backend, const SIZE: usize> BlockAllocator<SIZE>
         self.device.free_memory(memory);
     }
 
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>) {
+    unsafe fn flush(
+        &mut self,
+        ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>,
+    ) {
         println!("Flushed {:?}", ranges.size_hint());
         let allocations = &self.allocations;
-        self.device.flush_mapped_memory_ranges(
-            ranges.map(|(ptr, range)| {
+        self.device
+            .flush_mapped_memory_ranges(ranges.map(|(ptr, range)| {
                 let memory = &allocations[&ptr];
-                (memory, hal::memory::Segment {
-                    offset: range.start as u64,
-                    size: Some((range.end - range.start) as u64)
-                })
-            })
-        );
+                (
+                    memory,
+                    hal::memory::Segment {
+                        offset: range.start as u64,
+                        size: Some((range.end - range.start) as u64),
+                    },
+                )
+            }));
     }
 }
 

@@ -1,10 +1,8 @@
 use super::super::Octree;
-use crate::alloc::{CHUNK_SIZE, Handle};
+use crate::alloc::{Handle, CHUNK_SIZE};
 use crate::octree::Node;
 use crate::Voxel;
 use std::mem::size_of;
-
-
 
 fn set_recursive<T: Voxel>(
     octree: &mut Octree<T>,
@@ -69,7 +67,13 @@ fn set_recursive<T: Voxel>(
     return (avg, false);
 }
 
-pub fn get<T: Voxel>(octree: &Octree<T>, mut x: u32, mut y: u32, mut z: u32, mut gridsize: u32) -> T {
+pub fn get<T: Voxel>(
+    octree: &Octree<T>,
+    mut x: u32,
+    mut y: u32,
+    mut z: u32,
+    mut gridsize: u32,
+) -> T {
     let mut handle = octree.root;
     while gridsize > 2 {
         gridsize = gridsize / 2;
@@ -107,8 +111,6 @@ pub fn get<T: Voxel>(octree: &Octree<T>, mut x: u32, mut y: u32, mut z: u32, mut
     octree.arena.get(handle).data[corner as usize]
 }
 
-
-
 pub struct RandomAccessor<'a, T: Voxel> {
     pub octree: &'a Octree<T>,
 }
@@ -128,7 +130,8 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
         get(self.octree, x, y, z, gridsize)
     }
     pub fn set(&mut self, x: u32, y: u32, z: u32, gridsize: u32, item: T) {
-        let (data, _collapsed) = set_recursive(self.octree, self.octree.root, x, y, z, gridsize, item);
+        let (data, _collapsed) =
+            set_recursive(self.octree, self.octree.root, x, y, z, gridsize, item);
         self.octree.root_data = data;
     }
     pub fn commit(&mut self) {

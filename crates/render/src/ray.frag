@@ -119,16 +119,7 @@ uint RayMarch(vec4 initial_box, Ray ray, out vec3 hitpoint, out vec4 hitbox, out
 }
 
 void main() {
-    Ray ray = generate_ray();
-
-    float depth;
-    vec3 hitpoint;
-    vec4 hitbox;
-    uint iteration_times;
-    uint voxel_id = RayMarch(bounding_box, ray, hitpoint, hitbox, iteration_times);
-    float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE) * 10.0; // 0 to 1
-
-    f_color = vec4(iteration, iteration, iteration, 1.0);
+    f_color = vec4(0.0, 0.0, 1.0, 1.0);
 /*
 
     vec4 output_color;

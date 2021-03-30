@@ -39,7 +39,7 @@ impl Default for FlyCamera2d {
             accel: 3.0 * MUL_2D,
             max_speed: 1.0 * MUL_2D,
             friction: 1.75 * MUL_2D,
-            velocity: Vec2::zero(),
+            velocity: Vec2::ZERO,
             key_left: KeyCode::A,
             key_right: KeyCode::D,
             key_up: KeyCode::W,
@@ -64,17 +64,17 @@ pub fn camera_2d_movement_system(
             (0.0, 0.0)
         };
 
-        let accel: Vec2 = (Vec2::unit_x() * axis_h) + (Vec2::unit_y() * axis_v);
+        let accel: Vec2 = (Vec2::X * axis_h) + (Vec2::Y * axis_v);
         let accel: Vec2 = if accel.length() != 0.0 {
             accel.normalize() * options.accel
         } else {
-            Vec2::zero()
+            Vec2::ZERO
         };
 
         let friction: Vec2 = if options.velocity.length() != 0.0 {
             options.velocity.normalize() * -1.0 * options.friction
         } else {
-            Vec2::zero()
+            Vec2::ZERO
         };
 
         options.velocity += accel * time.delta_seconds();
@@ -86,15 +86,13 @@ pub fn camera_2d_movement_system(
 
         let delta_friction = friction * time.delta_seconds();
 
-        options.velocity = if (options.velocity + delta_friction).signum()
-            != options.velocity.signum()
-        {
-            Vec2::zero()
-        } else {
-            options.velocity + delta_friction
-        };
+        options.velocity =
+            if (options.velocity + delta_friction).signum() != options.velocity.signum() {
+                Vec2::ZERO
+            } else {
+                options.velocity + delta_friction
+            };
 
-        transform.translation +=
-            Vec3::new(options.velocity.x, options.velocity.y, 0.0);
+        transform.translation += Vec3::new(options.velocity.x, options.velocity.y, 0.0);
     }
 }

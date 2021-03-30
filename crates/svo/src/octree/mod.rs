@@ -82,8 +82,7 @@ impl<T: Voxel> Octree<T> {
             if old_have_children_at_i && new_have_children_at_i {
                 unsafe {
                     std::ptr::copy(
-                        self.arena
-                            .get(old_child_handle.offset(old_slot_num as u32)),
+                        self.arena.get(old_child_handle.offset(old_slot_num as u32)),
                         self.arena
                             .get_mut(new_child_handle.offset(new_slot_num as u32)),
                         1,
@@ -107,14 +106,10 @@ impl<T: Voxel> Octree<T> {
         }
     }
     pub fn get_random_accessor(&self) -> accessor::random::RandomAccessor<T> {
-        accessor::random::RandomAccessor {
-            octree: self
-        }
+        accessor::random::RandomAccessor { octree: self }
     }
     pub fn get_random_mutator(&mut self) -> accessor::random::RandomMutator<T> {
-        accessor::random::RandomMutator {
-            octree: self
-        }
+        accessor::random::RandomMutator { octree: self }
     }
 }
 

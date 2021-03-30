@@ -1,9 +1,9 @@
 use super::BlockAllocator;
+use crate::alloc::changeset::ChangeSet;
 use std::marker::PhantomData;
 use std::mem::{size_of, ManuallyDrop};
 use std::ops::{Index, IndexMut};
 use std::ptr::NonNull;
-use crate::alloc::changeset::ChangeSet;
 
 pub const CHUNK_DEGREE: usize = 24;
 pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
@@ -204,13 +204,12 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
     }
     pub fn flush(&mut self) {
         let chunks = &self.chunks;
-        let mut iter = self.changeset.drain()
-            .map(|(chunk_index, range)| {
-                let ptr = chunks[chunk_index];
-                let size: u32 = size_of::<T>() as u32;
-                let range = (range.start * size)..(range.end * size);
-                (ptr.cast(), range)
-            });
+        let mut iter = self.changeset.drain().map(|(chunk_index, range)| {
+            let ptr = chunks[chunk_index];
+            let size: u32 = size_of::<T>() as u32;
+            let range = (range.start * size)..(range.end * size);
+            (ptr.cast(), range)
+        });
         unsafe {
             self.block_allocator.flush(&mut iter);
         }

@@ -1,7 +1,7 @@
 use crate::alloc::Handle;
-use std::ops::Range;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::mem::MaybeUninit;
+use std::ops::Range;
 
 #[derive(Clone, Debug)]
 struct BlockChangeSet {
@@ -38,15 +38,15 @@ impl ChangeSet {
         if let Some(chunk) = self.changed_chunks.get_mut(&chunk_num) {
             chunk.changed(slot_num, len);
         } else {
-            self.changed_chunks.insert(chunk_num, BlockChangeSet::new(slot_num, len));
+            self.changed_chunks
+                .insert(chunk_num, BlockChangeSet::new(slot_num, len));
         }
     }
 
     // returns: iterator of (chunk_index, range of slots)
     pub fn drain<'a>(&'a mut self) -> impl Iterator<Item = (usize, Range<u32>)> + 'a {
-        self.changed_chunks.drain()
-            .map(move |(i, changes)| {
-                    (i as usize, changes.range.clone())
-            })
+        self.changed_chunks
+            .drain()
+            .map(move |(i, changes)| (i as usize, changes.range.clone()))
     }
 }

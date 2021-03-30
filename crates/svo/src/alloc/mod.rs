@@ -1,6 +1,6 @@
 mod arena;
-mod system;
 mod changeset;
+mod system;
 
 pub use arena::CHUNK_DEGREE;
 pub use arena::CHUNK_SIZE;
