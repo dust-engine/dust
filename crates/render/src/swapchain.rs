@@ -22,7 +22,6 @@ impl Frame {
     }
 }
 pub struct Swapchain {
-    pub format: vk::Format,
     device: ash::Device,
     current_frame: usize,
     loader: ash::extensions::khr::Swapchain,
@@ -31,66 +30,54 @@ pub struct Swapchain {
     swapchain_images: Vec<SwapchainImage>, // number of images in swapchain
     graphics_queue: vk::Queue,
     command_pool: vk::CommandPool,
-    render_pass: vk::RenderPass,
+    config: SwapchainConfig
+}
+pub struct SwapchainConfig {
+    pub format: vk::Format,
+    pub extent: vk::Extent2D,
 }
 impl Swapchain {
-    pub unsafe fn new(
-        instance: &ash::Instance,
-        device: ash::Device,
+    pub unsafe fn get_config(
         physical_device: vk::PhysicalDevice,
         surface: vk::SurfaceKHR,
         surface_loader: ash::extensions::khr::Surface,
-        graphics_queue_family_index: u32,
-        graphics_queue: vk::Queue,
-    ) -> Self {
-        let num_frames_in_flight = 3;
-        let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
+    ) -> SwapchainConfig {
         let caps = surface_loader.get_physical_device_surface_capabilities(physical_device, surface)
             .unwrap();
         let supported_formats = surface_loader.get_physical_device_surface_formats(physical_device, surface).unwrap();
         let supported_present_mode = surface_loader.get_physical_device_surface_present_modes(physical_device, surface).unwrap();
 
-        let surface_format = vk::Format::R8G8B8A8_SRGB;
-        let extent = caps.current_extent.clone();
+        let format = vk::Format::R8G8B8A8_SRGB;
+        let extent = caps.current_extent;
+        SwapchainConfig {
+            format,
+            extent
+        }
+    }
+    pub unsafe fn new<F1, F2>(
+        instance: &ash::Instance,
+        device: ash::Device,
+        render_pass: vk::RenderPass,
+        surface: vk::SurfaceKHR,
+        config: SwapchainConfig,
+        graphics_queue_family_index: u32,
+        graphics_queue: vk::Queue,
 
-        let render_pass = device.create_render_pass(
-            &vk::RenderPassCreateInfo::builder()
-                .attachments(&[
-                    vk::AttachmentDescription::builder()
-                        .format(surface_format)
-                        .samples(vk::SampleCountFlags::TYPE_1)
-                        .load_op(vk::AttachmentLoadOp::CLEAR)
-                        .store_op(vk::AttachmentStoreOp::STORE)
-                        .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                        .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                        .initial_layout(vk::ImageLayout::UNDEFINED)
-                        .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .build(),
-                ])
-                .subpasses(&[
-                    vk::SubpassDescription::builder()
-                        .color_attachments(&[
-                            vk::AttachmentReference {
-                                attachment: 0,
-                                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                            }
-                        ])
-                        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                        .build()
-                ])
-                .build(),
-            None
-        ).unwrap();
-
-
+        record_cmd_buf_pre_pass: F1,
+        record_cmd_buf_in_pass: F2,
+    ) -> Self
+    where F1: Fn(&ash::Device, vk::CommandBuffer),
+          F2: Fn(&ash::Device, vk::CommandBuffer) {
+        let num_frames_in_flight = 3;
+        let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
         let swapchain = swapchain_loader
             .create_swapchain(
                 &vk::SwapchainCreateInfoKHR::builder()
                     .surface(surface)
                     .min_image_count(3)
                     .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
-                    .image_format(surface_format)
-                    .image_extent(extent)
+                    .image_format(config.format)
+                    .image_extent(config.extent)
                     .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
                     .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
@@ -124,7 +111,7 @@ impl Swapchain {
             .map(|(image, command_buffer)| {
                 let view = device.create_image_view(&vk::ImageViewCreateInfo::builder()
                     .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(surface_format)
+                    .format(config.format)
                     .components(vk::ComponentMapping {
                         r: vk::ComponentSwizzle::R,
                         g: vk::ComponentSwizzle::G,
@@ -144,8 +131,8 @@ impl Swapchain {
                 // Create the framebuffer
                 let framebuffer = device.create_framebuffer(
                     &vk::FramebufferCreateInfo::builder()
-                        .height(extent.height)
-                        .width(extent.width)
+                        .height(config.extent.height)
+                        .width(config.extent.width)
                         .layers(1)
                         .attachments(&[view])
                         .render_pass(render_pass)
@@ -163,8 +150,8 @@ impl Swapchain {
                     &[vk::Viewport {
                         x: 0.0,
                         y: 0.0,
-                        width: extent.width as f32,
-                        height: extent.height as f32,
+                        width: config.extent.width as f32,
+                        height: config.extent.height as f32,
                         min_depth: 0.0,
                         max_depth: 1.0
                     }]
@@ -174,7 +161,7 @@ impl Swapchain {
                     0,
                     &[vk::Rect2D {
                         offset: vk::Offset2D { x: 0, y: 0 },
-                        extent
+                        extent: config.extent
                     }]
                 );
                 let mut clear_values = [
@@ -186,18 +173,20 @@ impl Swapchain {
                     depth: 1.0,
                     stencil: 0
                 };
+                record_cmd_buf_pre_pass(&device, command_buffer);
                 device.cmd_begin_render_pass(
                     command_buffer,
                     &vk::RenderPassBeginInfo::builder()
                         .render_area(vk::Rect2D {
                             offset: vk::Offset2D { x: 0, y: 0 },
-                            extent
+                            extent: config.extent
                         })
                         .framebuffer(framebuffer)
                         .render_pass(render_pass)
                         .clear_values(&clear_values),
                     vk::SubpassContents::INLINE
                 );
+                record_cmd_buf_in_pass(&device, command_buffer);
                 device.cmd_end_render_pass(command_buffer);
 
                 SwapchainImage {
@@ -221,8 +210,7 @@ impl Swapchain {
             frames_in_flight,
             swapchain_images,
             graphics_queue,
-            format: surface_format,
-            render_pass,
+            config,
         }
     }
     pub unsafe fn render_frame(
