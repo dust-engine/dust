@@ -1,4 +1,4 @@
-use crate::device_info::DeviceInfo;
+use crate::device_info::{DeviceInfo, Quirks};
 use crate::raytracer::RayTracer;
 use crate::shared_buffer::SharedBuffer;
 use crate::swapchain::{Swapchain, SwapchainConfig};
@@ -9,13 +9,14 @@ use std::ffi::CStr;
 use std::io::Cursor;
 use svo::alloc::BlockAllocator;
 
-use crate::raytracer::CUBE_INDICES;
-use crate::raytracer::CUBE_POSITIONS;
-
 pub struct Renderer {
     device: ash::Device,
     swapchain: Swapchain,
     raytracer: RayTracer,
+    physical_device: vk::PhysicalDevice,
+    surface: vk::SurfaceKHR,
+    surface_loader: ash::extensions::khr::Surface,
+    quirks: Quirks,
 }
 
 impl Renderer {
@@ -168,7 +169,7 @@ impl Renderer {
             };
 
             let swapchain_config =
-                Swapchain::get_config(physical_device, surface, surface_loader, &quirks);
+                Swapchain::get_config(physical_device, surface, &surface_loader, &quirks);
             let shared_buffer = SharedBuffer::new(
                 device.clone(),
                 &memory_properties,
@@ -179,7 +180,7 @@ impl Renderer {
                 device.clone(),
                 shared_buffer,
                 node_pool_buffer,
-                &swapchain_config,
+                swapchain_config.format,
             );
 
             let swapchain = Swapchain::new(
@@ -195,6 +196,10 @@ impl Renderer {
                 device,
                 swapchain,
                 raytracer,
+                physical_device,
+                surface,
+                surface_loader,
+                quirks,
             };
             (renderer, allocator)
         }
@@ -215,8 +220,17 @@ impl Renderer {
     }
 
     pub fn resize(&mut self) {
+        // Assuming the swapchain format is still the same.
         unsafe {
             self.device.device_wait_idle().unwrap();
+            let config = Swapchain::get_config(
+                self.physical_device,
+                self.surface,
+                &self.surface_loader,
+                &self.quirks,
+            );
+            self.swapchain
+                .recreate(self.raytracer.render_pass, config, &self.raytracer);
         }
     }
 }

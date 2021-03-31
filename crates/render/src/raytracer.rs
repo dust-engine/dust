@@ -34,14 +34,14 @@ impl RayTracer {
         device: ash::Device,
         shared_buffer: SharedBuffer,
         node_pool_buffer: vk::Buffer,
-        swapchain_config: &SwapchainConfig,
+        format: vk::Format,
     ) -> Self {
         shared_buffer.write_vertex_index(&CUBE_POSITIONS, &CUBE_INDICES);
         let render_pass = device
             .create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
                     .attachments(&[vk::AttachmentDescription::builder()
-                        .format(swapchain_config.format)
+                        .format(format)
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .load_op(vk::AttachmentLoadOp::CLEAR)
                         .store_op(vk::AttachmentStoreOp::STORE)
@@ -190,18 +190,8 @@ impl RayTracer {
                     )
                     .viewport_state(
                         &vk::PipelineViewportStateCreateInfo::builder()
-                            .viewports(&[vk::Viewport {
-                                x: 0.0,
-                                y: 0.0,
-                                width: swapchain_config.extent.width as f32,
-                                height: -(swapchain_config.extent.height as f32),
-                                min_depth: 0.0,
-                                max_depth: 1.0,
-                            }])
-                            .scissors(&[vk::Rect2D {
-                                offset: vk::Offset2D { x: 0, y: 0 },
-                                extent: swapchain_config.extent,
-                            }])
+                            .viewports(&[vk::Viewport::default()])
+                            .scissors(&[vk::Rect2D::default()])
                             .build(),
                     )
                     .rasterization_state(

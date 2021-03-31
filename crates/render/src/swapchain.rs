@@ -46,8 +46,103 @@ impl Frame {
         }
     }
 }
+
+unsafe fn create_swapchain(
+    loader: &ash::extensions::khr::Swapchain,
+    surface: vk::SurfaceKHR,
+    config: &SwapchainConfig,
+) -> vk::SwapchainKHR {
+    loader
+        .create_swapchain(
+            &vk::SwapchainCreateInfoKHR::builder()
+                .surface(surface)
+                .min_image_count(3)
+                .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
+                .image_format(config.format)
+                .image_extent(config.extent)
+                .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
+                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+                .present_mode(vk::PresentModeKHR::FIFO)
+                .clipped(true)
+                .image_array_layers(1)
+                .build(),
+            None,
+        )
+        .unwrap()
+}
+
+unsafe fn create_image_view(
+    device: &ash::Device,
+    image: vk::Image,
+    config: &SwapchainConfig,
+) -> vk::ImageView {
+    device
+        .create_image_view(
+            &vk::ImageViewCreateInfo::builder()
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(config.format)
+                .components(vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::R,
+                    g: vk::ComponentSwizzle::G,
+                    b: vk::ComponentSwizzle::B,
+                    a: vk::ComponentSwizzle::A,
+                })
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .image(image),
+            None,
+        )
+        .unwrap()
+}
+unsafe fn create_framebuffer(
+    device: &ash::Device,
+    view: vk::ImageView,
+    render_pass: vk::RenderPass,
+    config: &SwapchainConfig,
+) -> vk::Framebuffer {
+    device
+        .create_framebuffer(
+            &vk::FramebufferCreateInfo::builder()
+                .height(config.extent.height)
+                .width(config.extent.width)
+                .layers(1)
+                .attachments(&[view])
+                .render_pass(render_pass)
+                .flags(vk::FramebufferCreateFlags::empty())
+                .build(),
+            None,
+        )
+        .unwrap()
+}
+unsafe fn record_command_buffer(
+    device: &ash::Device,
+    command_buffer: vk::CommandBuffer,
+    framebuffer: vk::Framebuffer,
+    render_pass_provider: &impl RenderPassProvider,
+    config: &SwapchainConfig,
+) {
+    device
+        .begin_command_buffer(
+            command_buffer,
+            &vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::empty())
+                .build(),
+        )
+        .unwrap();
+    render_pass_provider.record_command_buffer(&device, command_buffer, framebuffer, config);
+    device.end_command_buffer(command_buffer).unwrap();
+}
+
 pub struct Swapchain {
     device: ash::Device,
+    surface: vk::SurfaceKHR,
     current_frame: usize,
     loader: ash::extensions::khr::Swapchain,
     swapchain: vk::SwapchainKHR,
@@ -66,7 +161,7 @@ impl Swapchain {
     pub unsafe fn get_config(
         physical_device: vk::PhysicalDevice,
         surface: vk::SurfaceKHR,
-        surface_loader: ash::extensions::khr::Surface,
+        surface_loader: &ash::extensions::khr::Surface,
         quirks: &Quirks,
     ) -> SwapchainConfig {
         let caps = surface_loader
@@ -98,25 +193,7 @@ impl Swapchain {
     ) -> Self {
         let num_frames_in_flight = 3;
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
-        let swapchain = swapchain_loader
-            .create_swapchain(
-                &vk::SwapchainCreateInfoKHR::builder()
-                    .surface(surface)
-                    .min_image_count(3)
-                    .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
-                    .image_format(config.format)
-                    .image_extent(config.extent)
-                    .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-                    .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-                    .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
-                    .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-                    .present_mode(vk::PresentModeKHR::FIFO)
-                    .clipped(true)
-                    .image_array_layers(1)
-                    .build(),
-                None,
-            )
-            .unwrap();
+        let swapchain = create_swapchain(&swapchain_loader, surface, &config);
         let images = swapchain_loader.get_swapchain_images(swapchain).unwrap();
         // First, create the command pool
         let command_pool = device
@@ -141,59 +218,21 @@ impl Swapchain {
             .into_iter()
             .zip(command_buffers.into_iter())
             .map(|(image, command_buffer)| {
-                let view = device
-                    .create_image_view(
-                        &vk::ImageViewCreateInfo::builder()
-                            .view_type(vk::ImageViewType::TYPE_2D)
-                            .format(config.format)
-                            .components(vk::ComponentMapping {
-                                r: vk::ComponentSwizzle::R,
-                                g: vk::ComponentSwizzle::G,
-                                b: vk::ComponentSwizzle::B,
-                                a: vk::ComponentSwizzle::A,
-                            })
-                            .subresource_range(vk::ImageSubresourceRange {
-                                aspect_mask: vk::ImageAspectFlags::COLOR,
-                                base_mip_level: 0,
-                                level_count: 1,
-                                base_array_layer: 0,
-                                layer_count: 1,
-                            })
-                            .image(image),
-                        None,
-                    )
-                    .unwrap();
+                let view = create_image_view(&device, image, &config);
                 // Create the framebuffer
-                let framebuffer = device
-                    .create_framebuffer(
-                        &vk::FramebufferCreateInfo::builder()
-                            .height(config.extent.height)
-                            .width(config.extent.width)
-                            .layers(1)
-                            .attachments(&[view])
-                            .render_pass(render_pass_provider.get_render_pass())
-                            .flags(vk::FramebufferCreateFlags::empty())
-                            .build(),
-                        None,
-                    )
-                    .unwrap();
-                // record the command buffer
-                device
-                    .begin_command_buffer(
-                        command_buffer,
-                        &vk::CommandBufferBeginInfo::builder()
-                            .flags(vk::CommandBufferUsageFlags::empty())
-                            .build(),
-                    )
-                    .unwrap();
-                render_pass_provider.record_command_buffer(
+                let framebuffer = create_framebuffer(
+                    &device,
+                    view,
+                    render_pass_provider.get_render_pass(),
+                    &config,
+                );
+                record_command_buffer(
                     &device,
                     command_buffer,
                     framebuffer,
+                    render_pass_provider,
                     &config,
                 );
-                device.end_command_buffer(command_buffer).unwrap();
-
                 SwapchainImage {
                     view,
                     fence: vk::Fence::null(),
@@ -216,14 +255,15 @@ impl Swapchain {
             swapchain_images,
             graphics_queue,
             config,
+            surface,
         }
     }
 
     pub unsafe fn recreate(
         &mut self,
-        new_config: &SwapchainConfig,
-        surface: vk::SurfaceKHR,
         render_pass: vk::RenderPass,
+        config: SwapchainConfig,
+        render_pass_provider: &impl RenderPassProvider,
     ) {
         // reclaim resources
         for swapchain_image in self.swapchain_images.iter() {
@@ -233,7 +273,30 @@ impl Swapchain {
         }
         self.loader.destroy_swapchain(self.swapchain, None);
         self.device
-            .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty());
+            .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())
+            .unwrap();
+
+        // create new
+        self.swapchain = create_swapchain(&self.loader, self.surface, &config);
+        let images = self.loader.get_swapchain_images(self.swapchain).unwrap();
+        for (swapchain_image, image) in self.swapchain_images.iter_mut().zip(images.into_iter()) {
+            swapchain_image.view = create_image_view(&self.device, image, &config);
+            // Create the framebuffer
+            swapchain_image.framebuffer = create_framebuffer(
+                &self.device,
+                swapchain_image.view,
+                render_pass_provider.get_render_pass(),
+                &config,
+            );
+            record_command_buffer(
+                &self.device,
+                swapchain_image.command_buffer,
+                swapchain_image.framebuffer,
+                render_pass_provider,
+                &config,
+            );
+        }
+        self.config = config;
     }
 
     pub unsafe fn render_frame(&mut self) {
