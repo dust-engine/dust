@@ -4,6 +4,8 @@
 #![feature(const_generics)]
 #![feature(const_evaluatable_checked)]
 #![feature(allocator_api)]
+#![feature(slice_ptr_get)]
+#![feature(alloc_layout_extra)]
 
 pub mod alloc;
 pub mod bounds;

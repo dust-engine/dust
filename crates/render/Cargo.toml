@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 svo = { path = "../svo" }
-block-alloc = { path = "../block_alloc" }
 tracing = "*"
 raw-window-handle = "*"
 glam = { version = "0.13", features = ["transform-types"] }

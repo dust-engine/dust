@@ -1,5 +1,5 @@
 use crate::device_info::Quirks;
-use ash::version::{DeviceV1_0, EntryV1_0, EntryV1_1};
+use ash::version::DeviceV1_0;
 use ash::vk;
 
 struct Frame {
@@ -62,10 +62,10 @@ impl Swapchain {
         let caps = surface_loader
             .get_physical_device_surface_capabilities(physical_device, surface)
             .unwrap();
-        let supported_formats = surface_loader
+        let _supported_formats = surface_loader
             .get_physical_device_surface_formats(physical_device, surface)
             .unwrap();
-        let supported_present_mode = surface_loader
+        let _supported_present_mode = surface_loader
             .get_physical_device_surface_present_modes(physical_device, surface)
             .unwrap();
 
@@ -238,7 +238,7 @@ impl Swapchain {
             })
             .collect();
         let mut frames_in_flight = Vec::with_capacity(num_frames_in_flight);
-        for i in 0..num_frames_in_flight {
+        for _i in 0..num_frames_in_flight {
             frames_in_flight.push(Frame::new(&device));
         }
         Self {

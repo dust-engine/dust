@@ -10,13 +10,13 @@ use std::io::Cursor;
 const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
     (-1.0, -1.0, -1.0), // 0
-    (-1.0, -1.0, 1.0), // 1
-    (-1.0, 1.0, -1.0), // 2
-    (-1.0, 1.0, 1.0), // 3
-    (1.0, -1.0, -1.0), // 4
-    (1.0, -1.0, 1.0), // 5
-    (1.0, 1.0, -1.0), // 6
-    (1.0, 1.0, 1.0), // 7
+    (-1.0, -1.0, 1.0),  // 1
+    (-1.0, 1.0, -1.0),  // 2
+    (-1.0, 1.0, 1.0),   // 3
+    (1.0, -1.0, -1.0),  // 4
+    (1.0, -1.0, 1.0),   // 5
+    (1.0, 1.0, -1.0),   // 6
+    (1.0, 1.0, 1.0),    // 7
 ];
 
 pub struct Renderer {
@@ -51,6 +51,46 @@ impl RayTracer {
                     .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
                     .build(),
                 None,
+            )
+            .unwrap();
+
+        let mem = self
+            .device
+            .allocate_memory(
+                &vk::MemoryAllocateInfo::builder()
+                    .allocation_size(1 << 24 - 1)
+                    .memory_type_index(1)
+                    .build(),
+                None,
+            )
+            .unwrap();
+        let ptr = self
+            .device
+            .map_memory(mem, 0, 1 << 24 - 1, vk::MemoryMapFlags::empty())
+            .unwrap() as *mut u8;
+        let testdata: &[u8] = &[1, 2, 3, 5, 7];
+        std::ptr::copy_nonoverlapping(
+            testdata.as_ptr() as *mut u8,
+            ptr,
+            std::mem::size_of_val(testdata),
+        );
+        let queue = self.device.get_device_queue(0, 0);
+        self.device
+            .queue_bind_sparse(
+                queue,
+                &[vk::BindSparseInfo::builder()
+                    .buffer_binds(&[vk::SparseBufferMemoryBindInfo::builder()
+                        .buffer(storage_buffer)
+                        .binds(&[vk::SparseMemoryBind {
+                            resource_offset: 0,
+                            size: 1 << 24 - 1,
+                            memory: mem,
+                            memory_offset: 0,
+                            flags: vk::SparseMemoryBindFlags::empty(),
+                        }])
+                        .build()])
+                    .build()],
+                vk::Fence::null(),
             )
             .unwrap();
 
@@ -411,7 +451,7 @@ impl Renderer {
                 )
                 .unwrap();
             let graphics_queue = device.get_device_queue(graphics_queue_family.0, 0);
-            let transfer_binding_queue =
+            let _transfer_binding_queue =
                 device.get_device_queue(transfer_binding_queue_family.0, 0);
 
             let shared_buffer = SharedBuffer::new(

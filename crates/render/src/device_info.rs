@@ -5,6 +5,7 @@ use std::ffi::CStr;
 pub struct DeviceInfo {
     pub supported_extensions: Vec<vk::ExtensionProperties>,
     pub physical_device_properties: vk::PhysicalDeviceProperties,
+    pub memory_properties: vk::PhysicalDeviceMemoryProperties,
 }
 
 #[derive(Default, Debug)]
@@ -18,12 +19,10 @@ impl DeviceInfo {
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
     ) -> Self {
-        let supported_extensions = entry.enumerate_instance_extension_properties().unwrap();
-        let physical_device_properties = instance.get_physical_device_properties(physical_device);
-
         Self {
-            supported_extensions,
-            physical_device_properties,
+            supported_extensions: entry.enumerate_instance_extension_properties().unwrap(),
+            physical_device_properties: instance.get_physical_device_properties(physical_device),
+            memory_properties: instance.get_physical_device_memory_properties(physical_device),
         }
     }
     pub fn api_version(&self) -> u32 {

@@ -1,9 +1,12 @@
 #![feature(array_methods)]
 #![feature(array_map)]
 
+mod block_alloc;
 mod camera_projection;
 mod device_info;
+pub mod renderer;
 mod shared_buffer;
+pub mod swapchain;
 mod voxel;
 
 pub use crate::camera_projection::CameraProjection;
@@ -17,6 +20,4 @@ pub struct State<'a> {
     pub camera_transform: &'a TransformRT,
 }
 
-pub mod renderer;
-pub mod swapchain;
 pub use renderer::Renderer;

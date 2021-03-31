@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-use bevy::app::Events;
 use bevy::window::{WindowCreated, WindowResized};
 use bevy::winit::WinitWindows;
 use dust_render::{CameraProjection, Renderer};
@@ -46,11 +45,11 @@ fn world_update(
     mut renderer: ResMut<Renderer>,
     mut query: Query<(&mut CameraProjection, &GlobalTransform)>,
 ) {
-    let (mut camera_projection, global_transform) = query
+    let (camera_projection, global_transform) = query
         .single_mut()
         .expect("Expecting an entity with RaytracerCameraBundle");
 
-    for window_resized_event in window_resized_events.iter() {
+    for _window_resized_event in window_resized_events.iter() {
         renderer.resize();
     }
     let camera_transform = glam::TransformRT {

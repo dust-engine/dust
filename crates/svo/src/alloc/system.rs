@@ -5,34 +5,41 @@ use super::AllocError;
 use super::BlockAllocator;
 use std::alloc::{Allocator, Global, Layout};
 
-pub struct SystemBlockAllocator<const SIZE: usize, A: Allocator = Global> {
+pub struct SystemBlockAllocator<A: Allocator = Global> {
     allocator: A,
+    block_size: u32,
 }
 
-impl<const SIZE: usize> SystemBlockAllocator<SIZE> {
-    pub fn new() -> SystemBlockAllocator<SIZE, Global> {
-        SystemBlockAllocator { allocator: Global }
+impl SystemBlockAllocator {
+    pub fn new(block_size: u32) -> SystemBlockAllocator<Global> {
+        SystemBlockAllocator {
+            allocator: Global,
+            block_size,
+        }
     }
 }
 
-impl<const SIZE: usize> BlockAllocator<SIZE> for SystemBlockAllocator<SIZE> {
-    unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError> {
-        let layout = Layout::new::<[u8; SIZE]>();
+impl BlockAllocator for SystemBlockAllocator {
+    unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError> {
         let mem = self
             .allocator
-            .allocate(layout)
+            .allocate(Layout::from_size_align_unchecked(
+                self.block_size as usize,
+                1,
+            ))
             .map_err(|_| AllocError::OutOfHostMemory)?;
-        Ok(mem.cast())
+        Ok(mem.as_mut_ptr())
     }
 
-    unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>) {
-        let layout = Layout::new::<[u8; SIZE]>();
-        self.allocator.deallocate(block.cast(), layout);
+    unsafe fn deallocate_block(&mut self, block: *mut u8) {
+        let layout = Layout::new::<u8>()
+            .repeat(self.block_size as usize)
+            .unwrap();
+        self.allocator.deallocate(
+            NonNull::new(block).unwrap(),
+            Layout::from_size_align_unchecked(self.block_size as usize, 1),
+        );
     }
 
-    unsafe fn flush(
-        &mut self,
-        ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>,
-    ) {
-    }
+    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {}
 }

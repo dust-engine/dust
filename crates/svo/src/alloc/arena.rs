@@ -40,7 +40,7 @@ impl Default for Handle {
 }
 
 type ArenaAllocatorChunk<T> = [ArenaSlot<T>; CHUNK_SIZE / size_of::<T>()];
-pub type ArenaBlockAllocator = dyn BlockAllocator<CHUNK_SIZE>;
+pub type ArenaBlockAllocator = dyn BlockAllocator;
 
 #[repr(C)]
 struct FreeSlot {
@@ -106,7 +106,8 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
                 // Allocate a new memory chunk from the underlying block allocator.
                 let chunk_index = self.chunks.len() as u32;
                 let chunk = unsafe { self.block_allocator.allocate_block().unwrap() };
-                self.chunks.push(chunk.cast());
+                self.chunks
+                    .push(unsafe { NonNull::new_unchecked(chunk as _) });
                 self.capacity += Self::NUM_SLOTS_IN_CHUNK as u32;
                 self.newspace_top = Handle::from_index(chunk_index, len);
                 Handle::from_index(chunk_index, 0)
@@ -208,7 +209,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             let ptr = chunks[chunk_index];
             let size: u32 = size_of::<T>() as u32;
             let range = (range.start * size)..(range.end * size);
-            (ptr.cast(), range)
+            (ptr.as_ptr() as *mut u8, range)
         });
         unsafe {
             self.block_allocator.flush(&mut iter);

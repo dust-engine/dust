@@ -17,8 +17,8 @@ pub enum AllocError {
     TooManyObjects,
 }
 
-pub trait BlockAllocator<const SIZE: usize> {
-    unsafe fn allocate_block(&mut self) -> Result<NonNull<[u8; SIZE]>, AllocError>;
-    unsafe fn deallocate_block(&mut self, block: NonNull<[u8; SIZE]>);
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (NonNull<[u8; SIZE]>, Range<u32>)>);
+pub trait BlockAllocator {
+    unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError>;
+    unsafe fn deallocate_block(&mut self, block: *mut u8);
+    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>);
 }
