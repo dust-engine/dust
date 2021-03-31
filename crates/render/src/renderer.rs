@@ -179,7 +179,7 @@ impl Renderer {
                 device.clone(),
                 shared_buffer,
                 node_pool_buffer,
-                &swapchain_config
+                &swapchain_config,
             );
 
             let swapchain = Swapchain::new(

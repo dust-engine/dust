@@ -28,17 +28,14 @@ impl SharedBuffer {
         let span = tracing::info_span!("shared_buffer_new");
         let _enter = span.enter();
 
-        let mut needs_staging = true;
-        for i in 0..memory_properties.memory_type_count {
-            let ty: &vk::MemoryType = &memory_properties.memory_types[i as usize];
-            if ty.property_flags.contains(
-                vk::MemoryPropertyFlags::DEVICE_LOCAL | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            ) {
-                // We've found a device local and host visible memory type. Don't need staging.
-                needs_staging = false;
-                break;
-            }
-        }
+        let mut needs_staging = !memory_properties.memory_types
+            [0..memory_properties.memory_type_count as usize]
+            .iter()
+            .any(|ty| {
+                ty.property_flags.contains(
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                )
+            });
         tracing::info!("SharedBuffer using staging: {:?}", needs_staging);
         let buffer = device
             .create_buffer(
@@ -59,43 +56,44 @@ impl SharedBuffer {
                 None,
             )
             .unwrap();
-        let buffer_requirments = device.get_buffer_memory_requirements(buffer);
-        let mut buffer_memory_type: u32 = u32::MAX;
-        for i in 0..memory_properties.memory_type_count {
-            let ty: &vk::MemoryType = &memory_properties.memory_types[i as usize];
-            if buffer_requirments.memory_type_bits & (1 << i) == 0 {
-                continue;
-            }
-            if needs_staging {
-                if ty
-                    .property_flags
-                    .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
-                    && !ty
-                        .property_flags
-                        .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
-                {
-                    buffer_memory_type = i;
-                    break;
+        let buffer_requirements = device.get_buffer_memory_requirements(buffer);
+        let mut buffer_memory_type: u32 = memory_properties.memory_types
+            [0..memory_properties.memory_type_count as usize]
+            .iter()
+            .enumerate()
+            .position(|(i, ty)| {
+                if buffer_requirements.memory_type_bits & (1 << i) == 0 {
+                    return false;
                 }
-            } else {
-                if ty
-                    .property_flags
-                    .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
-                    && ty
+                if needs_staging {
+                    if ty
                         .property_flags
-                        .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
-                {
-                    buffer_memory_type = i;
-                    break;
+                        .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                        && !ty
+                            .property_flags
+                            .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
+                    {
+                        return true;
+                    }
+                } else {
+                    if ty
+                        .property_flags
+                        .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                        && ty
+                            .property_flags
+                            .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
+                    {
+                        return true;
+                    }
                 }
-            }
-        }
-        assert_ne!(buffer_memory_type, u32::MAX);
+                return false;
+            })
+            .unwrap() as u32;
         let memory = device
             .allocate_memory(
                 &vk::MemoryAllocateInfo::builder()
                     .memory_type_index(buffer_memory_type)
-                    .allocation_size(buffer_requirments.size),
+                    .allocation_size(buffer_requirements.size),
                 None,
             )
             .unwrap();
@@ -121,23 +119,26 @@ impl SharedBuffer {
             let staging_buffer_requirements = shared_buffer
                 .device
                 .get_buffer_memory_requirements(staging_buffer);
-            let mut memory_type = u32::MAX;
-            for i in 0..memory_properties.memory_type_count {
-                let ty: &vk::MemoryType = &memory_properties.memory_types[i as usize];
-                if staging_buffer_requirements.memory_type_bits & (1 << i) == 0 {
-                    continue;
-                }
-                if ty
-                    .property_flags
-                    .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
-                    && !ty
-                    .property_flags
-                    .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
-                {
-                    memory_type = i;
-                }
-            }
-            assert_ne!(memory_type, u32::MAX);
+            let memory_type = memory_properties.memory_types
+                [0..memory_properties.memory_type_count as usize]
+                .iter()
+                .enumerate()
+                .position(|(i, ty)| {
+                    if staging_buffer_requirements.memory_type_bits & (1 << i) == 0 {
+                        return false;
+                    }
+                    if ty
+                        .property_flags
+                        .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
+                        && !ty
+                            .property_flags
+                            .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                    {
+                        return true;
+                    }
+                    return false;
+                })
+                .unwrap() as u32;
             let staging_mem = shared_buffer
                 .device
                 .allocate_memory(
@@ -156,7 +157,7 @@ impl SharedBuffer {
                 memory: staging_mem,
                 buffer: staging_buffer,
                 queue,
-                queue_family
+                queue_family,
             });
         }
         shared_buffer
@@ -188,8 +189,7 @@ impl SharedBuffer {
             ptr.add(std::mem::size_of_val(vertex_buffer)),
             std::mem::size_of_val(index_buffer),
         );
-        self
-            .device
+        self.device
             .flush_mapped_memory_ranges(&[vk::MappedMemoryRange::builder()
                 .memory(mem_to_write)
                 .size(128)
@@ -221,8 +221,7 @@ impl SharedBuffer {
                 .unwrap()
                 .pop()
                 .unwrap();
-            self
-                .device
+            self.device
                 .begin_command_buffer(
                     cmd_buf,
                     &vk::CommandBufferBeginInfo::builder()
@@ -246,8 +245,7 @@ impl SharedBuffer {
                 .device
                 .create_fence(&vk::FenceCreateInfo::default(), None)
                 .unwrap();
-            self
-                .device
+            self.device
                 .queue_submit(
                     staging.queue,
                     &[vk::SubmitInfo::builder()
@@ -256,8 +254,7 @@ impl SharedBuffer {
                     fence,
                 )
                 .unwrap();
-            self
-                .device
+            self.device
                 .wait_for_fences(&[fence], true, u64::MAX)
                 .unwrap();
             self.device.destroy_command_pool(pool, None);
@@ -266,7 +263,7 @@ impl SharedBuffer {
     }
 
     pub fn update_camera(
-        &mut self,
+        &self,
         camera_projection: &CameraProjection,
         transform: &TransformRT,
         aspect_ratio: f32,
@@ -276,7 +273,7 @@ impl SharedBuffer {
         let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * rotation.inverse();
         let transform_cols_arr = transform.to_cols_array();
         let view_proj_cols_arr = view_proj.to_cols_array();
-        let (mem_to_write, offset, size) = if let Some(staging_buffer) = self.staging.as_mut() {
+        let (mem_to_write, offset, size) = if let Some(staging_buffer) = self.staging.as_ref() {
             // needs staging
             (staging_buffer.memory, 0_u64, 128_u64)
         } else {

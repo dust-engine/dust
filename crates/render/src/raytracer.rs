@@ -1,10 +1,10 @@
 use crate::shared_buffer::SharedBuffer;
-use crate::swapchain::{SwapchainConfig, RenderPassProvider};
+use crate::swapchain::{RenderPassProvider, SwapchainConfig};
 use ash::version::DeviceV1_0;
 use ash::vk;
+use ash::vk::RenderPass;
 use std::ffi::CStr;
 use std::io::Cursor;
-use ash::vk::RenderPass;
 
 pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -34,12 +34,9 @@ impl RayTracer {
         device: ash::Device,
         shared_buffer: SharedBuffer,
         node_pool_buffer: vk::Buffer,
-        swapchain_config: &SwapchainConfig
+        swapchain_config: &SwapchainConfig,
     ) -> Self {
-        shared_buffer.write_vertex_index(
-            &CUBE_POSITIONS,
-            &CUBE_INDICES,
-        );
+        shared_buffer.write_vertex_index(&CUBE_POSITIONS, &CUBE_INDICES);
         let render_pass = device
             .create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
@@ -287,7 +284,7 @@ impl RayTracer {
             storage_desc_set,
             uniform_desc_set,
             render_pass,
-            shared_buffer
+            shared_buffer,
         }
     }
 }
@@ -330,7 +327,8 @@ impl RenderPassProvider for RayTracer {
             depth: 1.0,
             stencil: 0,
         };
-        self.shared_buffer.record_cmd_buffer_copy_buffer(command_buffer);
+        self.shared_buffer
+            .record_cmd_buffer_copy_buffer(command_buffer);
         device.cmd_bind_pipeline(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
@@ -344,12 +342,7 @@ impl RenderPassProvider for RayTracer {
             &[self.uniform_desc_set, self.storage_desc_set],
             &[],
         );
-        device.cmd_bind_vertex_buffers(
-            command_buffer,
-            0,
-            &[self.shared_buffer.buffer],
-            &[0],
-        );
+        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.shared_buffer.buffer], &[0]);
         device.cmd_bind_index_buffer(
             command_buffer,
             self.shared_buffer.buffer,

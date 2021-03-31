@@ -24,9 +24,7 @@ pub trait RenderPassProvider {
         framebuffer: vk::Framebuffer,
         config: &SwapchainConfig,
     );
-    unsafe fn get_render_pass(
-        &self
-    ) -> vk::RenderPass;
+    unsafe fn get_render_pass(&self) -> vk::RenderPass;
 }
 impl Frame {
     unsafe fn new(device: &ash::Device) -> Self {
@@ -97,8 +95,7 @@ impl Swapchain {
         graphics_queue_family_index: u32,
         graphics_queue: vk::Queue,
         render_pass_provider: &T,
-    ) -> Self
-    {
+    ) -> Self {
         let num_frames_in_flight = 3;
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
         let swapchain = swapchain_loader
@@ -193,7 +190,7 @@ impl Swapchain {
                     &device,
                     command_buffer,
                     framebuffer,
-                    &config
+                    &config,
                 );
                 device.end_command_buffer(command_buffer).unwrap();
 
@@ -235,7 +232,8 @@ impl Swapchain {
             self.device.destroy_image_view(swapchain_image.view, None);
         }
         self.loader.destroy_swapchain(self.swapchain, None);
-        self.device.reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty());
+        self.device
+            .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty());
     }
 
     pub unsafe fn render_frame(&mut self) {
