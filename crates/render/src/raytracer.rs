@@ -32,7 +32,7 @@ pub struct RayTracer {
 impl RayTracer {
     pub unsafe fn new(
         device: ash::Device,
-        shared_buffer: SharedBuffer,
+        mut shared_buffer: SharedBuffer,
         node_pool_buffer: vk::Buffer,
         format: vk::Format,
     ) -> Self {
@@ -259,7 +259,7 @@ impl RayTracer {
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&[vk::DescriptorBufferInfo {
                         buffer: shared_buffer.buffer,
-                        offset: 128,
+                        offset: 0,
                         range: 128,
                     }])
                     .build(), // Camera
@@ -270,7 +270,7 @@ impl RayTracer {
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&[vk::DescriptorBufferInfo {
                         buffer: shared_buffer.buffer,
-                        offset: 256,
+                        offset: 128,
                         range: 128,
                     }])
                     .build(), // Lights
@@ -302,7 +302,7 @@ impl RayTracer {
 
 impl RenderPassProvider for RayTracer {
     unsafe fn record_command_buffer(
-        &self,
+        &mut self,
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
         framebuffer: vk::Framebuffer,
@@ -333,7 +333,7 @@ impl RenderPassProvider for RayTracer {
             }],
         );
         let mut clear_values = [vk::ClearValue::default(), vk::ClearValue::default()];
-        clear_values[0].color.float32 = [0.0, 1.0, 0.0, 1.0];
+        clear_values[0].color.float32 = [0.0, 0.0, 0.0, 1.0];
         clear_values[1].depth_stencil = vk::ClearDepthStencilValue {
             depth: 1.0,
             stencil: 0,
@@ -352,11 +352,11 @@ impl RenderPassProvider for RayTracer {
             &[self.uniform_desc_set, self.storage_desc_set],
             &[],
         );
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.shared_buffer.buffer], &[0]);
+        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.shared_buffer.buffer], &[256]);
         device.cmd_bind_index_buffer(
             command_buffer,
             self.shared_buffer.buffer,
-            std::mem::size_of_val(&CUBE_POSITIONS) as u64,
+            std::mem::size_of_val(&CUBE_POSITIONS) as u64 + 256,
             vk::IndexType::UINT16,
         );
         device.cmd_begin_render_pass(

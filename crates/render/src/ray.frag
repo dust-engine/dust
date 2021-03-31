@@ -129,6 +129,7 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
     return material_id;
 }
 
+#define DEBUG_RENDERING
 
 void main() {
     Ray ray = GenerateRay();
@@ -139,7 +140,9 @@ void main() {
     uint iteration_times;
     uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times);
     float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE) * 10.0; // 0 to 1
-
+    #ifdef DEBUG_RENDERING
+    f_color = vec4(iteration, iteration, iteration, 1.0);
+    #else
     vec3 normal = CubedNormalize(hitpoint - (hitbox.origin + hitbox.extent/2));
     vec2 texcoords = vec2(
         dot(vec3(hitpoint.z, hitpoint.x, -hitpoint.x), normal),
@@ -153,5 +156,5 @@ void main() {
         f_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
 
     }
-
+    #endif
 }

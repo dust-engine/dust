@@ -1,12 +1,10 @@
 use crate::device_info::{DeviceInfo, Quirks};
-use crate::light::SunLight;
 use crate::raytracer::RayTracer;
 use crate::shared_buffer::SharedBuffer;
 use crate::swapchain::Swapchain;
 use crate::State;
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
-use glam::Vec3;
 use std::ffi::CStr;
 use svo::alloc::BlockAllocator;
 
@@ -177,7 +175,7 @@ impl Renderer {
                 graphics_queue,
                 graphics_queue_family.0,
             );
-            let raytracer = RayTracer::new(
+            let mut raytracer = RayTracer::new(
                 device.clone(),
                 shared_buffer,
                 node_pool_buffer,
@@ -191,7 +189,7 @@ impl Renderer {
                 swapchain_config,
                 graphics_queue_family.0,
                 graphics_queue,
-                &raytracer,
+                &mut raytracer,
             );
             let renderer = Self {
                 device,
@@ -229,7 +227,7 @@ impl Renderer {
                 &self.surface_loader,
                 &self.quirks,
             );
-            self.swapchain.recreate(config, &self.raytracer);
+            self.swapchain.recreate(config, &mut self.raytracer);
         }
     }
 }

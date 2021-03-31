@@ -18,7 +18,7 @@ struct SwapchainImage {
 }
 pub trait RenderPassProvider {
     unsafe fn record_command_buffer(
-        &self,
+        &mut self,
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
         framebuffer: vk::Framebuffer,
@@ -125,7 +125,7 @@ unsafe fn record_command_buffer(
     device: &ash::Device,
     command_buffer: vk::CommandBuffer,
     framebuffer: vk::Framebuffer,
-    render_pass_provider: &impl RenderPassProvider,
+    render_pass_provider: &mut impl RenderPassProvider,
     config: &SwapchainConfig,
 ) {
     device
@@ -182,14 +182,14 @@ impl Swapchain {
             flip_y_requires_shift: quirks.flip_y_requires_shift,
         }
     }
-    pub unsafe fn new<T: RenderPassProvider>(
+    pub unsafe fn new(
         instance: &ash::Instance,
         device: ash::Device,
         surface: vk::SurfaceKHR,
         config: SwapchainConfig,
         graphics_queue_family_index: u32,
         graphics_queue: vk::Queue,
-        render_pass_provider: &T,
+        render_pass_provider: &mut impl RenderPassProvider,
     ) -> Self {
         let num_frames_in_flight = 3;
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
@@ -262,7 +262,7 @@ impl Swapchain {
     pub unsafe fn recreate(
         &mut self,
         config: SwapchainConfig,
-        render_pass_provider: &impl RenderPassProvider,
+        render_pass_provider: &mut impl RenderPassProvider,
     ) {
         // reclaim resources
         for swapchain_image in self.swapchain_images.iter() {

@@ -1,5 +1,6 @@
 pub use glam::Vec3;
 
+#[derive(Clone)]
 pub struct SunLight {
     pub color: Vec3,
     pub(crate) _padding1: f32,

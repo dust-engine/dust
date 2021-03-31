@@ -51,7 +51,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     octree_mutator.commit();
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(4.2, 4.4, 4.0);
+    bundle.transform.translation = Vec3::new(1.6, 1.6, 1.6);
     commands
         .spawn()
         .insert_bundle(bundle)

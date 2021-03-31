@@ -53,7 +53,7 @@ fn setup(
 fn world_update(
     mut window_resized_events: EventReader<WindowResized>,
     mut renderer: ResMut<Renderer>,
-    mut sunlight: Res<SunLight>,
+    sunlight: Res<SunLight>,
     mut query: Query<(&mut CameraProjection, &GlobalTransform)>,
 ) {
     let (camera_projection, global_transform) = query
