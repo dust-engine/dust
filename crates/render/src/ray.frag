@@ -17,6 +17,12 @@ struct Box {
     vec3 origin;
     float extent;
 };
+struct Sunlight {
+    vec3 color;
+    float padding1;
+    vec3 dir;
+    float padding2;
+};
 uint MaskLocationNthOne(uint mask, uint location) {
     return bitCount(mask & ((1 << location) - 1));
 }
@@ -30,6 +36,9 @@ layout(location=0) in vec3 vWorldPosition;
 layout(set = 0, binding = 0) uniform Camera {
     mat4 ViewProj;
     mat4 Proj;
+};
+layout(set = 0, binding = 1) uniform Lights {
+    Sunlight Lights_Sunlight;
 };
 layout(set = 1, binding = 0) readonly buffer Chunk {
     Node Chunk_Nodes[];
@@ -59,6 +68,11 @@ bool ContainsAABB(vec3 point, Box box) {
     vec3 s = step(min, point) - step(max, point);
     bvec3 bs = bvec3(s);
     return all(bs);
+}
+vec3 CubedNormalize(vec3 dir) {
+    vec3 dir_abs = abs(dir);
+    float max_element = max(dir_abs.x, max(dir_abs.y, dir_abs.z));
+    return -sign(dir) * step(max_element, dir_abs);
 }
 uint MaterialAtPosition(inout Box box, vec3 position) {
     uint node_index = 0; // Assume root node
@@ -125,5 +139,19 @@ void main() {
     uint iteration_times;
     uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times);
     float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE) * 10.0; // 0 to 1
-    f_color = vec4(iteration, iteration, iteration, 1.0);
+
+    vec3 normal = CubedNormalize(hitpoint - (hitbox.origin + hitbox.extent/2));
+    vec2 texcoords = vec2(
+        dot(vec3(hitpoint.z, hitpoint.x, -hitpoint.x), normal),
+        dot(-sign(normal) * vec3(hitpoint.y, hitpoint.z, hitpoint.y), normal)
+    );
+
+    if (voxel_id == 0) {
+        discard;
+    } else {
+        float sunLightFactor = max(0.3, dot(normal, Lights_Sunlight.dir));
+        f_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
+
+    }
+
 }

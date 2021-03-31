@@ -36,7 +36,7 @@ impl RayTracer {
         node_pool_buffer: vk::Buffer,
         format: vk::Format,
     ) -> Self {
-        shared_buffer.write_vertex_index(&CUBE_POSITIONS, &CUBE_INDICES);
+        shared_buffer.copy_vertex_index(&CUBE_POSITIONS, &CUBE_INDICES);
         let render_pass = device
             .create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
@@ -69,7 +69,7 @@ impl RayTracer {
                     .pool_sizes(&[
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::UNIFORM_BUFFER,
-                            descriptor_count: 1,
+                            descriptor_count: 2,
                         },
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::STORAGE_BUFFER,
@@ -83,12 +83,22 @@ impl RayTracer {
             .create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo::builder()
                     .flags(vk::DescriptorSetLayoutCreateFlags::empty())
-                    .bindings(&[vk::DescriptorSetLayoutBinding::builder()
-                        .binding(0)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                        .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::VERTEX)
-                        .descriptor_count(1)
-                        .build()]),
+                    .bindings(&[
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .stage_flags(
+                                vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::VERTEX,
+                            )
+                            .descriptor_count(1)
+                            .build(), // Camera
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .binding(1)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .descriptor_count(1)
+                            .build(), // Lights
+                    ]),
                 None,
             )
             .unwrap();
@@ -252,7 +262,18 @@ impl RayTracer {
                         offset: 128,
                         range: 128,
                     }])
-                    .build(),
+                    .build(), // Camera
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(uniform_desc_set)
+                    .dst_binding(1)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(&[vk::DescriptorBufferInfo {
+                        buffer: shared_buffer.buffer,
+                        offset: 256,
+                        range: 128,
+                    }])
+                    .build(), // Lights
                 vk::WriteDescriptorSet::builder()
                     .dst_set(storage_desc_set)
                     .dst_binding(0)
@@ -263,7 +284,7 @@ impl RayTracer {
                         offset: 0,
                         range: vk::WHOLE_SIZE,
                     }])
-                    .build(),
+                    .build(), // Nodes
             ],
             &[],
         );
@@ -317,8 +338,7 @@ impl RenderPassProvider for RayTracer {
             depth: 1.0,
             stencil: 0,
         };
-        self.shared_buffer
-            .record_cmd_buffer_copy_buffer(command_buffer);
+        self.shared_buffer.record_cmd_buffer_copy(command_buffer);
         device.cmd_bind_pipeline(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,

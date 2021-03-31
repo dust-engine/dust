@@ -1,10 +1,12 @@
 use crate::device_info::{DeviceInfo, Quirks};
+use crate::light::SunLight;
 use crate::raytracer::RayTracer;
 use crate::shared_buffer::SharedBuffer;
 use crate::swapchain::Swapchain;
 use crate::State;
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
+use glam::Vec3;
 use std::ffi::CStr;
 use svo::alloc::BlockAllocator;
 
@@ -206,12 +208,13 @@ impl Renderer {
 
     pub fn update(&mut self, state: &State) {
         unsafe {
-            self.raytracer.shared_buffer.update_camera(
+            self.raytracer.shared_buffer.write_camera(
                 state.camera_projection,
                 state.camera_transform,
                 self.swapchain.config.extent.width as f32
                     / self.swapchain.config.extent.height as f32,
             );
+            self.raytracer.shared_buffer.write_light(state.sunlight);
             self.swapchain.render_frame();
         }
     }

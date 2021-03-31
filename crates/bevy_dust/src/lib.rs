@@ -5,7 +5,9 @@ use bevy::winit::WinitWindows;
 use dust_render::{CameraProjection, Renderer};
 
 pub use dust_render::Octree;
+pub use dust_render::SunLight;
 pub use dust_render::Voxel;
+
 use svo::alloc::CHUNK_SIZE;
 use svo::ArenaAllocator;
 
@@ -14,7 +16,8 @@ pub struct DustPlugin;
 
 impl Plugin for DustPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_startup_system_to_stage(StartupStage::PreStartup, setup.exclusive_system())
+        app.insert_resource(SunLight::new(Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO))
+            .add_startup_system_to_stage(StartupStage::PreStartup, setup.exclusive_system())
             .add_system(world_update.system());
     }
 }
@@ -50,6 +53,7 @@ fn setup(
 fn world_update(
     mut window_resized_events: EventReader<WindowResized>,
     mut renderer: ResMut<Renderer>,
+    mut sunlight: Res<SunLight>,
     mut query: Query<(&mut CameraProjection, &GlobalTransform)>,
 ) {
     let (camera_projection, global_transform) = query
@@ -66,5 +70,6 @@ fn world_update(
     renderer.update(&dust_render::State {
         camera_projection: &*camera_projection,
         camera_transform: &camera_transform,
+        sunlight: &sunlight,
     });
 }

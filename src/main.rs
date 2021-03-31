@@ -1,6 +1,6 @@
 use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
-use bevy_dust::{Octree, RaytracerCameraBundle, Voxel};
+use bevy_dust::{Octree, RaytracerCameraBundle, SunLight, Voxel};
 
 mod fly_camera;
 
@@ -29,6 +29,7 @@ fn main() {
         .add_plugin(bevy_dust::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
         .add_startup_system(setup.system())
+        .add_system(run.system())
         .run();
 }
 
@@ -55,4 +56,9 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
         .spawn()
         .insert_bundle(bundle)
         .insert(FlyCamera::default());
+}
+
+fn run(mut sunlight: ResMut<SunLight>, time: Res<Time>) {
+    let (sin, cos) = (time.seconds_since_startup() * 2.0).sin_cos();
+    sunlight.dir = Vec3::new(sin as f32 * 10.0, -3.0, cos as f32 * 10.0).normalize();
 }

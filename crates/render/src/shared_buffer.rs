@@ -1,8 +1,10 @@
 use ash::vk;
 
 use crate::camera_projection::CameraProjection;
+use crate::light::SunLight;
 use ash::version::DeviceV1_0;
 use glam::{Mat4, TransformRT, Vec3};
+use std::ptr::NonNull;
 
 struct StagingState {
     memory: vk::DeviceMemory,
@@ -11,12 +13,31 @@ struct StagingState {
     queue_family: u32,
 }
 
+/**
+SharedBuffer Layout:
+0-128: Vertex and Index buffer of the cube
+128 - 256: Camera Data
+256-512: Light Data
+
+StagingBuffer Layout:
+0 - 128: Camera Data
+128-256: Light Data
+
+Staging area is fixed 128 bytes
+*/
 pub struct SharedBuffer {
     device: ash::Device,
     memory: vk::DeviceMemory,
     staging: Option<StagingState>,
     pub buffer: vk::Buffer,
+    ptr: *mut u8,
 }
+unsafe impl Send for SharedBuffer {}
+unsafe impl Sync for SharedBuffer {}
+
+const STAGING_BUFFER_SIZE: u64 = 256;
+const DEVICE_BUFFER_SIZE: u64 = 512;
+const DEVICE_STAGING_OFFSET: u64 = 128;
 
 impl SharedBuffer {
     pub unsafe fn new(
@@ -42,7 +63,7 @@ impl SharedBuffer {
                 &vk::BufferCreateInfo::builder()
                     .flags(vk::BufferCreateFlags::empty())
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                    .size(256)
+                    .size(DEVICE_BUFFER_SIZE)
                     .usage(
                         vk::BufferUsageFlags::UNIFORM_BUFFER
                             | vk::BufferUsageFlags::INDEX_BUFFER
@@ -103,13 +124,14 @@ impl SharedBuffer {
             staging: None,
             buffer,
             device,
+            ptr: std::ptr::null_mut(),
         };
         if needs_staging {
             let staging_buffer = shared_buffer
                 .device
                 .create_buffer(
                     &vk::BufferCreateInfo::builder()
-                        .size(128)
+                        .size(STAGING_BUFFER_SIZE)
                         .usage(vk::BufferUsageFlags::TRANSFER_SRC)
                         .flags(vk::BufferCreateFlags::empty())
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
@@ -163,16 +185,16 @@ impl SharedBuffer {
         shared_buffer
     }
 
-    pub unsafe fn write_vertex_index(
+    pub unsafe fn copy_vertex_index(
         &self,
         vertex_buffer: &[(f32, f32, f32); 8],
         index_buffer: &[u16; 14],
     ) {
-        // Write data into buffer
+        assert!(self.ptr.is_null()); // The memory is not already mapped
+                                     // Write data into buffer
         let mem_to_write = if let Some(staging_buffer) = self.staging.as_ref() {
             staging_buffer.memory
         } else {
-            // Directly map and write
             self.memory
         };
         let ptr = self
@@ -189,15 +211,101 @@ impl SharedBuffer {
             ptr.add(std::mem::size_of_val(vertex_buffer)),
             std::mem::size_of_val(index_buffer),
         );
-        self.device
-            .flush_mapped_memory_ranges(&[vk::MappedMemoryRange::builder()
-                .memory(mem_to_write)
-                .size(128)
-                .offset(0)
-                .build()])
-            .unwrap();
         self.device.unmap_memory(mem_to_write);
-        // copy buffer to buffer
+        self.flush_staging_data_immediately(0, 128);
+    }
+
+    pub unsafe fn mapped_memory(&mut self) -> (vk::DeviceMemory, *mut u8) {
+        let (mem_to_write, offset) = if let Some(staging_buffer) = self.staging.as_ref() {
+            (staging_buffer.memory, 0)
+        } else {
+            (self.memory, DEVICE_STAGING_OFFSET)
+        };
+        if self.ptr.is_null() {
+            self.ptr = self
+                .device
+                .map_memory(
+                    mem_to_write,
+                    offset,
+                    STAGING_BUFFER_SIZE,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .unwrap() as *mut u8;
+        }
+        (mem_to_write, self.ptr)
+    }
+
+    pub fn write_camera(
+        &mut self,
+        camera_projection: &CameraProjection,
+        transform: &TransformRT,
+        aspect_ratio: f32,
+    ) {
+        let rotation = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
+        let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
+        let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * rotation.inverse();
+        let transform_cols_arr = transform.to_cols_array();
+        let view_proj_cols_arr = view_proj.to_cols_array();
+        unsafe {
+            let (mem, ptr) = self.mapped_memory();
+            std::ptr::copy_nonoverlapping(
+                view_proj_cols_arr.as_ptr() as *const u8,
+                ptr,
+                std::mem::size_of_val(&view_proj_cols_arr),
+            );
+            std::ptr::copy_nonoverlapping(
+                transform_cols_arr.as_ptr() as *const u8,
+                ptr.add(std::mem::size_of_val(&view_proj_cols_arr)),
+                std::mem::size_of_val(&transform_cols_arr),
+            );
+        }
+    }
+
+    pub fn write_light(&mut self, sunlight: &SunLight) {
+        unsafe {
+            let (mem, ptr) = self.mapped_memory();
+            std::ptr::copy_nonoverlapping(
+                sunlight as *const SunLight as *const u8,
+                ptr.add(128),
+                std::mem::size_of::<SunLight>(),
+            );
+        }
+    }
+
+    pub unsafe fn record_cmd_buffer_copy(&self, cmd_buffer: vk::CommandBuffer) {
+        if !self.ptr.is_null() {
+            // memory is mapped
+            // flush staging buffer before copy
+            let (mem_to_write, offset) = if let Some(staging) = self.staging.as_ref() {
+                (staging.memory, 0)
+            } else {
+                (self.memory, DEVICE_STAGING_OFFSET)
+            };
+            self.device
+                .flush_mapped_memory_ranges(&[vk::MappedMemoryRange::builder()
+                    .memory(mem_to_write)
+                    .size(STAGING_BUFFER_SIZE)
+                    .offset(offset)
+                    .build()])
+                .unwrap();
+        }
+        if let Some(staging_buffer) = self.staging.as_ref() {
+            self.device.cmd_copy_buffer(
+                cmd_buffer,
+                staging_buffer.buffer,
+                self.buffer,
+                &[vk::BufferCopy {
+                    src_offset: 0,
+                    dst_offset: DEVICE_STAGING_OFFSET,
+                    size: STAGING_BUFFER_SIZE,
+                }],
+            );
+        }
+    }
+
+    // This copies data from [0..size] of the staging buffer to [offset..offset+size] of the device
+    // buffer.
+    unsafe fn flush_staging_data_immediately(&self, offset: u64, size: u64) {
         if let Some(ref staging) = self.staging {
             let pool = self
                 .device
@@ -235,9 +343,8 @@ impl SharedBuffer {
                 self.buffer,
                 &[vk::BufferCopy {
                     src_offset: 0,
-                    dst_offset: 0,
-                    size: std::mem::size_of_val(vertex_buffer) as u64
-                        + std::mem::size_of_val(index_buffer) as u64,
+                    dst_offset: offset,
+                    size,
                 }],
             );
             self.device.end_command_buffer(cmd_buf).unwrap();
@@ -259,65 +366,6 @@ impl SharedBuffer {
                 .unwrap();
             self.device.destroy_command_pool(pool, None);
             self.device.destroy_fence(fence, None);
-        }
-    }
-
-    pub fn update_camera(
-        &self,
-        camera_projection: &CameraProjection,
-        transform: &TransformRT,
-        aspect_ratio: f32,
-    ) {
-        let rotation = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
-        let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
-        let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * rotation.inverse();
-        let transform_cols_arr = transform.to_cols_array();
-        let view_proj_cols_arr = view_proj.to_cols_array();
-        let (mem_to_write, offset, size) = if let Some(staging_buffer) = self.staging.as_ref() {
-            // needs staging
-            (staging_buffer.memory, 0_u64, 128_u64)
-        } else {
-            // direct write
-            (self.memory, 128_u64, 128_u64)
-        };
-        unsafe {
-            let ptr = self
-                .device
-                .map_memory(mem_to_write, offset, size, vk::MemoryMapFlags::empty())
-                .unwrap() as *mut u8;
-            std::ptr::copy_nonoverlapping(
-                view_proj_cols_arr.as_ptr() as *const u8,
-                ptr,
-                std::mem::size_of_val(&view_proj_cols_arr),
-            );
-            std::ptr::copy_nonoverlapping(
-                transform_cols_arr.as_ptr() as *const u8,
-                ptr.add(std::mem::size_of_val(&view_proj_cols_arr)),
-                std::mem::size_of_val(&transform_cols_arr),
-            );
-            self.device
-                .flush_mapped_memory_ranges(&[vk::MappedMemoryRange::builder()
-                    .size(size)
-                    .offset(offset)
-                    .memory(mem_to_write)
-                    .build()])
-                .unwrap();
-            self.device.unmap_memory(mem_to_write);
-        }
-    }
-
-    pub unsafe fn record_cmd_buffer_copy_buffer(&self, cmd_buffer: vk::CommandBuffer) {
-        if let Some(staging_buffer) = self.staging.as_ref() {
-            self.device.cmd_copy_buffer(
-                cmd_buffer,
-                staging_buffer.buffer,
-                self.buffer,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset: 128,
-                    size: 128,
-                }],
-            );
         }
     }
 }
