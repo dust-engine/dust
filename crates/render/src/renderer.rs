@@ -6,6 +6,7 @@ use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
 use std::ffi::CStr;
 use std::io::Cursor;
+use svo::alloc::BlockAllocator;
 
 const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -36,64 +37,11 @@ struct RayTracer {
 }
 
 impl RayTracer {
-    pub unsafe fn bind_shared_buffer(&self, shared_buffer: &SharedBuffer) {
-        // TODO: temp code to test things out
-        let storage_buffer = self
-            .device
-            .create_buffer(
-                &vk::BufferCreateInfo::builder()
-                    .flags(
-                        vk::BufferCreateFlags::SPARSE_RESIDENCY
-                            | vk::BufferCreateFlags::SPARSE_BINDING,
-                    )
-                    .size(4294967295)
-                    .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                    .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
-                    .build(),
-                None,
-            )
-            .unwrap();
-
-        let mem = self
-            .device
-            .allocate_memory(
-                &vk::MemoryAllocateInfo::builder()
-                    .allocation_size(1 << 24 - 1)
-                    .memory_type_index(1)
-                    .build(),
-                None,
-            )
-            .unwrap();
-        let ptr = self
-            .device
-            .map_memory(mem, 0, 1 << 24 - 1, vk::MemoryMapFlags::empty())
-            .unwrap() as *mut u8;
-        let testdata: &[u8] = &[1, 2, 3, 5, 7];
-        std::ptr::copy_nonoverlapping(
-            testdata.as_ptr() as *mut u8,
-            ptr,
-            std::mem::size_of_val(testdata),
-        );
-        let queue = self.device.get_device_queue(0, 0);
-        self.device
-            .queue_bind_sparse(
-                queue,
-                &[vk::BindSparseInfo::builder()
-                    .buffer_binds(&[vk::SparseBufferMemoryBindInfo::builder()
-                        .buffer(storage_buffer)
-                        .binds(&[vk::SparseMemoryBind {
-                            resource_offset: 0,
-                            size: 1 << 24 - 1,
-                            memory: mem,
-                            memory_offset: 0,
-                            flags: vk::SparseMemoryBindFlags::empty(),
-                        }])
-                        .build()])
-                    .build()],
-                vk::Fence::null(),
-            )
-            .unwrap();
-
+    pub unsafe fn bind_shared_buffer(
+        &self,
+        shared_buffer: &SharedBuffer,
+        node_pool_buffer: vk::Buffer,
+    ) {
         self.device.update_descriptor_sets(
             &[
                 vk::WriteDescriptorSet::builder()
@@ -113,9 +61,9 @@ impl RayTracer {
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[vk::DescriptorBufferInfo {
-                        buffer: storage_buffer,
+                        buffer: node_pool_buffer,
                         offset: 0,
-                        range: 4294967295,
+                        range: vk::WHOLE_SIZE,
                     }])
                     .build(),
             ],
@@ -347,7 +295,10 @@ impl RayTracer {
 }
 
 impl Renderer {
-    pub fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Self {
+    pub fn new(
+        window_handle: &impl raw_window_handle::HasRawWindowHandle,
+        block_size: u64,
+    ) -> (Self, Box<dyn BlockAllocator>) {
         unsafe {
             let entry = ash::Entry::new().unwrap();
             let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
@@ -451,7 +402,7 @@ impl Renderer {
                 )
                 .unwrap();
             let graphics_queue = device.get_device_queue(graphics_queue_family.0, 0);
-            let _transfer_binding_queue =
+            let transfer_binding_queue =
                 device.get_device_queue(transfer_binding_queue_family.0, 0);
 
             let shared_buffer = SharedBuffer::new(
@@ -465,7 +416,47 @@ impl Renderer {
             let swapchain_config =
                 Swapchain::get_config(physical_device, surface, surface_loader, &quirks);
             let raytracer = RayTracer::new(device.clone(), &swapchain_config);
-            raytracer.bind_shared_buffer(&shared_buffer);
+
+            let node_pool_buffer: vk::Buffer;
+            let device_type = device_info.physical_device_properties.device_type;
+            let device_type = vk::PhysicalDeviceType::INTEGRATED_GPU;
+            let allocator: Box<dyn BlockAllocator> = match device_type {
+                vk::PhysicalDeviceType::DISCRETE_GPU => {
+                    let allocator = crate::block_alloc::DiscreteBlockAllocator::new(
+                        device.clone(),
+                        transfer_binding_queue,
+                        transfer_binding_queue_family.0,
+                        graphics_queue_family.0,
+                        block_size,
+                        device_info
+                            .physical_device_properties
+                            .limits
+                            .max_storage_buffer_range as u64,
+                        &device_info,
+                    );
+                    node_pool_buffer = allocator.device_buffer;
+                    Box::new(allocator)
+                }
+                vk::PhysicalDeviceType::INTEGRATED_GPU => {
+                    let allocator = crate::block_alloc::IntegratedBlockAllocator::new(
+                        device.clone(),
+                        transfer_binding_queue,
+                        transfer_binding_queue_family.0,
+                        graphics_queue_family.0,
+                        block_size,
+                        device_info
+                            .physical_device_properties
+                            .limits
+                            .max_storage_buffer_range as u64,
+                        &device_info,
+                    );
+                    node_pool_buffer = allocator.buffer;
+                    Box::new(allocator)
+                }
+                _ => panic!("Unsupported GPU"),
+            };
+            raytracer.bind_shared_buffer(&shared_buffer, node_pool_buffer);
+
             let swapchain = Swapchain::new(
                 &instance,
                 device.clone(),
@@ -506,12 +497,13 @@ impl Renderer {
                     device.cmd_draw_indexed(command_buffer, CUBE_INDICES.len() as u32, 1, 0, 0, 0);
                 },
             );
-            Self {
+            let renderer = Self {
                 device,
                 swapchain,
                 shared_buffer,
                 raytracer,
-            }
+            };
+            (renderer, allocator)
         }
     }
 
@@ -523,7 +515,7 @@ impl Renderer {
                 self.swapchain.config.extent.width as f32
                     / self.swapchain.config.extent.height as f32,
             );
-            self.swapchain.render_frame()
+            self.swapchain.render_frame();
             //self.swapchain.render_frame();
             //self.device.cmd_bind_
         }

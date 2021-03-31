@@ -15,7 +15,7 @@ pub struct DiscreteBlockAllocator {
     block_size: u64,
     device: ash::Device,
     bind_transfer_queue: vk::Queue,
-    device_buffer: vk::Buffer,
+    pub device_buffer: vk::Buffer,
     system_buffer: vk::Buffer,
     system_memtype: u32,
     device_memtype: u32,
@@ -135,34 +135,36 @@ impl BlockAllocator for DiscreteBlockAllocator {
             .device
             .map_memory(system_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
             .map_err(super::utils::map_err)? as *mut u8;
-        self.device.queue_bind_sparse(
-            self.bind_transfer_queue,
-            &[vk::BindSparseInfo::builder()
-                .buffer_binds(&[
-                    vk::SparseBufferMemoryBindInfo::builder()
-                        .buffer(self.system_buffer)
-                        .binds(&[vk::SparseMemoryBind {
-                            resource_offset: resource_offset * self.block_size as u64,
-                            size: self.block_size,
-                            memory: system_mem,
-                            memory_offset: 0,
-                            flags: vk::SparseMemoryBindFlags::empty(),
-                        }])
-                        .build(),
-                    vk::SparseBufferMemoryBindInfo::builder()
-                        .buffer(self.device_buffer)
-                        .binds(&[vk::SparseMemoryBind {
-                            resource_offset: resource_offset * self.block_size as u64,
-                            size: self.block_size,
-                            memory: device_mem,
-                            memory_offset: 0,
-                            flags: vk::SparseMemoryBindFlags::empty(),
-                        }])
-                        .build(),
-                ])
-                .build()],
-            vk::Fence::null(),
-        );
+        self.device
+            .queue_bind_sparse(
+                self.bind_transfer_queue,
+                &[vk::BindSparseInfo::builder()
+                    .buffer_binds(&[
+                        vk::SparseBufferMemoryBindInfo::builder()
+                            .buffer(self.system_buffer)
+                            .binds(&[vk::SparseMemoryBind {
+                                resource_offset: resource_offset * self.block_size as u64,
+                                size: self.block_size,
+                                memory: system_mem,
+                                memory_offset: 0,
+                                flags: vk::SparseMemoryBindFlags::empty(),
+                            }])
+                            .build(),
+                        vk::SparseBufferMemoryBindInfo::builder()
+                            .buffer(self.device_buffer)
+                            .binds(&[vk::SparseMemoryBind {
+                                resource_offset: resource_offset * self.block_size as u64,
+                                size: self.block_size,
+                                memory: device_mem,
+                                memory_offset: 0,
+                                flags: vk::SparseMemoryBindFlags::empty(),
+                            }])
+                            .build(),
+                    ])
+                    .build()],
+                vk::Fence::null(),
+            )
+            .map_err(super::utils::map_err)?;
         let block = DiscreteBlock {
             system_mem,
             device_mem,

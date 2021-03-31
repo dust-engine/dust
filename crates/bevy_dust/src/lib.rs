@@ -6,6 +6,8 @@ use dust_render::{CameraProjection, Renderer};
 
 pub use dust_render::Octree;
 pub use dust_render::Voxel;
+use svo::alloc::CHUNK_SIZE;
+use svo::ArenaAllocator;
 
 #[derive(Default)]
 pub struct DustPlugin;
@@ -36,7 +38,12 @@ fn setup(
         .unwrap();
 
     let winit_window = winit_windows.get_window(window_id).unwrap();
-    let renderer = dust_render::renderer::Renderer::new(winit_window);
+    let (renderer, block_allocator) =
+        dust_render::renderer::Renderer::new(winit_window, CHUNK_SIZE as u64);
+
+    let arena = ArenaAllocator::new(block_allocator);
+    let octree = Octree::new(arena);
+    commands.insert_resource(octree);
     commands.insert_resource(renderer);
 }
 

@@ -265,8 +265,9 @@ impl SharedBuffer {
         transform: &TransformRT,
         aspect_ratio: f32,
     ) {
-        let transform = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
-        let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * transform.inverse();
+        let rotation = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
+        let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
+        let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * rotation.inverse();
         let transform_cols_arr = transform.to_cols_array();
         let view_proj_cols_arr = view_proj.to_cols_array();
         let (mem_to_write, offset, size) = if let Some(staging_buffer) = self.staging.as_mut() {
