@@ -4,6 +4,7 @@
 mod block_alloc;
 mod camera_projection;
 mod device_info;
+mod raytracer;
 pub mod renderer;
 mod shared_buffer;
 pub mod swapchain;

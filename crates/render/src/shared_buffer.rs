@@ -4,26 +4,26 @@ use crate::camera_projection::CameraProjection;
 use ash::version::DeviceV1_0;
 use glam::{Mat4, TransformRT, Vec3};
 
-pub struct SharedStagingBuffer {
+struct StagingState {
     memory: vk::DeviceMemory,
     buffer: vk::Buffer,
+    queue: vk::Queue,
+    queue_family: u32,
 }
 
 pub struct SharedBuffer {
     device: ash::Device,
     memory: vk::DeviceMemory,
-    staging: Option<SharedStagingBuffer>,
+    staging: Option<StagingState>,
     pub buffer: vk::Buffer,
 }
 
 impl SharedBuffer {
     pub unsafe fn new(
         device: ash::Device,
+        memory_properties: &vk::PhysicalDeviceMemoryProperties,
         queue: vk::Queue,
         queue_family: u32,
-        vertex_buffer: &[(f32, f32, f32); 8],
-        index_buffer: &[u16; 14],
-        memory_properties: &vk::PhysicalDeviceMemoryProperties,
     ) -> Self {
         let span = tracing::info_span!("shared_buffer_new");
         let _enter = span.enter();
@@ -40,10 +40,6 @@ impl SharedBuffer {
             }
         }
         tracing::info!("SharedBuffer using staging: {:?}", needs_staging);
-        debug_assert_eq!(
-            std::mem::size_of_val(vertex_buffer) + std::mem::size_of_val(index_buffer),
-            124
-        );
         let buffer = device
             .create_buffer(
                 &vk::BufferCreateInfo::builder()
@@ -110,9 +106,7 @@ impl SharedBuffer {
             buffer,
             device,
         };
-
-        // Write data into buffer
-        let mem_to_write = if needs_staging {
+        if needs_staging {
             let staging_buffer = shared_buffer
                 .device
                 .create_buffer(
@@ -137,8 +131,8 @@ impl SharedBuffer {
                     .property_flags
                     .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
                     && !ty
-                        .property_flags
-                        .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                    .property_flags
+                    .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
                 {
                     memory_type = i;
                 }
@@ -158,16 +152,29 @@ impl SharedBuffer {
                 .device
                 .bind_buffer_memory(staging_buffer, staging_mem, 0)
                 .unwrap();
-            shared_buffer.staging = Some(SharedStagingBuffer {
+            shared_buffer.staging = Some(StagingState {
                 memory: staging_mem,
                 buffer: staging_buffer,
+                queue,
+                queue_family
             });
-            shared_buffer.staging.as_mut().unwrap().memory
+        }
+        shared_buffer
+    }
+
+    pub unsafe fn write_vertex_index(
+        &self,
+        vertex_buffer: &[(f32, f32, f32); 8],
+        index_buffer: &[u16; 14],
+    ) {
+        // Write data into buffer
+        let mem_to_write = if let Some(staging_buffer) = self.staging.as_ref() {
+            staging_buffer.memory
         } else {
             // Directly map and write
-            shared_buffer.memory
+            self.memory
         };
-        let ptr = shared_buffer
+        let ptr = self
             .device
             .map_memory(mem_to_write, 0, 128, vk::MemoryMapFlags::empty())
             .unwrap() as *mut u8;
@@ -181,7 +188,7 @@ impl SharedBuffer {
             ptr.add(std::mem::size_of_val(vertex_buffer)),
             std::mem::size_of_val(index_buffer),
         );
-        shared_buffer
+        self
             .device
             .flush_mapped_memory_ranges(&[vk::MappedMemoryRange::builder()
                 .memory(mem_to_write)
@@ -189,20 +196,20 @@ impl SharedBuffer {
                 .offset(0)
                 .build()])
             .unwrap();
-        shared_buffer.device.unmap_memory(mem_to_write);
+        self.device.unmap_memory(mem_to_write);
         // copy buffer to buffer
-        if let Some(ref staging) = shared_buffer.staging {
-            let pool = shared_buffer
+        if let Some(ref staging) = self.staging {
+            let pool = self
                 .device
                 .create_command_pool(
                     &vk::CommandPoolCreateInfo::builder()
                         .flags(vk::CommandPoolCreateFlags::TRANSIENT)
-                        .queue_family_index(queue_family)
+                        .queue_family_index(staging.queue_family)
                         .build(),
                     None,
                 )
                 .unwrap();
-            let cmd_buf = shared_buffer
+            let cmd_buf = self
                 .device
                 .allocate_command_buffers(
                     &vk::CommandBufferAllocateInfo::builder()
@@ -214,7 +221,7 @@ impl SharedBuffer {
                 .unwrap()
                 .pop()
                 .unwrap();
-            shared_buffer
+            self
                 .device
                 .begin_command_buffer(
                     cmd_buf,
@@ -223,10 +230,10 @@ impl SharedBuffer {
                         .build(),
                 )
                 .unwrap();
-            shared_buffer.device.cmd_copy_buffer(
+            self.device.cmd_copy_buffer(
                 cmd_buf,
                 staging.buffer,
-                shared_buffer.buffer,
+                self.buffer,
                 &[vk::BufferCopy {
                     src_offset: 0,
                     dst_offset: 0,
@@ -234,29 +241,28 @@ impl SharedBuffer {
                         + std::mem::size_of_val(index_buffer) as u64,
                 }],
             );
-            shared_buffer.device.end_command_buffer(cmd_buf).unwrap();
-            let fence = shared_buffer
+            self.device.end_command_buffer(cmd_buf).unwrap();
+            let fence = self
                 .device
                 .create_fence(&vk::FenceCreateInfo::default(), None)
                 .unwrap();
-            shared_buffer
+            self
                 .device
                 .queue_submit(
-                    queue,
+                    staging.queue,
                     &[vk::SubmitInfo::builder()
                         .command_buffers(&[cmd_buf])
                         .build()],
                     fence,
                 )
                 .unwrap();
-            shared_buffer
+            self
                 .device
                 .wait_for_fences(&[fence], true, u64::MAX)
                 .unwrap();
-            shared_buffer.device.destroy_command_pool(pool, None);
-            shared_buffer.device.destroy_fence(fence, None);
+            self.device.destroy_command_pool(pool, None);
+            self.device.destroy_fence(fence, None);
         }
-        shared_buffer
     }
 
     pub fn update_camera(

@@ -9,12 +9,24 @@ struct Frame {
 }
 struct SwapchainImage {
     view: vk::ImageView,
-    fence: vk::Fence,
+    fence: vk::Fence, // This fence was borrowed from the last rendered frame.
     // The reason we need a separate command buffer for each swapchain image
     // is that cmd_begin_render_pass contains a reference to the framebuffer
     // which is unique to each swapchain image.
     command_buffer: vk::CommandBuffer,
     framebuffer: vk::Framebuffer,
+}
+pub trait RenderPassProvider {
+    unsafe fn record_command_buffer(
+        &self,
+        device: &ash::Device,
+        command_buffer: vk::CommandBuffer,
+        framebuffer: vk::Framebuffer,
+        config: &SwapchainConfig,
+    );
+    unsafe fn get_render_pass(
+        &self
+    ) -> vk::RenderPass;
 }
 impl Frame {
     unsafe fn new(device: &ash::Device) -> Self {
@@ -77,20 +89,15 @@ impl Swapchain {
             flip_y_requires_shift: quirks.flip_y_requires_shift,
         }
     }
-    pub unsafe fn new<F1, F2>(
+    pub unsafe fn new<T: RenderPassProvider>(
         instance: &ash::Instance,
         device: ash::Device,
-        render_pass: vk::RenderPass,
         surface: vk::SurfaceKHR,
         config: SwapchainConfig,
         graphics_queue_family_index: u32,
         graphics_queue: vk::Queue,
-        record_cmd_buf_pre_pass: F1,
-        record_cmd_buf_in_pass: F2,
+        render_pass_provider: &T,
     ) -> Self
-    where
-        F1: Fn(&ash::Device, vk::CommandBuffer),
-        F2: Fn(&ash::Device, vk::CommandBuffer),
     {
         let num_frames_in_flight = 3;
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
@@ -167,7 +174,7 @@ impl Swapchain {
                             .width(config.extent.width)
                             .layers(1)
                             .attachments(&[view])
-                            .render_pass(render_pass)
+                            .render_pass(render_pass_provider.get_render_pass())
                             .flags(vk::FramebufferCreateFlags::empty())
                             .build(),
                         None,
@@ -182,51 +189,12 @@ impl Swapchain {
                             .build(),
                     )
                     .unwrap();
-                device.cmd_set_viewport(
+                render_pass_provider.record_command_buffer(
+                    &device,
                     command_buffer,
-                    0,
-                    &[vk::Viewport {
-                        x: 0.0,
-                        y: if config.flip_y_requires_shift {
-                            config.extent.height as f32
-                        } else {
-                            0.0
-                        },
-                        width: config.extent.width as f32,
-                        height: -(config.extent.height as f32),
-                        min_depth: 0.0,
-                        max_depth: 1.0,
-                    }],
+                    framebuffer,
+                    &config
                 );
-                device.cmd_set_scissor(
-                    command_buffer,
-                    0,
-                    &[vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent: config.extent,
-                    }],
-                );
-                let mut clear_values = [vk::ClearValue::default(), vk::ClearValue::default()];
-                clear_values[0].color.float32 = [0.0, 1.0, 0.0, 1.0];
-                clear_values[1].depth_stencil = vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                };
-                record_cmd_buf_pre_pass(&device, command_buffer);
-                device.cmd_begin_render_pass(
-                    command_buffer,
-                    &vk::RenderPassBeginInfo::builder()
-                        .render_area(vk::Rect2D {
-                            offset: vk::Offset2D { x: 0, y: 0 },
-                            extent: config.extent,
-                        })
-                        .framebuffer(framebuffer)
-                        .render_pass(render_pass)
-                        .clear_values(&clear_values),
-                    vk::SubpassContents::INLINE,
-                );
-                record_cmd_buf_in_pass(&device, command_buffer);
-                device.cmd_end_render_pass(command_buffer);
                 device.end_command_buffer(command_buffer).unwrap();
 
                 SwapchainImage {
@@ -253,6 +221,23 @@ impl Swapchain {
             config,
         }
     }
+
+    pub unsafe fn recreate(
+        &mut self,
+        new_config: &SwapchainConfig,
+        surface: vk::SurfaceKHR,
+        render_pass: vk::RenderPass,
+    ) {
+        // reclaim resources
+        for swapchain_image in self.swapchain_images.iter() {
+            self.device
+                .destroy_framebuffer(swapchain_image.framebuffer, None);
+            self.device.destroy_image_view(swapchain_image.view, None);
+        }
+        self.loader.destroy_swapchain(self.swapchain, None);
+        self.device.reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty());
+    }
+
     pub unsafe fn render_frame(&mut self) {
         let frame_in_flight = &self.frames_in_flight[self.current_frame];
         self.device
