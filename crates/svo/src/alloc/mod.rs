@@ -6,7 +6,7 @@ pub use arena::CHUNK_DEGREE;
 pub use arena::CHUNK_SIZE;
 pub use arena::{ArenaAllocated, ArenaAllocator, ArenaBlockAllocator, Handle};
 use std::ops::Range;
-use std::ptr::NonNull;
+
 pub use system::SystemBlockAllocator;
 
 #[derive(Debug)]

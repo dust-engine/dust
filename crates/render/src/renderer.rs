@@ -1,12 +1,11 @@
 use crate::device_info::{DeviceInfo, Quirks};
 use crate::raytracer::RayTracer;
 use crate::shared_buffer::SharedBuffer;
-use crate::swapchain::{Swapchain, SwapchainConfig};
+use crate::swapchain::Swapchain;
 use crate::State;
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
 use std::ffi::CStr;
-use std::io::Cursor;
 use svo::alloc::BlockAllocator;
 
 pub struct Renderer {
@@ -214,8 +213,6 @@ impl Renderer {
                     / self.swapchain.config.extent.height as f32,
             );
             self.swapchain.render_frame();
-            //self.swapchain.render_frame();
-            //self.device.cmd_bind_
         }
     }
 
@@ -229,8 +226,7 @@ impl Renderer {
                 &self.surface_loader,
                 &self.quirks,
             );
-            self.swapchain
-                .recreate(self.raytracer.render_pass, config, &self.raytracer);
+            self.swapchain.recreate(config, &self.raytracer);
         }
     }
 }

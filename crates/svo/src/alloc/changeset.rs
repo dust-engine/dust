@@ -1,6 +1,6 @@
 use crate::alloc::Handle;
-use std::collections::{HashMap, HashSet};
-use std::mem::MaybeUninit;
+use std::collections::HashMap;
+
 use std::ops::Range;
 
 #[derive(Clone, Debug)]
@@ -24,7 +24,7 @@ pub struct ChangeSet {
 }
 
 impl ChangeSet {
-    pub fn new(len: usize) -> Self {
+    pub fn new(_len: usize) -> Self {
         ChangeSet {
             changed_chunks: HashMap::new(),
         }

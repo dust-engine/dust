@@ -1,8 +1,7 @@
 use super::super::Octree;
-use crate::alloc::{Handle, CHUNK_SIZE};
-use crate::octree::Node;
+use crate::alloc::Handle;
+
 use crate::Voxel;
-use std::mem::size_of;
 
 fn set_recursive<T: Voxel>(
     octree: &mut Octree<T>,

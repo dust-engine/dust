@@ -28,7 +28,7 @@ impl SharedBuffer {
         let span = tracing::info_span!("shared_buffer_new");
         let _enter = span.enter();
 
-        let mut needs_staging = !memory_properties.memory_types
+        let needs_staging = !memory_properties.memory_types
             [0..memory_properties.memory_type_count as usize]
             .iter()
             .any(|ty| {
@@ -57,7 +57,7 @@ impl SharedBuffer {
             )
             .unwrap();
         let buffer_requirements = device.get_buffer_memory_requirements(buffer);
-        let mut buffer_memory_type: u32 = memory_properties.memory_types
+        let buffer_memory_type: u32 = memory_properties.memory_types
             [0..memory_properties.memory_type_count as usize]
             .iter()
             .enumerate()

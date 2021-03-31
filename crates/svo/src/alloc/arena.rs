@@ -1,8 +1,8 @@
 use super::BlockAllocator;
 use crate::alloc::changeset::ChangeSet;
-use std::marker::PhantomData;
+
 use std::mem::{size_of, ManuallyDrop};
-use std::ops::{Index, IndexMut};
+
 use std::ptr::NonNull;
 
 pub const CHUNK_DEGREE: usize = 24;

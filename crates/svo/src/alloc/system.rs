@@ -32,7 +32,7 @@ impl BlockAllocator for SystemBlockAllocator {
     }
 
     unsafe fn deallocate_block(&mut self, block: *mut u8) {
-        let layout = Layout::new::<u8>()
+        let _layout = Layout::new::<u8>()
             .repeat(self.block_size as usize)
             .unwrap();
         self.allocator.deallocate(
@@ -41,5 +41,5 @@ impl BlockAllocator for SystemBlockAllocator {
         );
     }
 
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {}
+    unsafe fn flush(&mut self, _ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {}
 }

@@ -261,7 +261,6 @@ impl Swapchain {
 
     pub unsafe fn recreate(
         &mut self,
-        render_pass: vk::RenderPass,
         config: SwapchainConfig,
         render_pass_provider: &impl RenderPassProvider,
     ) {
