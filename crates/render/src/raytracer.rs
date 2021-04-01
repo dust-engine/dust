@@ -314,7 +314,6 @@ impl RayTracer {
         self.shared_buffer.write_light(state.sunlight);
     }
     pub unsafe fn bind_block_allocator_buffer(&mut self, block_allocator_buffer: vk::Buffer) {
-        println!("Bind block allocator buffer");
         self.device.update_descriptor_sets(
             &[
                 vk::WriteDescriptorSet::builder()

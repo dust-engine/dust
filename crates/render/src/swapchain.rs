@@ -327,7 +327,6 @@ impl Swapchain {
         }
     }
     pub unsafe fn bind_render_pass(&mut self, render_pass_provider: &mut impl RenderPassProvider) {
-        println!("Render pass binded and recorded command buffer");
         self.render_pass = render_pass_provider.get_render_pass();
         for swapchain_image in self.swapchain_images.iter_mut() {
             swapchain_image.framebuffer = create_framebuffer(

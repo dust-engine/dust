@@ -11,6 +11,7 @@ use std::mem::ManuallyDrop;
 use svo::alloc::BlockAllocator;
 
 pub struct Renderer {
+    pub entry: ash::Entry,
     pub instance: ash::Instance,
     pub device: ash::Device,
     pub raytracer: Option<RayTracer>,
@@ -63,13 +64,43 @@ impl Renderer {
 
             let surface =
                 ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();
-            let mut physical_devices = instance.enumerate_physical_devices().unwrap();
+            let available_physical_devices: Vec<_> = instance
+                .enumerate_physical_devices()
+                .unwrap()
+                .into_iter()
+                .map(|physical_device| {
+                    let device_info = DeviceInfo::new(&entry, &instance, physical_device);
+                    (physical_device, device_info)
+                })
+                .filter(|(physical_device, device_info)| {
+                    device_info.features.sparse_residency_buffer != 0
+                        && device_info.features.sparse_binding != 0
+                })
+                .collect();
+            let (physical_device, device_info) = available_physical_devices
+                .iter()
+                .find(|(physical_device, device_info)| {
+                    device_info.physical_device_properties.device_type
+                        == vk::PhysicalDeviceType::DISCRETE_GPU
+                })
+                .or_else(|| {
+                    available_physical_devices
+                        .iter()
+                        .find(|(physical_device, device_info)| {
+                            device_info.physical_device_properties.device_type
+                                == vk::PhysicalDeviceType::INTEGRATED_GPU
+                        })
+                })
+                .expect("Unable to find a supported graphics card");
+            let physical_device = *physical_device;
+            let device_info = device_info.clone();
+            println!(
+                "Selected graphics card: {}",
+                CStr::from_ptr(&device_info.physical_device_properties.device_name as *const _)
+                    .to_string_lossy()
+            );
             let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
-            let physical_device = physical_devices.pop().unwrap();
-            let device_info = DeviceInfo::new(&entry, &instance, physical_device);
 
-            let _memory_properties =
-                instance.get_physical_device_memory_properties(physical_device);
             let available_queue_family =
                 instance.get_physical_device_queue_family_properties(physical_device);
             let graphics_queue_family = available_queue_family
@@ -89,7 +120,30 @@ impl Renderer {
                 .find(|&(_, family)| {
                     !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
                         && !family.queue_flags.contains(vk::QueueFlags::COMPUTE)
-                        && family.queue_flags.contains(vk::QueueFlags::SPARSE_BINDING)
+                        && family
+                            .queue_flags
+                            .contains(vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING)
+                })
+                .or_else(|| {
+                    available_queue_family
+                        .iter()
+                        .enumerate()
+                        .find(|&(_, family)| {
+                            !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                                && family.queue_flags.contains(
+                                    vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING,
+                                )
+                        })
+                })
+                .or_else(|| {
+                    available_queue_family
+                        .iter()
+                        .enumerate()
+                        .find(|&(_, family)| {
+                            family
+                                .queue_flags
+                                .contains(vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING)
+                        })
                 })
                 .unwrap()
                 .0 as u32;
@@ -146,6 +200,7 @@ impl Renderer {
                 graphics_queue,
             );
             let renderer = Self {
+                entry,
                 device,
                 raytracer: None,
                 physical_device,
@@ -247,7 +302,6 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        println!("Freed renderer");
         unsafe {
             self.device.device_wait_idle().unwrap();
             if let Some(raytracer) = self.raytracer.take() {

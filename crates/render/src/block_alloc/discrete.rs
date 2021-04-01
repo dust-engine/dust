@@ -66,28 +66,28 @@ impl DiscreteBlockAllocator {
             &system_buf_requirements,
             &device_buf_requirements,
         );
-        println!(
-            "sys_memtype: {:?} \ndevice_memtype: {:?}",
-            device_info.memory_properties.memory_types[system_memtype as usize],
-            device_info.memory_properties.memory_types[device_memtype as usize]
-        );
         let command_pool = device
             .create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
                     .flags(vk::CommandPoolCreateFlags::TRANSIENT)
-                    .queue_family_index(bind_transfer_queue_family),
+                    .queue_family_index(bind_transfer_queue_family)
+                    .build(),
                 None,
             )
             .unwrap();
-        let command_buffer = device
+        let mut command_buffer = vk::CommandBuffer::null();
+        device
+            .fp_v1_0()
             .allocate_command_buffers(
+                device.handle(),
                 &vk::CommandBufferAllocateInfo::builder()
                     .command_pool(command_pool)
                     .command_buffer_count(1)
-                    .level(vk::CommandBufferLevel::PRIMARY),
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .build() as *const vk::CommandBufferAllocateInfo,
+                &mut command_buffer as *mut vk::CommandBuffer,
             )
-            .unwrap()
-            .pop()
+            .result()
             .unwrap();
         Self {
             block_size,
@@ -285,7 +285,6 @@ fn select_discrete_memtype(
 impl Drop for DiscreteBlockAllocator {
     fn drop(&mut self) {
         unsafe {
-            println!("Freed discrete blockallocator");
             self.device.device_wait_idle().unwrap();
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_buffer(self.device_buffer, None);
