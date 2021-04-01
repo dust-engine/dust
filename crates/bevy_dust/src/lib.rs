@@ -8,6 +8,7 @@ pub use dust_render::Octree;
 pub use dust_render::SunLight;
 pub use dust_render::Voxel;
 
+use std::borrow::BorrowMut;
 use svo::alloc::CHUNK_SIZE;
 use svo::ArenaAllocator;
 
@@ -41,11 +42,20 @@ fn setup(
         .unwrap();
 
     let winit_window = winit_windows.get_window(window_id).unwrap();
-    let (renderer, block_allocator) =
-        dust_render::renderer::Renderer::new(winit_window, CHUNK_SIZE as u64);
-
+    let mut renderer = dust_render::renderer::Renderer::new(winit_window);
+    renderer.create_raytracer(); // More like "Enter Raytracing Mode"
+    let (block_allocator, block_allocator_buffer) =
+        renderer.create_block_allocator(CHUNK_SIZE as u64);
+    unsafe {
+        let raytracer = renderer.raytracer.as_mut().unwrap();
+        raytracer.bind_block_allocator_buffer(block_allocator_buffer);
+        renderer.swapchain.bind_render_pass(raytracer);
+    }
     let arena = ArenaAllocator::new(block_allocator);
     let octree = Octree::new(arena);
+
+    // Insert the octree before the renderer so that the octree would be dropped first.
+    // This isn't safe at all... TODO: manually drop these resources on state exit.
     commands.insert_resource(octree);
     commands.insert_resource(renderer);
 }
@@ -56,6 +66,7 @@ fn world_update(
     sunlight: Res<SunLight>,
     mut query: Query<(&mut CameraProjection, &GlobalTransform)>,
 ) {
+    let renderer: &mut Renderer = renderer.borrow_mut();
     let (camera_projection, global_transform) = query
         .single_mut()
         .expect("Expecting an entity with RaytracerCameraBundle");

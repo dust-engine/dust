@@ -27,6 +27,8 @@ pub struct DiscreteBlockAllocator {
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
 }
+unsafe impl Send for DiscreteBlockAllocator {}
+unsafe impl Sync for DiscreteBlockAllocator {}
 
 impl DiscreteBlockAllocator {
     pub unsafe fn new(
@@ -278,4 +280,20 @@ fn select_discrete_memtype(
         .unwrap() as u32;
 
     (system_buf_mem_type, device_buf_mem_type)
+}
+
+impl Drop for DiscreteBlockAllocator {
+    fn drop(&mut self) {
+        unsafe {
+            println!("Freed discrete blockallocator");
+            self.device.device_wait_idle().unwrap();
+            self.device.destroy_command_pool(self.command_pool, None);
+            self.device.destroy_buffer(self.device_buffer, None);
+            self.device.destroy_buffer(self.system_buffer, None);
+            for i in self.allocations.values() {
+                self.device.free_memory(i.device_mem, None);
+                self.device.free_memory(i.system_mem, None);
+            }
+        }
+    }
 }

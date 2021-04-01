@@ -151,6 +151,7 @@ pub struct Swapchain {
     graphics_queue: vk::Queue,
     command_pool: vk::CommandPool,
     pub config: SwapchainConfig,
+    render_pass: vk::RenderPass,
 }
 pub struct SwapchainConfig {
     pub format: vk::Format,
@@ -189,7 +190,6 @@ impl Swapchain {
         config: SwapchainConfig,
         graphics_queue_family_index: u32,
         graphics_queue: vk::Queue,
-        render_pass_provider: &mut impl RenderPassProvider,
     ) -> Self {
         let num_frames_in_flight = 3;
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
@@ -219,25 +219,11 @@ impl Swapchain {
             .zip(command_buffers.into_iter())
             .map(|(image, command_buffer)| {
                 let view = create_image_view(&device, image, &config);
-                // Create the framebuffer
-                let framebuffer = create_framebuffer(
-                    &device,
-                    view,
-                    render_pass_provider.get_render_pass(),
-                    &config,
-                );
-                record_command_buffer(
-                    &device,
-                    command_buffer,
-                    framebuffer,
-                    render_pass_provider,
-                    &config,
-                );
                 SwapchainImage {
                     view,
                     fence: vk::Fence::null(),
                     command_buffer,
-                    framebuffer,
+                    framebuffer: vk::Framebuffer::null(),
                 }
             })
             .collect();
@@ -256,14 +242,11 @@ impl Swapchain {
             graphics_queue,
             config,
             surface,
+            render_pass: vk::RenderPass::null(),
         }
     }
 
-    pub unsafe fn recreate(
-        &mut self,
-        config: SwapchainConfig,
-        render_pass_provider: &mut impl RenderPassProvider,
-    ) {
+    pub unsafe fn recreate(&mut self, config: SwapchainConfig) {
         // reclaim resources
         for swapchain_image in self.swapchain_images.iter() {
             self.device
@@ -280,25 +263,15 @@ impl Swapchain {
         let images = self.loader.get_swapchain_images(self.swapchain).unwrap();
         for (swapchain_image, image) in self.swapchain_images.iter_mut().zip(images.into_iter()) {
             swapchain_image.view = create_image_view(&self.device, image, &config);
-            // Create the framebuffer
-            swapchain_image.framebuffer = create_framebuffer(
-                &self.device,
-                swapchain_image.view,
-                render_pass_provider.get_render_pass(),
-                &config,
-            );
-            record_command_buffer(
-                &self.device,
-                swapchain_image.command_buffer,
-                swapchain_image.framebuffer,
-                render_pass_provider,
-                &config,
-            );
+            swapchain_image.framebuffer = vk::Framebuffer::null();
         }
         self.config = config;
     }
 
     pub unsafe fn render_frame(&mut self) {
+        if self.render_pass == vk::RenderPass::null() {
+            return;
+        }
         let frame_in_flight = &self.frames_in_flight[self.current_frame];
         self.device
             .wait_for_fences(&[frame_in_flight.fence], true, u64::MAX)
@@ -351,6 +324,46 @@ impl Swapchain {
         self.current_frame = self.current_frame + 1;
         if self.current_frame >= 3 {
             self.current_frame = 0;
+        }
+    }
+    pub unsafe fn bind_render_pass(&mut self, render_pass_provider: &mut impl RenderPassProvider) {
+        println!("Render pass binded and recorded command buffer");
+        self.render_pass = render_pass_provider.get_render_pass();
+        for swapchain_image in self.swapchain_images.iter_mut() {
+            swapchain_image.framebuffer = create_framebuffer(
+                &self.device,
+                swapchain_image.view,
+                self.render_pass,
+                &self.config,
+            );
+            record_command_buffer(
+                &self.device,
+                swapchain_image.command_buffer,
+                swapchain_image.framebuffer,
+                render_pass_provider,
+                &self.config,
+            );
+        }
+    }
+}
+
+impl Drop for Swapchain {
+    fn drop(&mut self) {
+        unsafe {
+            for swapchain_image in self.swapchain_images.iter() {
+                self.device
+                    .destroy_framebuffer(swapchain_image.framebuffer, None);
+                self.device.destroy_image_view(swapchain_image.view, None);
+            }
+            for frame in self.frames_in_flight.iter() {
+                self.device.destroy_fence(frame.fence, None);
+                self.device
+                    .destroy_semaphore(frame.swapchain_image_available_semaphore, None);
+                self.device
+                    .destroy_semaphore(frame.render_finished_semaphore, None);
+            }
+            self.loader.destroy_swapchain(self.swapchain, None);
+            self.device.destroy_command_pool(self.command_pool, None);
         }
     }
 }

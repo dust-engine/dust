@@ -17,7 +17,7 @@ pub enum AllocError {
     TooManyObjects,
 }
 
-pub trait BlockAllocator {
+pub trait BlockAllocator: Send + Sync {
     unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError>;
     unsafe fn deallocate_block(&mut self, block: *mut u8);
     unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>);

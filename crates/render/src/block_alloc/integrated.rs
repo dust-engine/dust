@@ -17,6 +17,8 @@ pub struct IntegratedBlockAllocator {
     allocations: HashMap<*mut u8, vk::DeviceMemory>,
     block_size: u64,
 }
+unsafe impl Send for IntegratedBlockAllocator {}
+unsafe impl Sync for IntegratedBlockAllocator {}
 
 impl IntegratedBlockAllocator {
     pub unsafe fn new(
@@ -159,4 +161,16 @@ fn select_integrated_memtype(
                 })
         })
         .unwrap() as u32
+}
+
+impl Drop for IntegratedBlockAllocator {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+            self.device.destroy_buffer(self.buffer, None);
+            for i in self.allocations.values() {
+                self.device.free_memory(*i, None);
+            }
+        }
+    }
 }

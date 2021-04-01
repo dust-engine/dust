@@ -1,5 +1,7 @@
+use crate::device_info::DeviceInfo;
 use crate::shared_buffer::SharedBuffer;
 use crate::swapchain::{RenderPassProvider, SwapchainConfig};
+use crate::State;
 use ash::version::DeviceV1_0;
 use ash::vk;
 use ash::vk::RenderPass;
@@ -20,8 +22,11 @@ pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
 
 pub struct RayTracer {
     device: ash::Device,
+    desc_pool: vk::DescriptorPool,
     pub storage_desc_set: vk::DescriptorSet,
+    storage_desc_set_layout: vk::DescriptorSetLayout,
     pub uniform_desc_set: vk::DescriptorSet,
+    uniform_desc_set_layout: vk::DescriptorSetLayout,
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
     pub render_pass: vk::RenderPass,
@@ -32,10 +37,17 @@ pub struct RayTracer {
 impl RayTracer {
     pub unsafe fn new(
         device: ash::Device,
-        mut shared_buffer: SharedBuffer,
-        node_pool_buffer: vk::Buffer,
         format: vk::Format,
+        info: &DeviceInfo,
+        graphics_queue: vk::Queue,
+        graphics_queue_family: u32,
     ) -> Self {
+        let mut shared_buffer = SharedBuffer::new(
+            device.clone(),
+            &info.memory_properties,
+            graphics_queue,
+            graphics_queue_family,
+        );
         shared_buffer.copy_vertex_index(&CUBE_POSITIONS, &CUBE_INDICES);
         let render_pass = device
             .create_render_pass(
@@ -79,7 +91,7 @@ impl RayTracer {
                 None,
             )
             .unwrap();
-        let uniform_desc_layout = device
+        let uniform_desc_set_layout = device
             .create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo::builder()
                     .flags(vk::DescriptorSetLayoutCreateFlags::empty())
@@ -102,7 +114,7 @@ impl RayTracer {
                 None,
             )
             .unwrap();
-        let storage_desc_layout = device
+        let storage_desc_set_layout = device
             .create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo::builder()
                     .flags(vk::DescriptorSetLayoutCreateFlags::empty())
@@ -119,7 +131,7 @@ impl RayTracer {
             .allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::builder()
                     .descriptor_pool(desc_pool)
-                    .set_layouts(&[uniform_desc_layout, storage_desc_layout])
+                    .set_layouts(&[uniform_desc_set_layout, storage_desc_set_layout])
                     .build(),
             )
             .unwrap();
@@ -130,7 +142,7 @@ impl RayTracer {
         let pipeline_layout = device
             .create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[uniform_desc_layout, storage_desc_layout]),
+                    .set_layouts(&[uniform_desc_set_layout, storage_desc_set_layout]),
                 None,
             )
             .unwrap();
@@ -274,13 +286,44 @@ impl RayTracer {
                         range: 128,
                     }])
                     .build(), // Lights
+            ],
+            &[],
+        );
+        device.destroy_shader_module(vertex_shader_module, None);
+        device.destroy_shader_module(fragment_shader_module, None);
+        let raytracer = Self {
+            device,
+            pipeline_layout,
+            pipeline,
+            storage_desc_set,
+            storage_desc_set_layout,
+            uniform_desc_set,
+            render_pass,
+            shared_buffer,
+            desc_pool,
+            uniform_desc_set_layout,
+        };
+        raytracer
+    }
+    pub fn update(&mut self, state: &State, aspect_ratio: f32) {
+        self.shared_buffer.write_camera(
+            state.camera_projection,
+            state.camera_transform,
+            aspect_ratio,
+        );
+        self.shared_buffer.write_light(state.sunlight);
+    }
+    pub unsafe fn bind_block_allocator_buffer(&mut self, block_allocator_buffer: vk::Buffer) {
+        println!("Bind block allocator buffer");
+        self.device.update_descriptor_sets(
+            &[
                 vk::WriteDescriptorSet::builder()
-                    .dst_set(storage_desc_set)
+                    .dst_set(self.storage_desc_set)
                     .dst_binding(0)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[vk::DescriptorBufferInfo {
-                        buffer: node_pool_buffer,
+                        buffer: block_allocator_buffer,
                         offset: 0,
                         range: vk::WHOLE_SIZE,
                     }])
@@ -288,15 +331,6 @@ impl RayTracer {
             ],
             &[],
         );
-        Self {
-            device,
-            pipeline_layout,
-            pipeline,
-            storage_desc_set,
-            uniform_desc_set,
-            render_pass,
-            shared_buffer,
-        }
     }
 }
 
@@ -377,5 +411,21 @@ impl RenderPassProvider for RayTracer {
 
     unsafe fn get_render_pass(&self) -> RenderPass {
         self.render_pass
+    }
+}
+
+impl Drop for RayTracer {
+    fn drop(&mut self) {
+        unsafe {
+            self.device
+                .destroy_descriptor_set_layout(self.uniform_desc_set_layout, None);
+            self.device
+                .destroy_descriptor_set_layout(self.storage_desc_set_layout, None);
+            self.device.destroy_descriptor_pool(self.desc_pool, None);
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device.destroy_pipeline(self.pipeline, None);
+            self.device.destroy_render_pass(self.render_pass, None);
+        }
     }
 }

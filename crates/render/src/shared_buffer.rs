@@ -258,3 +258,17 @@ impl SharedBuffer {
         }
     }
 }
+
+impl Drop for SharedBuffer {
+    fn drop(&mut self) {
+        // If a memory object is mapped at the time it is freed, it is implicitly unmapped.
+        unsafe {
+            if let Some(staging) = self.staging.as_ref() {
+                self.device.destroy_buffer(staging.buffer, None);
+                self.device.free_memory(staging.memory, None);
+            }
+            self.device.destroy_buffer(self.buffer, None);
+            self.device.free_memory(self.memory, None);
+        }
+    }
+}

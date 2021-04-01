@@ -1,28 +1,38 @@
 use crate::device_info::{DeviceInfo, Quirks};
 use crate::raytracer::RayTracer;
-use crate::shared_buffer::SharedBuffer;
+
 use crate::swapchain::Swapchain;
-use crate::State;
+
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
 use std::ffi::CStr;
+use std::mem::ManuallyDrop;
+
 use svo::alloc::BlockAllocator;
 
 pub struct Renderer {
-    device: ash::Device,
-    swapchain: Swapchain,
-    raytracer: RayTracer,
-    physical_device: vk::PhysicalDevice,
-    surface: vk::SurfaceKHR,
-    surface_loader: ash::extensions::khr::Surface,
-    quirks: Quirks,
+    pub instance: ash::Instance,
+    pub device: ash::Device,
+    pub raytracer: Option<RayTracer>,
+    pub physical_device: vk::PhysicalDevice,
+    pub surface: vk::SurfaceKHR,
+    pub surface_loader: ash::extensions::khr::Surface,
+    pub quirks: Quirks,
+
+    pub graphics_queue: vk::Queue,
+    pub transfer_binding_queue: vk::Queue,
+    pub graphics_queue_family: u32,
+    pub transfer_binding_queue_family: u32,
+    pub info: DeviceInfo,
+    pub swapchain: ManuallyDrop<Swapchain>,
 }
 
 impl Renderer {
-    pub fn new(
-        window_handle: &impl raw_window_handle::HasRawWindowHandle,
-        block_size: u64,
-    ) -> (Self, Box<dyn BlockAllocator>) {
+    /// Returns a Renderer and its associated BlockAllocator.
+    /// Note that the two objects must be dropped at the same time.
+    /// The application needs to ensure that when the Renderer was dropped,
+    /// the BlockAllocator will not be used anymore.
+    pub fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Renderer {
         unsafe {
             let entry = ash::Entry::new().unwrap();
             let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
@@ -58,7 +68,8 @@ impl Renderer {
             let physical_device = physical_devices.pop().unwrap();
             let device_info = DeviceInfo::new(&entry, &instance, physical_device);
 
-            let memory_properties = instance.get_physical_device_memory_properties(physical_device);
+            let _memory_properties =
+                instance.get_physical_device_memory_properties(physical_device);
             let available_queue_family =
                 instance.get_physical_device_queue_family_properties(physical_device);
             let graphics_queue_family = available_queue_family
@@ -70,8 +81,8 @@ impl Renderer {
                             .get_physical_device_surface_support(physical_device, i as u32, surface)
                             .unwrap_or(false)
                 })
-                .unwrap();
-            let graphics_queue_family = (graphics_queue_family.0 as u32, graphics_queue_family.1);
+                .unwrap()
+                .0 as u32;
             let transfer_binding_queue_family = available_queue_family
                 .iter()
                 .enumerate()
@@ -80,11 +91,8 @@ impl Renderer {
                         && !family.queue_flags.contains(vk::QueueFlags::COMPUTE)
                         && family.queue_flags.contains(vk::QueueFlags::SPARSE_BINDING)
                 })
-                .unwrap();
-            let transfer_binding_queue_family = (
-                transfer_binding_queue_family.0 as u32,
-                transfer_binding_queue_family.1,
-            );
+                .unwrap()
+                .0 as u32;
 
             let (extension_names, quirks) = device_info.required_device_extensions_and_quirks();
             let device = instance
@@ -93,11 +101,11 @@ impl Renderer {
                     &vk::DeviceCreateInfo::builder()
                         .queue_create_infos(&[
                             vk::DeviceQueueCreateInfo::builder()
-                                .queue_family_index(graphics_queue_family.0)
+                                .queue_family_index(graphics_queue_family)
                                 .queue_priorities(&[1.0])
                                 .build(),
                             vk::DeviceQueueCreateInfo::builder()
-                                .queue_family_index(transfer_binding_queue_family.0)
+                                .queue_family_index(transfer_binding_queue_family)
                                 .queue_priorities(&[0.5])
                                 .build(),
                         ])
@@ -125,98 +133,37 @@ impl Renderer {
                     None,
                 )
                 .unwrap();
-            let graphics_queue = device.get_device_queue(graphics_queue_family.0, 0);
-            let transfer_binding_queue =
-                device.get_device_queue(transfer_binding_queue_family.0, 0);
-
-            let node_pool_buffer: vk::Buffer;
-            let device_type = device_info.physical_device_properties.device_type;
-            let allocator: Box<dyn BlockAllocator> = match device_type {
-                vk::PhysicalDeviceType::DISCRETE_GPU => {
-                    let allocator = crate::block_alloc::DiscreteBlockAllocator::new(
-                        device.clone(),
-                        transfer_binding_queue,
-                        transfer_binding_queue_family.0,
-                        graphics_queue_family.0,
-                        block_size,
-                        device_info
-                            .physical_device_properties
-                            .limits
-                            .max_storage_buffer_range as u64,
-                        &device_info,
-                    );
-                    node_pool_buffer = allocator.device_buffer;
-                    Box::new(allocator)
-                }
-                vk::PhysicalDeviceType::INTEGRATED_GPU => {
-                    let allocator = crate::block_alloc::IntegratedBlockAllocator::new(
-                        device.clone(),
-                        transfer_binding_queue,
-                        transfer_binding_queue_family.0,
-                        graphics_queue_family.0,
-                        block_size,
-                        device_info
-                            .physical_device_properties
-                            .limits
-                            .max_storage_buffer_range as u64,
-                        &device_info,
-                    );
-                    node_pool_buffer = allocator.buffer;
-                    Box::new(allocator)
-                }
-                _ => panic!("Unsupported GPU"),
-            };
-
+            let graphics_queue = device.get_device_queue(graphics_queue_family, 0);
+            let transfer_binding_queue = device.get_device_queue(transfer_binding_queue_family, 0);
             let swapchain_config =
                 Swapchain::get_config(physical_device, surface, &surface_loader, &quirks);
-            let shared_buffer = SharedBuffer::new(
-                device.clone(),
-                &memory_properties,
-                graphics_queue,
-                graphics_queue_family.0,
-            );
-            let mut raytracer = RayTracer::new(
-                device.clone(),
-                shared_buffer,
-                node_pool_buffer,
-                swapchain_config.format,
-            );
-
             let swapchain = Swapchain::new(
                 &instance,
                 device.clone(),
                 surface,
                 swapchain_config,
-                graphics_queue_family.0,
+                graphics_queue_family,
                 graphics_queue,
-                &mut raytracer,
             );
             let renderer = Self {
                 device,
-                swapchain,
-                raytracer,
+                raytracer: None,
                 physical_device,
                 surface,
                 surface_loader,
                 quirks,
+                graphics_queue,
+                transfer_binding_queue,
+                graphics_queue_family,
+                instance,
+                transfer_binding_queue_family,
+                info: device_info,
+                swapchain: ManuallyDrop::new(swapchain),
             };
-            (renderer, allocator)
+
+            renderer
         }
     }
-
-    pub fn update(&mut self, state: &State) {
-        unsafe {
-            self.raytracer.shared_buffer.write_camera(
-                state.camera_projection,
-                state.camera_transform,
-                self.swapchain.config.extent.width as f32
-                    / self.swapchain.config.extent.height as f32,
-            );
-            self.raytracer.shared_buffer.write_light(state.sunlight);
-            self.swapchain.render_frame();
-        }
-    }
-
     pub fn resize(&mut self) {
         // Assuming the swapchain format is still the same.
         unsafe {
@@ -227,7 +174,89 @@ impl Renderer {
                 &self.surface_loader,
                 &self.quirks,
             );
-            self.swapchain.recreate(config, &mut self.raytracer);
+            self.swapchain.recreate(config);
+        }
+    }
+    pub fn update(&mut self, state: &crate::State) {
+        unsafe {
+            if let Some(raytracer) = self.raytracer.as_mut() {
+                let extent = self.swapchain.config.extent;
+                raytracer.update(state, extent.width as f32 / extent.height as f32);
+            }
+            self.swapchain.render_frame();
+        }
+    }
+    pub fn create_raytracer(&mut self) {
+        unsafe {
+            let raytracer = RayTracer::new(
+                self.device.clone(),
+                self.swapchain.config.format,
+                &self.info,
+                self.graphics_queue,
+                self.graphics_queue_family,
+            );
+            self.raytracer = Some(raytracer);
+        }
+    }
+    pub fn create_block_allocator(
+        &mut self,
+        block_size: u64,
+    ) -> (Box<dyn BlockAllocator>, vk::Buffer) {
+        unsafe {
+            let node_pool_buffer: vk::Buffer;
+            let device_type = self.info.physical_device_properties.device_type;
+            let allocator: Box<dyn BlockAllocator> = match device_type {
+                vk::PhysicalDeviceType::DISCRETE_GPU => {
+                    let allocator = crate::block_alloc::DiscreteBlockAllocator::new(
+                        self.device.clone(),
+                        self.transfer_binding_queue,
+                        self.transfer_binding_queue_family,
+                        self.graphics_queue_family,
+                        block_size,
+                        self.info
+                            .physical_device_properties
+                            .limits
+                            .max_storage_buffer_range as u64,
+                        &self.info,
+                    );
+                    node_pool_buffer = allocator.device_buffer;
+                    Box::new(allocator)
+                }
+                vk::PhysicalDeviceType::INTEGRATED_GPU => {
+                    let allocator = crate::block_alloc::IntegratedBlockAllocator::new(
+                        self.device.clone(),
+                        self.transfer_binding_queue,
+                        self.transfer_binding_queue_family,
+                        self.graphics_queue_family,
+                        block_size,
+                        self.info
+                            .physical_device_properties
+                            .limits
+                            .max_storage_buffer_range as u64,
+                        &self.info,
+                    );
+                    node_pool_buffer = allocator.buffer;
+                    Box::new(allocator)
+                }
+                _ => panic!("Unsupported GPU"),
+            };
+            (allocator, node_pool_buffer)
+        }
+    }
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        println!("Freed renderer");
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+            if let Some(raytracer) = self.raytracer.take() {
+                drop(raytracer);
+            }
+            ManuallyDrop::drop(&mut self.swapchain);
+            self.surface_loader.destroy_surface(self.surface, None);
+            self.device.destroy_device(None);
+            self.instance.destroy_instance(None);
         }
     }
 }
