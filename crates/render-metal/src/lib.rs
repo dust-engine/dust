@@ -1,18 +1,27 @@
-use dust_core::svo::alloc::{AllocError, BlockAllocator};
+use dust_core::svo::alloc::{AllocError, BlockAllocator, SystemBlockAllocator, CHUNK_SIZE};
 use dust_core::{CameraProjection, SunLight};
 use glam::TransformRT;
 use std::ops::Range;
+use std::os::raw::c_void;
 
 extern "C" {
-    fn helloworldswift();
+    fn RendererNew(window: *mut c_void, view: *mut c_void);
 }
 
 pub struct Renderer {}
 impl Renderer {
     pub fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Self {
-        println!("Hello?");
-        unsafe {
-            helloworldswift();
+        use raw_window_handle::RawWindowHandle;
+        let window_handle = window_handle.raw_window_handle();
+        match window_handle {
+            RawWindowHandle::MacOS(window_handle) => {
+                unsafe {
+                    RendererNew(window_handle.ns_window as *mut c_void, window_handle.ns_view as *mut c_void);
+                }
+            }
+            _ => {
+                panic!("Unsupported Window Handle")
+            }
         }
         Renderer {}
     }
@@ -20,21 +29,7 @@ impl Renderer {
     pub fn update(&mut self, state: &State) {}
     pub fn create_raytracer(&self) {}
     pub fn create_block_allocator(&self, size: u64) -> Box<dyn BlockAllocator> {
-        unsafe { Box::new(Allocator {}) }
-    }
-}
-struct Allocator {}
-impl BlockAllocator for Allocator {
-    unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError> {
-        unimplemented!()
-    }
-
-    unsafe fn deallocate_block(&mut self, block: *mut u8) {
-        unimplemented!()
-    }
-
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
-        unimplemented!()
+        unsafe { Box::new(SystemBlockAllocator::new(CHUNK_SIZE as u32)) }
     }
 }
 
