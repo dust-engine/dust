@@ -1,5 +1,7 @@
 #![feature(array_methods)]
 #![feature(array_map)]
+#[macro_use]
+extern crate memoffset;
 
 mod block_alloc;
 mod camera_projection;

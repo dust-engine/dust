@@ -129,7 +129,7 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
     return material_id;
 }
 
-#define DEBUG_RENDERING
+//#define DEBUG_RENDERING
 
 void main() {
     Ray ray = GenerateRay();

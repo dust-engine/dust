@@ -15,16 +15,16 @@ struct StagingState {
 
 const SHARED_BUFFER_FRAME_UPDATE_SIZE: u64 = 256;
 pub struct StagingStateLayout {
-    view_proj: Mat4,
-    proj: Mat4,
+    pub view_proj: Mat4,
+    pub proj: Mat4,
     // -- 128
-    sunlight: SunLight,
+    pub sunlight: SunLight,
     _padding1: [f32; 8],
     _padding2: [f32; 16],
     // -- 256
-    vertex_buffer: [(f32, f32, f32); 8],
-    index_buffer: [u16; 14],
+    pub vertex_buffer: [(f32, f32, f32); 8],
     _padding3: f32,
+    pub index_buffer: [u16; 14],
     // -- 384
 }
 

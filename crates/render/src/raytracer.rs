@@ -1,5 +1,5 @@
 use crate::device_info::DeviceInfo;
-use crate::shared_buffer::SharedBuffer;
+use crate::shared_buffer::{SharedBuffer, StagingStateLayout};
 use crate::swapchain::{RenderPassProvider, SwapchainConfig};
 use crate::State;
 use ash::version::DeviceV1_0;
@@ -282,7 +282,7 @@ impl RayTracer {
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&[vk::DescriptorBufferInfo {
                         buffer: shared_buffer.buffer,
-                        offset: 128,
+                        offset: offset_of!(StagingStateLayout, sunlight) as u64,
                         range: 128,
                     }])
                     .build(), // Lights
@@ -385,11 +385,16 @@ impl RenderPassProvider for RayTracer {
             &[self.uniform_desc_set, self.storage_desc_set],
             &[],
         );
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[self.shared_buffer.buffer], &[256]);
+        device.cmd_bind_vertex_buffers(
+            command_buffer,
+            0,
+            &[self.shared_buffer.buffer],
+            &[offset_of!(StagingStateLayout, vertex_buffer) as u64],
+        );
         device.cmd_bind_index_buffer(
             command_buffer,
             self.shared_buffer.buffer,
-            std::mem::size_of_val(&CUBE_POSITIONS) as u64 + 256,
+            offset_of!(StagingStateLayout, index_buffer) as u64,
             vk::IndexType::UINT16,
         );
         device.cmd_begin_render_pass(

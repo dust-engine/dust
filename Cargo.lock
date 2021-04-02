@@ -1261,6 +1261,7 @@ dependencies = [
  "ash 0.32.0",
  "ash-window",
  "glam",
+ "memoffset",
  "raw-window-handle",
  "shaderc",
  "svo",
