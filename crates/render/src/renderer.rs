@@ -230,6 +230,11 @@ impl Renderer {
                 &self.quirks,
             );
             self.swapchain.recreate(config);
+            // swapchain.recreate is going to clear its command buffers
+            // so we have to rebind the render pass here.
+            if let Some(raytracer) = self.raytracer.as_mut() {
+                self.swapchain.bind_render_pass(raytracer);
+            }
         }
     }
     pub fn update(&mut self, state: &crate::State) {

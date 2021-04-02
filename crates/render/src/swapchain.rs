@@ -168,14 +168,14 @@ impl Swapchain {
         let caps = surface_loader
             .get_physical_device_surface_capabilities(physical_device, surface)
             .unwrap();
-        let _supported_formats = surface_loader
+        let supported_formats = surface_loader
             .get_physical_device_surface_formats(physical_device, surface)
             .unwrap();
         let _supported_present_mode = surface_loader
             .get_physical_device_surface_present_modes(physical_device, surface)
             .unwrap();
 
-        let format = vk::Format::R8G8B8A8_SRGB;
+        let format = supported_formats[0].format;
         let extent = caps.current_extent;
         SwapchainConfig {
             format,
