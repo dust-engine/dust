@@ -8,7 +8,7 @@ use ash::vk;
 use std::ffi::CStr;
 use std::mem::ManuallyDrop;
 
-use svo::alloc::BlockAllocator;
+use dust_core::svo::alloc::BlockAllocator;
 
 pub struct Renderer {
     pub entry: ash::Entry,

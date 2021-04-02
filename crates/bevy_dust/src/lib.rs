@@ -1,16 +1,18 @@
 use bevy::prelude::*;
 
+pub use dust_core as core;
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub use dust_render as render;
+
 use bevy::window::{WindowCreated, WindowResized};
 use bevy::winit::WinitWindows;
-use dust_render::{CameraProjection, Renderer};
+use dust_core::Octree;
+use render::{CameraProjection, Renderer, SunLight};
 
-pub use dust_render::Octree;
-pub use dust_render::SunLight;
-pub use dust_render::Voxel;
-
+use dust_core::svo::alloc::CHUNK_SIZE;
+use dust_core::svo::ArenaAllocator;
 use std::borrow::BorrowMut;
-use svo::alloc::CHUNK_SIZE;
-use svo::ArenaAllocator;
 
 #[derive(Default)]
 pub struct DustPlugin;

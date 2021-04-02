@@ -1,5 +1,5 @@
 use ash::vk;
-use svo::alloc::AllocError;
+use dust_core::svo::alloc::AllocError;
 pub fn map_err(err: vk::Result) -> AllocError {
     match err {
         vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => AllocError::OutOfDeviceMemory,

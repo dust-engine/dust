@@ -2,9 +2,9 @@ use crate::device_info::DeviceInfo;
 use ash::version::DeviceV1_0;
 use ash::vk;
 
+use dust_core::svo::alloc::{AllocError, BlockAllocator};
 use std::collections::HashMap;
 use std::ops::Range;
-use svo::alloc::{AllocError, BlockAllocator};
 
 pub struct IntegratedBlockAllocator {
     device: ash::Device,
