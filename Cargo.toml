@@ -19,4 +19,6 @@ members = ["crates/*"]
 bevy = { git = "https://github.com/bevyengine/bevy.git" }
 bevy_dust = { path = "./crates/bevy_dust" }
 glam = { version = "0.13", features = ["transform-types"] }
-dot_vox = "4.1.0"
+
+fastnbt = "0.14.0"
+fastanvil = "0.14.1"

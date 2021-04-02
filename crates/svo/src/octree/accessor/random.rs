@@ -133,7 +133,10 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
             set_recursive(self.octree, self.octree.root, x, y, z, gridsize, item);
         self.octree.root_data = data;
     }
-    pub fn commit(&mut self) {
+}
+
+impl<T: Voxel> Drop for RandomMutator<'_, T> {
+    fn drop(&mut self) {
         self.octree.arena.flush();
     }
 }
