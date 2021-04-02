@@ -1,14 +1,16 @@
 use bevy::prelude::*;
-
 pub use dust_core as core;
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub use dust_render as render;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub use dust_render_metal as render;
 
 use bevy::window::{WindowCreated, WindowResized};
 use bevy::winit::WinitWindows;
 use dust_core::Octree;
-use render::{CameraProjection, Renderer, SunLight};
+use dust_core::{CameraProjection, SunLight};
+use render::Renderer;
 
 use dust_core::svo::alloc::CHUNK_SIZE;
 use dust_core::svo::ArenaAllocator;
@@ -44,15 +46,9 @@ fn setup(
         .unwrap();
 
     let winit_window = winit_windows.get_window(window_id).unwrap();
-    let mut renderer = dust_render::renderer::Renderer::new(winit_window);
+    let mut renderer = Renderer::new(winit_window);
     renderer.create_raytracer(); // More like "Enter Raytracing Mode"
-    let (block_allocator, block_allocator_buffer) =
-        renderer.create_block_allocator(CHUNK_SIZE as u64);
-    unsafe {
-        let raytracer = renderer.raytracer.as_mut().unwrap();
-        raytracer.bind_block_allocator_buffer(block_allocator_buffer);
-        renderer.swapchain.bind_render_pass(raytracer);
-    }
+    let block_allocator = renderer.create_block_allocator(CHUNK_SIZE as u64);
     let arena = ArenaAllocator::new(block_allocator);
     let octree = Octree::new(arena);
 
@@ -80,7 +76,7 @@ fn world_update(
         rotation: global_transform.rotation,
         translation: global_transform.translation,
     };
-    renderer.update(&dust_render::State {
+    renderer.update(&render::State {
         camera_projection: &*camera_projection,
         camera_transform: &camera_transform,
         sunlight: &sunlight,

@@ -338,6 +338,7 @@ dependencies = [
  "bevy",
  "dust-core",
  "dust-render",
+ "dust-render-metal",
  "glam",
 ]
 
@@ -1258,6 +1259,7 @@ dependencies = [
 name = "dust-core"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "svo",
 ]
 
@@ -1273,6 +1275,15 @@ dependencies = [
  "raw-window-handle",
  "shaderc",
  "tracing",
+]
+
+[[package]]
+name = "dust-render-metal"
+version = "0.1.0"
+dependencies = [
+ "dust-core",
+ "glam",
+ "raw-window-handle",
 ]
 
 [[package]]

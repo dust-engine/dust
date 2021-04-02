@@ -1,7 +1,6 @@
 use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
-use bevy_dust::core::{Octree, Voxel};
-use bevy_dust::render::SunLight;
+use bevy_dust::core::{Octree, SunLight, Voxel};
 use bevy_dust::RaytracerCameraBundle;
 
 mod fly_camera;

@@ -13,3 +13,6 @@ dust-core = { path = "../core" }
 
 [target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
 dust-render = { path = "../render" }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+dust-render-metal = { path = "../render-metal" }

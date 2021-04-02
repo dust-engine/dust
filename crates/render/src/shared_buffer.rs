@@ -1,8 +1,8 @@
 use ash::vk;
 
-use crate::camera_projection::CameraProjection;
-use crate::light::SunLight;
 use ash::version::DeviceV1_0;
+use dust_core::CameraProjection;
+use dust_core::SunLight;
 use glam::{Mat4, TransformRT, Vec3};
 use std::mem::size_of;
 

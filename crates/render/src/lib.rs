@@ -4,16 +4,14 @@
 extern crate memoffset;
 
 mod block_alloc;
-mod camera_projection;
 mod device_info;
-mod light;
 mod raytracer;
 pub mod renderer;
 mod shared_buffer;
 pub mod swapchain;
 
-pub use crate::camera_projection::CameraProjection;
-pub use crate::light::SunLight;
+use dust_core::CameraProjection;
+use dust_core::SunLight;
 use glam::TransformRT;
 
 pub struct State<'a> {

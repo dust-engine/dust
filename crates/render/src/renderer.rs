@@ -258,10 +258,7 @@ impl Renderer {
             self.raytracer = Some(raytracer);
         }
     }
-    pub fn create_block_allocator(
-        &mut self,
-        block_size: u64,
-    ) -> (Box<dyn BlockAllocator>, vk::Buffer) {
+    pub fn create_block_allocator(&mut self, block_size: u64) -> Box<dyn BlockAllocator> {
         unsafe {
             let node_pool_buffer: vk::Buffer;
             let device_type = self.info.physical_device_properties.device_type;
@@ -300,7 +297,11 @@ impl Renderer {
                 }
                 _ => panic!("Unsupported GPU"),
             };
-            (allocator, node_pool_buffer)
+            if let Some(raytracer) = self.raytracer.as_mut() {
+                raytracer.bind_block_allocator_buffer(node_pool_buffer);
+                self.swapchain.bind_render_pass(raytracer);
+            }
+            allocator
         }
     }
 }
