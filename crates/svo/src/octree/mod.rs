@@ -4,6 +4,7 @@ use crate::alloc::{ArenaAllocated, Handle};
 use crate::{Corner, Voxel};
 
 mod accessor;
+mod io;
 
 //mod sdf;
 //mod accessor;

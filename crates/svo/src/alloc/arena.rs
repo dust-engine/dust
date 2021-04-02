@@ -11,23 +11,28 @@ pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Handle(u32);
 impl Handle {
+    #[inline]
     pub const fn none() -> Self {
-        Handle(std::u32::MAX)
+        Handle(u32::MAX)
     }
     #[inline]
     pub fn is_none(&self) -> bool {
-        self.0 == std::u32::MAX
+        self.0 == u32::MAX
     }
+    #[inline]
     pub fn offset(&self, n: u32) -> Self {
         Handle(self.0 + n)
     }
+    #[inline]
     pub fn get_slot_num(&self) -> u32 {
         let mask = CHUNK_SIZE as u32 - 1;
         self.0 & mask
     }
+    #[inline]
     pub fn get_chunk_num(&self) -> u32 {
         self.0 >> CHUNK_DEGREE
     }
+    #[inline]
     pub fn from_index(chunk_index: u32, block_index: u32) -> Handle {
         Handle(chunk_index << CHUNK_DEGREE | block_index)
     }
@@ -167,6 +172,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         }
         sized_head
     }
+    #[inline]
     fn get_slot(&self, handle: Handle) -> &ArenaSlot<T> {
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
@@ -175,6 +181,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             &*base.add(slot_index as usize)
         }
     }
+    #[inline]
     fn get_slot_mut(&mut self, handle: Handle) -> &mut ArenaSlot<T> {
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
@@ -185,12 +192,14 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
     }
 
     // method here due to compiler bug
+    #[inline]
     pub fn get(&self, index: Handle) -> &T {
         unsafe {
             let slot = self.get_slot(index);
             &slot.occupied
         }
     }
+    #[inline]
     pub fn get_mut(&mut self, index: Handle) -> &mut T {
         unsafe {
             let slot = self.get_slot_mut(index);

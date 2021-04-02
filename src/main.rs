@@ -28,9 +28,22 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(bevy_dust::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup.system())
+        .add_startup_system(setup_from_oct_file.system())
         .add_system(run.system())
         .run();
+}
+
+fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
+    let file = std::fs::File::open("./test.oct").unwrap();
+    let mut reader = std::io::BufReader::new(file);
+    Octree::read(&mut octree, &mut reader, 10);
+
+    let mut bundle = RaytracerCameraBundle::default();
+    bundle.transform.translation = Vec3::new(1.6, 1.6, 1.6);
+    commands
+        .spawn()
+        .insert_bundle(bundle)
+        .insert(FlyCamera::default());
 }
 
 fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
@@ -71,9 +84,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                     "minecraft:cave_air" => continue,
                                     "minecraft:grass" => continue,
                                     "minecraft:tall_grass" => continue,
-                                    _ => {
-                                        Voxel::with_id(1)
-                                    }
+                                    _ => Voxel::with_id(1),
                                 };
                                 mutator.set(
                                     x + chunk_x as u32 * 16 + region_x as u32 * 512,
@@ -94,6 +105,10 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     load_region(0, 0);
     load_region(1, 1);
     load_region(0, 1);
+    drop(mutator);
+    let file = std::fs::File::create("./test.oct").unwrap();
+    let mut writer = std::io::BufWriter::new(file);
+    octree.write(&mut writer);
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.6, 1.6, 1.6);

@@ -1,6 +1,8 @@
-use crate::{Arena, Handle, Octree, Voxel};
+use super::Octree;
+use crate::alloc::Handle;
+use crate::Voxel;
 use std::collections::VecDeque;
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
@@ -20,7 +22,7 @@ impl<T: Voxel> Octree<T> {
             ))?;
         }
         // starting to DFS
-        let mut queue: VecDeque<(Handle<T>, u8, u8)> = VecDeque::new(); // todo: optimize this with_capacity
+        let mut queue: VecDeque<(Handle, u8, u8)> = VecDeque::new(); // todo: optimize this with_capacity
         let mut current_index: u32 = 1; // The file address of the next available slot.
         let mut current_lod: u8 = 0;
         let mut fences: Vec<u32> = Vec::new();
@@ -36,7 +38,7 @@ impl<T: Voxel> Octree<T> {
             for i in 0..num_of_children {
                 // For each children of this block
                 let node = nodes.offset(i as u32);
-                let node_ref = &self.arena[node];
+                let node_ref = self.arena.get(node);
 
                 // Write the node into the file.
                 unsafe {
@@ -71,32 +73,30 @@ impl<T: Voxel> Octree<T> {
                 fences.as_ptr() as *const u8,
                 size_of::<u32>() * fences.len(),
             ))?;
-            writer.write(from_raw_parts(
-                &fence_size,
-                size_of::<u8>(),
-            ))?;
+            writer.write(from_raw_parts(&fence_size, size_of::<u8>()))?;
         }
         Ok(())
     }
 
-    pub fn read<R: Read + Seek>(reader: &mut R, lod: u8) -> std::io::Result<Self> {
-        let mut octree = Octree {
-            arena: Arena::new(),
-            root: Handle::new(0, 0),
-            root_data: Default::default(),
-        };
-
+    pub fn read<R: Read + Seek>(
+        octree: &mut Octree<T>,
+        reader: &mut R,
+        lod: u8,
+    ) -> std::io::Result<()> {
+        // this is a little hacky. TODO: find a better way to do this.
+        unsafe {
+            octree.arena.free(Handle::from_index(0, 0), 1);
+        }
         let fences = unsafe {
             let original_pos = reader.stream_position()?;
             reader.seek(SeekFrom::End(-(size_of::<u8>() as i64)))?;
 
             let mut fence_size: u8 = 0;
-            reader.read_exact(from_raw_parts_mut(
-                &mut fence_size,
-                size_of::<u8>(),
-            ))?;
+            reader.read_exact(from_raw_parts_mut(&mut fence_size, size_of::<u8>()))?;
 
-            reader.seek(SeekFrom::End(-((size_of::<u8>() + size_of::<u32>() * fence_size as usize) as i64)))?;
+            reader.seek(SeekFrom::End(
+                -((size_of::<u8>() + size_of::<u32>() * fence_size as usize) as i64),
+            ))?;
             let mut vec: Vec<u32> = vec![0; fence_size as usize];
             reader.read_exact(from_raw_parts_mut(
                 vec.as_mut_ptr() as *mut u8,
@@ -115,10 +115,10 @@ impl<T: Voxel> Octree<T> {
         }
 
         // Mapping from file-space indices to (Parent, BlockSize)
-        let mut block_size_map: VecDeque<(Handle<T>, u8)> = VecDeque::new(); // todo: optimize with_capacity
-        // let mut block_size_map: AHashMap<u32, (Handle<T>, u8)> = AHashMap::new();
-        // The root node is always the first one in the file, and the block size of the root node
-        // is always one.
+        let mut block_size_map: VecDeque<(Handle, u8)> = VecDeque::new(); // todo: optimize with_capacity
+                                                                          // let mut block_size_map: AHashMap<u32, (Handle<T>, u8)> = AHashMap::new();
+                                                                          // The root node is always the first one in the file, and the block size of the root node
+                                                                          // is always one.
         block_size_map.push_back((Handle::none(), 1));
         let mut slots_loaded: u32 = 0;
         let total_slots = if lod as usize >= fences.len() {
@@ -126,25 +126,26 @@ impl<T: Voxel> Octree<T> {
         } else {
             fences[lod as usize]
         };
-        let total_nonleaf_slots = if (lod-1) as usize >= fences.len() {
+        let total_nonleaf_slots = if (lod - 1) as usize >= fences.len() {
             u32::MAX
         } else {
-            fences[(lod-1) as usize]
+            fences[(lod - 1) as usize]
         };
         while !block_size_map.is_empty() {
             let (parent_handle, block_size) = block_size_map.pop_front().unwrap();
 
             let block = octree.arena.alloc(block_size as u32);
+            octree.arena.changed_block(block, block_size as u32);
             if !parent_handle.is_none() {
                 // Has a parent. Set the parent's child index to convert it back into memory space
-                let parent_ref = &mut octree.arena[parent_handle];
+                let parent_ref = octree.arena.get_mut(parent_handle);
                 parent_ref.children = block;
             }
 
             for i in 0..block_size {
                 let node = block.offset(i as u32);
-                let node_ref = &mut octree.arena[node];
-                node_ref.block_size = block_size;
+                let node_ref = octree.arena.get_mut(node);
+                //node_ref.block_size = block_size;
                 unsafe {
                     // Read the entire thing into the newly allocated node
                     reader.read_exact(from_raw_parts_mut::<u8>(
@@ -156,8 +157,8 @@ impl<T: Voxel> Octree<T> {
                         if node_ref.freemask != 0 {
                             // has children
                             reader.read_exact(from_raw_parts_mut::<u8>(
-                                &mut node_ref.children as *mut Handle<T> as *mut u8,
-                                size_of::<Handle<T>>(),
+                                &mut node_ref.children as *mut Handle as *mut u8,
+                                size_of::<Handle>(),
                             ))?;
                             block_size_map.push_back((node, node_ref.freemask.count_ones() as u8));
                         }
@@ -165,7 +166,7 @@ impl<T: Voxel> Octree<T> {
                         // leaf slot
                         if node_ref.freemask != 0 {
                             // has children
-                            reader.seek(SeekFrom::Current(size_of::<Handle<T>>() as i64))?;
+                            reader.seek(SeekFrom::Current(size_of::<Handle>() as i64))?;
                         }
                         node_ref.freemask = 0; // Force to be a leaf
                     }
@@ -178,6 +179,7 @@ impl<T: Voxel> Octree<T> {
             }
             slots_loaded += block_size as u32;
         }
-        Ok(octree)
+        octree.arena.flush();
+        Ok(())
     }
 }
