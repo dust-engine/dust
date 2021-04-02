@@ -3,9 +3,17 @@ use dust_core::{CameraProjection, SunLight};
 use glam::TransformRT;
 use std::ops::Range;
 
+extern "C" {
+    fn helloworldswift();
+}
+
 pub struct Renderer {}
 impl Renderer {
     pub fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Self {
+        println!("Hello?");
+        unsafe {
+            helloworldswift();
+        }
         Renderer {}
     }
     pub fn resize(&mut self) {}

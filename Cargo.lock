@@ -1284,6 +1284,8 @@ dependencies = [
  "dust-core",
  "glam",
  "raw-window-handle",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
