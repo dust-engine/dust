@@ -129,7 +129,7 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
     return material_id;
 }
 
-//#define DEBUG_RENDERING
+#define DEBUG_RENDERING
 
 void main() {
     Ray ray = GenerateRay();
@@ -139,7 +139,7 @@ void main() {
     Box hitbox;
     uint iteration_times;
     uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times);
-    float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE) * 10.0; // 0 to 1
+    float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE) * 20.0; // 0 to 1
     #ifdef DEBUG_RENDERING
     f_color = vec4(iteration, iteration, iteration, 1.0);
     #else

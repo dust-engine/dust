@@ -2,6 +2,7 @@ use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
 use bevy_dust::core::{Octree, SunLight, Voxel};
 use bevy_dust::RaytracerCameraBundle;
+use std::ops::DerefMut;
 
 mod fly_camera;
 
@@ -29,7 +30,7 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(bevy_dust::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup_from_oct_file.system())
+        .add_startup_system(setup.system())
         .add_system(run.system())
         .run();
 }
@@ -47,69 +48,71 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
         .insert(FlyCamera::default());
 }
 
+
 fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
-    let mut mutator = octree.get_random_mutator();
-    let region_dir = "./assets/region";
-    let mut load_region = |region_x: usize, region_y: usize| {
-        let file =
-            std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y)).unwrap();
-        let mut region = fastanvil::Region::new(file);
+    let octree = octree.deref_mut();
+    let octree: &'static mut Octree = unsafe {
+        &mut *(octree as *mut Octree)
+    };
+    std::thread::spawn(move || {
+        let region_dir = "./assets/region";
+        let mut load_region = |region_x: usize, region_y: usize| {
+            let file =
+                std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y)).unwrap();
+            let mut region = fastanvil::Region::new(file);
 
-        region
-            .for_each_chunk(|chunk_x, chunk_z, chunk_data| {
-                println!("loading chunk {} {}", chunk_x, chunk_z);
-                let chunk: fastanvil::Chunk =
-                    fastnbt::de::from_bytes(chunk_data.as_slice()).unwrap();
+            region
+                .for_each_chunk(|chunk_x, chunk_z, chunk_data| {
+                    let mut mutator = octree.get_random_mutator();
+                    let chunk: fastanvil::Chunk =
+                        fastnbt::de::from_bytes(chunk_data.as_slice()).unwrap();
 
-                if let Some(sections) = chunk.level.sections {
-                    for section in sections {
-                        if section.palette.is_none() {
-                            continue;
-                        }
-                        let palette = section.palette.unwrap();
-                        if let Some(block_states) = section.block_states {
-                            let bits_per_item = (block_states.0.len() * 8) / 4096;
-                            let mut buff: [u16; 4096] = [0; 4096];
-                            block_states.unpack_into(bits_per_item, &mut buff);
-                            for (i, indice) in buff.iter().enumerate() {
-                                let indice = *indice;
-                                let block = &palette[indice as usize];
-                                let x = (i & 0xF) as u32;
-                                let z = ((i >> 4) & 0xF) as u32;
-                                let y = (i >> 8) as u32;
+                    if let Some(sections) = chunk.level.sections {
+                        for section in sections {
+                            if section.palette.is_none() {
+                                continue;
+                            }
+                            let palette = section.palette.unwrap();
+                            if let Some(block_states) = section.block_states {
+                                let bits_per_item = (block_states.0.len() * 8) / 4096;
+                                let mut buff: [u16; 4096] = [0; 4096];
+                                block_states.unpack_into(bits_per_item, &mut buff);
+                                for (i, indice) in buff.iter().enumerate() {
+                                    let indice = *indice;
+                                    let block = &palette[indice as usize];
+                                    let x = (i & 0xF) as u32;
+                                    let z = ((i >> 4) & 0xF) as u32;
+                                    let y = (i >> 8) as u32;
 
-                                let y = y + section.y as u32 * 16;
-                                assert_eq!(i >> 12, 0);
-                                let voxel = match block.name {
-                                    "minecraft:air" => continue,
-                                    "minecraft:cave_air" => continue,
-                                    "minecraft:grass" => continue,
-                                    "minecraft:tall_grass" => continue,
-                                    _ => Voxel::with_id(1),
-                                };
-                                mutator.set(
-                                    x + chunk_x as u32 * 16 + region_x as u32 * 512,
-                                    y,
-                                    z + chunk_z as u32 * 16 + region_y as u32 * 512,
-                                    1024,
-                                    voxel,
-                                );
+                                    let y = y + section.y as u32 * 16;
+                                    assert_eq!(i >> 12, 0);
+                                    let voxel = match block.name {
+                                        "minecraft:air" => continue,
+                                        "minecraft:cave_air" => continue,
+                                        "minecraft:grass" => continue,
+                                        "minecraft:tall_grass" => continue,
+                                        _ => Voxel::with_id(1),
+                                    };
+                                    mutator.set(
+                                        x + chunk_x as u32 * 16 + region_x as u32 * 512,
+                                        y,
+                                        z + chunk_z as u32 * 16 + region_y as u32 * 512,
+                                        1024,
+                                        voxel,
+                                    );
+                                }
                             }
                         }
                     }
-                }
-            })
-            .unwrap();
-    };
-
-    load_region(1, 0);
-    load_region(0, 0);
-    load_region(1, 1);
-    load_region(0, 1);
-    drop(mutator);
-    let file = std::fs::File::create("./test.oct").unwrap();
-    let mut writer = std::io::BufWriter::new(file);
-    octree.write(&mut writer);
+                })
+                .unwrap();
+            println!("Region loaded");
+        };
+        load_region(0, 1);
+        load_region(1, 0);
+        load_region(1, 1);
+        load_region(0, 0);
+    });
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.6, 1.6, 1.6);
