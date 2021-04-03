@@ -42,4 +42,8 @@ impl BlockAllocator for SystemBlockAllocator {
     }
 
     unsafe fn flush(&mut self, _ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {}
+
+    fn can_flush(&self) -> bool {
+        true
+    }
 }

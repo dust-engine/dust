@@ -129,6 +129,9 @@ impl BlockAllocator for IntegratedBlockAllocator {
             )
             .unwrap();
     }
+    fn can_flush(&self) -> bool {
+        true
+    }
 }
 
 fn select_integrated_memtype(

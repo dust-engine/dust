@@ -213,6 +213,9 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         self.changeset.changed_block(index, len)
     }
     pub fn flush(&mut self) {
+        if !self.block_allocator.can_flush() {
+            return;
+        }
         let chunks = &self.chunks;
         let mut iter = self.changeset.drain().map(|(chunk_index, range)| {
             let ptr = chunks[chunk_index];

@@ -60,6 +60,7 @@ fn setup(
 
 fn world_update(
     mut window_resized_events: EventReader<WindowResized>,
+    mut octree: ResMut<Octree>,
     mut renderer: ResMut<Renderer>,
     sunlight: Res<SunLight>,
     mut query: Query<(&mut CameraProjection, &GlobalTransform)>,
@@ -76,6 +77,7 @@ fn world_update(
         rotation: global_transform.rotation,
         translation: global_transform.translation,
     };
+    octree.flush();
     renderer.update(&render::State {
         camera_projection: &*camera_projection,
         camera_transform: &camera_transform,

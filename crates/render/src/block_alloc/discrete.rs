@@ -26,6 +26,7 @@ pub struct DiscreteBlockAllocator {
 
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
+    copy_completion_fence: vk::Fence,
 }
 unsafe impl Send for DiscreteBlockAllocator {}
 unsafe impl Sync for DiscreteBlockAllocator {}
@@ -89,6 +90,13 @@ impl DiscreteBlockAllocator {
             )
             .result()
             .unwrap();
+        let copy_completion_fence = device.create_fence(
+            &vk::FenceCreateInfo::builder()
+                .flags(vk::FenceCreateFlags::SIGNALED)
+                .build(),
+            None
+        )
+            .unwrap();
         Self {
             block_size,
             device,
@@ -102,6 +110,7 @@ impl DiscreteBlockAllocator {
             allocations: HashMap::new(),
             command_pool,
             command_buffer,
+            copy_completion_fence,
         }
     }
 }
@@ -191,6 +200,21 @@ impl BlockAllocator for DiscreteBlockAllocator {
 
     unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
         // TODO: wait for fences
+        let allocations = &self.allocations;
+        let regions = ranges
+            .map(|(block_ptr, range)| {
+                let location = allocations[&block_ptr].offset * self.block_size as u64
+                    + range.start as u64;
+                vk::BufferCopy {
+                    src_offset: location,
+                    dst_offset: location,
+                    size: (range.end - range.start) as u64,
+                }
+            })
+            .collect::<Vec<_>>();
+        if regions.len() == 0 {
+            return;
+        }
         self.device
             .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())
             .unwrap();
@@ -202,34 +226,31 @@ impl BlockAllocator for DiscreteBlockAllocator {
                     .build(),
             )
             .unwrap();
-
-        let allocations = &self.allocations;
         self.device.cmd_copy_buffer(
             self.command_buffer,
             self.system_buffer,
             self.device_buffer,
-            &ranges
-                .map(|(block_ptr, range)| {
-                    let location = allocations[&block_ptr].offset * self.block_size as u64
-                        + range.start as u64;
-                    vk::BufferCopy {
-                        src_offset: location,
-                        dst_offset: location,
-                        size: (range.end - range.start) as u64,
-                    }
-                })
-                .collect::<Vec<_>>(),
+            &regions,
         );
         self.device.end_command_buffer(self.command_buffer).unwrap();
+        self.device.reset_fences(&[self.copy_completion_fence]).unwrap();
         self.device
             .queue_submit(
                 self.bind_transfer_queue,
-                &[vk::SubmitInfo::builder()
+                &[
+                    vk::SubmitInfo::builder()
                     .command_buffers(&[self.command_buffer])
-                    .build()],
-                vk::Fence::null(),
+                    .build()
+                ],
+                self.copy_completion_fence,
             )
             .unwrap();
+    }
+    fn can_flush(&self) -> bool {
+        let copy_completed = unsafe {
+            self.device.get_fence_status(self.copy_completion_fence).unwrap()
+        };
+        copy_completed
     }
 }
 

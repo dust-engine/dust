@@ -134,9 +134,3 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
         self.octree.root_data = data;
     }
 }
-
-impl<T: Voxel> Drop for RandomMutator<'_, T> {
-    fn drop(&mut self) {
-        self.octree.arena.flush();
-    }
-}

@@ -112,6 +112,9 @@ impl<T: Voxel> Octree<T> {
     pub fn get_random_mutator(&mut self) -> accessor::random::RandomMutator<T> {
         accessor::random::RandomMutator { octree: self }
     }
+    pub fn flush(&mut self) {
+        self.arena.flush();
+    }
 }
 
 #[cfg(test)]
