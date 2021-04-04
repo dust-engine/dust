@@ -2,9 +2,8 @@ mod arena;
 mod changeset;
 mod system;
 
-pub use arena::CHUNK_DEGREE;
-pub use arena::CHUNK_SIZE;
 pub use arena::{ArenaAllocated, ArenaAllocator, ArenaBlockAllocator, Handle};
+pub use arena::{BLOCK_MASK, BLOCK_MASK_DEGREE, BLOCK_SIZE, NUM_SLOTS_IN_BLOCK};
 use std::ops::Range;
 
 pub use system::SystemBlockAllocator;

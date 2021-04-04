@@ -5,8 +5,10 @@ use std::mem::{size_of, ManuallyDrop};
 
 use std::ptr::NonNull;
 
-pub const CHUNK_DEGREE: usize = 24;
-pub const CHUNK_SIZE: usize = 1 << CHUNK_DEGREE; // 16MB per block
+pub const BLOCK_MASK_DEGREE: u32 = 20;
+pub const NUM_SLOTS_IN_BLOCK: u32 = 1 << BLOCK_MASK_DEGREE;
+pub const BLOCK_SIZE: u64 = NUM_SLOTS_IN_BLOCK as u64 * 24;
+pub const BLOCK_MASK: u32 = NUM_SLOTS_IN_BLOCK - 1;
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Handle(u32);
@@ -25,16 +27,15 @@ impl Handle {
     }
     #[inline]
     pub fn get_slot_num(&self) -> u32 {
-        let mask = CHUNK_SIZE as u32 - 1;
-        self.0 & mask
+        self.0 & BLOCK_MASK
     }
     #[inline]
     pub fn get_chunk_num(&self) -> u32 {
-        self.0 >> CHUNK_DEGREE
+        self.0 >> BLOCK_MASK_DEGREE
     }
     #[inline]
     pub fn from_index(chunk_index: u32, block_index: u32) -> Handle {
-        Handle(chunk_index << CHUNK_DEGREE | block_index)
+        Handle(chunk_index << BLOCK_MASK_DEGREE | block_index)
     }
 }
 
@@ -44,7 +45,6 @@ impl Default for Handle {
     }
 }
 
-type ArenaAllocatorChunk<T> = [ArenaSlot<T>; CHUNK_SIZE / size_of::<T>()];
 pub type ArenaBlockAllocator = dyn BlockAllocator;
 
 #[repr(C)]
@@ -79,7 +79,6 @@ unsafe impl<T: ArenaAllocated> Send for ArenaAllocator<T> {}
 unsafe impl<T: ArenaAllocated> Sync for ArenaAllocator<T> {}
 
 impl<T: ArenaAllocated> ArenaAllocator<T> {
-    const NUM_SLOTS_IN_CHUNK: usize = CHUNK_SIZE / size_of::<T>();
     pub fn new(block_allocator: Box<ArenaBlockAllocator>) -> Self {
         debug_assert!(
             size_of::<T>() >= size_of::<FreeSlot>(),
@@ -97,6 +96,14 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             changeset: ChangeSet::new(0),
         }
     }
+    pub fn alloc_block(&mut self) -> Handle {
+        let chunk_index = self.chunks.len() as u32;
+        let chunk = unsafe { self.block_allocator.allocate_block().unwrap() };
+        self.chunks
+            .push(unsafe { NonNull::new_unchecked(chunk as _) });
+        self.capacity += NUM_SLOTS_IN_BLOCK;
+        Handle::from_index(chunk_index, 0)
+    }
     pub fn alloc(&mut self, len: u32) -> Handle {
         assert!(0 < len && len <= 8, "Only supports block size between 1-8!");
         self.size += len;
@@ -109,19 +116,15 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             if self.newspace_top.is_none() {
                 // We've run out of newspace.
                 // Allocate a new memory chunk from the underlying block allocator.
-                let chunk_index = self.chunks.len() as u32;
-                let chunk = unsafe { self.block_allocator.allocate_block().unwrap() };
-                self.chunks
-                    .push(unsafe { NonNull::new_unchecked(chunk as _) });
-                self.capacity += Self::NUM_SLOTS_IN_CHUNK as u32;
-                self.newspace_top = Handle::from_index(chunk_index, len);
-                Handle::from_index(chunk_index, 0)
+                let alloc_head = self.alloc_block();
+                self.newspace_top = Handle::from_index(alloc_head.get_chunk_num(), len);
+                alloc_head
             } else {
                 // There's still space remains to be allocated in the current chunk.
                 let handle = self.newspace_top;
                 let slot_index = handle.get_slot_num();
                 let chunk_index = handle.get_chunk_num();
-                let remaining_space = Self::NUM_SLOTS_IN_CHUNK as u32 - slot_index - len;
+                let remaining_space = NUM_SLOTS_IN_BLOCK - slot_index - len;
 
                 let new_handle = Handle::from_index(chunk_index, slot_index + len);
                 if remaining_space > 8 {

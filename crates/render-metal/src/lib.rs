@@ -14,11 +14,12 @@ impl Renderer {
         use raw_window_handle::RawWindowHandle;
         let window_handle = window_handle.raw_window_handle();
         match window_handle {
-            RawWindowHandle::MacOS(window_handle) => {
-                unsafe {
-                    RendererNew(window_handle.ns_window as *mut c_void, window_handle.ns_view as *mut c_void);
-                }
-            }
+            RawWindowHandle::MacOS(window_handle) => unsafe {
+                RendererNew(
+                    window_handle.ns_window as *mut c_void,
+                    window_handle.ns_view as *mut c_void,
+                );
+            },
             _ => {
                 panic!("Unsupported Window Handle")
             }

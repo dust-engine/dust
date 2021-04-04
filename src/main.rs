@@ -2,6 +2,7 @@ use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
 use bevy_dust::core::{Octree, SunLight, Voxel};
 use bevy_dust::RaytracerCameraBundle;
+use std::io::BufWriter;
 use std::ops::DerefMut;
 
 mod fly_camera;
@@ -48,17 +49,15 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
         .insert(FlyCamera::default());
 }
 
-
 fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     let octree = octree.deref_mut();
-    let octree: &'static mut Octree = unsafe {
-        &mut *(octree as *mut Octree)
-    };
+    let octree: &'static mut Octree = unsafe { &mut *(octree as *mut Octree) };
     std::thread::spawn(move || {
         let region_dir = "./assets/region";
         let mut load_region = |region_x: usize, region_y: usize| {
             let file =
-                std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y)).unwrap();
+                std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y))
+                    .unwrap();
             let mut region = fastanvil::Region::new(file);
 
             region
@@ -113,7 +112,8 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
         load_region(1, 1);
         load_region(0, 0);
         let mut file = std::fs::File::create("./test.oct").unwrap();
-        octree.write(&mut file);
+        let mut bufwriter = BufWriter::new(file);
+        octree.write(&mut bufwriter);
     });
 
     let mut bundle = RaytracerCameraBundle::default();

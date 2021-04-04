@@ -27,6 +27,7 @@ pub struct DiscreteBlockAllocator {
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
     copy_completion_fence: vk::Fence,
+    sparse_binding_completion_fence: vk::Fence,
 }
 unsafe impl Send for DiscreteBlockAllocator {}
 unsafe impl Sync for DiscreteBlockAllocator {}
@@ -90,12 +91,21 @@ impl DiscreteBlockAllocator {
             )
             .result()
             .unwrap();
-        let copy_completion_fence = device.create_fence(
-            &vk::FenceCreateInfo::builder()
-                .flags(vk::FenceCreateFlags::SIGNALED)
-                .build(),
-            None
-        )
+        let copy_completion_fence = device
+            .create_fence(
+                &vk::FenceCreateInfo::builder()
+                    .flags(vk::FenceCreateFlags::SIGNALED)
+                    .build(),
+                None,
+            )
+            .unwrap();
+        let sparse_binding_completion_fence = device
+            .create_fence(
+                &vk::FenceCreateInfo::builder()
+                    .flags(vk::FenceCreateFlags::SIGNALED)
+                    .build(),
+                None,
+            )
             .unwrap();
         Self {
             block_size,
@@ -111,6 +121,7 @@ impl DiscreteBlockAllocator {
             command_pool,
             command_buffer,
             copy_completion_fence,
+            sparse_binding_completion_fence,
         }
     }
 }
@@ -147,6 +158,9 @@ impl BlockAllocator for DiscreteBlockAllocator {
             .map_memory(system_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
             .map_err(super::utils::map_err)? as *mut u8;
         self.device
+            .reset_fences(&[self.sparse_binding_completion_fence])
+            .unwrap();
+        self.device
             .queue_bind_sparse(
                 self.bind_transfer_queue,
                 &[vk::BindSparseInfo::builder()
@@ -173,7 +187,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
                             .build(),
                     ])
                     .build()],
-                vk::Fence::null(),
+                self.sparse_binding_completion_fence,
             )
             .map_err(super::utils::map_err)?;
         let block = DiscreteBlock {
@@ -203,8 +217,8 @@ impl BlockAllocator for DiscreteBlockAllocator {
         let allocations = &self.allocations;
         let regions = ranges
             .map(|(block_ptr, range)| {
-                let location = allocations[&block_ptr].offset * self.block_size as u64
-                    + range.start as u64;
+                let location =
+                    allocations[&block_ptr].offset * self.block_size as u64 + range.start as u64;
                 vk::BufferCopy {
                     src_offset: location,
                     dst_offset: location,
@@ -233,24 +247,40 @@ impl BlockAllocator for DiscreteBlockAllocator {
             &regions,
         );
         self.device.end_command_buffer(self.command_buffer).unwrap();
-        self.device.reset_fences(&[self.copy_completion_fence]).unwrap();
+        self.device
+            .reset_fences(&[self.copy_completion_fence])
+            .unwrap();
         self.device
             .queue_submit(
                 self.bind_transfer_queue,
-                &[
-                    vk::SubmitInfo::builder()
+                &[vk::SubmitInfo::builder()
                     .command_buffers(&[self.command_buffer])
-                    .build()
-                ],
+                    .build()],
                 self.copy_completion_fence,
             )
             .unwrap();
     }
     fn can_flush(&self) -> bool {
+        // If the previous copy hasn't completed: simply signal that we're busy at the moment.
+        // The changes are going to be submitted to the queue in the next frame.
         let copy_completed = unsafe {
-            self.device.get_fence_status(self.copy_completion_fence).unwrap()
+            self.device
+                .get_fence_status(self.copy_completion_fence)
+                .unwrap()
         };
-        copy_completed
+        // If there's a pending sparse binding operation in progress, also signal that
+        // we're busy at the moment. New copy commands can include copy commands
+        // pointing to the new memory region.
+        let sparse_binding_completed = unsafe {
+            self.device
+                .get_fence_status(self.sparse_binding_completion_fence)
+                .unwrap()
+        };
+
+        // Note that it's ok to have a copy command and a sparse binding command
+        // in the queue at the same time. The copy command won't reference the newly
+        // allocated memory ranges.
+        copy_completed && sparse_binding_completed
     }
 }
 
@@ -310,6 +340,9 @@ impl Drop for DiscreteBlockAllocator {
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_buffer(self.device_buffer, None);
             self.device.destroy_buffer(self.system_buffer, None);
+            self.device.destroy_fence(self.copy_completion_fence, None);
+            self.device
+                .destroy_fence(self.sparse_binding_completion_fence, None);
             for i in self.allocations.values() {
                 self.device.free_memory(i.device_mem, None);
                 self.device.free_memory(i.system_mem, None);

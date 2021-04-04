@@ -12,7 +12,7 @@ use dust_core::Octree;
 use dust_core::{CameraProjection, SunLight};
 use render::Renderer;
 
-use dust_core::svo::alloc::CHUNK_SIZE;
+use dust_core::svo::alloc::BLOCK_SIZE;
 use dust_core::svo::ArenaAllocator;
 use std::borrow::BorrowMut;
 
@@ -48,7 +48,7 @@ fn setup(
     let winit_window = winit_windows.get_window(window_id).unwrap();
     let mut renderer = Renderer::new(winit_window);
     renderer.create_raytracer(); // More like "Enter Raytracing Mode"
-    let block_allocator = renderer.create_block_allocator(CHUNK_SIZE as u64);
+    let block_allocator = renderer.create_block_allocator(BLOCK_SIZE as u64);
     let arena = ArenaAllocator::new(block_allocator);
     let octree = Octree::new(arena);
 
