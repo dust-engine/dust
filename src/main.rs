@@ -39,7 +39,7 @@ fn main() {
 fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     let file = std::fs::File::open("./test.oct").unwrap();
     let mut reader = std::io::BufReader::new(file);
-    Octree::read(&mut octree, &mut reader, 10);
+    Octree::read(&mut octree, &mut reader, 12);
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.6, 1.6, 1.6);
@@ -54,10 +54,12 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     let octree: &'static mut Octree = unsafe { &mut *(octree as *mut Octree) };
     std::thread::spawn(move || {
         let region_dir = "./assets/region";
-        let mut load_region = |region_x: usize, region_y: usize| {
+        let mut load_region = |region_x: i32, region_y: i32| {
             let file =
                 std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y))
                     .unwrap();
+            let region_x = region_x + 7;
+            let region_y = region_y + 6;
             let mut region = fastanvil::Region::new(file);
 
             region
@@ -96,7 +98,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                         x + chunk_x as u32 * 16 + region_x as u32 * 512,
                                         y,
                                         z + chunk_z as u32 * 16 + region_y as u32 * 512,
-                                        1024,
+                                        8192,
                                         voxel,
                                     );
                                 }
@@ -105,12 +107,13 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                     }
                 })
                 .unwrap();
-            println!("Region loaded");
+            println!("Region loaded: {} {}", region_x, region_y);
         };
-        load_region(0, 1);
-        load_region(1, 0);
-        load_region(1, 1);
-        load_region(0, 0);
+        for x in -7 ..= 5 {
+            for y in -6 ..= 4 {
+                load_region(x, y);
+            }
+        }
         let mut file = std::fs::File::create("./test.oct").unwrap();
         let mut bufwriter = BufWriter::new(file);
         octree.write(&mut bufwriter);

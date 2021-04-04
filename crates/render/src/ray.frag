@@ -28,8 +28,8 @@ uint MaskLocationNthOne(uint mask, uint location) {
 }
 
 
-layout (constant_id = 0) const uint MAX_ITERATION_VALUE = 1000;
-const Box GlobalBoundingBox = { vec3(0,0,0), 16 };
+layout (constant_id = 0) const uint MAX_ITERATION_VALUE = 100;
+const Box GlobalBoundingBox = { vec3(0,0,0), 512 };
 
 layout(location=0) out vec4 f_color;
 layout(location=0) in vec3 vWorldPosition;
@@ -99,14 +99,13 @@ uint MaterialAtPosition(inout Box box, vec3 position) {
     }
 }
 
-uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out uint iteration_times) {
+uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out uint counter) {
     hitbox = initial_box;
     vec2 intersection = IntersectAABB(ray.origin, ray.dir, hitbox);
     vec3 entry_point = ray.origin + max(0, intersection.x) * ray.dir;
     vec3 test_point = entry_point + ray.dir * hitbox.extent * 0.000001;
     uint material_id = 0;
 
-    uint counter;
     for(
     counter = 0;
     counter < MAX_ITERATION_VALUE && ContainsAABB(test_point, GlobalBoundingBox);
@@ -125,7 +124,6 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
         test_point = entry_point + sign(ray.dir) * hitbox.extent * 0.0001;
     }
     hitpoint = entry_point;
-    iteration_times = counter;
     return material_id;
 }
 
@@ -139,7 +137,7 @@ void main() {
     Box hitbox;
     uint iteration_times;
     uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times);
-    float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE) * 20.0; // 0 to 1
+    float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE); // 0 to 1
     #ifdef DEBUG_RENDERING
     f_color = vec4(iteration, iteration, iteration, 1.0);
     #else
