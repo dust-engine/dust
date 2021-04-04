@@ -112,6 +112,8 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
         load_region(1, 0);
         load_region(1, 1);
         load_region(0, 0);
+        let mut file = std::fs::File::create("./test.oct").unwrap();
+        octree.write(&mut file);
     });
 
     let mut bundle = RaytracerCameraBundle::default();
