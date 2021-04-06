@@ -28,4 +28,4 @@ DerivedData/
 
 ## Gcc Patch
 /*.gcno
-
+assets/region/

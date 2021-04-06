@@ -110,7 +110,7 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
     counter = 0;
     counter < MAX_ITERATION_VALUE && ContainsAABB(test_point, GlobalBoundingBox);
     counter++) {
-        vec4 entry_point_camera_space = ViewProj * vec4(entry_point, 1.0);
+        // TODO: change this so that entry point doesn't get too big
         hitbox = initial_box;
         material_id = MaterialAtPosition(hitbox, test_point);
         if (material_id > 0) {
@@ -121,7 +121,7 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
         vec2 new_intersection = IntersectAABB(entry_point, ray.dir, hitbox);
 
         entry_point = entry_point + ray.dir * new_intersection.y;
-        test_point = entry_point + sign(ray.dir) * hitbox.extent * 0.0001;
+        test_point = entry_point + sign(ray.dir) * hitbox.extent * 0.001;
     }
     hitpoint = entry_point;
     return material_id;
@@ -139,6 +139,7 @@ void main() {
     uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times);
     float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE); // 0 to 1
     #ifdef DEBUG_RENDERING
+    depth = length(hitpoint - ray.origin) * 0.005;
     f_color = vec4(iteration, iteration, iteration, 1.0);
     #else
     vec3 normal = CubedNormalize(hitpoint - (hitbox.origin + hitbox.extent/2));
