@@ -1,4 +1,5 @@
 use crate::device_info::DeviceInfo;
+use crate::renderer::RenderContext;
 use crate::shared_buffer::{SharedBuffer, StagingStateLayout};
 use crate::swapchain::{RenderPassProvider, SwapchainConfig};
 use crate::State;
@@ -7,6 +8,7 @@ use ash::vk;
 use ash::vk::RenderPass;
 use std::ffi::CStr;
 use std::io::Cursor;
+use std::sync::Arc;
 use vk_mem as vma;
 
 pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
@@ -22,7 +24,7 @@ pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
 ];
 
 pub struct RayTracer {
-    device: ash::Device,
+    context: Arc<RenderContext>,
     desc_pool: vk::DescriptorPool,
     pub storage_desc_set: vk::DescriptorSet,
     storage_desc_set_layout: vk::DescriptorSetLayout,
@@ -37,15 +39,16 @@ pub struct RayTracer {
 
 impl RayTracer {
     pub unsafe fn new(
-        device: ash::Device,
+        context: Arc<RenderContext>,
         allocator: &vma::Allocator,
         format: vk::Format,
         info: &DeviceInfo,
         graphics_queue: vk::Queue,
         graphics_queue_family: u32,
     ) -> Self {
+        let device = &context.device;
         let mut shared_buffer = SharedBuffer::new(
-            device.clone(),
+            context.clone(),
             allocator,
             &info.memory_properties,
             graphics_queue,
@@ -295,7 +298,7 @@ impl RayTracer {
         device.destroy_shader_module(vertex_shader_module, None);
         device.destroy_shader_module(fragment_shader_module, None);
         let raytracer = Self {
-            device,
+            context,
             pipeline_layout,
             pipeline,
             storage_desc_set,
@@ -317,7 +320,7 @@ impl RayTracer {
         self.shared_buffer.write_light(state.sunlight);
     }
     pub unsafe fn bind_block_allocator_buffer(&mut self, block_allocator_buffer: vk::Buffer) {
-        self.device.update_descriptor_sets(
+        self.context.device.update_descriptor_sets(
             &[
                 vk::WriteDescriptorSet::builder()
                     .dst_set(self.storage_desc_set)
@@ -424,15 +427,51 @@ impl RenderPassProvider for RayTracer {
 impl Drop for RayTracer {
     fn drop(&mut self) {
         unsafe {
-            self.device
+            self.context
+                .device
                 .destroy_descriptor_set_layout(self.uniform_desc_set_layout, None);
-            self.device
+            self.context
+                .device
                 .destroy_descriptor_set_layout(self.storage_desc_set_layout, None);
-            self.device.destroy_descriptor_pool(self.desc_pool, None);
-            self.device
+            self.context
+                .device
+                .destroy_descriptor_pool(self.desc_pool, None);
+            self.context
+                .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.destroy_pipeline(self.pipeline, None);
-            self.device.destroy_render_pass(self.render_pass, None);
+            self.context.device.destroy_pipeline(self.pipeline, None);
+            self.context
+                .device
+                .destroy_render_pass(self.render_pass, None);
         }
+    }
+}
+
+pub mod systems {
+    use super::RayTracer;
+    use crate::core::Octree;
+    use crate::render_resources::RenderResources;
+    use crate::Renderer;
+    use bevy::prelude::*;
+
+    pub fn create_raytracer(
+        mut commands: Commands,
+        renderer: Res<Renderer>,
+        mut render_resources: ResMut<RenderResources>,
+    ) {
+        let raytracer = unsafe {
+            let mut raytracer = RayTracer::new(
+                renderer.context.clone(),
+                &render_resources.allocator,
+                render_resources.swapchain.config.format,
+                &renderer.info,
+                renderer.graphics_queue,
+                renderer.graphics_queue_family,
+            );
+            raytracer.bind_block_allocator_buffer(render_resources.block_allocator_buffer);
+            render_resources.swapchain.bind_render_pass(&mut raytracer);
+            raytracer
+        };
+        commands.insert_resource(raytracer);
     }
 }

@@ -1,6 +1,8 @@
 use crate::device_info::Quirks;
+use crate::renderer::RenderContext;
 use ash::version::DeviceV1_0;
 use ash::vk;
+use std::sync::Arc;
 
 struct Frame {
     swapchain_image_available_semaphore: vk::Semaphore,
@@ -141,7 +143,7 @@ unsafe fn record_command_buffer(
 }
 
 pub struct Swapchain {
-    device: ash::Device,
+    context: Arc<RenderContext>,
     surface: vk::SurfaceKHR,
     current_frame: usize,
     loader: ash::extensions::khr::Swapchain,
@@ -184,15 +186,16 @@ impl Swapchain {
         }
     }
     pub unsafe fn new(
-        instance: &ash::Instance,
-        device: ash::Device,
+        context: Arc<RenderContext>,
         surface: vk::SurfaceKHR,
         config: SwapchainConfig,
         graphics_queue_family_index: u32,
         graphics_queue: vk::Queue,
     ) -> Self {
         let num_frames_in_flight = 3;
-        let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, &device);
+        let instance = &context.instance;
+        let device = &context.device;
+        let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, device);
         let swapchain = create_swapchain(&swapchain_loader, surface, &config);
         let images = swapchain_loader.get_swapchain_images(swapchain).unwrap();
         // First, create the command pool
@@ -233,7 +236,7 @@ impl Swapchain {
         }
         Self {
             command_pool,
-            device,
+            context,
             loader: swapchain_loader,
             swapchain,
             current_frame: 0,
@@ -249,12 +252,16 @@ impl Swapchain {
     pub unsafe fn recreate(&mut self, config: SwapchainConfig) {
         // reclaim resources
         for swapchain_image in self.swapchain_images.iter() {
-            self.device
+            self.context
+                .device
                 .destroy_framebuffer(swapchain_image.framebuffer, None);
-            self.device.destroy_image_view(swapchain_image.view, None);
+            self.context
+                .device
+                .destroy_image_view(swapchain_image.view, None);
         }
         self.loader.destroy_swapchain(self.swapchain, None);
-        self.device
+        self.context
+            .device
             .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())
             .unwrap();
 
@@ -262,7 +269,7 @@ impl Swapchain {
         self.swapchain = create_swapchain(&self.loader, self.surface, &config);
         let images = self.loader.get_swapchain_images(self.swapchain).unwrap();
         for (swapchain_image, image) in self.swapchain_images.iter_mut().zip(images.into_iter()) {
-            swapchain_image.view = create_image_view(&self.device, image, &config);
+            swapchain_image.view = create_image_view(&self.context.device, image, &config);
             swapchain_image.framebuffer = vk::Framebuffer::null();
         }
         self.config = config;
@@ -273,7 +280,8 @@ impl Swapchain {
             return;
         }
         let frame_in_flight = &self.frames_in_flight[self.current_frame];
-        self.device
+        self.context
+            .device
             .wait_for_fences(&[frame_in_flight.fence], true, u64::MAX)
             .unwrap();
         let (image_index, suboptimal) = self
@@ -291,14 +299,19 @@ impl Swapchain {
         let swapchain_image = &mut self.swapchain_images[image_index as usize];
         {
             if swapchain_image.fence != vk::Fence::null() {
-                self.device
+                self.context
+                    .device
                     .wait_for_fences(&[swapchain_image.fence], true, u64::MAX)
                     .unwrap();
             }
             swapchain_image.fence = frame_in_flight.fence;
         }
-        self.device.reset_fences(&[frame_in_flight.fence]).unwrap();
-        self.device
+        self.context
+            .device
+            .reset_fences(&[frame_in_flight.fence])
+            .unwrap();
+        self.context
+            .device
             .queue_submit(
                 self.graphics_queue,
                 &[vk::SubmitInfo::builder()
@@ -330,13 +343,13 @@ impl Swapchain {
         self.render_pass = render_pass_provider.get_render_pass();
         for swapchain_image in self.swapchain_images.iter_mut() {
             swapchain_image.framebuffer = create_framebuffer(
-                &self.device,
+                &self.context.device,
                 swapchain_image.view,
                 self.render_pass,
                 &self.config,
             );
             record_command_buffer(
-                &self.device,
+                &self.context.device,
                 swapchain_image.command_buffer,
                 swapchain_image.framebuffer,
                 render_pass_provider,
@@ -350,19 +363,26 @@ impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
             for swapchain_image in self.swapchain_images.iter() {
-                self.device
+                self.context
+                    .device
                     .destroy_framebuffer(swapchain_image.framebuffer, None);
-                self.device.destroy_image_view(swapchain_image.view, None);
+                self.context
+                    .device
+                    .destroy_image_view(swapchain_image.view, None);
             }
             for frame in self.frames_in_flight.iter() {
-                self.device.destroy_fence(frame.fence, None);
-                self.device
+                self.context.device.destroy_fence(frame.fence, None);
+                self.context
+                    .device
                     .destroy_semaphore(frame.swapchain_image_available_semaphore, None);
-                self.device
+                self.context
+                    .device
                     .destroy_semaphore(frame.render_finished_semaphore, None);
             }
             self.loader.destroy_swapchain(self.swapchain, None);
-            self.device.destroy_command_pool(self.command_pool, None);
+            self.context
+                .device
+                .destroy_command_pool(self.command_pool, None);
         }
     }
 }

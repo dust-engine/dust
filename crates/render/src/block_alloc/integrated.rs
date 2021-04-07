@@ -2,12 +2,14 @@ use crate::device_info::DeviceInfo;
 use ash::version::DeviceV1_0;
 use ash::vk;
 
+use crate::renderer::RenderContext;
 use dust_core::svo::alloc::{AllocError, BlockAllocator};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 pub struct IntegratedBlockAllocator {
-    device: ash::Device,
+    context: Arc<RenderContext>,
     bind_transfer_queue: vk::Queue,
     memtype: u32,
     pub buffer: vk::Buffer,
@@ -22,7 +24,7 @@ unsafe impl Sync for IntegratedBlockAllocator {}
 
 impl IntegratedBlockAllocator {
     pub unsafe fn new(
-        device: ash::Device,
+        context: Arc<RenderContext>,
         bind_transfer_queue: vk::Queue,
         bind_transfer_queue_family: u32,
         graphics_queue_family: u32,
@@ -44,13 +46,14 @@ impl IntegratedBlockAllocator {
                 .queue_family_indices(&queue_family_indices);
         }
 
-        let device_buffer = device
+        let device_buffer = context
+            .device
             .create_buffer(&buffer_create_info.build(), None)
             .unwrap();
-        let requirements = device.get_buffer_memory_requirements(device_buffer);
+        let requirements = context.device.get_buffer_memory_requirements(device_buffer);
         let memtype = select_integrated_memtype(&device_info.memory_properties, &requirements);
         Self {
-            device,
+            context,
             bind_transfer_queue,
             memtype,
             buffer: device_buffer,
@@ -70,6 +73,7 @@ impl BlockAllocator for IntegratedBlockAllocator {
             val
         });
         let mem = self
+            .context
             .device
             .allocate_memory(
                 &vk::MemoryAllocateInfo::builder()
@@ -80,10 +84,12 @@ impl BlockAllocator for IntegratedBlockAllocator {
             )
             .unwrap();
         let ptr = self
+            .context
             .device
             .map_memory(mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
             .map_err(super::utils::map_err)? as *mut u8;
-        self.device
+        self.context
+            .device
             .queue_bind_sparse(
                 self.bind_transfer_queue,
                 &[vk::BindSparseInfo::builder()
@@ -107,14 +113,15 @@ impl BlockAllocator for IntegratedBlockAllocator {
 
     unsafe fn deallocate_block(&mut self, block: *mut u8) {
         let memory = self.allocations.remove(&block).unwrap();
-        self.device.unmap_memory(memory);
-        self.device.free_memory(memory, None);
+        self.context.device.unmap_memory(memory);
+        self.context.device.free_memory(memory, None);
     }
 
     unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
         // TODO: only do this for non-coherent memory
         let allocations = &self.allocations;
-        self.device
+        self.context
+            .device
             .flush_mapped_memory_ranges(
                 &ranges
                     .map(|(ptr, range)| {
@@ -169,10 +176,10 @@ fn select_integrated_memtype(
 impl Drop for IntegratedBlockAllocator {
     fn drop(&mut self) {
         unsafe {
-            self.device.device_wait_idle().unwrap();
-            self.device.destroy_buffer(self.buffer, None);
+            self.context.device.device_wait_idle().unwrap();
+            self.context.device.destroy_buffer(self.buffer, None);
             for i in self.allocations.values() {
-                self.device.free_memory(*i, None);
+                self.context.device.free_memory(*i, None);
             }
         }
     }

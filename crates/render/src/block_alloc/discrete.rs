@@ -1,9 +1,11 @@
 use crate::device_info::DeviceInfo;
+use crate::renderer::RenderContext;
 use ash::version::{DeviceV1_0, DeviceV1_1};
 use ash::vk;
 use dust_core::svo::alloc::{AllocError, BlockAllocator};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 pub struct DiscreteBlock {
     system_mem: vk::DeviceMemory,
@@ -13,7 +15,7 @@ pub struct DiscreteBlock {
 
 pub struct DiscreteBlockAllocator {
     block_size: u64,
-    device: ash::Device,
+    context: Arc<RenderContext>,
     bind_transfer_queue: vk::Queue,
     pub device_buffer: vk::Buffer,
     system_buffer: vk::Buffer,
@@ -38,7 +40,7 @@ unsafe impl Sync for DiscreteBlockAllocator {}
 
 impl DiscreteBlockAllocator {
     pub unsafe fn new(
-        device: ash::Device,
+        context: Arc<RenderContext>,
         bind_transfer_queue: vk::Queue,
         bind_transfer_queue_family: u32,
         graphics_queue_family: u32,
@@ -46,6 +48,7 @@ impl DiscreteBlockAllocator {
         max_storage_buffer_size: u64,
         device_info: &DeviceInfo,
     ) -> Self {
+        let device = &context.device;
         let queue_family_indices = [graphics_queue_family, bind_transfer_queue_family];
         let mut buffer_create_info = vk::BufferCreateInfo::builder()
             .size(max_storage_buffer_size)
@@ -116,7 +119,7 @@ impl DiscreteBlockAllocator {
             .unwrap();
         Self {
             block_size,
-            device,
+            context,
             bind_transfer_queue,
             device_buffer,
             system_buffer,
@@ -143,6 +146,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
             val
         });
         let system_mem = self
+            .context
             .device
             .allocate_memory(
                 &vk::MemoryAllocateInfo::builder()
@@ -153,6 +157,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
             )
             .map_err(super::utils::map_err)?;
         let device_mem = self
+            .context
             .device
             .allocate_memory(
                 &vk::MemoryAllocateInfo::builder()
@@ -163,21 +168,25 @@ impl BlockAllocator for DiscreteBlockAllocator {
             )
             .map_err(super::utils::map_err)?;
         let ptr = self
+            .context
             .device
             .map_memory(system_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
             .map_err(super::utils::map_err)? as *mut u8;
 
         if self
+            .context
             .device
             .get_fence_status(self.sparse_binding_completion_fence)
             .unwrap()
         {
             // There's no active binds
-            self.device
+            self.context
+                .device
                 .reset_fences(&[self.sparse_binding_completion_fence])
                 .unwrap();
             // Immediately submit the request
-            self.device
+            self.context
+                .device
                 .queue_bind_sparse(
                     self.bind_transfer_queue,
                     &[vk::BindSparseInfo::builder()
@@ -226,9 +235,9 @@ impl BlockAllocator for DiscreteBlockAllocator {
     unsafe fn deallocate_block(&mut self, block: *mut u8) {
         let block = self.allocations.remove(&block).unwrap();
 
-        self.device.unmap_memory(block.system_mem);
-        self.device.free_memory(block.system_mem, None);
-        self.device.free_memory(block.device_mem, None);
+        self.context.device.unmap_memory(block.system_mem);
+        self.context.device.free_memory(block.system_mem, None);
+        self.context.device.free_memory(block.device_mem, None);
         if self.current_offset == block.offset + 1 {
             self.current_offset -= 1;
         } else {
@@ -237,6 +246,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
     }
 
     unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
+        let device = &self.context.device;
         // First, complete sparse bindings
         let needs_binding = !self.binds_pending.is_empty();
         if needs_binding {
@@ -260,10 +270,10 @@ impl BlockAllocator for DiscreteBlockAllocator {
                     flags: vk::SparseMemoryBindFlags::empty(),
                 });
             }
-            self.device
+            device
                 .reset_fences(&[self.sparse_binding_completion_fence])
                 .unwrap();
-            self.device
+            device
                 .queue_bind_sparse(
                     self.bind_transfer_queue,
                     &[vk::BindSparseInfo::builder()
@@ -299,10 +309,12 @@ impl BlockAllocator for DiscreteBlockAllocator {
         if regions.len() == 0 {
             return;
         }
-        self.device
+        self.context
+            .device
             .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())
             .unwrap();
-        self.device
+        self.context
+            .device
             .begin_command_buffer(
                 self.command_buffer,
                 &vk::CommandBufferBeginInfo::builder()
@@ -310,16 +322,14 @@ impl BlockAllocator for DiscreteBlockAllocator {
                     .build(),
             )
             .unwrap();
-        self.device.cmd_copy_buffer(
+        self.context.device.cmd_copy_buffer(
             self.command_buffer,
             self.system_buffer,
             self.device_buffer,
             &regions,
         );
-        self.device.end_command_buffer(self.command_buffer).unwrap();
-        self.device
-            .reset_fences(&[self.copy_completion_fence])
-            .unwrap();
+        device.end_command_buffer(self.command_buffer).unwrap();
+        device.reset_fences(&[self.copy_completion_fence]).unwrap();
 
         let command_buffers = [self.command_buffer];
         let submit_wait_semaphore = [self.sparse_binding_completion_semaphore];
@@ -330,7 +340,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
                 .wait_semaphores(&submit_wait_semaphore)
                 .wait_dst_stage_mask(&submit_wait_semaphore_masks);
         }
-        self.device
+        device
             .queue_submit(
                 self.bind_transfer_queue,
                 &[submit_info.build()],
@@ -342,7 +352,8 @@ impl BlockAllocator for DiscreteBlockAllocator {
         // If the previous copy hasn't completed: simply signal that we're busy at the moment.
         // The changes are going to be submitted to the queue in the next frame.
         let copy_completed = unsafe {
-            self.device
+            self.context
+                .device
                 .get_fence_status(self.copy_completion_fence)
                 .unwrap()
         };
@@ -350,7 +361,8 @@ impl BlockAllocator for DiscreteBlockAllocator {
         // we're busy at the moment. New copy commands can include copy commands
         // pointing to the new memory region.
         let sparse_binding_completed = unsafe {
-            self.device
+            self.context
+                .device
                 .get_fence_status(self.sparse_binding_completion_fence)
                 .unwrap()
         };
@@ -413,19 +425,18 @@ fn select_discrete_memtype(
 
 impl Drop for DiscreteBlockAllocator {
     fn drop(&mut self) {
+        let device = &self.context.device;
         unsafe {
-            self.device.device_wait_idle().unwrap();
-            self.device.destroy_command_pool(self.command_pool, None);
-            self.device.destroy_buffer(self.device_buffer, None);
-            self.device.destroy_buffer(self.system_buffer, None);
-            self.device.destroy_fence(self.copy_completion_fence, None);
-            self.device
-                .destroy_fence(self.sparse_binding_completion_fence, None);
-            self.device
-                .destroy_semaphore(self.sparse_binding_completion_semaphore, None);
+            device.device_wait_idle().unwrap();
+            device.destroy_command_pool(self.command_pool, None);
+            device.destroy_buffer(self.device_buffer, None);
+            device.destroy_buffer(self.system_buffer, None);
+            device.destroy_fence(self.copy_completion_fence, None);
+            device.destroy_fence(self.sparse_binding_completion_fence, None);
+            device.destroy_semaphore(self.sparse_binding_completion_semaphore, None);
             for i in self.allocations.values() {
-                self.device.free_memory(i.device_mem, None);
-                self.device.free_memory(i.system_mem, None);
+                device.free_memory(i.device_mem, None);
+                device.free_memory(i.system_mem, None);
             }
         }
     }

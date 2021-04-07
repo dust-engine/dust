@@ -9,16 +9,18 @@ use std::ffi::CStr;
 use std::mem::ManuallyDrop;
 use vk_mem as vma;
 
-use dust_core::svo::alloc::BlockAllocator;
-use crate::material_repo::TextureRepo;
 use crate::material::Material;
+use crate::material_repo::TextureRepo;
+use dust_core::svo::alloc::{BlockAllocator, BLOCK_SIZE};
+use std::sync::Arc;
 
-pub struct Renderer {
+pub struct RenderContext {
     pub entry: ash::Entry,
     pub instance: ash::Instance,
     pub device: ash::Device,
-    pub allocator: vma::Allocator,
-    pub raytracer: Option<RayTracer>,
+}
+pub struct Renderer {
+    pub context: Arc<RenderContext>,
     pub physical_device: vk::PhysicalDevice,
     pub surface: vk::SurfaceKHR,
     pub surface_loader: ash::extensions::khr::Surface,
@@ -29,7 +31,6 @@ pub struct Renderer {
     pub graphics_queue_family: u32,
     pub transfer_binding_queue_family: u32,
     pub info: DeviceInfo,
-    pub swapchain: ManuallyDrop<Swapchain>,
 }
 
 impl Renderer {
@@ -37,7 +38,7 @@ impl Renderer {
     /// Note that the two objects must be dropped at the same time.
     /// The application needs to ensure that when the Renderer was dropped,
     /// the BlockAllocator will not be used anymore.
-    pub fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Renderer {
+    pub unsafe fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Renderer {
         unsafe {
             let entry = ash::Entry::new().unwrap();
             let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
@@ -191,40 +192,15 @@ impl Renderer {
                     None,
                 )
                 .unwrap();
-            let allocator = vk_mem::Allocator::new(&vma::AllocatorCreateInfo {
-                physical_device,
-                device: device.clone(),
-                instance: instance.clone(),
-                flags: Default::default(),
-                preferred_large_heap_block_size: 0,
-                frame_in_use_count: 0,
-                heap_size_limits: None,
-            })
-            .unwrap();
             let graphics_queue = device.get_device_queue(graphics_queue_family, 0);
             let transfer_binding_queue = device.get_device_queue(transfer_binding_queue_family, 0);
-            let swapchain_config =
-                Swapchain::get_config(physical_device, surface, &surface_loader, &quirks);
-            let swapchain = Swapchain::new(
-                &instance,
-                device.clone(),
-                surface,
-                swapchain_config,
-                graphics_queue_family,
-                graphics_queue,
-            );
-            let mut texture_repo = TextureRepo::new();
-            texture_repo.materials.push(Material {
-                name: "Stone".into(),
-                scale: 1.0,
-                diffuse: image::io::Reader::open("./assets/stone.png").unwrap().decode().unwrap(),
-                normal: None
-            });
-            let renderer = Self {
+            let context = RenderContext {
                 entry,
                 device,
-                allocator,
-                raytracer: None,
+                instance,
+            };
+            let renderer = Self {
+                context: Arc::new(context),
                 physical_device,
                 surface,
                 surface_loader,
@@ -232,99 +208,11 @@ impl Renderer {
                 graphics_queue,
                 transfer_binding_queue,
                 graphics_queue_family,
-                instance,
                 transfer_binding_queue_family,
                 info: device_info,
-                swapchain: ManuallyDrop::new(swapchain),
             };
 
             renderer
-        }
-    }
-    pub fn resize(&mut self) {
-        // Assuming the swapchain format is still the same.
-        unsafe {
-            self.device.device_wait_idle().unwrap();
-            let config = Swapchain::get_config(
-                self.physical_device,
-                self.surface,
-                &self.surface_loader,
-                &self.quirks,
-            );
-            self.swapchain.recreate(config);
-            // swapchain.recreate is going to clear its command buffers
-            // so we have to rebind the render pass here.
-            if let Some(raytracer) = self.raytracer.as_mut() {
-                self.swapchain.bind_render_pass(raytracer);
-            }
-        }
-    }
-    pub fn update(&mut self, state: &crate::State) {
-        unsafe {
-            if let Some(raytracer) = self.raytracer.as_mut() {
-                let extent = self.swapchain.config.extent;
-                raytracer.update(state, extent.width as f32 / extent.height as f32);
-            }
-            self.swapchain.render_frame();
-        }
-    }
-    pub fn create_raytracer(&mut self) {
-        unsafe {
-            let raytracer = RayTracer::new(
-                self.device.clone(),
-                &self.allocator,
-                self.swapchain.config.format,
-                &self.info,
-                self.graphics_queue,
-                self.graphics_queue_family,
-            );
-            self.raytracer = Some(raytracer);
-        }
-    }
-    pub fn create_block_allocator(&mut self, block_size: u64) -> Box<dyn BlockAllocator> {
-        unsafe {
-            let node_pool_buffer: vk::Buffer;
-            let device_type = self.info.physical_device_properties.device_type;
-            let allocator: Box<dyn BlockAllocator> = match device_type {
-                vk::PhysicalDeviceType::DISCRETE_GPU => {
-                    let allocator = crate::block_alloc::DiscreteBlockAllocator::new(
-                        self.device.clone(),
-                        self.transfer_binding_queue,
-                        self.transfer_binding_queue_family,
-                        self.graphics_queue_family,
-                        block_size,
-                        self.info
-                            .physical_device_properties
-                            .limits
-                            .max_storage_buffer_range as u64,
-                        &self.info,
-                    );
-                    node_pool_buffer = allocator.device_buffer;
-                    Box::new(allocator)
-                }
-                vk::PhysicalDeviceType::INTEGRATED_GPU => {
-                    let allocator = crate::block_alloc::IntegratedBlockAllocator::new(
-                        self.device.clone(),
-                        self.transfer_binding_queue,
-                        self.transfer_binding_queue_family,
-                        self.graphics_queue_family,
-                        block_size,
-                        self.info
-                            .physical_device_properties
-                            .limits
-                            .max_storage_buffer_range as u64,
-                        &self.info,
-                    );
-                    node_pool_buffer = allocator.buffer;
-                    Box::new(allocator)
-                }
-                _ => panic!("Unsupported GPU"),
-            };
-            if let Some(raytracer) = self.raytracer.as_mut() {
-                raytracer.bind_block_allocator_buffer(node_pool_buffer);
-                self.swapchain.bind_render_pass(raytracer);
-            }
-            allocator
         }
     }
 }
@@ -332,14 +220,9 @@ impl Renderer {
 impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
-            self.device.device_wait_idle().unwrap();
-            if let Some(raytracer) = self.raytracer.take() {
-                drop(raytracer);
-            }
-            ManuallyDrop::drop(&mut self.swapchain);
             self.surface_loader.destroy_surface(self.surface, None);
-            self.device.destroy_device(None);
-            self.instance.destroy_instance(None);
+            self.context.device.destroy_device(None);
+            self.context.instance.destroy_instance(None);
         }
     }
 }

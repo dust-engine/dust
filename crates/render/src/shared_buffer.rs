@@ -1,10 +1,12 @@
 use ash::vk;
 
+use crate::renderer::RenderContext;
 use ash::version::DeviceV1_0;
 use dust_core::CameraProjection;
 use dust_core::SunLight;
 use glam::{Mat4, TransformRT, Vec3};
 use std::mem::size_of;
+use std::sync::Arc;
 use vk_mem as vma;
 
 struct StagingState {
@@ -43,7 +45,7 @@ StagingBuffer Layout:
 Staging area is fixed 128 bytes
 */
 pub struct SharedBuffer {
-    device: ash::Device,
+    context: Arc<RenderContext>,
     staging: Option<StagingState>,
     pub buffer: vk::Buffer,
     allocation: vma::Allocation,
@@ -56,7 +58,7 @@ unsafe impl Sync for SharedBuffer {}
 
 impl SharedBuffer {
     pub unsafe fn new(
-        device: ash::Device,
+        context: Arc<RenderContext>,
         allocator: &vma::Allocator,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
         queue: vk::Queue,
@@ -65,6 +67,7 @@ impl SharedBuffer {
         let span = tracing::info_span!("shared_buffer_new");
         let _enter = span.enter();
 
+        let device = &context.device;
         let needs_staging = !memory_properties.memory_types
             [0..memory_properties.memory_type_count as usize]
             .iter()
@@ -144,7 +147,7 @@ impl SharedBuffer {
             staging,
             buffer,
             allocation,
-            device,
+            context,
             layout: &mut *ptr,
             static_data_dirty: true,
             allocation_info,
@@ -186,7 +189,7 @@ impl SharedBuffer {
             SHARED_BUFFER_FRAME_UPDATE_SIZE
         };
         if let Some(staging_buffer) = self.staging.as_ref() {
-            self.device.cmd_copy_buffer(
+            self.context.device.cmd_copy_buffer(
                 cmd_buffer,
                 staging_buffer.buffer,
                 self.buffer,
@@ -205,9 +208,9 @@ impl Drop for SharedBuffer {
         // If a memory object is mapped at the time it is freed, it is implicitly unmapped.
         unsafe {
             if let Some(staging) = self.staging.as_ref() {
-                //self.device.destroy_buffer(staging.buffer, None);
+                self.context.device.destroy_buffer(staging.buffer, None);
             }
-            //self.device.destroy_buffer(self.buffer, None);
+            self.context.device.destroy_buffer(self.buffer, None);
         }
     }
 }

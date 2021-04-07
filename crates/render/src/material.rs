@@ -1,5 +1,5 @@
-use std::borrow::Cow;
 use glam::Vec3;
+use std::borrow::Cow;
 
 pub struct Material {
     pub name: Cow<'static, str>,
@@ -13,5 +13,5 @@ pub struct ColoredMaterial {
     pub scale: f32,
     pub diffuse: Option<image::DynamicImage>,
     pub normal: Option<image::DynamicImage>,
-    pub color_palette: [Vec3; 256]
+    pub color_palette: [Vec3; 256],
 }
