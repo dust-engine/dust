@@ -5,10 +5,12 @@ use dust_core::CameraProjection;
 use dust_core::SunLight;
 use glam::{Mat4, TransformRT, Vec3};
 use std::mem::size_of;
+use vk_mem as vma;
 
 struct StagingState {
-    memory: vk::DeviceMemory,
     buffer: vk::Buffer,
+    allocation: vma::Allocation,
+    allocation_info: vma::AllocationInfo,
     queue: vk::Queue,
     queue_family: u32,
 }
@@ -42,9 +44,10 @@ Staging area is fixed 128 bytes
 */
 pub struct SharedBuffer {
     device: ash::Device,
-    memory: vk::DeviceMemory,
     staging: Option<StagingState>,
     pub buffer: vk::Buffer,
+    allocation: vma::Allocation,
+    allocation_info: vma::AllocationInfo,
     layout: &'static mut StagingStateLayout,
     static_data_dirty: bool,
 }
@@ -54,6 +57,7 @@ unsafe impl Sync for SharedBuffer {}
 impl SharedBuffer {
     pub unsafe fn new(
         device: ash::Device,
+        allocator: &vma::Allocator,
         memory_properties: &vk::PhysicalDeviceMemoryProperties,
         queue: vk::Queue,
         queue_family: u32,
@@ -70,7 +74,7 @@ impl SharedBuffer {
                 )
             });
         tracing::info!("SharedBuffer using staging: {:?}", needs_staging);
-        let buffer = device
+        let (buffer, allocation, allocation_info) = allocator
             .create_buffer(
                 &vk::BufferCreateInfo::builder()
                     .flags(vk::BufferCreateFlags::empty())
@@ -86,87 +90,46 @@ impl SharedBuffer {
                                 vk::BufferUsageFlags::empty()
                             },
                     ),
-                None,
+                &vma::AllocationCreateInfo {
+                    usage: if needs_staging {
+                        vma::MemoryUsage::GpuOnly
+                    } else {
+                        vma::MemoryUsage::CpuToGpu
+                    },
+                    flags: vma::AllocationCreateFlags::MAPPED,
+                    required_flags: vk::MemoryPropertyFlags::empty(),
+                    preferred_flags: vk::MemoryPropertyFlags::empty(),
+                    memory_type_bits: 0,
+                    pool: None,
+                    user_data: None
+                },
             )
             .unwrap();
-        let buffer_requirements = device.get_buffer_memory_requirements(buffer);
-        let buffer_memory_type: u32 = memory_properties.memory_types
-            [0..memory_properties.memory_type_count as usize]
-            .iter()
-            .enumerate()
-            .position(|(i, ty)| {
-                if buffer_requirements.memory_type_bits & (1 << i) == 0 {
-                    return false;
-                }
-                if ty
-                    .property_flags
-                    .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
-                    && (needs_staging
-                        ^ ty.property_flags
-                            .contains(vk::MemoryPropertyFlags::HOST_VISIBLE))
-                {
-                    return true;
-                }
-                return false;
-            })
-            .unwrap() as u32;
-        let memory = device
-            .allocate_memory(
-                &vk::MemoryAllocateInfo::builder()
-                    .memory_type_index(buffer_memory_type)
-                    .allocation_size(buffer_requirements.size),
-                None,
-            )
-            .unwrap();
-        device.bind_buffer_memory(buffer, memory, 0).unwrap();
 
         let staging = if needs_staging {
-            let staging_buffer = device
+            let (staging_buffer, allocation, allocation_info) = allocator
                 .create_buffer(
                     &vk::BufferCreateInfo::builder()
                         .size(size_of::<StagingStateLayout>() as u64)
                         .usage(vk::BufferUsageFlags::TRANSFER_SRC)
                         .flags(vk::BufferCreateFlags::empty())
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
-                    None,
+                    &vma::AllocationCreateInfo {
+                        usage: vma::MemoryUsage::CpuToGpu,
+                        flags: vma::AllocationCreateFlags::MAPPED,
+                        required_flags: vk::MemoryPropertyFlags::empty(),
+                        preferred_flags: vk::MemoryPropertyFlags::empty(),
+                        memory_type_bits: 0,
+                        pool: None,
+                        user_data: None
+                    },
                 )
                 .unwrap();
-            let staging_buffer_requirements = device.get_buffer_memory_requirements(staging_buffer);
-            let memory_type = memory_properties.memory_types
-                [0..memory_properties.memory_type_count as usize]
-                .iter()
-                .enumerate()
-                .position(|(i, ty)| {
-                    if staging_buffer_requirements.memory_type_bits & (1 << i) == 0 {
-                        return false;
-                    }
-                    if ty
-                        .property_flags
-                        .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
-                        && !ty
-                            .property_flags
-                            .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
-                    {
-                        return true;
-                    }
-                    return false;
-                })
-                .unwrap() as u32;
-            let staging_mem = device
-                .allocate_memory(
-                    &vk::MemoryAllocateInfo::builder()
-                        .allocation_size(staging_buffer_requirements.size)
-                        .memory_type_index(memory_type)
-                        .build(),
-                    None,
-                )
-                .unwrap();
-            device
-                .bind_buffer_memory(staging_buffer, staging_mem, 0)
-                .unwrap();
+
             Some(StagingState {
-                memory: staging_mem,
                 buffer: staging_buffer,
+                allocation,
+                allocation_info,
                 queue,
                 queue_family,
             })
@@ -174,27 +137,21 @@ impl SharedBuffer {
             None
         };
 
-        let mem_to_write = if let Some(staging) = staging.as_ref() {
-            staging.memory
+        let ptr = if let Some(staging) = staging.as_ref() {
+            staging.allocation_info.get_mapped_data()
         } else {
-            memory
-        };
-        let ptr = device
-            .map_memory(
-                mem_to_write,
-                0,
-                size_of::<StagingStateLayout>() as u64,
-                vk::MemoryMapFlags::empty(),
-            )
-            .unwrap() as *mut StagingStateLayout;
+            allocation_info.get_mapped_data()
+        } as *mut StagingStateLayout;
+        assert_ne!(ptr, std::ptr::null_mut());
 
         let shared_buffer = Self {
-            memory,
             staging,
             buffer,
+            allocation,
             device,
             layout: &mut *ptr,
             static_data_dirty: true,
+            allocation_info
         };
         shared_buffer
     }
@@ -232,18 +189,6 @@ impl SharedBuffer {
         } else {
             SHARED_BUFFER_FRAME_UPDATE_SIZE
         };
-        let mem_to_write = if let Some(staging) = self.staging.as_ref() {
-            staging.memory
-        } else {
-            self.memory
-        };
-        self.device
-            .flush_mapped_memory_ranges(&[vk::MappedMemoryRange::builder()
-                .memory(mem_to_write)
-                .size(size)
-                .offset(0)
-                .build()])
-            .unwrap();
         if let Some(staging_buffer) = self.staging.as_ref() {
             self.device.cmd_copy_buffer(
                 cmd_buffer,
@@ -264,11 +209,9 @@ impl Drop for SharedBuffer {
         // If a memory object is mapped at the time it is freed, it is implicitly unmapped.
         unsafe {
             if let Some(staging) = self.staging.as_ref() {
-                self.device.destroy_buffer(staging.buffer, None);
-                self.device.free_memory(staging.memory, None);
+                //self.device.destroy_buffer(staging.buffer, None);
             }
-            self.device.destroy_buffer(self.buffer, None);
-            self.device.free_memory(self.memory, None);
+            //self.device.destroy_buffer(self.buffer, None);
         }
     }
 }

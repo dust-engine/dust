@@ -5,6 +5,7 @@ use crate::swapchain::Swapchain;
 
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
+use vk_mem as vma;
 use std::ffi::CStr;
 use std::mem::ManuallyDrop;
 
@@ -14,6 +15,7 @@ pub struct Renderer {
     pub entry: ash::Entry,
     pub instance: ash::Instance,
     pub device: ash::Device,
+    pub allocator: vma::Allocator,
     pub raytracer: Option<RayTracer>,
     pub physical_device: vk::PhysicalDevice,
     pub surface: vk::SurfaceKHR,
@@ -187,6 +189,16 @@ impl Renderer {
                     None,
                 )
                 .unwrap();
+            let allocator = vk_mem::Allocator::new(&vma::AllocatorCreateInfo {
+                physical_device,
+                device: device.clone(),
+                instance: instance.clone(),
+                flags: Default::default(),
+                preferred_large_heap_block_size: 0,
+                frame_in_use_count: 0,
+                heap_size_limits: None
+            })
+                .unwrap();
             let graphics_queue = device.get_device_queue(graphics_queue_family, 0);
             let transfer_binding_queue = device.get_device_queue(transfer_binding_queue_family, 0);
             let swapchain_config =
@@ -202,6 +214,7 @@ impl Renderer {
             let renderer = Self {
                 entry,
                 device,
+                allocator,
                 raytracer: None,
                 physical_device,
                 surface,
@@ -250,6 +263,7 @@ impl Renderer {
         unsafe {
             let raytracer = RayTracer::new(
                 self.device.clone(),
+                &self.allocator,
                 self.swapchain.config.format,
                 &self.info,
                 self.graphics_queue,

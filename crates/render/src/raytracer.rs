@@ -7,6 +7,7 @@ use ash::vk;
 use ash::vk::RenderPass;
 use std::ffi::CStr;
 use std::io::Cursor;
+use vk_mem as vma;
 
 pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -37,6 +38,7 @@ pub struct RayTracer {
 impl RayTracer {
     pub unsafe fn new(
         device: ash::Device,
+        allocator: &vma::Allocator,
         format: vk::Format,
         info: &DeviceInfo,
         graphics_queue: vk::Queue,
@@ -44,6 +46,7 @@ impl RayTracer {
     ) -> Self {
         let mut shared_buffer = SharedBuffer::new(
             device.clone(),
+            allocator,
             &info.memory_properties,
             graphics_queue,
             graphics_queue_family,
