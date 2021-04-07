@@ -3,7 +3,7 @@ use crate::alloc::Handle;
 use crate::Voxel;
 use std::collections::VecDeque;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::mem::size_of;
+use std::mem::{size_of_val, size_of};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 /// File structures:
@@ -88,16 +88,19 @@ impl<T: Voxel> Octree<T> {
             octree.arena.free(Handle::from_index(0, 0), 1);
         }
         let fences = unsafe {
-            let original_pos = reader.stream_position()?;
             reader.seek(SeekFrom::End(-(size_of::<u8>() as i64)))?;
 
             let mut fence_size: u8 = 0;
-            reader.read_exact(from_raw_parts_mut(&mut fence_size, size_of::<u8>()))?;
+            reader.read_exact(from_raw_parts_mut(&mut fence_size, size_of_val(&fence_size)))?;
 
+            // Read fence_size u32 numbers from the end of the file
             reader.seek(SeekFrom::End(
                 -((size_of::<u8>() + size_of::<u32>() * fence_size as usize) as i64),
             ))?;
-            let mut vec: Vec<u32> = vec![0; fence_size as usize];
+            let mut vec: Vec<u32> = Vec::with_capacity(fence_size as usize);
+            unsafe {
+                vec.set_len(fence_size as usize);
+            }
             reader.read_exact(from_raw_parts_mut(
                 vec.as_mut_ptr() as *mut u8,
                 size_of::<u32>() * vec.len(),

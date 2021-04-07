@@ -17,19 +17,38 @@ impl svo::Voxel for Voxel {
         // find most frequent element
         let mut arr = arr.clone();
         arr.sort();
+        if arr[7] == Self::default() {
+            return Self::default();
+        }
 
         let mut count: u8 = 1;
         let mut max_count: u8 = 0;
         let mut max_element: Self = Voxel(0);
-        let mut last_element: Self = arr[0];
-        for i in arr.iter().skip(1) {
-            if *i != last_element {
+        let mut last_element: Self;
+
+        let mut iter = arr.iter();
+        loop {
+            if let Some(&val) = iter.next() {
+                if val == Self::default() {
+                    continue;
+                } else {
+                    last_element = val;
+                    break;
+                }
+            } else {
+                // never found a non-zero element until the very end.
+                return Self::default();
+            }
+        }
+
+        for &i in iter {
+            if i != last_element {
                 if count > max_count {
                     max_count = count;
                     max_element = last_element;
                 }
                 count = 0;
-                last_element = *i;
+                last_element = i;
             }
             count += 1;
         }
@@ -37,5 +56,65 @@ impl svo::Voxel for Voxel {
             max_element = last_element;
         }
         max_element
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use svo::Voxel as VoxelTrait;
+    use super::Voxel;
+
+    #[test]
+    fn test() {
+        assert_eq!(Voxel::avg(&[
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(3),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+        ]), Voxel::with_id(3));
+        assert_eq!(Voxel::avg(&[
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(3),
+            Voxel::with_id(3),
+            Voxel::with_id(3),
+            Voxel::with_id(4),
+            Voxel::with_id(0),
+        ]), Voxel::with_id(3));
+        assert_eq!(Voxel::avg(&[
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+            Voxel::with_id(0),
+        ]), Voxel::with_id(0));
+        assert_eq!(Voxel::avg(&[
+            Voxel::with_id(1),
+            Voxel::with_id(2),
+            Voxel::with_id(3),
+            Voxel::with_id(4),
+            Voxel::with_id(5),
+            Voxel::with_id(6),
+            Voxel::with_id(7),
+            Voxel::with_id(8),
+        ]), Voxel::with_id(1));
+        assert_eq!(Voxel::avg(&[
+            Voxel::with_id(1),
+            Voxel::with_id(2),
+            Voxel::with_id(3),
+            Voxel::with_id(4),
+            Voxel::with_id(5),
+            Voxel::with_id(6),
+            Voxel::with_id(7),
+            Voxel::with_id(7),
+        ]), Voxel::with_id(7));
     }
 }
