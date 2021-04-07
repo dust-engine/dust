@@ -8,8 +8,8 @@ mod device_info;
 mod raytracer;
 pub mod renderer;
 mod shared_buffer;
-//mod material_repo;
-//mod material;
+mod material_repo;
+mod material;
 pub mod swapchain;
 
 use dust_core::CameraProjection;

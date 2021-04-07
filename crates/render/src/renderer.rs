@@ -10,6 +10,8 @@ use std::mem::ManuallyDrop;
 use vk_mem as vma;
 
 use dust_core::svo::alloc::BlockAllocator;
+use crate::material_repo::TextureRepo;
+use crate::material::Material;
 
 pub struct Renderer {
     pub entry: ash::Entry,
@@ -211,6 +213,13 @@ impl Renderer {
                 graphics_queue_family,
                 graphics_queue,
             );
+            let mut texture_repo = TextureRepo::new();
+            texture_repo.materials.push(Material {
+                name: "Stone".into(),
+                scale: 1.0,
+                diffuse: image::io::Reader::open("./assets/stone.png").unwrap().decode().unwrap(),
+                normal: None
+            });
             let renderer = Self {
                 entry,
                 device,

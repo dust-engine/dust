@@ -1271,6 +1271,7 @@ dependencies = [
  "ash-window",
  "dust-core",
  "glam",
+ "image",
  "memoffset",
  "raw-window-handle",
  "shaderc",
