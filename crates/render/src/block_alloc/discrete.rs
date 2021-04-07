@@ -31,7 +31,7 @@ pub struct DiscreteBlockAllocator {
     sparse_binding_completion_semaphore: vk::Semaphore,
 
     // maps from resource offsets to (system_mem, device_mem)
-    binds_pending: HashMap<u64, (vk::DeviceMemory, vk::DeviceMemory)>
+    binds_pending: HashMap<u64, (vk::DeviceMemory, vk::DeviceMemory)>,
 }
 unsafe impl Send for DiscreteBlockAllocator {}
 unsafe impl Sync for DiscreteBlockAllocator {}
@@ -112,10 +112,7 @@ impl DiscreteBlockAllocator {
             )
             .unwrap();
         let sparse_binding_completion_semaphore = device
-            .create_semaphore(
-                &vk::SemaphoreCreateInfo::default(),
-                None
-            )
+            .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
             .unwrap();
         Self {
             block_size,
@@ -170,7 +167,11 @@ impl BlockAllocator for DiscreteBlockAllocator {
             .map_memory(system_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
             .map_err(super::utils::map_err)? as *mut u8;
 
-        if self.device.get_fence_status(self.sparse_binding_completion_fence).unwrap() {
+        if self
+            .device
+            .get_fence_status(self.sparse_binding_completion_fence)
+            .unwrap()
+        {
             // There's no active binds
             self.device
                 .reset_fences(&[self.sparse_binding_completion_fence])
@@ -210,7 +211,8 @@ impl BlockAllocator for DiscreteBlockAllocator {
             // Queue up the sparse binding action
             // This helps us to handle a large amount of queue binding
             // requests on application launch for example
-            self.binds_pending.insert(resource_offset, (system_mem, device_mem));
+            self.binds_pending
+                .insert(resource_offset, (system_mem, device_mem));
         }
         let block = DiscreteBlock {
             system_mem,
@@ -248,17 +250,19 @@ impl BlockAllocator for DiscreteBlockAllocator {
                     size: self.block_size,
                     memory: system_mem,
                     memory_offset: 0,
-                    flags: vk::SparseMemoryBindFlags::empty()
+                    flags: vk::SparseMemoryBindFlags::empty(),
                 });
                 device_binds.push(vk::SparseMemoryBind {
                     resource_offset,
                     size: self.block_size,
                     memory: device_mem,
                     memory_offset: 0,
-                    flags: vk::SparseMemoryBindFlags::empty()
+                    flags: vk::SparseMemoryBindFlags::empty(),
                 });
             }
-            self.device.reset_fences(&[self.sparse_binding_completion_fence]).unwrap();
+            self.device
+                .reset_fences(&[self.sparse_binding_completion_fence])
+                .unwrap();
             self.device
                 .queue_bind_sparse(
                     self.bind_transfer_queue,
@@ -320,10 +324,10 @@ impl BlockAllocator for DiscreteBlockAllocator {
         let command_buffers = [self.command_buffer];
         let submit_wait_semaphore = [self.sparse_binding_completion_semaphore];
         let submit_wait_semaphore_masks = [vk::PipelineStageFlags::TRANSFER];
-        let mut submit_info = vk::SubmitInfo::builder()
-            .command_buffers(&command_buffers);
+        let mut submit_info = vk::SubmitInfo::builder().command_buffers(&command_buffers);
         if needs_binding {
-            submit_info = submit_info.wait_semaphores(&submit_wait_semaphore)
+            submit_info = submit_info
+                .wait_semaphores(&submit_wait_semaphore)
                 .wait_dst_stage_mask(&submit_wait_semaphore_masks);
         }
         self.device
@@ -417,7 +421,8 @@ impl Drop for DiscreteBlockAllocator {
             self.device.destroy_fence(self.copy_completion_fence, None);
             self.device
                 .destroy_fence(self.sparse_binding_completion_fence, None);
-            self.device.destroy_semaphore(self.sparse_binding_completion_semaphore, None);
+            self.device
+                .destroy_semaphore(self.sparse_binding_completion_semaphore, None);
             for i in self.allocations.values() {
                 self.device.free_memory(i.device_mem, None);
                 self.device.free_memory(i.system_mem, None);

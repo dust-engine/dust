@@ -5,9 +5,9 @@ use crate::swapchain::Swapchain;
 
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
-use vk_mem as vma;
 use std::ffi::CStr;
 use std::mem::ManuallyDrop;
+use vk_mem as vma;
 
 use dust_core::svo::alloc::BlockAllocator;
 
@@ -196,9 +196,9 @@ impl Renderer {
                 flags: Default::default(),
                 preferred_large_heap_block_size: 0,
                 frame_in_use_count: 0,
-                heap_size_limits: None
+                heap_size_limits: None,
             })
-                .unwrap();
+            .unwrap();
             let graphics_queue = device.get_device_queue(graphics_queue_family, 0);
             let transfer_binding_queue = device.get_device_queue(transfer_binding_queue_family, 0);
             let swapchain_config =

@@ -61,60 +61,75 @@ impl svo::Voxel for Voxel {
 
 #[cfg(test)]
 mod tests {
-    use svo::Voxel as VoxelTrait;
     use super::Voxel;
+    use svo::Voxel as VoxelTrait;
 
     #[test]
     fn test() {
-        assert_eq!(Voxel::avg(&[
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(3),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-        ]), Voxel::with_id(3));
-        assert_eq!(Voxel::avg(&[
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(3),
-            Voxel::with_id(3),
-            Voxel::with_id(3),
-            Voxel::with_id(4),
-            Voxel::with_id(0),
-        ]), Voxel::with_id(3));
-        assert_eq!(Voxel::avg(&[
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-            Voxel::with_id(0),
-        ]), Voxel::with_id(0));
-        assert_eq!(Voxel::avg(&[
-            Voxel::with_id(1),
-            Voxel::with_id(2),
-            Voxel::with_id(3),
-            Voxel::with_id(4),
-            Voxel::with_id(5),
-            Voxel::with_id(6),
-            Voxel::with_id(7),
-            Voxel::with_id(8),
-        ]), Voxel::with_id(1));
-        assert_eq!(Voxel::avg(&[
-            Voxel::with_id(1),
-            Voxel::with_id(2),
-            Voxel::with_id(3),
-            Voxel::with_id(4),
-            Voxel::with_id(5),
-            Voxel::with_id(6),
-            Voxel::with_id(7),
-            Voxel::with_id(7),
-        ]), Voxel::with_id(7));
+        assert_eq!(
+            Voxel::avg(&[
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(3),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+            ]),
+            Voxel::with_id(3)
+        );
+        assert_eq!(
+            Voxel::avg(&[
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(3),
+                Voxel::with_id(3),
+                Voxel::with_id(3),
+                Voxel::with_id(4),
+                Voxel::with_id(0),
+            ]),
+            Voxel::with_id(3)
+        );
+        assert_eq!(
+            Voxel::avg(&[
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+                Voxel::with_id(0),
+            ]),
+            Voxel::with_id(0)
+        );
+        assert_eq!(
+            Voxel::avg(&[
+                Voxel::with_id(1),
+                Voxel::with_id(2),
+                Voxel::with_id(3),
+                Voxel::with_id(4),
+                Voxel::with_id(5),
+                Voxel::with_id(6),
+                Voxel::with_id(7),
+                Voxel::with_id(8),
+            ]),
+            Voxel::with_id(1)
+        );
+        assert_eq!(
+            Voxel::avg(&[
+                Voxel::with_id(1),
+                Voxel::with_id(2),
+                Voxel::with_id(3),
+                Voxel::with_id(4),
+                Voxel::with_id(5),
+                Voxel::with_id(6),
+                Voxel::with_id(7),
+                Voxel::with_id(7),
+            ]),
+            Voxel::with_id(7)
+        );
     }
 }

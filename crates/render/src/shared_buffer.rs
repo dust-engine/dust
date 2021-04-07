@@ -101,7 +101,7 @@ impl SharedBuffer {
                     preferred_flags: vk::MemoryPropertyFlags::empty(),
                     memory_type_bits: 0,
                     pool: None,
-                    user_data: None
+                    user_data: None,
                 },
             )
             .unwrap();
@@ -117,11 +117,7 @@ impl SharedBuffer {
                     &vma::AllocationCreateInfo {
                         usage: vma::MemoryUsage::CpuToGpu,
                         flags: vma::AllocationCreateFlags::MAPPED,
-                        required_flags: vk::MemoryPropertyFlags::empty(),
-                        preferred_flags: vk::MemoryPropertyFlags::empty(),
-                        memory_type_bits: 0,
-                        pool: None,
-                        user_data: None
+                        ..Default::default()
                     },
                 )
                 .unwrap();
@@ -151,7 +147,7 @@ impl SharedBuffer {
             device,
             layout: &mut *ptr,
             static_data_dirty: true,
-            allocation_info
+            allocation_info,
         };
         shared_buffer
     }
