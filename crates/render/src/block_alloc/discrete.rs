@@ -11,6 +11,7 @@ pub struct DiscreteBlock {
     system_mem: vk::DeviceMemory,
     device_mem: vk::DeviceMemory,
     offset: u64,
+    sparse_binding_completion_semaphore: vk::Semaphore,
 }
 
 pub struct DiscreteBlockAllocator {
@@ -29,11 +30,6 @@ pub struct DiscreteBlockAllocator {
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
     copy_completion_fence: vk::Fence,
-    sparse_binding_completion_fence: vk::Fence,
-    sparse_binding_completion_semaphore: vk::Semaphore,
-
-    // maps from resource offsets to (system_mem, device_mem)
-    binds_pending: HashMap<u64, (vk::DeviceMemory, vk::DeviceMemory)>,
 }
 unsafe impl Send for DiscreteBlockAllocator {}
 unsafe impl Sync for DiscreteBlockAllocator {}
@@ -106,17 +102,6 @@ impl DiscreteBlockAllocator {
                 None,
             )
             .unwrap();
-        let sparse_binding_completion_fence = device
-            .create_fence(
-                &vk::FenceCreateInfo::builder()
-                    .flags(vk::FenceCreateFlags::SIGNALED)
-                    .build(),
-                None,
-            )
-            .unwrap();
-        let sparse_binding_completion_semaphore = device
-            .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-            .unwrap();
         Self {
             block_size,
             context,
@@ -131,9 +116,6 @@ impl DiscreteBlockAllocator {
             command_pool,
             command_buffer,
             copy_completion_fence,
-            sparse_binding_completion_fence,
-            binds_pending: HashMap::new(),
-            sparse_binding_completion_semaphore,
         }
     }
 }
@@ -173,60 +155,62 @@ impl BlockAllocator for DiscreteBlockAllocator {
             .map_memory(system_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
             .map_err(super::utils::map_err)? as *mut u8;
 
-        if self
+        let sparse_binding_completion_semaphore = self
             .context
             .device
-            .get_fence_status(self.sparse_binding_completion_fence)
-            .unwrap()
-        {
-            // There's no active binds
-            self.context
-                .device
-                .reset_fences(&[self.sparse_binding_completion_fence])
-                .unwrap();
-            // Immediately submit the request
-            self.context
-                .device
-                .queue_bind_sparse(
-                    self.bind_transfer_queue,
-                    &[vk::BindSparseInfo::builder()
-                        .buffer_binds(&[
-                            vk::SparseBufferMemoryBindInfo::builder()
-                                .buffer(self.system_buffer)
-                                .binds(&[vk::SparseMemoryBind {
-                                    resource_offset: resource_offset * self.block_size as u64,
-                                    size: self.block_size,
-                                    memory: system_mem,
-                                    memory_offset: 0,
-                                    flags: vk::SparseMemoryBindFlags::empty(),
-                                }])
-                                .build(),
-                            vk::SparseBufferMemoryBindInfo::builder()
-                                .buffer(self.device_buffer)
-                                .binds(&[vk::SparseMemoryBind {
-                                    resource_offset: resource_offset * self.block_size as u64,
-                                    size: self.block_size,
-                                    memory: device_mem,
-                                    memory_offset: 0,
-                                    flags: vk::SparseMemoryBindFlags::empty(),
-                                }])
-                                .build(),
-                        ])
-                        .build()],
-                    self.sparse_binding_completion_fence,
-                )
-                .map_err(super::utils::map_err);
-        } else {
-            // Queue up the sparse binding action
-            // This helps us to handle a large amount of queue binding
-            // requests on application launch for example
-            self.binds_pending
-                .insert(resource_offset, (system_mem, device_mem));
-        }
+            .create_semaphore(
+                &vk::SemaphoreCreateInfo::builder().push_next(
+                    &mut vk::SemaphoreTypeCreateInfo::builder()
+                        .semaphore_type(vk::SemaphoreType::TIMELINE)
+                        .initial_value(0)
+                        .build(),
+                ),
+                None,
+            )
+            .unwrap();
+        // Immediately submit the request
+        self.context
+            .device
+            .queue_bind_sparse(
+                self.bind_transfer_queue,
+                &[vk::BindSparseInfo::builder()
+                    .buffer_binds(&[
+                        vk::SparseBufferMemoryBindInfo::builder()
+                            .buffer(self.system_buffer)
+                            .binds(&[vk::SparseMemoryBind {
+                                resource_offset: resource_offset * self.block_size as u64,
+                                size: self.block_size,
+                                memory: system_mem,
+                                memory_offset: 0,
+                                flags: vk::SparseMemoryBindFlags::empty(),
+                            }])
+                            .build(),
+                        vk::SparseBufferMemoryBindInfo::builder()
+                            .buffer(self.device_buffer)
+                            .binds(&[vk::SparseMemoryBind {
+                                resource_offset: resource_offset * self.block_size as u64,
+                                size: self.block_size,
+                                memory: device_mem,
+                                memory_offset: 0,
+                                flags: vk::SparseMemoryBindFlags::empty(),
+                            }])
+                            .build(),
+                    ])
+                    .signal_semaphores(&[sparse_binding_completion_semaphore])
+                    .push_next(
+                        &mut vk::TimelineSemaphoreSubmitInfo::builder()
+                            .signal_semaphore_values(&[1])
+                            .build(),
+                    )
+                    .build()],
+                vk::Fence::null(),
+            )
+            .map_err(super::utils::map_err);
         let block = DiscreteBlock {
             system_mem,
             device_mem,
             offset: resource_offset,
+            sparse_binding_completion_semaphore,
         };
         self.allocations.insert(ptr, block);
         Ok(ptr)
@@ -247,65 +231,19 @@ impl BlockAllocator for DiscreteBlockAllocator {
 
     unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
         let device = &self.context.device;
-        // First, complete sparse bindings
-        let needs_binding = !self.binds_pending.is_empty();
-        if needs_binding {
-            let len = self.binds_pending.len();
-            let mut system_binds: Vec<vk::SparseMemoryBind> = Vec::with_capacity(len);
-            let mut device_binds: Vec<vk::SparseMemoryBind> = Vec::with_capacity(len);
-            for (resource_offsets, (system_mem, device_mem)) in self.binds_pending.drain() {
-                let resource_offset = resource_offsets * self.block_size as u64;
-                system_binds.push(vk::SparseMemoryBind {
-                    resource_offset,
-                    size: self.block_size,
-                    memory: system_mem,
-                    memory_offset: 0,
-                    flags: vk::SparseMemoryBindFlags::empty(),
-                });
-                device_binds.push(vk::SparseMemoryBind {
-                    resource_offset,
-                    size: self.block_size,
-                    memory: device_mem,
-                    memory_offset: 0,
-                    flags: vk::SparseMemoryBindFlags::empty(),
-                });
-            }
-            device
-                .reset_fences(&[self.sparse_binding_completion_fence])
-                .unwrap();
-            device
-                .queue_bind_sparse(
-                    self.bind_transfer_queue,
-                    &[vk::BindSparseInfo::builder()
-                        .signal_semaphores(&[self.sparse_binding_completion_semaphore])
-                        .buffer_binds(&[
-                            vk::SparseBufferMemoryBindInfo::builder()
-                                .buffer(self.system_buffer)
-                                .binds(&system_binds)
-                                .build(),
-                            vk::SparseBufferMemoryBindInfo::builder()
-                                .buffer(self.device_buffer)
-                                .binds(&device_binds)
-                                .build(),
-                        ])
-                        .build()],
-                    self.sparse_binding_completion_fence,
-                )
-                .map_err(super::utils::map_err)
-                .unwrap();
+        let mut regions: Vec<vk::BufferCopy> = Vec::with_capacity(ranges.size_hint().0);
+        let mut semaphores: Vec<vk::Semaphore> = Vec::with_capacity(ranges.size_hint().0);
+
+        for (block_ptr, range) in ranges {
+            let block = &self.allocations[&block_ptr];
+            let location = block.offset * self.block_size as u64 + range.start as u64;
+            regions.push(vk::BufferCopy {
+                src_offset: location,
+                dst_offset: location,
+                size: (range.end - range.start) as u64,
+            });
+            semaphores.push(block.sparse_binding_completion_semaphore);
         }
-        let allocations = &self.allocations;
-        let regions = ranges
-            .map(|(block_ptr, range)| {
-                let location =
-                    allocations[&block_ptr].offset * self.block_size as u64 + range.start as u64;
-                vk::BufferCopy {
-                    src_offset: location,
-                    dst_offset: location,
-                    size: (range.end - range.start) as u64,
-                }
-            })
-            .collect::<Vec<_>>();
         if regions.len() == 0 {
             return;
         }
@@ -332,18 +270,16 @@ impl BlockAllocator for DiscreteBlockAllocator {
         device.reset_fences(&[self.copy_completion_fence]).unwrap();
 
         let command_buffers = [self.command_buffer];
-        let submit_wait_semaphore = [self.sparse_binding_completion_semaphore];
-        let submit_wait_semaphore_masks = [vk::PipelineStageFlags::TRANSFER];
-        let mut submit_info = vk::SubmitInfo::builder().command_buffers(&command_buffers);
-        if needs_binding {
-            submit_info = submit_info
-                .wait_semaphores(&submit_wait_semaphore)
-                .wait_dst_stage_mask(&submit_wait_semaphore_masks);
-        }
+        let mut submit_info = vk::SubmitInfo::builder()
+            .command_buffers(&command_buffers)
+            .wait_semaphores(&semaphores)
+            .wait_dst_stage_mask(&[vk::PipelineStageFlags::TRANSFER])
+            .push_next(&mut vk::TimelineSemaphoreSubmitInfo::builder().wait_semaphore_values(&[1]))
+            .build();
         device
             .queue_submit(
                 self.bind_transfer_queue,
-                &[submit_info.build()],
+                &[submit_info],
                 self.copy_completion_fence,
             )
             .unwrap();
@@ -357,20 +293,11 @@ impl BlockAllocator for DiscreteBlockAllocator {
                 .get_fence_status(self.copy_completion_fence)
                 .unwrap()
         };
-        // If there's a pending sparse binding operation in progress, also signal that
-        // we're busy at the moment. New copy commands can include copy commands
-        // pointing to the new memory region.
-        let sparse_binding_completed = unsafe {
-            self.context
-                .device
-                .get_fence_status(self.sparse_binding_completion_fence)
-                .unwrap()
-        };
 
         // Note that it's ok to have a copy command and a sparse binding command
         // in the queue at the same time. The copy command won't reference the newly
         // allocated memory ranges.
-        copy_completed && sparse_binding_completed
+        copy_completed
     }
 }
 
@@ -432,9 +359,8 @@ impl Drop for DiscreteBlockAllocator {
             device.destroy_buffer(self.device_buffer, None);
             device.destroy_buffer(self.system_buffer, None);
             device.destroy_fence(self.copy_completion_fence, None);
-            device.destroy_fence(self.sparse_binding_completion_fence, None);
-            device.destroy_semaphore(self.sparse_binding_completion_semaphore, None);
             for i in self.allocations.values() {
+                device.destroy_semaphore(i.sparse_binding_completion_semaphore, None);
                 device.free_memory(i.device_mem, None);
                 device.free_memory(i.system_mem, None);
             }
