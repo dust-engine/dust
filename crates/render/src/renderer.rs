@@ -217,12 +217,19 @@ impl Renderer {
     }
 }
 
+impl Drop for RenderContext {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_device(None);
+            self.instance.destroy_instance(None);
+        }
+    }
+}
+
 impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
             self.surface_loader.destroy_surface(self.surface, None);
-            self.context.device.destroy_device(None);
-            self.context.instance.destroy_instance(None);
         }
     }
 }

@@ -6,9 +6,6 @@ use crate::{Corner, Voxel};
 pub mod accessor;
 mod io;
 
-//mod sdf;
-//mod accessor;
-
 #[derive(Default)]
 #[repr(C)]
 pub struct Node<T: Voxel> {

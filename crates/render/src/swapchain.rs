@@ -123,25 +123,6 @@ unsafe fn create_framebuffer(
         )
         .unwrap()
 }
-unsafe fn record_command_buffer(
-    device: &ash::Device,
-    command_buffer: vk::CommandBuffer,
-    framebuffer: vk::Framebuffer,
-    render_pass_provider: &mut impl RenderPassProvider,
-    config: &SwapchainConfig,
-) {
-    device
-        .begin_command_buffer(
-            command_buffer,
-            &vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::empty())
-                .build(),
-        )
-        .unwrap();
-    render_pass_provider.record_command_buffer(&device, command_buffer, framebuffer, config);
-    device.end_command_buffer(command_buffer).unwrap();
-}
-
 pub struct Swapchain {
     context: Arc<RenderContext>,
     surface: vk::SurfaceKHR,
@@ -348,13 +329,25 @@ impl Swapchain {
                 self.render_pass,
                 &self.config,
             );
-            record_command_buffer(
+            self.context
+                .device
+                .begin_command_buffer(
+                    swapchain_image.command_buffer,
+                    &vk::CommandBufferBeginInfo::builder()
+                        .flags(vk::CommandBufferUsageFlags::empty())
+                        .build(),
+                )
+                .unwrap();
+            render_pass_provider.record_command_buffer(
                 &self.context.device,
                 swapchain_image.command_buffer,
                 swapchain_image.framebuffer,
-                render_pass_provider,
                 &self.config,
             );
+            self.context
+                .device
+                .end_command_buffer(swapchain_image.command_buffer)
+                .unwrap();
         }
     }
 }

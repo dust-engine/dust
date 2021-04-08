@@ -456,6 +456,7 @@ pub mod systems {
 
     pub fn create_raytracer(
         mut commands: Commands,
+        mesh: Res<dust_core::svo::mesher::Mesh>,
         renderer: Res<Renderer>,
         mut render_resources: ResMut<RenderResources>,
     ) {

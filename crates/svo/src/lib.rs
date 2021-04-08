@@ -12,7 +12,7 @@
 pub mod alloc;
 pub mod bounds;
 pub mod dir;
-mod mesher;
+pub mod mesher;
 pub mod octree;
 
 pub use bounds::Bounds;

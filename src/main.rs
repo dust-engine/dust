@@ -1,5 +1,6 @@
 use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
+use dust_core::svo::mesher::MarchingCubeMeshBuilder;
 use dust_core::{Octree, SunLight, Voxel};
 use dust_render::RaytracerCameraBundle;
 use std::io::BufWriter;
@@ -40,6 +41,8 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     let file = std::fs::File::open("./test.oct").unwrap();
     let mut reader = std::io::BufReader::new(file);
     Octree::read(&mut octree, &mut reader, 12);
+    let mesh = MarchingCubeMeshBuilder::new(512.0, 6).build(&octree);
+    commands.insert_resource(mesh);
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(128.0, 32.0, 128.0);
@@ -109,8 +112,8 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                 .unwrap();
             println!("Region loaded: {} {}", region_x, region_y);
         };
-        for x in -7 ..= 5 {
-            for y in -6 ..= 4 {
+        for x in -7..=5 {
+            for y in -6..=4 {
                 load_region(x, y);
             }
         }
