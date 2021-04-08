@@ -41,8 +41,8 @@ impl RenderResources {
         });
         let allocator = vk_mem::Allocator::new(&vma::AllocatorCreateInfo {
             physical_device: renderer.physical_device,
-            device: renderer.context.device.clone(),
-            instance: renderer.context.instance.clone(),
+            device: &renderer.context.device,
+            instance: &renderer.context.instance,
             flags: Default::default(),
             preferred_large_heap_block_size: 0,
             frame_in_use_count: 0,

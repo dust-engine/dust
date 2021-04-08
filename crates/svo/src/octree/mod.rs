@@ -35,7 +35,7 @@ impl<T: Voxel> Node<T> {
 
 pub struct Octree<T: Voxel> {
     arena: ArenaAllocator<Node<T>>,
-    root: Handle,
+    pub(crate) root: Handle,
     root_data: T,
 }
 
@@ -105,12 +105,6 @@ impl<T: Voxel> Octree<T> {
             self.arena
                 .free(old_child_handle, old_mask.count_ones() as u8);
         }
-    }
-    pub fn get_random_accessor(&self) -> accessor::random::RandomAccessor<T> {
-        accessor::random::RandomAccessor { octree: self }
-    }
-    pub fn get_random_mutator(&mut self) -> accessor::random::RandomMutator<T> {
-        accessor::random::RandomMutator { octree: self }
     }
     pub fn flush(&mut self) {
         self.arena.flush();

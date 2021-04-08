@@ -134,3 +134,12 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
         self.octree.root_data = data;
     }
 }
+
+impl<T: Voxel> Octree<T> {
+    pub fn get_random_accessor(&self) -> RandomAccessor<T> {
+        RandomAccessor { octree: self }
+    }
+    pub fn get_random_mutator(&mut self) -> RandomMutator<T> {
+        RandomMutator { octree: self }
+    }
+}

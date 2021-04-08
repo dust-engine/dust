@@ -6,10 +6,13 @@
 #![feature(allocator_api)]
 #![feature(slice_ptr_get)]
 #![feature(alloc_layout_extra)]
+#![feature(maybe_uninit_extra)]
+#![feature(array_map)]
 
 pub mod alloc;
 pub mod bounds;
 pub mod dir;
+mod mesher;
 pub mod octree;
 
 pub use bounds::Bounds;
