@@ -1,4 +1,4 @@
-//mod marching_cube;
+mod marching_cube;
 mod stack;
 mod surface;
 

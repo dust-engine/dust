@@ -1,14 +1,14 @@
-use crate::octree::{Octree};
-use crate::dir::{Corner, Edge, Face, Quadrant};
-use crate::mesher::Mesh;
-use glam::{Vec3, Vec2};
-use crate::Voxel;
 use crate::bounds::Bounds;
-use std::mem::MaybeUninit;
-use super::stack::{StackAllocator, StackAllocatorHandle};
-use super::surface::{Surface};
+use crate::dir::{Corner, Edge, Face, Quadrant};
+use crate::mesher::stack::StackAllocator;
+use crate::mesher::surface::Surface;
+use crate::mesher::Mesh;
+use crate::octree::accessor::tree::NodeRef;
+use crate::octree::Octree;
+use crate::Voxel;
+use glam::{Vec2, Vec3};
 use std::fmt::Debug;
-use crate::alloc::Handle;
+use std::mem::MaybeUninit;
 
 pub struct MarchingCubeMeshBuilder<T> {
     vertices: Vec<Vec3>,
@@ -104,8 +104,7 @@ mod foo {
     }
 }
 
-
-impl<T: Voxel+Debug> MarchingCubeMeshBuilder<T> {
+impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
     pub fn new(size: f32, lod: u8) -> MarchingCubeMeshBuilder<T> {
         let grid_size: usize = 1 << lod;
         MarchingCubeMeshBuilder {
@@ -138,7 +137,8 @@ impl<T: Voxel+Debug> MarchingCubeMeshBuilder<T> {
 
     fn draw_edge_index(&mut self, edge_index: u8, bounds: &Bounds, color: Vec3) {
         let edge_table: &[u64; 256] = unsafe {
-            let slice: &[u64] = std::slice::from_raw_parts(include_bytes!("mc.bin").as_ptr() as *const u64, 256);
+            let slice: &[u64] =
+                std::slice::from_raw_parts(include_bytes!("mc.bin").as_ptr() as *const u64, 256);
             std::mem::transmute(slice.as_ptr())
         };
         let mut edge_bin = edge_table[edge_index as usize];
@@ -156,8 +156,7 @@ impl<T: Voxel+Debug> MarchingCubeMeshBuilder<T> {
         }
     }
 
-    fn build_recursive(&mut self, octree: &Octree<T>, node: Handle, lod: u8, borders: [Option<Surface>; 6]) {
-        let node_ref = octree.mut
+    fn build_recursive(&mut self, node: NodeRef<T>, lod: u8, borders: [Option<Surface>; 6]) {
         let size = 1 << lod;
         if node.is_virtual() {
             // Virtual nodes always have all eight children with the same color.
@@ -189,7 +188,9 @@ impl<T: Voxel+Debug> MarchingCubeMeshBuilder<T> {
                     if let Some(surface) = borders[*face as usize] {
                         let surface = surface.slice(*quadrant);
                         assert_eq!(surface.size, 1);
-                        surface.get_mut(&mut self.stack_allocator, 0, 0).write(child);
+                        surface
+                            .get_mut(&mut self.stack_allocator, 0, 0)
+                            .write(child);
                     }
                 }
             }
@@ -212,30 +213,17 @@ impl<T: Voxel+Debug> MarchingCubeMeshBuilder<T> {
                 surface_xy_minz,
             ];
 
-
             for corner in Corner::all() {
-                let new_borders: [Option<Surface>; 6] = corner
-                    .subdivided_surfaces()
-                    .map(|(internal, face, quadrant)| {
-                    if internal {
-                        Some(internal_surfaces[face as usize].slice(quadrant))
-                    } else {
-                        borders[face as usize].map(|surface| surface.slice(quadrant))
-                    }
-                });
-
-                if node.is_virtual() {
-                    // Virtual nodes always have all eight children with the same color.
-                    // Therefore it could be skipped.
-                    // But before that, fill the borders.
-                    let value = node.get();
-                    for i in &borders {
-                        if let Some(i) = i {
-                            i.fill(&mut self.stack_allocator, value);
-                        }
-                    }
-                    return;
-                }
+                let new_borders: [Option<Surface>; 6] =
+                    corner
+                        .subdivided_surfaces()
+                        .map(|(internal, face, quadrant)| {
+                            if internal {
+                                Some(internal_surfaces[face as usize].slice(quadrant))
+                            } else {
+                                borders[face as usize].map(|surface| surface.slice(quadrant))
+                            }
+                        });
                 self.build_recursive(node.child(corner), lod - 1, new_borders);
             }
 
@@ -254,12 +242,56 @@ impl<T: Voxel+Debug> MarchingCubeMeshBuilder<T> {
     }
 
     pub fn build(mut self, octree: &Octree<T>) -> Mesh {
-        self.build_recursive(octree, octree.root, self.lod, [None, None, None, None, None, None]);
+        self.build_recursive(
+            octree.get_tree_accessor(),
+            self.lod,
+            [None, None, None, None, None, None],
+        );
         Mesh {
             vertices: self.vertices,
             indices: self.indices,
             normals: self.normals,
             uvs: self.uvs,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    extern crate test;
+    use test::Bencher;
+
+    #[bench]
+    fn bench_sphere(b: &mut Bencher) {
+        let lod = 6;
+        let octree: Octree<u16> = Octree::from_signed_distance_field(
+            |l: glam::Vec3| 0.4 - l.distance(Vec3::new(0.5, 0.5, 0.5)),
+            1,
+            lod,
+        );
+        b.iter(|| {
+            let mut builder: MarchingCubeMeshBuilder<u16> = MarchingCubeMeshBuilder::new(3.0, lod);
+            let mesha = builder.build(&octree);
+            mesha
+        })
+    }
+
+    #[bench]
+    fn bench_inf_norm(b: &mut Bencher) {
+        let lod = 6;
+        let octree: Octree<u16> = Octree::from_signed_distance_field(
+            |l: glam::Vec3| {
+                let l = l - Vec3::new(0.5, 0.5, 0.5);
+                0.4 - l.x.abs().max(l.y.abs()).max(l.z.abs())
+            },
+            1,
+            lod,
+        );
+        b.iter(|| {
+            let mut builder: MarchingCubeMeshBuilder<u16> = MarchingCubeMeshBuilder::new(3.0, lod);
+            let mesha = builder.build(&octree);
+            mesha
+        })
     }
 }
