@@ -6,6 +6,8 @@ use ash::vk;
 use dust_core::svo::alloc::BlockAllocator;
 use dust_core::svo::alloc::BLOCK_SIZE;
 use vk_mem as vma;
+use std::sync::Arc;
+use crate::renderer::RenderContext;
 
 pub struct RenderResources {
     pub swapchain: Swapchain,
@@ -18,13 +20,13 @@ impl RenderResources {
     pub unsafe fn new(renderer: &Renderer) -> (Self, Box<dyn BlockAllocator>) {
         let swapchain_config = Swapchain::get_config(
             renderer.physical_device,
-            renderer.surface,
-            &renderer.surface_loader,
+            renderer.context.surface,
+            &renderer.context.surface_loader,
             &renderer.quirks,
         );
         let swapchain = Swapchain::new(
             renderer.context.clone(),
-            renderer.surface,
+            renderer.context.surface,
             swapchain_config,
             renderer.graphics_queue_family,
             renderer.graphics_queue,

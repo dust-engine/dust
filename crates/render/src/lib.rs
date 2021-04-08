@@ -116,8 +116,8 @@ fn world_update(
             renderer.context.device.device_wait_idle().unwrap();
             let config = Swapchain::get_config(
                 renderer.physical_device,
-                renderer.surface,
-                &renderer.surface_loader,
+                renderer.context.surface,
+                &renderer.context.surface_loader,
                 &renderer.quirks,
             );
 

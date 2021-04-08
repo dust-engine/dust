@@ -18,12 +18,13 @@ pub struct RenderContext {
     pub entry: ash::Entry,
     pub instance: ash::Instance,
     pub device: ash::Device,
+
+    pub surface: vk::SurfaceKHR,
+    pub surface_loader: ash::extensions::khr::Surface,
 }
 pub struct Renderer {
     pub context: Arc<RenderContext>,
     pub physical_device: vk::PhysicalDevice,
-    pub surface: vk::SurfaceKHR,
-    pub surface_loader: ash::extensions::khr::Surface,
     pub quirks: Quirks,
 
     pub graphics_queue: vk::Queue,
@@ -197,13 +198,13 @@ impl Renderer {
             let context = RenderContext {
                 entry,
                 device,
+                surface,
                 instance,
+                surface_loader
             };
             let renderer = Self {
                 context: Arc::new(context),
                 physical_device,
-                surface,
-                surface_loader,
                 quirks,
                 graphics_queue,
                 transfer_binding_queue,
@@ -220,16 +221,9 @@ impl Renderer {
 impl Drop for RenderContext {
     fn drop(&mut self) {
         unsafe {
+            self.surface_loader.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
             self.instance.destroy_instance(None);
-        }
-    }
-}
-
-impl Drop for Renderer {
-    fn drop(&mut self) {
-        unsafe {
-            self.surface_loader.destroy_surface(self.surface, None);
         }
     }
 }

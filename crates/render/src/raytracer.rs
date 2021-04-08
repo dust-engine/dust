@@ -10,6 +10,7 @@ use std::ffi::CStr;
 use std::io::Cursor;
 use std::sync::Arc;
 use vk_mem as vma;
+use crate::core::svo::mesher::Mesh;
 
 pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -337,6 +338,9 @@ impl RayTracer {
             &[],
         );
     }
+
+    pub fn bind_mesh(&mut self, mesh: &Mesh) {
+    }
 }
 
 impl RenderPassProvider for RayTracer {
@@ -470,6 +474,7 @@ pub mod systems {
                 renderer.graphics_queue_family,
             );
             raytracer.bind_block_allocator_buffer(render_resources.block_allocator_buffer);
+            raytracer.bind_mesh(&mesh);
             render_resources.swapchain.bind_render_pass(&mut raytracer);
             raytracer
         };
