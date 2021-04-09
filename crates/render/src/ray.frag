@@ -34,11 +34,16 @@ const Box GlobalBoundingBox = { vec3(0,0,0), 512 };
 
 layout(location=0) out vec4 f_color;
 layout(location=0) in vec3 vWorldPosition;
-layout(set = 0, binding = 0) uniform Camera {
+layout(set = 0, binding = 0) uniform u_Camera {
     mat4 ViewProj;
     mat4 RotationViewProj;
-    mat4 Proj;
-};
+    vec3 position;
+    float placeholder;
+    float fov;
+    float near;
+    float far;
+    float aspect_ratio;
+} Camera;
 layout(set = 0, binding = 1) uniform Lights {
     Sunlight Lights_Sunlight;
 };
@@ -49,7 +54,7 @@ layout (input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput i
 
 Ray GenerateRay() {
     Ray ray;
-    ray.origin = Proj[3].xyz;
+    ray.origin = Camera.position;
     ray.dir = normalize(vWorldPosition);
     return ray;
 }
@@ -102,11 +107,10 @@ uint MaterialAtPosition(inout Box box, vec3 position) {
     }
 }
 
-uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out uint counter) {
+uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out uint counter, float initialDistance) {
     hitbox = initial_box;
-    vec2 intersection = IntersectAABB(ray.origin, ray.dir, hitbox);
-    vec3 entry_point = ray.origin + max(0, intersection.x) * ray.dir;
-    vec3 test_point = entry_point + ray.dir * hitbox.extent * 0.000001;
+    vec3 entry_point = ray.origin + initialDistance * ray.dir;
+    vec3 test_point = entry_point;
     uint material_id = 0;
 
     for(
@@ -133,20 +137,22 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
 #define DEBUG_RENDERING
 
 void main() {
-    float d = subpassLoad(inputDepth).r;
-    f_color = vec4(d, d, d, 1.0);
-    return;
+    float distance = subpassLoad(inputDepth).r;
+    distance = Camera.near * Camera.far / (Camera.far - distance*(Camera.far - Camera.near));
     Ray ray = GenerateRay();
 
     float depth;
     vec3 hitpoint;
     Box hitbox;
     uint iteration_times;
-    uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times);
+    uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times, distance);
     float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE); // 0 to 1
     #ifdef DEBUG_RENDERING
-    depth = length(hitpoint - ray.origin) * 0.005;
-    f_color = vec4(iteration, iteration, iteration, 1.0);
+    if (voxel_id == 0) {
+        f_color = vec4(0.0, 1.0, 0.0, 1.0);
+    } else {
+        f_color = vec4(iteration, iteration, iteration, 1.0);
+    }
     #else
     vec3 normal = CubedNormalize(hitpoint - (hitbox.origin + hitbox.extent/2));
     vec2 texcoords = vec2(
@@ -155,7 +161,7 @@ void main() {
     );
 
     if (voxel_id == 0) {
-        discard;
+        f_color = vec4(0.0, 1.0, 0.0, 1.0);
     } else {
         float sunLightFactor = max(0.3, dot(normal, Lights_Sunlight.dir));
         f_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);

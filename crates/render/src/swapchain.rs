@@ -65,7 +65,7 @@ unsafe fn create_depth_image(
             &vk::ImageCreateInfo::builder()
                 .flags(vk::ImageCreateFlags::empty())
                 .image_type(vk::ImageType::TYPE_2D)
-                .format(vk::Format::D32_SFLOAT)
+                .format(vk::Format::D32_SFLOAT_S8_UINT)
                 .extent(vk::Extent3D {
                     width: config.extent.width,
                     height: config.extent.height,
@@ -93,7 +93,7 @@ unsafe fn create_depth_image(
         .create_image_view(
             &vk::ImageViewCreateInfo::builder()
                 .view_type(vk::ImageViewType::TYPE_2D)
-                .format(vk::Format::D32_SFLOAT)
+                .format(vk::Format::D32_SFLOAT_S8_UINT)
                 .components(vk::ComponentMapping {
                     r: vk::ComponentSwizzle::R,
                     g: vk::ComponentSwizzle::G,

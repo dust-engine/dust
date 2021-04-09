@@ -76,7 +76,7 @@ impl RayTracer {
                             .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
                             .build(),
                         vk::AttachmentDescription::builder()
-                            .format(vk::Format::D32_SFLOAT)
+                            .format(vk::Format::D32_SFLOAT_S8_UINT)
                             .samples(vk::SampleCountFlags::TYPE_1)
                             .load_op(vk::AttachmentLoadOp::CLEAR)
                             .store_op(vk::AttachmentStoreOp::STORE)
@@ -327,6 +327,16 @@ impl RayTracer {
                             .depth_compare_op(vk::CompareOp::LESS)
                             .depth_write_enable(true)
                             .depth_bounds_test_enable(false)
+                            .stencil_test_enable(true)
+                            .front(vk::StencilOpState {
+                                fail_op: vk::StencilOp::ZERO,
+                                pass_op: vk::StencilOp::REPLACE,
+                                depth_fail_op: vk::StencilOp::REPLACE,
+                                compare_op: vk::CompareOp::ALWAYS,
+                                compare_mask: 0,
+                                write_mask: 1,
+                                reference: 1
+                            })
                             .build(),
                     )
                     .color_blend_state(
@@ -395,8 +405,8 @@ impl RayTracer {
                             .depth_clamp_enable(false)
                             .rasterizer_discard_enable(false)
                             .polygon_mode(vk::PolygonMode::FILL)
-                            .cull_mode(vk::CullModeFlags::NONE)
-                            .front_face(vk::FrontFace::CLOCKWISE)
+                            .cull_mode(vk::CullModeFlags::BACK)
+                            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
                             .depth_bias_enable(false)
                             .line_width(1.0)
                             .build(),
@@ -410,9 +420,18 @@ impl RayTracer {
                     .depth_stencil_state(
                         &vk::PipelineDepthStencilStateCreateInfo::builder()
                             .depth_test_enable(false)
-                            .depth_compare_op(vk::CompareOp::LESS)
                             .depth_write_enable(false)
                             .depth_bounds_test_enable(false)
+                            .stencil_test_enable(true)
+                            .front(vk::StencilOpState {
+                                fail_op: vk::StencilOp::KEEP,
+                                pass_op: vk::StencilOp::KEEP,
+                                depth_fail_op: vk::StencilOp::KEEP,
+                                compare_op: vk::CompareOp::EQUAL,
+                                compare_mask: 1,
+                                write_mask: 0,
+                                reference: 1
+                            })
                             .build(),
                     )
                     .color_blend_state(

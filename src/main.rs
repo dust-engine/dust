@@ -31,7 +31,7 @@ fn main() {
         .add_plugin(bevy::window::WindowPlugin::default())
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
-        .add_plugin(fly_camera::FlyCameraPlugin)
+        //.add_plugin(fly_camera::FlyCameraPlugin)
         .add_startup_system(setup_from_oct_file.system())
         .add_system(run.system())
         .run();
@@ -45,7 +45,8 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     commands.insert_resource(mesh);
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(0.0, 0.0, 0.0);
+    bundle.transform.translation = Vec3::new(50.0, 6.0, 50.0);
+    bundle.transform.look_at(Vec3::new(100.0, 0.0, 120.0), Vec3::Y);
     commands
         .spawn()
         .insert_bundle(bundle)
