@@ -124,7 +124,10 @@ impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
             let (v1, v2) = edge.vertices();
             let node1 = bounds.half(v1).center();
             let node2 = bounds.half(v2).center();
-            let pos = (node1 + node2) * (self.size * 0.5);
+            let mut pos = (node1 + node2) * (self.size * 0.5);
+            //pos.y -= 6.0;
+            //pos.x = self.size-pos.x;
+            pos.z = self.size - pos.z;
             self.vertices.push(pos.into());
             self.normals.push(color);
             self.current += 1;

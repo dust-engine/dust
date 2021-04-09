@@ -20,11 +20,11 @@ struct StagingState {
 const SHARED_BUFFER_FRAME_UPDATE_SIZE: u64 = 256;
 pub struct StagingStateLayout {
     pub view_proj: Mat4,
+    pub rotation_view_proj: Mat4,
     pub proj: Mat4,
-    // -- 128
+    // -- 192
     pub sunlight: SunLight,
     _padding1: [f32; 8],
-    _padding2: [f32; 16],
     // -- 256
     pub vertex_buffer: [(f32, f32, f32); 8],
     _padding3: f32,
@@ -172,8 +172,11 @@ impl SharedBuffer {
     ) {
         let rotation = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
         let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
-        let view_proj = camera_projection.get_projection_matrix(aspect_ratio) * rotation.inverse();
-        self.layout.view_proj = view_proj;
+
+        let projection_matrix = camera_projection.get_projection_matrix(aspect_ratio);
+
+        self.layout.view_proj = projection_matrix * transform.inverse();
+        self.layout.rotation_view_proj = projection_matrix * rotation.inverse();
         self.layout.proj = transform;
     }
 

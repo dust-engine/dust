@@ -121,7 +121,8 @@ fn world_update(
                 &renderer.quirks,
             );
 
-            render_resources.swapchain.recreate(config);
+            let allocator = &render_resources.allocator;
+            //render_resources.swapchain.recreate(allocator, config);
             render_resources.swapchain.bind_render_pass(&mut *raytracer);
         }
     }

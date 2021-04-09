@@ -18,6 +18,16 @@ pub struct RenderResources {
 
 impl RenderResources {
     pub unsafe fn new(renderer: &Renderer) -> (Self, Box<dyn BlockAllocator>) {
+        let allocator = vk_mem::Allocator::new(&vma::AllocatorCreateInfo {
+            physical_device: renderer.physical_device,
+            device: &renderer.context.device,
+            instance: &renderer.context.instance,
+            flags: Default::default(),
+            preferred_large_heap_block_size: 0,
+            frame_in_use_count: 0,
+            heap_size_limits: None,
+        })
+            .unwrap();
         let swapchain_config = Swapchain::get_config(
             renderer.physical_device,
             renderer.context.surface,
@@ -26,6 +36,7 @@ impl RenderResources {
         );
         let swapchain = Swapchain::new(
             renderer.context.clone(),
+            &allocator,
             renderer.context.surface,
             swapchain_config,
             renderer.graphics_queue_family,
@@ -41,16 +52,6 @@ impl RenderResources {
                 .unwrap(),
             normal: None,
         });
-        let allocator = vk_mem::Allocator::new(&vma::AllocatorCreateInfo {
-            physical_device: renderer.physical_device,
-            device: &renderer.context.device,
-            instance: &renderer.context.instance,
-            flags: Default::default(),
-            preferred_large_heap_block_size: 0,
-            frame_in_use_count: 0,
-            heap_size_limits: None,
-        })
-        .unwrap();
 
         let block_allocator_buffer: vk::Buffer;
         let device_type = renderer.info.physical_device_properties.device_type;

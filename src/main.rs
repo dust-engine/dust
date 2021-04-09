@@ -41,11 +41,11 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     let file = std::fs::File::open("./test.oct").unwrap();
     let mut reader = std::io::BufReader::new(file);
     Octree::read(&mut octree, &mut reader, 12);
-    let mesh = MarchingCubeMeshBuilder::new(512.0, 6).build(&octree);
+    let mesh = MarchingCubeMeshBuilder::new(512.0, 11).build(&octree);
     commands.insert_resource(mesh);
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(128.0, 32.0, 128.0);
+    bundle.transform.translation = Vec3::new(0.0, 0.0, 0.0);
     commands
         .spawn()
         .insert_bundle(bundle)

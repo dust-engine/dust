@@ -18,7 +18,7 @@ impl Default for CameraProjection {
         CameraProjection {
             fov: std::f32::consts::PI / 4.0,
             near: 0.1,
-            far: 10.0,
+            far: 1000.0,
         }
     }
 }

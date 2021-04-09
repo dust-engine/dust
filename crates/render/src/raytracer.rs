@@ -31,11 +31,13 @@ pub struct RayTracer {
     storage_desc_set_layout: vk::DescriptorSetLayout,
     pub uniform_desc_set: vk::DescriptorSet,
     uniform_desc_set_layout: vk::DescriptorSetLayout,
-    pub pipeline: vk::Pipeline,
+    pub depth_pipeline: vk::Pipeline,
+    pub ray_pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
     pub render_pass: vk::RenderPass,
 
     pub shared_buffer: SharedBuffer,
+    mesh: Option<(vk::Buffer, u64, u32)>,
 }
 
 impl RayTracer {
@@ -59,23 +61,44 @@ impl RayTracer {
         let render_pass = device
             .create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
-                    .attachments(&[vk::AttachmentDescription::builder()
-                        .format(format)
-                        .samples(vk::SampleCountFlags::TYPE_1)
-                        .load_op(vk::AttachmentLoadOp::CLEAR)
-                        .store_op(vk::AttachmentStoreOp::STORE)
-                        .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                        .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                        .initial_layout(vk::ImageLayout::UNDEFINED)
-                        .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                        .build()])
-                    .subpasses(&[vk::SubpassDescription::builder()
-                        .color_attachments(&[vk::AttachmentReference {
-                            attachment: 0,
-                            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        }])
-                        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                        .build()])
+                    .attachments(&[
+                        vk::AttachmentDescription::builder()
+                            .format(format)
+                            .samples(vk::SampleCountFlags::TYPE_1)
+                            .load_op(vk::AttachmentLoadOp::CLEAR)
+                            .store_op(vk::AttachmentStoreOp::STORE)
+                            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                            .initial_layout(vk::ImageLayout::UNDEFINED)
+                            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                            .build(),
+                        vk::AttachmentDescription::builder()
+                            .format(vk::Format::D32_SFLOAT)
+                            .samples(vk::SampleCountFlags::TYPE_1)
+                            .load_op(vk::AttachmentLoadOp::CLEAR)
+                            .store_op(vk::AttachmentStoreOp::STORE)
+                            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                            .initial_layout(vk::ImageLayout::UNDEFINED)
+                            .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                            .build(),
+                    ])
+                    .subpasses(&[
+                        vk::SubpassDescription::builder()
+                            .depth_stencil_attachment(&vk::AttachmentReference {
+                                attachment: 1,
+                                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                            })
+                            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                            .build(),
+                        vk::SubpassDescription::builder()
+                            .color_attachments(&[vk::AttachmentReference {
+                                attachment: 0,
+                                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                            }])
+                            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                            .build(),
+                    ])
                     .build(),
                 None,
             )
@@ -179,10 +202,105 @@ impl RayTracer {
                 None,
             )
             .unwrap();
-        let pipeline = device
+        let depth_prepass_vertex_shader_module = device
+            .create_shader_module(
+                &vk::ShaderModuleCreateInfo::builder()
+                    .code(
+                        &ash::util::read_spv(&mut Cursor::new(
+                            &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/depth.vert.spv"))[..],
+                        ))
+                            .unwrap(),
+                    )
+                    .build(),
+                None,
+            )
+            .unwrap();
+        let mut pipelines: [vk::Pipeline; 2] = [vk::Pipeline::null(), vk::Pipeline::null()];
+        let result = device
+            .fp_v1_0()
             .create_graphics_pipelines(
+                device.handle(),
                 vk::PipelineCache::null(),
-                &[vk::GraphicsPipelineCreateInfo::builder()
+                2,
+                [vk::GraphicsPipelineCreateInfo::builder()
+                    .flags(vk::PipelineCreateFlags::empty())
+                    .stages(&[
+                        vk::PipelineShaderStageCreateInfo::builder()
+                            .stage(vk::ShaderStageFlags::VERTEX)
+                            .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+                            .module(vertex_shader_module)
+                            .build(),
+                    ])
+                    .vertex_input_state(
+                        &vk::PipelineVertexInputStateCreateInfo::builder()
+                            .vertex_attribute_descriptions(&[vk::VertexInputAttributeDescription {
+                                location: 0,
+                                binding: 0,
+                                format: vk::Format::R32G32B32_SFLOAT,
+                                offset: 0,
+                            }])
+                            .vertex_binding_descriptions(&[vk::VertexInputBindingDescription {
+                                binding: 0,
+                                stride: std::mem::size_of::<[f32; 3]>() as u32,
+                                input_rate: vk::VertexInputRate::VERTEX,
+                            }])
+                            .build(),
+                    )
+                    .input_assembly_state(
+                        &vk::PipelineInputAssemblyStateCreateInfo::builder()
+                            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+                            .primitive_restart_enable(false)
+                            .build(),
+                    )
+                    .viewport_state(
+                        &vk::PipelineViewportStateCreateInfo::builder()
+                            .viewports(&[vk::Viewport::default()])
+                            .scissors(&[vk::Rect2D::default()])
+                            .build(),
+                    )
+                    .rasterization_state(
+                        &vk::PipelineRasterizationStateCreateInfo::builder()
+                            .depth_clamp_enable(false)
+                            .rasterizer_discard_enable(false)
+                            .polygon_mode(vk::PolygonMode::FILL)
+                            .cull_mode(vk::CullModeFlags::BACK)
+                            .front_face(vk::FrontFace::CLOCKWISE)
+                            .depth_bias_enable(false)
+                            .line_width(1.0)
+                            .build(),
+                    )
+                    .multisample_state(
+                        &vk::PipelineMultisampleStateCreateInfo::builder()
+                            .sample_shading_enable(false)
+                            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+                            .build(),
+                    )
+                    .depth_stencil_state(&vk::PipelineDepthStencilStateCreateInfo::builder()
+                        .depth_test_enable(true)
+                        .depth_compare_op(vk::CompareOp::LESS)
+                        .depth_write_enable(true)
+                        .depth_bounds_test_enable(false)
+                        .build())
+                    .color_blend_state(
+                        &vk::PipelineColorBlendStateCreateInfo::builder()
+                            .logic_op_enable(false)
+                            .attachments(&[])
+                            .build(),
+                    )
+                    .dynamic_state(
+                        &vk::PipelineDynamicStateCreateInfo::builder()
+                            .dynamic_states(&[
+                                vk::DynamicState::VIEWPORT,
+                                vk::DynamicState::SCISSOR,
+                            ])
+                            .build(),
+                    )
+                    .layout(pipeline_layout)
+                    .render_pass(render_pass)
+                    .subpass(0)
+                    .base_pipeline_handle(vk::Pipeline::null())
+                    .base_pipeline_index(-1)
+                    .build(), vk::GraphicsPipelineCreateInfo::builder()
                     .flags(vk::PipelineCreateFlags::empty())
                     .stages(&[
                         vk::PipelineShaderStageCreateInfo::builder()
@@ -259,15 +377,14 @@ impl RayTracer {
                     )
                     .layout(pipeline_layout)
                     .render_pass(render_pass)
-                    .subpass(0)
+                    .subpass(1)
                     .base_pipeline_handle(vk::Pipeline::null())
                     .base_pipeline_index(-1)
-                    .build()],
-                None,
-            )
-            .unwrap()
-            .pop()
-            .unwrap();
+                    .build()].as_ptr(),
+                std::ptr::null(),
+                pipelines.as_mut_ptr(),
+            );
+        assert_eq!(result, vk::Result::SUCCESS);
 
         device.update_descriptor_sets(
             &[
@@ -279,7 +396,7 @@ impl RayTracer {
                     .buffer_info(&[vk::DescriptorBufferInfo {
                         buffer: shared_buffer.buffer,
                         offset: 0,
-                        range: 128,
+                        range: 192,
                     }])
                     .build(), // Camera
                 vk::WriteDescriptorSet::builder()
@@ -290,7 +407,7 @@ impl RayTracer {
                     .buffer_info(&[vk::DescriptorBufferInfo {
                         buffer: shared_buffer.buffer,
                         offset: offset_of!(StagingStateLayout, sunlight) as u64,
-                        range: 128,
+                        range: 64,
                     }])
                     .build(), // Lights
             ],
@@ -301,7 +418,8 @@ impl RayTracer {
         let raytracer = Self {
             context,
             pipeline_layout,
-            pipeline,
+            ray_pipeline: pipelines[1],
+            depth_pipeline: pipelines[0],
             storage_desc_set,
             storage_desc_set_layout,
             uniform_desc_set,
@@ -309,6 +427,7 @@ impl RayTracer {
             shared_buffer,
             desc_pool,
             uniform_desc_set_layout,
+            mesh: None
         };
         raytracer
     }
@@ -339,7 +458,38 @@ impl RayTracer {
         );
     }
 
-    pub fn bind_mesh(&mut self, mesh: &Mesh) {
+    pub fn bind_mesh(&mut self, mesh: &Mesh,
+                     allocator: &vma::Allocator) {
+        let vertex_size = (mesh.vertices.len() * 3 * std::mem::size_of::<f32>()) as u64;
+        let index_size = (mesh.indices.len() * std::mem::size_of::<u32>()) as u64;
+        let (buffer, allocation, allocation_info) = allocator.create_buffer(
+            &vk::BufferCreateInfo::builder()
+                .usage(vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER)
+                .size(vertex_size + index_size)
+                .build(),
+            &vma::AllocationCreateInfo {
+                usage: vma::MemoryUsage::CpuToGpu,
+                flags: vma::AllocationCreateFlags::MAPPED,
+                ..Default::default()
+            }
+        ).unwrap();
+        let ptr = allocation_info.get_mapped_data();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                mesh.vertices.as_ptr() as *const u8,
+                ptr,
+                vertex_size as usize,
+            );
+
+
+            std::ptr::copy_nonoverlapping(
+                mesh.indices.as_ptr() as *const u8,
+                ptr.add(vertex_size as usize),
+                index_size as usize,
+            );
+        }
+
+        self.mesh = Some((buffer, vertex_size, mesh.indices.len() as u32))
     }
 }
 
@@ -376,17 +526,12 @@ impl RenderPassProvider for RayTracer {
             }],
         );
         let mut clear_values = [vk::ClearValue::default(), vk::ClearValue::default()];
-        clear_values[0].color.float32 = [0.0, 0.0, 0.0, 1.0];
+        clear_values[0].color.float32 = [1.0, 0.0, 0.0, 1.0];
         clear_values[1].depth_stencil = vk::ClearDepthStencilValue {
             depth: 1.0,
             stencil: 0,
         };
         self.shared_buffer.record_cmd_buffer_copy(command_buffer);
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            self.pipeline,
-        );
         device.cmd_bind_descriptor_sets(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
@@ -394,18 +539,6 @@ impl RenderPassProvider for RayTracer {
             0,
             &[self.uniform_desc_set, self.storage_desc_set],
             &[],
-        );
-        device.cmd_bind_vertex_buffers(
-            command_buffer,
-            0,
-            &[self.shared_buffer.buffer],
-            &[offset_of!(StagingStateLayout, vertex_buffer) as u64],
-        );
-        device.cmd_bind_index_buffer(
-            command_buffer,
-            self.shared_buffer.buffer,
-            offset_of!(StagingStateLayout, index_buffer) as u64,
-            vk::IndexType::UINT16,
         );
         device.cmd_begin_render_pass(
             command_buffer,
@@ -419,7 +552,51 @@ impl RenderPassProvider for RayTracer {
                 .clear_values(&clear_values),
             vk::SubpassContents::INLINE,
         );
-        device.cmd_draw_indexed(command_buffer, CUBE_INDICES.len() as u32, 1, 0, 0, 0);
+         {
+             let (buffer, i, index_count) = self.mesh.unwrap();
+             device.cmd_bind_pipeline(
+                 command_buffer,
+                 vk::PipelineBindPoint::GRAPHICS,
+                 self.depth_pipeline,
+             );
+            device.cmd_bind_vertex_buffers(
+                command_buffer,
+                0,
+                &[buffer],
+                &[0]
+            );
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                buffer,
+                i,
+                vk::IndexType::UINT32,
+            );
+            device.cmd_draw_indexed(command_buffer, index_count, 1, 0, 0, 0);
+        }
+        device.cmd_next_subpass(
+            command_buffer,
+            vk::SubpassContents::INLINE,
+        );
+        {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.ray_pipeline,
+            );
+            device.cmd_bind_vertex_buffers(
+                command_buffer,
+                0,
+                &[self.shared_buffer.buffer],
+                &[offset_of!(StagingStateLayout, vertex_buffer) as u64],
+            );
+            device.cmd_bind_index_buffer(
+                command_buffer,
+                self.shared_buffer.buffer,
+                offset_of!(StagingStateLayout, index_buffer) as u64,
+                vk::IndexType::UINT16,
+            );
+            device.cmd_draw_indexed(command_buffer, CUBE_INDICES.len() as u32, 1, 0, 0, 0);
+        }
         device.cmd_end_render_pass(command_buffer);
     }
 
@@ -443,7 +620,8 @@ impl Drop for RayTracer {
             self.context
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.context.device.destroy_pipeline(self.pipeline, None);
+            self.context.device.destroy_pipeline(self.ray_pipeline, None);
+            self.context.device.destroy_pipeline(self.depth_pipeline, None);
             self.context
                 .device
                 .destroy_render_pass(self.render_pass, None);
@@ -474,7 +652,7 @@ pub mod systems {
                 renderer.graphics_queue_family,
             );
             raytracer.bind_block_allocator_buffer(render_resources.block_allocator_buffer);
-            raytracer.bind_mesh(&mesh);
+            raytracer.bind_mesh(&mesh, &render_resources.allocator);
             render_resources.swapchain.bind_render_pass(&mut raytracer);
             raytracer
         };

@@ -28,6 +28,7 @@ uint MaskLocationNthOne(uint mask, uint location) {
 }
 
 
+layout(early_fragment_tests) in;
 layout (constant_id = 0) const uint MAX_ITERATION_VALUE = 100;
 const Box GlobalBoundingBox = { vec3(0,0,0), 512 };
 
@@ -35,6 +36,7 @@ layout(location=0) out vec4 f_color;
 layout(location=0) in vec3 vWorldPosition;
 layout(set = 0, binding = 0) uniform Camera {
     mat4 ViewProj;
+    mat4 RotationViewProj;
     mat4 Proj;
 };
 layout(set = 0, binding = 1) uniform Lights {

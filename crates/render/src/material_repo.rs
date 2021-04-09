@@ -48,7 +48,7 @@ impl TextureRepo {
                     .tiling(vk::ImageTiling::OPTIMAL)
                     .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                    .initial_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                    .initial_layout(vk::ImageLayout::PREINITIALIZED)
                     .build(),
                 &vma::AllocationCreateInfo {
                     usage: vma::MemoryUsage::GpuOnly,
