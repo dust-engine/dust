@@ -1,8 +1,4 @@
-const GLSL_SHADER_FILES: [&str; 3] = [
-    "./src/ray.frag",
-    "./src/ray.vert",
-    "./src/depth.vert",
-];
+const GLSL_SHADER_FILES: [&str; 3] = ["./src/ray.frag", "./src/ray.vert", "./src/depth.vert"];
 
 fn main() {
     use shaderc::{CompileOptions, Compiler, Error, ShaderKind};

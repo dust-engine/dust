@@ -45,6 +45,7 @@ layout(set = 0, binding = 1) uniform Lights {
 layout(set = 1, binding = 0) readonly buffer Chunk {
     Node Chunk_Nodes[];
 };
+layout (input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput inputDepth;
 
 Ray GenerateRay() {
     Ray ray;
@@ -132,6 +133,9 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
 #define DEBUG_RENDERING
 
 void main() {
+    float d = subpassLoad(inputDepth).r;
+    f_color = vec4(d, d, d, 1.0);
+    return;
     Ray ray = GenerateRay();
 
     float depth;

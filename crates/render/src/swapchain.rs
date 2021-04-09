@@ -19,9 +19,9 @@ struct SwapchainImage {
     command_buffer: vk::CommandBuffer,
     framebuffer: vk::Framebuffer,
 }
-struct DepthImage {
+pub(crate) struct DepthImage {
     image: vk::Image,
-    view: vk::ImageView,
+    pub(crate) view: vk::ImageView,
     allocation: vma::Allocation,
 }
 pub trait RenderPassProvider {
@@ -60,30 +60,35 @@ unsafe fn create_depth_image(
     allocator: &vma::Allocator,
     config: &SwapchainConfig,
 ) -> DepthImage {
-    let (image, allocation, allocation_info) = allocator.create_image(
-        &vk::ImageCreateInfo::builder()
-            .flags(vk::ImageCreateFlags::empty())
-            .image_type(vk::ImageType::TYPE_2D)
-            .format(vk::Format::D32_SFLOAT)
-            .extent(vk::Extent3D {
-                width: config.extent.width,
-                height: config.extent.height,
-                depth: 1
-            })
-            .mip_levels(1)
-            .array_layers(1)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
-            .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
-            .build(),
-        &vma::AllocationCreateInfo {
-            usage: vma::MemoryUsage::GpuOnly,
-            flags: vma::AllocationCreateFlags::NONE,
-            ..Default::default()
-        }
-    ).unwrap();
+    let (image, allocation, allocation_info) = allocator
+        .create_image(
+            &vk::ImageCreateInfo::builder()
+                .flags(vk::ImageCreateFlags::empty())
+                .image_type(vk::ImageType::TYPE_2D)
+                .format(vk::Format::D32_SFLOAT)
+                .extent(vk::Extent3D {
+                    width: config.extent.width,
+                    height: config.extent.height,
+                    depth: 1,
+                })
+                .mip_levels(1)
+                .array_layers(1)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .tiling(vk::ImageTiling::OPTIMAL)
+                .usage(
+                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                        | vk::ImageUsageFlags::INPUT_ATTACHMENT,
+                )
+                .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .build(),
+            &vma::AllocationCreateInfo {
+                usage: vma::MemoryUsage::GpuOnly,
+                flags: vma::AllocationCreateFlags::NONE,
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let view = device
         .create_image_view(
             &vk::ImageViewCreateInfo::builder()
@@ -109,7 +114,7 @@ unsafe fn create_depth_image(
     DepthImage {
         image,
         view,
-        allocation
+        allocation,
     }
 }
 
@@ -196,7 +201,7 @@ pub struct Swapchain {
     swapchain: vk::SwapchainKHR,
     frames_in_flight: Vec<Frame>,          // number of frames in flight
     swapchain_images: Vec<SwapchainImage>, // number of images in swapchain
-    depth_image: DepthImage,
+    pub(crate) depth_image: DepthImage,
     graphics_queue: vk::Queue,
     command_pool: vk::CommandPool,
     pub config: SwapchainConfig,
@@ -301,7 +306,9 @@ impl Swapchain {
 
     pub unsafe fn recreate(&mut self, allocator: &vma::Allocator, config: SwapchainConfig) {
         // reclaim resources
-        self.context.device.destroy_image_view(self.depth_image.view, None);
+        self.context
+            .device
+            .destroy_image_view(self.depth_image.view, None);
         allocator.destroy_image(self.depth_image.image, &self.depth_image.allocation);
         for swapchain_image in self.swapchain_images.iter() {
             self.context
@@ -324,11 +331,7 @@ impl Swapchain {
             swapchain_image.view = create_image_view(&self.context.device, image, &config);
             swapchain_image.framebuffer = vk::Framebuffer::null(); // this will be filled later on during bind_render_pass
         }
-        self.depth_image = create_depth_image(
-            &self.context.device,
-            allocator,
-            &config,
-        );
+        self.depth_image = create_depth_image(&self.context.device, allocator, &config);
         self.config = config;
     }
 
@@ -440,8 +443,9 @@ impl Drop for Swapchain {
                     .device
                     .destroy_image_view(swapchain_image.view, None);
             }
-            self.context.device
-                .destroy_image_view(self.depth_image.view);
+            self.context
+                .device
+                .destroy_image_view(self.depth_image.view, None);
             // allocator destroy image
             for frame in self.frames_in_flight.iter() {
                 self.context.device.destroy_fence(frame.fence, None);

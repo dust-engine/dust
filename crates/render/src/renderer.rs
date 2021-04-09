@@ -200,7 +200,7 @@ impl Renderer {
                 device,
                 surface,
                 instance,
-                surface_loader
+                surface_loader,
             };
             let renderer = Self {
                 context: Arc::new(context),

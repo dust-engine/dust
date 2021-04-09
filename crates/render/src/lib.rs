@@ -1,5 +1,6 @@
 #![feature(array_methods)]
 #![feature(array_map)]
+#![feature(backtrace)]
 #[macro_use]
 extern crate memoffset;
 
@@ -123,7 +124,7 @@ fn world_update(
 
             let allocator = &render_resources.allocator;
             //render_resources.swapchain.recreate(allocator, config);
-            render_resources.swapchain.bind_render_pass(&mut *raytracer);
+            raytracer.bind_render_target(&mut render_resources.swapchain);
         }
     }
     let camera_transform = glam::TransformRT {

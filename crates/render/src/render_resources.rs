@@ -1,13 +1,13 @@
 use crate::material::Material;
 use crate::material_repo::TextureRepo;
+use crate::renderer::RenderContext;
 use crate::swapchain::Swapchain;
 use crate::Renderer;
 use ash::vk;
 use dust_core::svo::alloc::BlockAllocator;
 use dust_core::svo::alloc::BLOCK_SIZE;
-use vk_mem as vma;
 use std::sync::Arc;
-use crate::renderer::RenderContext;
+use vk_mem as vma;
 
 pub struct RenderResources {
     pub swapchain: Swapchain,
@@ -27,7 +27,7 @@ impl RenderResources {
             frame_in_use_count: 0,
             heap_size_limits: None,
         })
-            .unwrap();
+        .unwrap();
         let swapchain_config = Swapchain::get_config(
             renderer.physical_device,
             renderer.context.surface,

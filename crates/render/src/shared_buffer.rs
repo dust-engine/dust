@@ -173,10 +173,16 @@ impl SharedBuffer {
         let rotation = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
         let transform = Mat4::from_rotation_translation(transform.rotation, transform.translation);
 
-        let projection_matrix = camera_projection.get_projection_matrix(aspect_ratio);
+        let cubed_projection_matrix = CameraProjection {
+            fov: camera_projection.fov,
+            near: 0.5,
+            far: 1.5,
+        };
 
-        self.layout.view_proj = projection_matrix * transform.inverse();
-        self.layout.rotation_view_proj = projection_matrix * rotation.inverse();
+        self.layout.view_proj =
+            camera_projection.get_projection_matrix(aspect_ratio) * transform.inverse(); // The normal ViewProj matrix
+        self.layout.rotation_view_proj =
+            cubed_projection_matrix.get_projection_matrix(aspect_ratio) * rotation.inverse();
         self.layout.proj = transform;
     }
 

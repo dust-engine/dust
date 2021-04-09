@@ -8,5 +8,5 @@ layout(set = 0, binding = 0) uniform Camera {
 };
 
 void main() {
-    gl_Position = RotationViewProj * vec4(Vertex_Position, 1.0);
+    gl_Position = ViewProj * vec4(Vertex_Position, 1.0);
 }
