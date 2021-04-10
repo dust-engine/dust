@@ -148,11 +148,7 @@ void main() {
     uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times, distance);
     float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE); // 0 to 1
     #ifdef DEBUG_RENDERING
-    if (voxel_id == 0) {
-        f_color = vec4(0.0, 1.0, 0.0, 1.0);
-    } else {
-        f_color = vec4(iteration, iteration, iteration, 1.0);
-    }
+    f_color = vec4(iteration, iteration, iteration, 1.0);
     #else
     vec3 normal = CubedNormalize(hitpoint - (hitbox.origin + hitbox.extent/2));
     vec2 texcoords = vec2(

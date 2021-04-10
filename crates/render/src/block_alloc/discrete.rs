@@ -337,8 +337,8 @@ fn select_discrete_memtype(
     let device_buf_mem_type = memory_properties.memory_types
         [0..memory_properties.memory_type_count as usize]
         .iter()
-        .filter(|ty| ty.heap_index == device_heap_index)
         .enumerate()
+        .filter(|(id, ty)| ty.heap_index == device_heap_index)
         .position(|(id, memory_type)| {
             device_buf_requirements.memory_type_bits & (1 << id) != 0
                 && memory_type
