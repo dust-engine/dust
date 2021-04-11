@@ -39,6 +39,8 @@ layout(set = 0, binding = 0) uniform u_Camera {
     mat4 RotationViewProj;
     vec3 position;
     float placeholder;
+    vec3 forward;
+    float placeholder2;
     float fov;
     float near;
     float far;
@@ -134,12 +136,13 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
     return material_id;
 }
 
-#define DEBUG_RENDERING
+//#define DEBUG_RENDERING
 
 void main() {
+    Ray ray = GenerateRay();
     float distance = subpassLoad(inputDepth).r;
     distance = Camera.near * Camera.far / (Camera.far - distance*(Camera.far - Camera.near));
-    Ray ray = GenerateRay();
+    distance = distance / dot(Camera.forward, ray.dir);
 
     float depth;
     vec3 hitpoint;

@@ -23,11 +23,12 @@ pub struct StagingStateLayout {
     pub rotation_view_proj: Mat4,
     pub camera_position: Vec3,
     placeholder: f32,
+    pub forward: Vec3,
+    placeholder2: f32,
     pub fov: f32,
     pub near: f32,
     pub far: f32,
     pub aspect_ratio: f32,
-    _padding2: [f32; 8],
     // -- 192
     pub sunlight: SunLight,
     _padding1: [f32; 8],
@@ -178,18 +179,19 @@ impl SharedBuffer {
     ) {
         let rotation_only_proj_matrix = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
         let proj_matrix = Mat4::from_rotation_translation(transform.rotation, transform.translation);
+        let forward_vector = transform.rotation * Vec3::new(0.0, 0.0, -1.0);
 
         let cubed_projection_matrix = CameraProjection {
             fov: camera_projection.fov,
             near: 0.5,
             far: 2.0,
         };
-
         self.layout.view_proj =
             camera_projection.get_projection_matrix(aspect_ratio) * proj_matrix.inverse(); // The normal ViewProj matrix
         self.layout.rotation_view_proj =
             cubed_projection_matrix.get_projection_matrix(aspect_ratio) * rotation_only_proj_matrix.inverse();
         self.layout.camera_position = transform.translation;
+        self.layout.forward = forward_vector.normalize();
         self.layout.far = camera_projection.far;
         self.layout.near = camera_projection.near;
         self.layout.fov = camera_projection.fov;

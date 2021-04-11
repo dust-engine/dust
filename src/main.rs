@@ -41,7 +41,7 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     let file = std::fs::File::open("./test.oct").unwrap();
     let mut reader = std::io::BufReader::new(file);
     Octree::read(&mut octree, &mut reader, 12);
-    let mesh = MarchingCubeMeshBuilder::new(512.0, 11).build(&octree);
+    let mesh = MarchingCubeMeshBuilder::new(512.0, 9).build(&octree);
     commands.insert_resource(mesh);
 
     let mut bundle = RaytracerCameraBundle::default();
@@ -133,5 +133,5 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
 
 fn run(mut sunlight: ResMut<SunLight>, time: Res<Time>) {
     let (sin, cos) = (time.seconds_since_startup() * 2.0).sin_cos();
-    sunlight.dir = Vec3::new(sin as f32 * 10.0, -3.0, cos as f32 * 10.0).normalize();
+    sunlight.dir = Vec3::new(sin as f32 * 10.0, -15.0, cos as f32 * 10.0).normalize();
 }
