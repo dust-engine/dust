@@ -1263,6 +1263,7 @@ dependencies = [
  "dust-core",
  "glam",
  "image",
+ "log",
  "memoffset",
  "raw-window-handle",
  "shaderc",

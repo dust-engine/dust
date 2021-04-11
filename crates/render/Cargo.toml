@@ -17,6 +17,7 @@ ash = { git = "https://github.com/MaikKlein/ash" } # wait for 0.33.0 for queue_b
 vk-mem = { git = "https://github.com/dust-engine/vk-mem-rs" }
 image = "0.23.14"
 memoffset = "0.6"
+log = "*"
 
 [build-dependencies]
 shaderc = "0.7"

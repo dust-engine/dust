@@ -14,6 +14,8 @@ use crate::material_repo::TextureRepo;
 use dust_core::svo::alloc::{BlockAllocator, BLOCK_SIZE};
 use std::sync::Arc;
 
+use std::borrow::Cow;
+
 pub struct RenderContext {
     pub entry: ash::Entry,
     pub instance: ash::Instance,
@@ -34,6 +36,151 @@ pub struct Renderer {
     pub info: DeviceInfo,
 }
 
+
+unsafe fn display_debug_utils_label_ext(
+    label_structs: *mut vk::DebugUtilsLabelEXT,
+    count: usize,
+) -> Option<String> {
+    if count == 0 {
+        return None;
+    }
+
+    Some(
+        std::slice::from_raw_parts::<vk::DebugUtilsLabelEXT>(label_structs, count)
+            .iter()
+            .flat_map(|dul_obj| {
+                dul_obj
+                    .p_label_name
+                    .as_ref()
+                    .map(|lbl| CStr::from_ptr(lbl).to_string_lossy().into_owned())
+            })
+            .collect::<Vec<String>>()
+            .join(", "),
+    )
+}
+
+unsafe fn display_debug_utils_object_name_info_ext(
+    info_structs: *mut vk::DebugUtilsObjectNameInfoEXT,
+    count: usize,
+) -> Option<String> {
+    if count == 0 {
+        return None;
+    }
+
+    //TODO: use color field of vk::DebugUtilsLabelExt in a meaningful way?
+    Some(
+        std::slice::from_raw_parts::<vk::DebugUtilsObjectNameInfoEXT>(info_structs, count)
+            .iter()
+            .map(|obj_info| {
+                let object_name = obj_info
+                    .p_object_name
+                    .as_ref()
+                    .map(|name| CStr::from_ptr(name).to_string_lossy().into_owned());
+
+                match object_name {
+                    Some(name) => format!(
+                        "(type: {:?}, hndl: 0x{:x}, name: {})",
+                        obj_info.object_type, obj_info.object_handle, name
+                    ),
+                    None => format!(
+                        "(type: {:?}, hndl: 0x{:x})",
+                        obj_info.object_type, obj_info.object_handle
+                    ),
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(", "),
+    )
+}
+
+unsafe extern "system" fn debug_utils_messenger_callback(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _user_data: *mut std::os::raw::c_void,
+) -> vk::Bool32 {
+    if std::thread::panicking() {
+        return vk::FALSE;
+    }
+    let callback_data = *p_callback_data;
+
+    let message_severity = match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => log::Level::Error,
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => log::Level::Warn,
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => log::Level::Info,
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => log::Level::Trace,
+        _ => log::Level::Warn,
+    };
+    let message_type = &format!("{:?}", message_type);
+    let message_id_number: i32 = callback_data.message_id_number as i32;
+
+    let message_id_name = if callback_data.p_message_id_name.is_null() {
+        Cow::from("")
+    } else {
+        CStr::from_ptr(callback_data.p_message_id_name).to_string_lossy()
+    };
+
+    let message = if callback_data.p_message.is_null() {
+        Cow::from("")
+    } else {
+        CStr::from_ptr(callback_data.p_message).to_string_lossy()
+    };
+
+    let additional_info: [(&str, Option<String>); 3] = [
+        (
+            "queue info",
+            display_debug_utils_label_ext(
+                callback_data.p_queue_labels as *mut _,
+                callback_data.queue_label_count as usize,
+            ),
+        ),
+        (
+            "cmd buf info",
+            display_debug_utils_label_ext(
+                callback_data.p_cmd_buf_labels as *mut _,
+                callback_data.cmd_buf_label_count as usize,
+            ),
+        ),
+        (
+            "object info",
+            display_debug_utils_object_name_info_ext(
+                callback_data.p_objects as *mut _,
+                callback_data.object_count as usize,
+            ),
+        ),
+    ];
+
+    {
+        let mut msg = format!(
+            "\n{} [{} (0x{:x})] : {}",
+            message_type, message_id_name, message_id_number, message
+        );
+
+        for &(info_label, ref info) in additional_info.iter() {
+            if let Some(ref data) = *info {
+                msg = format!("{}\n{}: {}", msg, info_label, data);
+            }
+        }
+        //println!("{}\n", msg);
+    }
+        
+    log!(message_severity, "{}\n", {
+        let mut msg = format!(
+            "\n{} [{} (0x{:x})] : {}",
+            message_type, message_id_name, message_id_number, message
+        );
+
+        for &(info_label, ref info) in additional_info.iter() {
+            if let Some(ref data) = *info {
+                msg = format!("{}\n{}: {}", msg, info_label, data);
+            }
+        }
+        msg
+    });
+
+    vk::FALSE
+}
+
 impl Renderer {
     /// Returns a Renderer and its associated BlockAllocator.
     /// Note that the two objects must be dropped at the same time.
@@ -42,6 +189,10 @@ impl Renderer {
     pub unsafe fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Renderer {
         unsafe {
             let entry = ash::Entry::new().unwrap();
+            let instance_extensions = entry
+                .enumerate_instance_extension_properties()
+                .unwrap();
+
             let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
             extensions.push(ash::extensions::ext::DebugUtils::name());
 
@@ -61,7 +212,7 @@ impl Renderer {
                                 .engine_version(0)
                                 .api_version(vk::make_version(1, 2, 0)),
                         )
-                        //.enabled_layer_names(&layers.map(|str| str.as_ptr() as *const i8))
+                        .enabled_layer_names(&layers.map(|str| str.as_ptr() as *const i8))
                         .enabled_extension_names(
                             &extensions
                                 .iter()
@@ -71,6 +222,24 @@ impl Renderer {
                     None,
                 )
                 .unwrap();
+
+                let debug_messenger = {
+                    // make sure VK_EXT_debug_utils is available
+                    if instance_extensions.iter().any(|props| unsafe {
+                        CStr::from_ptr(props.extension_name.as_ptr()) == ash::extensions::ext::DebugUtils::name()
+                    }) {
+                        let ext = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+                        let info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                            .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
+                            .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
+                            .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
+                            .pfn_user_callback(Some(debug_utils_messenger_callback));
+                        let handle = unsafe { ext.create_debug_utils_messenger(&info, None) }.unwrap();
+                        Some((ext, handle))
+                    } else {
+                        None
+                    }
+                };
 
             let surface =
                 ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();

@@ -4,6 +4,10 @@
 #[macro_use]
 extern crate memoffset;
 
+
+#[macro_use]
+extern crate log;
+
 mod block_alloc;
 mod device_info;
 mod material;

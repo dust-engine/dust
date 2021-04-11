@@ -334,18 +334,19 @@ fn select_device_memtype(
         .unwrap();
     let device_heap_index = device_heap_index as u32;
 
-    memory_properties.memory_types
+    let (id, memory_type) = memory_properties.memory_types
         [0..memory_properties.memory_type_count as usize]
         .iter()
         .enumerate()
         .filter(|(id, ty)| ty.heap_index == device_heap_index)
-        .position(|(id, memory_type)| {
+        .find(|(id, memory_type)| {
             device_buf_requirements.memory_type_bits & (1 << id) != 0
                 && memory_type
                     .property_flags
                     .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         })
-        .unwrap() as u32
+        .unwrap();
+    id as u32
 }
 
 impl Drop for DiscreteBlockAllocator {
