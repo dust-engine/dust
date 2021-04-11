@@ -45,6 +45,9 @@ impl Renderer {
             let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
             extensions.push(ash::extensions::ext::DebugUtils::name());
 
+            let layers: [&CStr; 1] = [
+                &CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0"),
+            ];
             let instance = entry
                 .create_instance(
                     &vk::InstanceCreateInfo::builder()
@@ -58,6 +61,7 @@ impl Renderer {
                                 .engine_version(0)
                                 .api_version(vk::make_version(1, 2, 0)),
                         )
+                        //.enabled_layer_names(&layers.map(|str| str.as_ptr() as *const i8))
                         .enabled_extension_names(
                             &extensions
                                 .iter()

@@ -49,4 +49,7 @@ impl ChangeSet {
             .drain()
             .map(move |(i, changes)| (i as usize, changes.range.clone()))
     }
+    pub fn len(&self) -> usize {
+        self.changed_chunks.len()
+    }
 }

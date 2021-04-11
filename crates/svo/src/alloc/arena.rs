@@ -216,6 +216,9 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         self.changeset.changed_block(index, len)
     }
     pub fn flush(&mut self) {
+        if self.changeset.len() == 0 {
+            return;
+        }
         if !self.block_allocator.can_flush() {
             return;
         }

@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 pub struct DiscreteBlock {
     system_mem: vk::DeviceMemory,
+    system_buf: vk::Buffer,
     device_mem: vk::DeviceMemory,
     offset: u64,
     sparse_binding_completion_semaphore: vk::Semaphore,
@@ -19,8 +20,6 @@ pub struct DiscreteBlockAllocator {
     context: Arc<RenderContext>,
     bind_transfer_queue: vk::Queue,
     pub device_buffer: vk::Buffer,
-    system_buffer: vk::Buffer,
-    system_memtype: u32,
     device_memtype: u32,
 
     current_offset: u64,
@@ -30,6 +29,7 @@ pub struct DiscreteBlockAllocator {
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
     copy_completion_fence: vk::Fence,
+    memory_properties: vk::PhysicalDeviceMemoryProperties,
 }
 unsafe impl Send for DiscreteBlockAllocator {}
 unsafe impl Sync for DiscreteBlockAllocator {}
@@ -48,6 +48,7 @@ impl DiscreteBlockAllocator {
         let queue_family_indices = [graphics_queue_family, bind_transfer_queue_family];
         let mut buffer_create_info = vk::BufferCreateInfo::builder()
             .size(max_storage_buffer_size)
+            .usage(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST)
             .flags(vk::BufferCreateFlags::SPARSE_BINDING | vk::BufferCreateFlags::SPARSE_RESIDENCY);
 
         if graphics_queue_family == bind_transfer_queue_family {
@@ -57,20 +58,9 @@ impl DiscreteBlockAllocator {
                 .sharing_mode(vk::SharingMode::CONCURRENT)
                 .queue_family_indices(&queue_family_indices);
         }
-        let mut buffer_create_info = buffer_create_info
-            .usage(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST)
-            .build();
-
-        let device_buffer = device.create_buffer(&buffer_create_info, None).unwrap();
-        buffer_create_info.usage = vk::BufferUsageFlags::TRANSFER_SRC;
-        let system_buffer = device.create_buffer(&buffer_create_info, None).unwrap();
+        let device_buffer = device.create_buffer(&buffer_create_info.build(), None).unwrap();
         let device_buf_requirements = device.get_buffer_memory_requirements(device_buffer);
-        let system_buf_requirements = device.get_buffer_memory_requirements(system_buffer);
-        let (system_memtype, device_memtype) = select_discrete_memtype(
-            &device_info.memory_properties,
-            &system_buf_requirements,
-            &device_buf_requirements,
-        );
+        let device_memtype = select_device_memtype(&device_info.memory_properties, &device_buf_requirements);
         let command_pool = device
             .create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
@@ -107,8 +97,6 @@ impl DiscreteBlockAllocator {
             context,
             bind_transfer_queue,
             device_buffer,
-            system_buffer,
-            system_memtype,
             device_memtype,
             current_offset: 0,
             free_offsets: Vec::new(),
@@ -116,6 +104,7 @@ impl DiscreteBlockAllocator {
             command_pool,
             command_buffer,
             copy_completion_fence,
+            memory_properties: device_info.memory_properties.clone()
         }
     }
 }
@@ -127,17 +116,41 @@ impl BlockAllocator for DiscreteBlockAllocator {
             self.current_offset += 1;
             val
         });
+        
+        let system_buf = self.context
+            .device
+            .create_buffer(&vk::BufferCreateInfo::builder()
+                .size(self.block_size)
+                .usage(vk::BufferUsageFlags::TRANSFER_SRC)
+                .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .build(),
+                None
+            )
+            .unwrap();
+            
+        let system_buf_requirements = self.context.device.get_buffer_memory_requirements(system_buf);
+        let system_memtype = select_system_memtype(&self.memory_properties, &system_buf_requirements);
         let system_mem = self
             .context
             .device
             .allocate_memory(
                 &vk::MemoryAllocateInfo::builder()
-                    .memory_type_index(self.system_memtype)
+                    .memory_type_index(system_memtype)
                     .allocation_size(self.block_size)
                     .build(),
                 None,
             )
             .map_err(super::utils::map_err)?;
+        self.context
+            .device
+            .bind_buffer_memory(system_buf, system_mem, 0).unwrap();
+        let ptr = self
+            .context
+            .device
+            .map_memory(system_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
+            .map_err(super::utils::map_err)? as *mut u8;
+
+
         let device_mem = self
             .context
             .device
@@ -149,11 +162,6 @@ impl BlockAllocator for DiscreteBlockAllocator {
                 None,
             )
             .map_err(super::utils::map_err)?;
-        let ptr = self
-            .context
-            .device
-            .map_memory(system_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
-            .map_err(super::utils::map_err)? as *mut u8;
 
         let sparse_binding_completion_semaphore = self
             .context
@@ -175,16 +183,6 @@ impl BlockAllocator for DiscreteBlockAllocator {
                 self.bind_transfer_queue,
                 &[vk::BindSparseInfo::builder()
                     .buffer_binds(&[
-                        vk::SparseBufferMemoryBindInfo::builder()
-                            .buffer(self.system_buffer)
-                            .binds(&[vk::SparseMemoryBind {
-                                resource_offset: resource_offset * self.block_size as u64,
-                                size: self.block_size,
-                                memory: system_mem,
-                                memory_offset: 0,
-                                flags: vk::SparseMemoryBindFlags::empty(),
-                            }])
-                            .build(),
                         vk::SparseBufferMemoryBindInfo::builder()
                             .buffer(self.device_buffer)
                             .binds(&[vk::SparseMemoryBind {
@@ -209,6 +207,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
         let block = DiscreteBlock {
             system_mem,
             device_mem,
+            system_buf,
             offset: resource_offset,
             sparse_binding_completion_semaphore,
         };
@@ -219,7 +218,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
     unsafe fn deallocate_block(&mut self, block: *mut u8) {
         let block = self.allocations.remove(&block).unwrap();
 
-        self.context.device.unmap_memory(block.system_mem);
+        self.context.device.destroy_buffer(block.system_buf, None);
         self.context.device.free_memory(block.system_mem, None);
         self.context.device.free_memory(block.device_mem, None);
         if self.current_offset == block.offset + 1 {
@@ -231,22 +230,8 @@ impl BlockAllocator for DiscreteBlockAllocator {
 
     unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
         let device = &self.context.device;
-        let mut regions: Vec<vk::BufferCopy> = Vec::with_capacity(ranges.size_hint().0);
         let mut semaphores: Vec<vk::Semaphore> = Vec::with_capacity(ranges.size_hint().0);
 
-        for (block_ptr, range) in ranges {
-            let block = &self.allocations[&block_ptr];
-            let location = block.offset * self.block_size as u64 + range.start as u64;
-            regions.push(vk::BufferCopy {
-                src_offset: location,
-                dst_offset: location,
-                size: (range.end - range.start) as u64,
-            });
-            semaphores.push(block.sparse_binding_completion_semaphore);
-        }
-        if regions.len() == 0 {
-            return;
-        }
         self.context
             .device
             .reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())
@@ -260,15 +245,27 @@ impl BlockAllocator for DiscreteBlockAllocator {
                     .build(),
             )
             .unwrap();
-        self.context.device.cmd_copy_buffer(
-            self.command_buffer,
-            self.system_buffer,
-            self.device_buffer,
-            &regions,
-        );
-        device.end_command_buffer(self.command_buffer).unwrap();
-        device.reset_fences(&[self.copy_completion_fence]).unwrap();
 
+        for (block_ptr, range) in ranges {
+            let block = &self.allocations[&block_ptr];
+            let location = block.offset * self.block_size as u64 + range.start as u64;
+            semaphores.push(block.sparse_binding_completion_semaphore);
+
+            self.context.device.cmd_copy_buffer(
+                self.command_buffer,
+                block.system_buf,
+                self.device_buffer,
+                &[vk::BufferCopy {
+                    src_offset: range.start as u64,
+                    dst_offset: location,
+                    size: (range.end - range.start) as u64
+                }]
+            );
+        }
+        device.end_command_buffer(self.command_buffer).unwrap();
+        assert!(semaphores.len() > 0);
+
+        device.reset_fences(&[self.copy_completion_fence]).unwrap();
         let command_buffers = [self.command_buffer];
         let mut submit_info = vk::SubmitInfo::builder()
             .command_buffers(&command_buffers)
@@ -302,12 +299,11 @@ impl BlockAllocator for DiscreteBlockAllocator {
 }
 
 /// Returns SystemMemId, DeviceMemId
-fn select_discrete_memtype(
+fn select_system_memtype(
     memory_properties: &vk::PhysicalDeviceMemoryProperties,
     system_buf_requirements: &vk::MemoryRequirements,
-    device_buf_requirements: &vk::MemoryRequirements,
-) -> (u32, u32) {
-    let system_buf_mem_type = memory_properties.memory_types
+) -> u32 {
+    memory_properties.memory_types
         [0..memory_properties.memory_type_count as usize]
         .iter()
         .enumerate()
@@ -322,9 +318,13 @@ fn select_discrete_memtype(
                     .property_flags
                     .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         })
-        .unwrap() as u32;
+        .unwrap() as u32
+}
 
-    // Search for the largest DEVICE_LOCAL heap
+fn select_device_memtype(
+    memory_properties: &vk::PhysicalDeviceMemoryProperties,
+    device_buf_requirements: &vk::MemoryRequirements,
+) -> u32 {
     let (device_heap_index, _device_heap) = memory_properties.memory_heaps
         [0..memory_properties.memory_heap_count as usize]
         .iter()
@@ -334,7 +334,7 @@ fn select_discrete_memtype(
         .unwrap();
     let device_heap_index = device_heap_index as u32;
 
-    let device_buf_mem_type = memory_properties.memory_types
+    memory_properties.memory_types
         [0..memory_properties.memory_type_count as usize]
         .iter()
         .enumerate()
@@ -345,9 +345,7 @@ fn select_discrete_memtype(
                     .property_flags
                     .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         })
-        .unwrap() as u32;
-
-    (system_buf_mem_type, device_buf_mem_type)
+        .unwrap() as u32
 }
 
 impl Drop for DiscreteBlockAllocator {
@@ -357,9 +355,9 @@ impl Drop for DiscreteBlockAllocator {
             device.device_wait_idle().unwrap();
             device.destroy_command_pool(self.command_pool, None);
             device.destroy_buffer(self.device_buffer, None);
-            device.destroy_buffer(self.system_buffer, None);
             device.destroy_fence(self.copy_completion_fence, None);
             for i in self.allocations.values() {
+                device.destroy_buffer(i.system_buf, None);
                 device.destroy_semaphore(i.sparse_binding_completion_semaphore, None);
                 device.free_memory(i.device_mem, None);
                 device.free_memory(i.system_mem, None);
