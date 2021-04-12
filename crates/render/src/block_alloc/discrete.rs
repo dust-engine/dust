@@ -264,14 +264,16 @@ impl BlockAllocator for DiscreteBlockAllocator {
         }
         device.end_command_buffer(self.command_buffer).unwrap();
         assert!(semaphores.len() > 0);
+        let wait_dst_stage_mask = vec![vk::PipelineStageFlags::TRANSFER; semaphores.len()];
+        let wait_semaphore_values = vec![1; semaphores.len()];
 
         device.reset_fences(&[self.copy_completion_fence]).unwrap();
         let command_buffers = [self.command_buffer];
         let mut submit_info = vk::SubmitInfo::builder()
             .command_buffers(&command_buffers)
             .wait_semaphores(&semaphores)
-            .wait_dst_stage_mask(&[vk::PipelineStageFlags::TRANSFER])
-            .push_next(&mut vk::TimelineSemaphoreSubmitInfo::builder().wait_semaphore_values(&[1]))
+            .wait_dst_stage_mask(&wait_dst_stage_mask)
+            .push_next(&mut vk::TimelineSemaphoreSubmitInfo::builder().wait_semaphore_values(&wait_semaphore_values))
             .build();
         device
             .queue_submit(
