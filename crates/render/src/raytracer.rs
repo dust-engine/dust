@@ -43,6 +43,256 @@ pub struct RayTracer {
     mesh: Option<(vk::Buffer, u64, u32)>,
 }
 
+unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLayout, render_pass: vk::RenderPass) -> [vk::Pipeline; 2] {
+    let vertex_shader_module = device
+        .create_shader_module(
+            &vk::ShaderModuleCreateInfo::builder()
+                .code(
+                    &ash::util::read_spv(&mut Cursor::new(
+                        &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.vert.spv"))[..],
+                    ))
+                        .unwrap(),
+                )
+                .build(),
+            None,
+        )
+        .unwrap();
+    let fragment_shader_module = device
+        .create_shader_module(
+            &vk::ShaderModuleCreateInfo::builder()
+                .code(
+                    &ash::util::read_spv(&mut Cursor::new(
+                        &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.frag.spv"))[..],
+                    ))
+                        .unwrap(),
+                )
+                .build(),
+            None,
+        )
+        .unwrap();
+    let depth_prepass_vertex_shader_module =
+        device
+            .create_shader_module(
+                &vk::ShaderModuleCreateInfo::builder()
+                    .code(
+                        &ash::util::read_spv(&mut Cursor::new(
+                            &include_bytes!(concat!(
+                            env!("OUT_DIR"),
+                            "/shaders/depth.vert.spv"
+                            ))[..],
+                        ))
+                            .unwrap(),
+                    )
+                    .build(),
+                None,
+            )
+            .unwrap();
+    let mut pipelines: [vk::Pipeline; 2] = [vk::Pipeline::null(), vk::Pipeline::null()];
+    let result = device.fp_v1_0().create_graphics_pipelines(
+        device.handle(),
+        vk::PipelineCache::null(),
+        2,
+        [
+            vk::GraphicsPipelineCreateInfo::builder()
+                .flags(vk::PipelineCreateFlags::empty())
+                .stages(&[vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::VERTEX)
+                    .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+                    .module(depth_prepass_vertex_shader_module)
+                    .build()])
+                .vertex_input_state(
+                    &vk::PipelineVertexInputStateCreateInfo::builder()
+                        .vertex_attribute_descriptions(&[vk::VertexInputAttributeDescription {
+                            location: 0,
+                            binding: 0,
+                            format: vk::Format::R32G32B32_SFLOAT,
+                            offset: 0,
+                        }])
+                        .vertex_binding_descriptions(&[vk::VertexInputBindingDescription {
+                            binding: 0,
+                            stride: std::mem::size_of::<[f32; 3]>() as u32,
+                            input_rate: vk::VertexInputRate::VERTEX,
+                        }])
+                        .build(),
+                )
+                .input_assembly_state(
+                    &vk::PipelineInputAssemblyStateCreateInfo::builder()
+                        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+                        .primitive_restart_enable(false)
+                        .build(),
+                )
+                .viewport_state(
+                    &vk::PipelineViewportStateCreateInfo::builder()
+                        .viewports(&[vk::Viewport::default()])
+                        .scissors(&[vk::Rect2D::default()])
+                        .build(),
+                )
+                .rasterization_state(
+                    &vk::PipelineRasterizationStateCreateInfo::builder()
+                        .depth_clamp_enable(false)
+                        .rasterizer_discard_enable(false)
+                        .polygon_mode(vk::PolygonMode::FILL)
+                        .cull_mode(vk::CullModeFlags::BACK)
+                        .front_face(vk::FrontFace::CLOCKWISE)
+                        .depth_bias_enable(false)
+                        .line_width(1.0)
+                        .build(),
+                )
+                .multisample_state(
+                    &vk::PipelineMultisampleStateCreateInfo::builder()
+                        .sample_shading_enable(false)
+                        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+                        .build(),
+                )
+                .depth_stencil_state(
+                    &vk::PipelineDepthStencilStateCreateInfo::builder()
+                        .depth_test_enable(true)
+                        .depth_compare_op(vk::CompareOp::LESS)
+                        .depth_write_enable(true)
+                        .depth_bounds_test_enable(false)
+                        .stencil_test_enable(true)
+                        .front(vk::StencilOpState {
+                            fail_op: vk::StencilOp::ZERO,
+                            pass_op: vk::StencilOp::REPLACE,
+                            depth_fail_op: vk::StencilOp::REPLACE,
+                            compare_op: vk::CompareOp::ALWAYS,
+                            compare_mask: 0,
+                            write_mask: 1,
+                            reference: 1
+                        })
+                        .build(),
+                )
+                .color_blend_state(
+                    &vk::PipelineColorBlendStateCreateInfo::builder()
+                        .logic_op_enable(false)
+                        .attachments(&[])
+                        .build(),
+                )
+                .dynamic_state(
+                    &vk::PipelineDynamicStateCreateInfo::builder()
+                        .dynamic_states(&[
+                            vk::DynamicState::VIEWPORT,
+                            vk::DynamicState::SCISSOR,
+                        ])
+                        .build(),
+                )
+                .layout(pipeline_layout)
+                .render_pass(render_pass)
+                .subpass(0)
+                .base_pipeline_handle(vk::Pipeline::null())
+                .base_pipeline_index(-1)
+                .build(),
+            vk::GraphicsPipelineCreateInfo::builder()
+                .flags(vk::PipelineCreateFlags::empty())
+                .stages(&[
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::VERTEX)
+                        .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+                        .module(vertex_shader_module)
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::FRAGMENT)
+                        .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+                        .module(fragment_shader_module)
+                        .build(),
+                ])
+                .vertex_input_state(
+                    &vk::PipelineVertexInputStateCreateInfo::builder()
+                        .vertex_attribute_descriptions(&[vk::VertexInputAttributeDescription {
+                            location: 0,
+                            binding: 0,
+                            format: vk::Format::R32G32B32_SFLOAT,
+                            offset: 0,
+                        }])
+                        .vertex_binding_descriptions(&[vk::VertexInputBindingDescription {
+                            binding: 0,
+                            stride: std::mem::size_of::<[f32; 3]>() as u32,
+                            input_rate: vk::VertexInputRate::VERTEX,
+                        }])
+                        .build(),
+                )
+                .input_assembly_state(
+                    &vk::PipelineInputAssemblyStateCreateInfo::builder()
+                        .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
+                        .primitive_restart_enable(false)
+                        .build(),
+                )
+                .viewport_state(
+                    &vk::PipelineViewportStateCreateInfo::builder()
+                        .viewports(&[vk::Viewport::default()])
+                        .scissors(&[vk::Rect2D::default()])
+                        .build(),
+                )
+                .rasterization_state(
+                    &vk::PipelineRasterizationStateCreateInfo::builder()
+                        .depth_clamp_enable(false)
+                        .rasterizer_discard_enable(false)
+                        .polygon_mode(vk::PolygonMode::FILL)
+                        .cull_mode(vk::CullModeFlags::BACK)
+                        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+                        .depth_bias_enable(false)
+                        .line_width(1.0)
+                        .build(),
+                )
+                .multisample_state(
+                    &vk::PipelineMultisampleStateCreateInfo::builder()
+                        .sample_shading_enable(false)
+                        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+                        .build(),
+                )
+                .depth_stencil_state(
+                    &vk::PipelineDepthStencilStateCreateInfo::builder()
+                        .depth_test_enable(false)
+                        .depth_write_enable(false)
+                        .depth_bounds_test_enable(false)
+                        .stencil_test_enable(true)
+                        .front(vk::StencilOpState {
+                            fail_op: vk::StencilOp::KEEP,
+                            pass_op: vk::StencilOp::KEEP,
+                            depth_fail_op: vk::StencilOp::KEEP,
+                            compare_op: vk::CompareOp::EQUAL,
+                            compare_mask: 1,
+                            write_mask: 0,
+                            reference: 1
+                        })
+                        .build(),
+                )
+                .color_blend_state(
+                    &vk::PipelineColorBlendStateCreateInfo::builder()
+                        .logic_op_enable(false)
+                        .attachments(&[vk::PipelineColorBlendAttachmentState::builder()
+                            .color_write_mask(vk::ColorComponentFlags::all())
+                            .blend_enable(false)
+                            .build()])
+                        .build(),
+                )
+                .dynamic_state(
+                    &vk::PipelineDynamicStateCreateInfo::builder()
+                        .dynamic_states(&[
+                            vk::DynamicState::VIEWPORT,
+                            vk::DynamicState::SCISSOR,
+                        ])
+                        .build(),
+                )
+                .layout(pipeline_layout)
+                .render_pass(render_pass)
+                .subpass(1)
+                .base_pipeline_handle(vk::Pipeline::null())
+                .base_pipeline_index(-1)
+                .build(),
+        ]
+            .as_ptr(),
+        std::ptr::null(),
+        pipelines.as_mut_ptr(),
+    );
+    assert_eq!(result, vk::Result::SUCCESS);
+
+    device.destroy_shader_module(vertex_shader_module, None);
+    device.destroy_shader_module(fragment_shader_module, None);
+    device.destroy_shader_module(depth_prepass_vertex_shader_module, None);
+    pipelines
+}
+
 impl RayTracer {
     pub unsafe fn new(
         context: Arc<RenderContext>,
@@ -221,248 +471,7 @@ impl RayTracer {
                 None,
             )
             .unwrap();
-        let vertex_shader_module = device
-            .create_shader_module(
-                &vk::ShaderModuleCreateInfo::builder()
-                    .code(
-                        &ash::util::read_spv(&mut Cursor::new(
-                            &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.vert.spv"))[..],
-                        ))
-                        .unwrap(),
-                    )
-                    .build(),
-                None,
-            )
-            .unwrap();
-        let fragment_shader_module = device
-            .create_shader_module(
-                &vk::ShaderModuleCreateInfo::builder()
-                    .code(
-                        &ash::util::read_spv(&mut Cursor::new(
-                            &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.frag.spv"))[..],
-                        ))
-                        .unwrap(),
-                    )
-                    .build(),
-                None,
-            )
-            .unwrap();
-        let depth_prepass_vertex_shader_module =
-            device
-                .create_shader_module(
-                    &vk::ShaderModuleCreateInfo::builder()
-                        .code(
-                            &ash::util::read_spv(&mut Cursor::new(
-                                &include_bytes!(concat!(
-                                    env!("OUT_DIR"),
-                                    "/shaders/depth.vert.spv"
-                                ))[..],
-                            ))
-                            .unwrap(),
-                        )
-                        .build(),
-                    None,
-                )
-                .unwrap();
-        let mut pipelines: [vk::Pipeline; 2] = [vk::Pipeline::null(), vk::Pipeline::null()];
-        let result = device.fp_v1_0().create_graphics_pipelines(
-            device.handle(),
-            vk::PipelineCache::null(),
-            2,
-            [
-                vk::GraphicsPipelineCreateInfo::builder()
-                    .flags(vk::PipelineCreateFlags::empty())
-                    .stages(&[vk::PipelineShaderStageCreateInfo::builder()
-                        .stage(vk::ShaderStageFlags::VERTEX)
-                        .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
-                        .module(depth_prepass_vertex_shader_module)
-                        .build()])
-                    .vertex_input_state(
-                        &vk::PipelineVertexInputStateCreateInfo::builder()
-                            .vertex_attribute_descriptions(&[vk::VertexInputAttributeDescription {
-                                location: 0,
-                                binding: 0,
-                                format: vk::Format::R32G32B32_SFLOAT,
-                                offset: 0,
-                            }])
-                            .vertex_binding_descriptions(&[vk::VertexInputBindingDescription {
-                                binding: 0,
-                                stride: std::mem::size_of::<[f32; 3]>() as u32,
-                                input_rate: vk::VertexInputRate::VERTEX,
-                            }])
-                            .build(),
-                    )
-                    .input_assembly_state(
-                        &vk::PipelineInputAssemblyStateCreateInfo::builder()
-                            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-                            .primitive_restart_enable(false)
-                            .build(),
-                    )
-                    .viewport_state(
-                        &vk::PipelineViewportStateCreateInfo::builder()
-                            .viewports(&[vk::Viewport::default()])
-                            .scissors(&[vk::Rect2D::default()])
-                            .build(),
-                    )
-                    .rasterization_state(
-                        &vk::PipelineRasterizationStateCreateInfo::builder()
-                            .depth_clamp_enable(false)
-                            .rasterizer_discard_enable(false)
-                            .polygon_mode(vk::PolygonMode::FILL)
-                            .cull_mode(vk::CullModeFlags::BACK)
-                            .front_face(vk::FrontFace::CLOCKWISE)
-                            .depth_bias_enable(false)
-                            .line_width(1.0)
-                            .build(),
-                    )
-                    .multisample_state(
-                        &vk::PipelineMultisampleStateCreateInfo::builder()
-                            .sample_shading_enable(false)
-                            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-                            .build(),
-                    )
-                    .depth_stencil_state(
-                        &vk::PipelineDepthStencilStateCreateInfo::builder()
-                            .depth_test_enable(true)
-                            .depth_compare_op(vk::CompareOp::LESS)
-                            .depth_write_enable(true)
-                            .depth_bounds_test_enable(false)
-                            .stencil_test_enable(true)
-                            .front(vk::StencilOpState {
-                                fail_op: vk::StencilOp::ZERO,
-                                pass_op: vk::StencilOp::REPLACE,
-                                depth_fail_op: vk::StencilOp::REPLACE,
-                                compare_op: vk::CompareOp::ALWAYS,
-                                compare_mask: 0,
-                                write_mask: 1,
-                                reference: 1
-                            })
-                            .build(),
-                    )
-                    .color_blend_state(
-                        &vk::PipelineColorBlendStateCreateInfo::builder()
-                            .logic_op_enable(false)
-                            .attachments(&[])
-                            .build(),
-                    )
-                    .dynamic_state(
-                        &vk::PipelineDynamicStateCreateInfo::builder()
-                            .dynamic_states(&[
-                                vk::DynamicState::VIEWPORT,
-                                vk::DynamicState::SCISSOR,
-                            ])
-                            .build(),
-                    )
-                    .layout(pipeline_layout)
-                    .render_pass(render_pass)
-                    .subpass(0)
-                    .base_pipeline_handle(vk::Pipeline::null())
-                    .base_pipeline_index(-1)
-                    .build(),
-                vk::GraphicsPipelineCreateInfo::builder()
-                    .flags(vk::PipelineCreateFlags::empty())
-                    .stages(&[
-                        vk::PipelineShaderStageCreateInfo::builder()
-                            .stage(vk::ShaderStageFlags::VERTEX)
-                            .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
-                            .module(vertex_shader_module)
-                            .build(),
-                        vk::PipelineShaderStageCreateInfo::builder()
-                            .stage(vk::ShaderStageFlags::FRAGMENT)
-                            .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
-                            .module(fragment_shader_module)
-                            .build(),
-                    ])
-                    .vertex_input_state(
-                        &vk::PipelineVertexInputStateCreateInfo::builder()
-                            .vertex_attribute_descriptions(&[vk::VertexInputAttributeDescription {
-                                location: 0,
-                                binding: 0,
-                                format: vk::Format::R32G32B32_SFLOAT,
-                                offset: 0,
-                            }])
-                            .vertex_binding_descriptions(&[vk::VertexInputBindingDescription {
-                                binding: 0,
-                                stride: std::mem::size_of::<[f32; 3]>() as u32,
-                                input_rate: vk::VertexInputRate::VERTEX,
-                            }])
-                            .build(),
-                    )
-                    .input_assembly_state(
-                        &vk::PipelineInputAssemblyStateCreateInfo::builder()
-                            .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
-                            .primitive_restart_enable(false)
-                            .build(),
-                    )
-                    .viewport_state(
-                        &vk::PipelineViewportStateCreateInfo::builder()
-                            .viewports(&[vk::Viewport::default()])
-                            .scissors(&[vk::Rect2D::default()])
-                            .build(),
-                    )
-                    .rasterization_state(
-                        &vk::PipelineRasterizationStateCreateInfo::builder()
-                            .depth_clamp_enable(false)
-                            .rasterizer_discard_enable(false)
-                            .polygon_mode(vk::PolygonMode::FILL)
-                            .cull_mode(vk::CullModeFlags::BACK)
-                            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-                            .depth_bias_enable(false)
-                            .line_width(1.0)
-                            .build(),
-                    )
-                    .multisample_state(
-                        &vk::PipelineMultisampleStateCreateInfo::builder()
-                            .sample_shading_enable(false)
-                            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-                            .build(),
-                    )
-                    .depth_stencil_state(
-                        &vk::PipelineDepthStencilStateCreateInfo::builder()
-                            .depth_test_enable(false)
-                            .depth_write_enable(false)
-                            .depth_bounds_test_enable(false)
-                            .stencil_test_enable(true)
-                            .front(vk::StencilOpState {
-                                fail_op: vk::StencilOp::KEEP,
-                                pass_op: vk::StencilOp::KEEP,
-                                depth_fail_op: vk::StencilOp::KEEP,
-                                compare_op: vk::CompareOp::EQUAL,
-                                compare_mask: 1,
-                                write_mask: 0,
-                                reference: 1
-                            })
-                            .build(),
-                    )
-                    .color_blend_state(
-                        &vk::PipelineColorBlendStateCreateInfo::builder()
-                            .logic_op_enable(false)
-                            .attachments(&[vk::PipelineColorBlendAttachmentState::builder()
-                                .color_write_mask(vk::ColorComponentFlags::all())
-                                .blend_enable(false)
-                                .build()])
-                            .build(),
-                    )
-                    .dynamic_state(
-                        &vk::PipelineDynamicStateCreateInfo::builder()
-                            .dynamic_states(&[
-                                vk::DynamicState::VIEWPORT,
-                                vk::DynamicState::SCISSOR,
-                            ])
-                            .build(),
-                    )
-                    .layout(pipeline_layout)
-                    .render_pass(render_pass)
-                    .subpass(1)
-                    .base_pipeline_handle(vk::Pipeline::null())
-                    .base_pipeline_index(-1)
-                    .build(),
-            ]
-            .as_ptr(),
-            std::ptr::null(),
-            pipelines.as_mut_ptr(),
-        );
-        assert_eq!(result, vk::Result::SUCCESS);
+        let pipelines = create_pipelines(device, pipeline_layout, render_pass);
 
         device.update_descriptor_sets(
             &[
@@ -491,8 +500,6 @@ impl RayTracer {
             ],
             &[],
         );
-        device.destroy_shader_module(vertex_shader_module, None);
-        device.destroy_shader_module(fragment_shader_module, None);
 
         let depth_sampler = device
             .create_sampler(
@@ -673,8 +680,8 @@ impl RenderPassProvider for RayTracer {
                 .clear_values(&clear_values),
             vk::SubpassContents::INLINE,
         );
-        {
-            let (buffer, i, index_count) = self.mesh.unwrap();
+        if let Some(mesh) = self.mesh {
+            let (buffer, i, index_count) = mesh;
             device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -750,7 +757,7 @@ pub mod systems {
 
     pub fn create_raytracer(
         mut commands: Commands,
-        mesh: Res<dust_core::svo::mesher::Mesh>,
+        mesh: Res<Option<dust_core::svo::mesher::Mesh>>,
         renderer: Res<Renderer>,
         mut render_resources: ResMut<RenderResources>,
     ) {
@@ -764,7 +771,9 @@ pub mod systems {
                 renderer.graphics_queue_family,
             );
             raytracer.bind_block_allocator_buffer(render_resources.block_allocator_buffer);
-            raytracer.bind_mesh(&mesh, &render_resources.allocator);
+            if let Some(mesh) = mesh.as_ref() {
+                raytracer.bind_mesh(&mesh, &render_resources.allocator);
+            }
             raytracer.bind_render_target(&mut render_resources.swapchain);
             raytracer
         };

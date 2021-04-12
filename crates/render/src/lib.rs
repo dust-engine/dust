@@ -58,6 +58,7 @@ enum RenderState {
 impl Plugin for DustPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app.insert_resource(SunLight::new(Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO))
+            .insert_resource::<Option<dust_core::svo::mesher::Mesh>>(None)
             .add_state(RenderState::InGame)
             .add_startup_system_to_stage(StartupStage::PreStartup, setup.system())
             .add_system_set(
