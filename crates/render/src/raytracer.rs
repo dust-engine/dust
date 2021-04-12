@@ -271,6 +271,7 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                         .dynamic_states(&[
                             vk::DynamicState::VIEWPORT,
                             vk::DynamicState::SCISSOR,
+                            vk::DynamicState::STENCIL_REFERENCE
                         ])
                         .build(),
                 )
@@ -692,6 +693,17 @@ impl RenderPassProvider for RayTracer {
             device.cmd_draw_indexed(command_buffer, index_count, 1, 0, 0, 0);
         }
         device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
+        if self.mesh.is_some() {
+            device.cmd_set_stencil_reference(command_buffer,
+            vk::StencilFaceFlags::FRONT,
+                1,
+            );
+        } else {
+            device.cmd_set_stencil_reference(command_buffer,
+                                             vk::StencilFaceFlags::FRONT,
+                                             0,
+            );
+        }
         {
             device.cmd_bind_pipeline(
                 command_buffer,

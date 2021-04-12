@@ -141,8 +141,12 @@ uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out u
 void main() {
     Ray ray = GenerateRay();
     float distance = subpassLoad(inputDepth).r;
-    distance = Camera.near * Camera.far / (Camera.far - distance*(Camera.far - Camera.near));
-    distance = distance / dot(Camera.forward, ray.dir);
+    if (distance == 1.0) {
+        distance = 0.0;
+    } else {
+        distance = Camera.near * Camera.far / (Camera.far - distance*(Camera.far - Camera.near));
+        distance = distance / dot(Camera.forward, ray.dir);
+    }
 
     float depth;
     vec3 hitpoint;
