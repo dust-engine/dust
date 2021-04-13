@@ -21,7 +21,7 @@ impl SystemBlockAllocator {
 }
 
 impl BlockAllocator for SystemBlockAllocator {
-    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError> {
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation, u32), AllocError> {
         let mem = self
             .allocator
             .allocate(Layout::from_size_align_unchecked(
@@ -30,7 +30,7 @@ impl BlockAllocator for SystemBlockAllocator {
             ))
             .map_err(|_| AllocError::OutOfHostMemory)?;
         let ptr = mem.as_mut_ptr();
-        Ok((mem.as_mut_ptr(), BlockAllocation(ptr as u64)))
+        Ok((mem.as_mut_ptr(), BlockAllocation(ptr as u64), 0))
     }
 
     unsafe fn deallocate_block(&self, block: BlockAllocation) {

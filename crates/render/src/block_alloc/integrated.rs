@@ -6,7 +6,7 @@ use crate::renderer::RenderContext;
 use crossbeam::queue::SegQueue;
 use dust_core::svo::alloc::{AllocError, BlockAllocation, BlockAllocator};
 use std::ops::Range;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering, AtomicU32};
 use std::sync::Arc;
 
 pub struct IntegratedBlockAllocator {
@@ -15,8 +15,8 @@ pub struct IntegratedBlockAllocator {
     memtype: u32,
     pub buffer: vk::Buffer,
 
-    current_offset: AtomicU64,
-    free_offsets: SegQueue<u64>,
+    current_offset: AtomicU32,
+    free_offsets: SegQueue<u32>,
     block_size: u64,
 }
 unsafe impl Send for IntegratedBlockAllocator {}
@@ -57,7 +57,7 @@ impl IntegratedBlockAllocator {
             bind_transfer_queue,
             memtype,
             buffer: device_buffer,
-            current_offset: AtomicU64::new(0),
+            current_offset: AtomicU32::new(0),
             free_offsets: SegQueue::new(),
             block_size,
         }
@@ -65,7 +65,7 @@ impl IntegratedBlockAllocator {
 }
 
 impl BlockAllocator for IntegratedBlockAllocator {
-    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError> {
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation, u32), AllocError> {
         let resource_offset = self
             .free_offsets
             .pop()
@@ -94,7 +94,7 @@ impl BlockAllocator for IntegratedBlockAllocator {
                     .buffer_binds(&[vk::SparseBufferMemoryBindInfo::builder()
                         .buffer(self.buffer)
                         .binds(&[vk::SparseMemoryBind {
-                            resource_offset: resource_offset * self.block_size as u64,
+                            resource_offset: resource_offset as u64 * self.block_size as u64,
                             size: self.block_size,
                             memory: mem,
                             memory_offset: 0,
@@ -106,7 +106,7 @@ impl BlockAllocator for IntegratedBlockAllocator {
             )
             .map_err(super::utils::map_err)?;
         let allocation = BlockAllocation(std::mem::transmute(mem));
-        Ok((ptr, allocation))
+        Ok((ptr, allocation, resource_offset))
     }
 
     unsafe fn deallocate_block(&self, block: BlockAllocation) {

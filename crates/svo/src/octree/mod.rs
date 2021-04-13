@@ -5,6 +5,7 @@ use crate::{Corner, Voxel};
 
 pub mod accessor;
 mod io;
+mod supertree;
 
 #[derive(Default)]
 #[repr(C)]

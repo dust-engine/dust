@@ -24,7 +24,8 @@ impl Drop for BlockAllocation {
 }
 
 pub trait BlockAllocator: Send + Sync {
-    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError>;
+    // Returns ptr, allocation, block index
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation, u32), AllocError>;
     unsafe fn deallocate_block(&self, block: BlockAllocation);
     unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>);
     fn can_flush(&self) -> bool;

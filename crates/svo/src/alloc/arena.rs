@@ -98,13 +98,12 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             changeset: ChangeSet::new(0),
         }
     }
-    pub fn alloc_block(&mut self) -> Handle {
-        let chunk_index = self.chunks.len() as u32;
-        let (chunk, allocation) = unsafe { self.block_allocator.allocate_block().unwrap() };
+    pub fn alloc_block(&mut self) -> u32 {
+        let (chunk, allocation, chunk_index) = unsafe { self.block_allocator.allocate_block().unwrap() };
         self.chunks
             .push(unsafe { (NonNull::new_unchecked(chunk as _), allocation) });
         self.capacity += NUM_SLOTS_IN_BLOCK;
-        Handle::from_index(chunk_index, 0)
+        chunk_index
     }
     pub fn alloc(&mut self, len: u32) -> Handle {
         assert!(0 < len && len <= 8, "Only supports block size between 1-8!");
@@ -118,17 +117,17 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             if self.newspace_top.is_none() {
                 // We've run out of newspace.
                 // Allocate a new memory chunk from the underlying block allocator.
-                let alloc_head = self.alloc_block();
-                self.newspace_top = Handle::from_index(alloc_head.get_chunk_num(), len);
+                let allocated_block_index = self.alloc_block();
+                let alloc_head = Handle::from_index(allocated_block_index, 0);
+                self.newspace_top = alloc_head.offset(len);
                 alloc_head
             } else {
                 // There's still space remains to be allocated in the current chunk.
                 let handle = self.newspace_top;
                 let slot_index = handle.get_slot_num();
-                let chunk_index = handle.get_chunk_num();
                 let remaining_space = NUM_SLOTS_IN_BLOCK - slot_index - len;
 
-                let new_handle = Handle::from_index(chunk_index, slot_index + len);
+                let new_handle = handle.offset(len);
                 if remaining_space > 8 {
                     self.newspace_top = new_handle;
                 } else {
@@ -145,16 +144,10 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         };
 
         // initialize to zero
-        let slot_index = handle.get_slot_num();
-        let chunk_index = handle.get_chunk_num();
         unsafe {
-            let base = self.chunks[chunk_index as usize]
-                .0
-                .as_ptr()
-                .add(slot_index as usize);
             for i in 0..len {
-                let i = &mut *base.add(i as usize);
-                i.occupied = Default::default();
+                let handle = handle.offset(i);
+                self.get_slot_mut(handle).occupied = Default::default();
             }
         }
         handle

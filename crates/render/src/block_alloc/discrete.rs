@@ -5,14 +5,14 @@ use ash::vk;
 use crossbeam::queue::SegQueue;
 use dust_core::svo::alloc::{AllocError, BlockAllocation, BlockAllocator};
 use std::ops::Range;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering, AtomicU32};
 use std::sync::Arc;
 
 pub struct DiscreteBlock {
     system_mem: vk::DeviceMemory,
     system_buf: vk::Buffer,
     device_mem: vk::DeviceMemory,
-    offset: u64,
+    offset: u32,
     sparse_binding_completion_semaphore: vk::Semaphore,
 }
 
@@ -23,8 +23,8 @@ pub struct DiscreteBlockAllocator {
     pub device_buffer: vk::Buffer,
     device_memtype: u32,
 
-    current_offset: AtomicU64,
-    free_offsets: SegQueue<u64>,
+    current_offset: AtomicU32,
+    free_offsets: SegQueue<u32>,
 
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
@@ -101,7 +101,7 @@ impl DiscreteBlockAllocator {
             bind_transfer_queue,
             device_buffer,
             device_memtype,
-            current_offset: AtomicU64::new(0),
+            current_offset: AtomicU32::new(0),
             free_offsets: SegQueue::new(),
             command_pool,
             command_buffer,
@@ -112,8 +112,8 @@ impl DiscreteBlockAllocator {
 }
 
 impl BlockAllocator for DiscreteBlockAllocator {
-    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError> {
-        let resource_offset = self
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation, u32), AllocError> {
+        let resource_offset: u32 = self
             .free_offsets
             .pop()
             .unwrap_or_else(|| self.current_offset.fetch_add(1, Ordering::Relaxed));
@@ -192,7 +192,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
                     .buffer_binds(&[vk::SparseBufferMemoryBindInfo::builder()
                         .buffer(self.device_buffer)
                         .binds(&[vk::SparseMemoryBind {
-                            resource_offset: resource_offset * self.block_size as u64,
+                            resource_offset: resource_offset as u64 * self.block_size,
                             size: self.block_size,
                             memory: device_mem,
                             memory_offset: 0,
@@ -218,7 +218,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
         };
         let block = Box::new(block);
         let allocation = BlockAllocation(Box::into_raw(block) as u64);
-        Ok((ptr, allocation))
+        Ok((ptr, allocation, resource_offset))
     }
 
     unsafe fn deallocate_block(&self, allocation: BlockAllocation) {
@@ -253,7 +253,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
         for (block_allocation, range) in ranges {
             let block = block_allocation.0 as *const DiscreteBlock;
             let block = &*block;
-            let location = block.offset * self.block_size as u64 + range.start as u64;
+            let location = block.offset as u64 * self.block_size as u64 + range.start as u64;
             semaphores.push(block.sparse_binding_completion_semaphore);
 
             self.context.device.cmd_copy_buffer(
