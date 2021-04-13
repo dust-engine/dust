@@ -60,7 +60,7 @@ unsafe fn create_depth_image(
     allocator: &vma::Allocator,
     config: &SwapchainConfig,
 ) -> DepthImage {
-    let (image, allocation, allocation_info) = allocator
+    let (image, allocation, _allocation_info) = allocator
         .create_image(
             &vk::ImageCreateInfo::builder()
                 .flags(vk::ImageCreateFlags::empty())

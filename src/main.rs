@@ -37,8 +37,11 @@ fn main() {
         .run();
 }
 
-fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>, mut mesh: ResMut<Option<
-    dust_core::svo::mesher::Mesh>>) {
+fn setup_from_oct_file(
+    mut commands: Commands,
+    mut octree: ResMut<Octree>,
+    mut mesh: ResMut<Option<dust_core::svo::mesher::Mesh>>,
+) {
     let file = std::fs::File::open("./test.oct").unwrap();
     let mut reader = std::io::BufReader::new(file);
     Octree::read(&mut octree, &mut reader, 12);
@@ -46,7 +49,9 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>, mut m
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(50.0, 6.0, 50.0);
-    bundle.transform.look_at(Vec3::new(100.0, 0.0, 120.0), Vec3::Y);
+    bundle
+        .transform
+        .look_at(Vec3::new(100.0, 0.0, 120.0), Vec3::Y);
     commands
         .spawn()
         .insert_bundle(bundle)
@@ -119,14 +124,16 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                 load_region(x, y);
             }
         }
-        let mut file = std::fs::File::create("./test.oct").unwrap();
+        let file = std::fs::File::create("./test.oct").unwrap();
         let mut bufwriter = BufWriter::new(file);
         octree.write(&mut bufwriter);
     });
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(50.0, 6.0, 50.0);
-    bundle.transform.look_at(Vec3::new(100.0, 0.0, 120.0), Vec3::Y);
+    bundle
+        .transform
+        .look_at(Vec3::new(100.0, 0.0, 120.0), Vec3::Y);
     commands
         .spawn()
         .insert_bundle(bundle)

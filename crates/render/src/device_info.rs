@@ -1,4 +1,4 @@
-use ash::version::{EntryV1_0, InstanceV1_0, InstanceV1_1};
+use ash::version::{EntryV1_0, InstanceV1_0};
 use ash::vk;
 use std::ffi::CStr;
 

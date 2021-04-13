@@ -4,7 +4,6 @@
 #[macro_use]
 extern crate memoffset;
 
-
 #[macro_use]
 extern crate log;
 
@@ -42,7 +41,7 @@ use crate::render_resources::RenderResources;
 use crate::swapchain::Swapchain;
 use ash::version::DeviceV1_0;
 use bevy::app::AppExit;
-use dust_core::svo::alloc::BLOCK_SIZE;
+
 use dust_core::svo::ArenaAllocator;
 use std::borrow::BorrowMut;
 
@@ -92,7 +91,7 @@ fn setup(
 
     let winit_window = winit_windows.get_window(window_id).unwrap();
     unsafe {
-        let mut renderer = Renderer::new(winit_window);
+        let renderer = Renderer::new(winit_window);
         let render_resources = RenderResources::new(&renderer);
         let arena = ArenaAllocator::new(render_resources.block_allocator.clone());
         let octree = Octree::new(arena);
@@ -120,14 +119,14 @@ fn world_update(
     if window_resized_events.iter().next().is_some() {
         unsafe {
             renderer.context.device.device_wait_idle().unwrap();
-            let config = Swapchain::get_config(
+            let _config = Swapchain::get_config(
                 renderer.physical_device,
                 renderer.context.surface,
                 &renderer.context.surface_loader,
                 &renderer.quirks,
             );
 
-            let allocator = &render_resources.allocator;
+            let _allocator = &render_resources.allocator;
             //render_resources.swapchain.recreate(allocator, config);
             raytracer.bind_render_target(&mut render_resources.swapchain);
         }

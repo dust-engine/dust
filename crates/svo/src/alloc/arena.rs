@@ -3,8 +3,8 @@ use crate::alloc::changeset::ChangeSet;
 
 use std::mem::{size_of, ManuallyDrop};
 
-use std::ptr::NonNull;
 use crate::alloc::BlockAllocation;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 pub const BLOCK_MASK_DEGREE: u32 = 20;
@@ -102,12 +102,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         let chunk_index = self.chunks.len() as u32;
         let (chunk, allocation) = unsafe { self.block_allocator.allocate_block().unwrap() };
         self.chunks
-            .push(unsafe {
-                (
-                    NonNull::new_unchecked(chunk as _),
-                    allocation
-                )
-            });
+            .push(unsafe { (NonNull::new_unchecked(chunk as _), allocation) });
         self.capacity += NUM_SLOTS_IN_BLOCK;
         Handle::from_index(chunk_index, 0)
     }
@@ -242,7 +237,6 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         }
     }
 }
-
 
 impl<T: ArenaAllocated> Drop for ArenaAllocator<T> {
     fn drop(&mut self) {

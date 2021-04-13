@@ -1,8 +1,7 @@
-use std::alloc::{alloc, alloc_zeroed, AllocError, Allocator, Layout};
+use std::alloc::{alloc, Layout};
 use std::mem::MaybeUninit;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
-use std::ptr::NonNull;
 
 pub struct StackAllocator<T> {
     head: usize,

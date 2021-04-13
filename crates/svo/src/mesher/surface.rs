@@ -52,7 +52,7 @@ impl Surface {
     pub fn fill<T: Copy>(&self, allocator: &mut StackAllocator<T>, value: T) {
         let slice = &mut allocator[self.handle];
         let mut index = self.offset_y * self.width + self.offset_x;
-        for y in 0..self.size {
+        for _y in 0..self.size {
             for x in 0..self.size {
                 slice[index + x].write(value);
             }

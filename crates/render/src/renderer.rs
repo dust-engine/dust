@@ -1,17 +1,17 @@
 use crate::device_info::{DeviceInfo, Quirks};
-use crate::raytracer::RayTracer;
 
-use crate::swapchain::Swapchain;
+
+
 
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
 use std::ffi::CStr;
-use std::mem::ManuallyDrop;
-use vk_mem as vma;
 
-use crate::material::Material;
-use crate::material_repo::TextureRepo;
-use dust_core::svo::alloc::{BlockAllocator, BLOCK_SIZE};
+
+
+
+
+
 use std::sync::Arc;
 
 use std::borrow::Cow;
@@ -35,7 +35,6 @@ pub struct Renderer {
     pub transfer_binding_queue_family: u32,
     pub info: DeviceInfo,
 }
-
 
 unsafe fn display_debug_utils_label_ext(
     label_structs: *mut vk::DebugUtilsLabelEXT,
@@ -163,7 +162,7 @@ unsafe extern "system" fn debug_utils_messenger_callback(
         }
         //println!("{}\n", msg);
     }
-        
+
     log!(message_severity, "{}\n", {
         let mut msg = format!(
             "\n{} [{} (0x{:x})] : {}",
@@ -189,16 +188,14 @@ impl Renderer {
     pub unsafe fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Renderer {
         unsafe {
             let entry = ash::Entry::new().unwrap();
-            let instance_extensions = entry
-                .enumerate_instance_extension_properties()
-                .unwrap();
+            let instance_extensions = entry.enumerate_instance_extension_properties().unwrap();
 
             let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
             extensions.push(ash::extensions::ext::DebugUtils::name());
 
-            let layers: [&CStr; 1] = [
-                &CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0"),
-            ];
+            let layers: [&CStr; 1] = [&CStr::from_bytes_with_nul_unchecked(
+                b"VK_LAYER_KHRONOS_validation\0",
+            )];
             let instance = entry
                 .create_instance(
                     &vk::InstanceCreateInfo::builder()
@@ -223,23 +220,24 @@ impl Renderer {
                 )
                 .unwrap();
 
-                let debug_messenger = {
-                    // make sure VK_EXT_debug_utils is available
-                    if instance_extensions.iter().any(|props| unsafe {
-                        CStr::from_ptr(props.extension_name.as_ptr()) == ash::extensions::ext::DebugUtils::name()
-                    }) {
-                        let ext = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-                        let info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-                            .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
-                            .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
-                            .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
-                            .pfn_user_callback(Some(debug_utils_messenger_callback));
-                        let handle = unsafe { ext.create_debug_utils_messenger(&info, None) }.unwrap();
-                        Some((ext, handle))
-                    } else {
-                        None
-                    }
-                };
+            let _debug_messenger = {
+                // make sure VK_EXT_debug_utils is available
+                if instance_extensions.iter().any(|props| unsafe {
+                    CStr::from_ptr(props.extension_name.as_ptr())
+                        == ash::extensions::ext::DebugUtils::name()
+                }) {
+                    let ext = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+                    let info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                        .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
+                        .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
+                        .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
+                        .pfn_user_callback(Some(debug_utils_messenger_callback));
+                    let handle = unsafe { ext.create_debug_utils_messenger(&info, None) }.unwrap();
+                    Some((ext, handle))
+                } else {
+                    None
+                }
+            };
 
             let surface =
                 ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();
@@ -251,21 +249,21 @@ impl Renderer {
                     let device_info = DeviceInfo::new(&entry, &instance, physical_device);
                     (physical_device, device_info)
                 })
-                .filter(|(physical_device, device_info)| {
+                .filter(|(_physical_device, device_info)| {
                     device_info.features.sparse_residency_buffer != 0
                         && device_info.features.sparse_binding != 0
                 })
                 .collect();
             let (physical_device, device_info) = available_physical_devices
                 .iter()
-                .find(|(physical_device, device_info)| {
+                .find(|(_physical_device, device_info)| {
                     device_info.physical_device_properties.device_type
                         == vk::PhysicalDeviceType::DISCRETE_GPU
                 })
                 .or_else(|| {
                     available_physical_devices
                         .iter()
-                        .find(|(physical_device, device_info)| {
+                        .find(|(_physical_device, device_info)| {
                             device_info.physical_device_properties.device_type
                                 == vk::PhysicalDeviceType::INTEGRATED_GPU
                         })

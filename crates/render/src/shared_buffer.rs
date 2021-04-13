@@ -4,7 +4,7 @@ use crate::renderer::RenderContext;
 use ash::version::DeviceV1_0;
 use dust_core::CameraProjection;
 use dust_core::SunLight;
-use glam::{Mat4, TransformRT, Vec3, Vec4};
+use glam::{Mat4, TransformRT, Vec3};
 use std::mem::size_of;
 use std::sync::Arc;
 use vk_mem as vma;
@@ -74,8 +74,8 @@ impl SharedBuffer {
         let span = tracing::info_span!("shared_buffer_new");
         let _enter = span.enter();
 
-        let device = &context.device;
-        let needs_staging = !memory_properties.memory_types
+        let _device = &context.device;
+        let _needs_staging = !memory_properties.memory_types
             [0..memory_properties.memory_type_count as usize]
             .iter()
             .any(|ty| {
@@ -178,8 +178,10 @@ impl SharedBuffer {
         transform: &TransformRT,
         aspect_ratio: f32,
     ) {
-        let rotation_only_proj_matrix = Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
-        let proj_matrix = Mat4::from_rotation_translation(transform.rotation, transform.translation);
+        let rotation_only_proj_matrix =
+            Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
+        let proj_matrix =
+            Mat4::from_rotation_translation(transform.rotation, transform.translation);
         let forward_vector = transform.rotation * Vec3::new(0.0, 0.0, -1.0);
 
         let cubed_projection_matrix = CameraProjection {
@@ -189,8 +191,9 @@ impl SharedBuffer {
         };
         self.layout.view_proj =
             camera_projection.get_projection_matrix(aspect_ratio) * proj_matrix.inverse(); // The normal ViewProj matrix
-        self.layout.rotation_view_proj =
-            cubed_projection_matrix.get_projection_matrix(aspect_ratio) * rotation_only_proj_matrix.inverse();
+        self.layout.rotation_view_proj = cubed_projection_matrix
+            .get_projection_matrix(aspect_ratio)
+            * rotation_only_proj_matrix.inverse();
         self.layout.camera_position = transform.translation;
         self.layout.forward = forward_vector.normalize();
         self.layout.far = camera_projection.far;

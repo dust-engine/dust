@@ -127,7 +127,7 @@ impl<T: Voxel> Octree<T> {
                                                                           // is always one.
         block_size_map.push_back((Handle::none(), 1));
         let mut slots_loaded: u32 = 0;
-        let total_slots = if lod as usize >= fences.len() {
+        let _total_slots = if lod as usize >= fences.len() {
             u32::MAX
         } else {
             fences[lod as usize]

@@ -3,11 +3,11 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 
 use crate::renderer::RenderContext;
-use dust_core::svo::alloc::{AllocError, BlockAllocator, BlockAllocation};
-use std::ops::Range;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use crossbeam::queue::SegQueue;
+use dust_core::svo::alloc::{AllocError, BlockAllocation, BlockAllocator};
+use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub struct IntegratedBlockAllocator {
     context: Arc<RenderContext>,
@@ -66,9 +66,10 @@ impl IntegratedBlockAllocator {
 
 impl BlockAllocator for IntegratedBlockAllocator {
     unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError> {
-        let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
-            self.current_offset.fetch_add(1, Ordering::Relaxed)
-        });
+        let resource_offset = self
+            .free_offsets
+            .pop()
+            .unwrap_or_else(|| self.current_offset.fetch_add(1, Ordering::Relaxed));
         let mem = self
             .context
             .device

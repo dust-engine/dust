@@ -76,7 +76,7 @@ impl TextureRepo {
             // Copy data into the buffer
             let mut current_offset: usize = 0;
             let mut indices: Vec<usize> = Vec::with_capacity(num_images as usize);
-            for (i, material) in self.materials.iter().enumerate() {
+            for (_i, material) in self.materials.iter().enumerate() {
                 let rgba8img = material.diffuse.as_rgba8().unwrap();
                 unsafe {
                     std::ptr::copy_nonoverlapping(

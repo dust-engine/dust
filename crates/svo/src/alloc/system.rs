@@ -3,8 +3,8 @@ use std::ptr::NonNull;
 //use crate::alloc::{handle_alloc_error, AllocError, Allocator, Global, Layout, WriteCloneIntoRaw};
 use super::AllocError;
 use super::BlockAllocator;
-use std::alloc::{Allocator, Global, Layout};
 use crate::alloc::BlockAllocation;
+use std::alloc::{Allocator, Global, Layout};
 
 pub struct SystemBlockAllocator<A: Allocator = Global> {
     allocator: A,

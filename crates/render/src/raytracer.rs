@@ -43,7 +43,11 @@ pub struct RayTracer {
     mesh: Option<(vk::Buffer, u64, u32)>,
 }
 
-unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLayout, render_pass: vk::RenderPass) -> [vk::Pipeline; 2] {
+unsafe fn create_pipelines(
+    device: &ash::Device,
+    pipeline_layout: vk::PipelineLayout,
+    render_pass: vk::RenderPass,
+) -> [vk::Pipeline; 2] {
     let vertex_shader_module = device
         .create_shader_module(
             &vk::ShaderModuleCreateInfo::builder()
@@ -51,7 +55,7 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                     &ash::util::read_spv(&mut Cursor::new(
                         &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.vert.spv"))[..],
                     ))
-                        .unwrap(),
+                    .unwrap(),
                 )
                 .build(),
             None,
@@ -64,29 +68,25 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                     &ash::util::read_spv(&mut Cursor::new(
                         &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.frag.spv"))[..],
                     ))
-                        .unwrap(),
+                    .unwrap(),
                 )
                 .build(),
             None,
         )
         .unwrap();
-    let depth_prepass_vertex_shader_module =
-        device
-            .create_shader_module(
-                &vk::ShaderModuleCreateInfo::builder()
-                    .code(
-                        &ash::util::read_spv(&mut Cursor::new(
-                            &include_bytes!(concat!(
-                            env!("OUT_DIR"),
-                            "/shaders/depth.vert.spv"
-                            ))[..],
-                        ))
-                            .unwrap(),
-                    )
-                    .build(),
-                None,
-            )
-            .unwrap();
+    let depth_prepass_vertex_shader_module = device
+        .create_shader_module(
+            &vk::ShaderModuleCreateInfo::builder()
+                .code(
+                    &ash::util::read_spv(&mut Cursor::new(
+                        &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/depth.vert.spv"))[..],
+                    ))
+                    .unwrap(),
+                )
+                .build(),
+            None,
+        )
+        .unwrap();
     let mut pipelines: [vk::Pipeline; 2] = [vk::Pipeline::null(), vk::Pipeline::null()];
     let result = device.fp_v1_0().create_graphics_pipelines(
         device.handle(),
@@ -158,7 +158,7 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                             compare_op: vk::CompareOp::ALWAYS,
                             compare_mask: 0,
                             write_mask: 1,
-                            reference: 1
+                            reference: 1,
                         })
                         .build(),
                 )
@@ -170,10 +170,7 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                 )
                 .dynamic_state(
                     &vk::PipelineDynamicStateCreateInfo::builder()
-                        .dynamic_states(&[
-                            vk::DynamicState::VIEWPORT,
-                            vk::DynamicState::SCISSOR,
-                        ])
+                        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR])
                         .build(),
                 )
                 .layout(pipeline_layout)
@@ -253,7 +250,7 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                             compare_op: vk::CompareOp::EQUAL,
                             compare_mask: 1,
                             write_mask: 0,
-                            reference: 1
+                            reference: 1,
                         })
                         .build(),
                 )
@@ -271,7 +268,7 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                         .dynamic_states(&[
                             vk::DynamicState::VIEWPORT,
                             vk::DynamicState::SCISSOR,
-                            vk::DynamicState::STENCIL_REFERENCE
+                            vk::DynamicState::STENCIL_REFERENCE,
                         ])
                         .build(),
                 )
@@ -282,7 +279,7 @@ unsafe fn create_pipelines(device: &ash::Device, pipeline_layout: vk::PipelineLa
                 .base_pipeline_index(-1)
                 .build(),
         ]
-            .as_ptr(),
+        .as_ptr(),
         std::ptr::null(),
         pipelines.as_mut_ptr(),
     );
@@ -565,7 +562,7 @@ impl RayTracer {
     pub fn bind_mesh(&mut self, mesh: &Mesh, allocator: &vma::Allocator) {
         let vertex_size = (mesh.vertices.len() * 3 * std::mem::size_of::<f32>()) as u64;
         let index_size = (mesh.indices.len() * std::mem::size_of::<u32>()) as u64;
-        let (buffer, allocation, allocation_info) = allocator
+        let (buffer, _allocation, allocation_info) = allocator
             .create_buffer(
                 &vk::BufferCreateInfo::builder()
                     .usage(vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER)
@@ -694,15 +691,9 @@ impl RenderPassProvider for RayTracer {
         }
         device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
         if self.mesh.is_some() {
-            device.cmd_set_stencil_reference(command_buffer,
-            vk::StencilFaceFlags::FRONT,
-                1,
-            );
+            device.cmd_set_stencil_reference(command_buffer, vk::StencilFaceFlags::FRONT, 1);
         } else {
-            device.cmd_set_stencil_reference(command_buffer,
-                                             vk::StencilFaceFlags::FRONT,
-                                             0,
-            );
+            device.cmd_set_stencil_reference(command_buffer, vk::StencilFaceFlags::FRONT, 0);
         }
         {
             device.cmd_bind_pipeline(
@@ -762,7 +753,7 @@ impl Drop for RayTracer {
 
 pub mod systems {
     use super::RayTracer;
-    use crate::core::Octree;
+    
     use crate::render_resources::RenderResources;
     use crate::Renderer;
     use bevy::prelude::*;

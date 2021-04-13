@@ -1,5 +1,5 @@
 use crate::bounds::Bounds;
-use crate::dir::{Corner, Edge, Face, Quadrant};
+use crate::dir::{Corner, Edge};
 use crate::mesher::stack::StackAllocator;
 use crate::mesher::surface::Surface;
 use crate::mesher::Mesh;
@@ -8,7 +8,6 @@ use crate::octree::Octree;
 use crate::Voxel;
 use glam::{Vec2, Vec3};
 use std::fmt::Debug;
-use std::mem::MaybeUninit;
 
 pub struct MarchingCubeMeshBuilder<T> {
     vertices: Vec<Vec3>,
@@ -145,7 +144,7 @@ impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
             std::mem::transmute(slice.as_ptr())
         };
         let mut edge_bin = edge_table[edge_index as usize];
-        for edge_index in 0..5 {
+        for _edge_index in 0..5 {
             let edges = edge_bin & 0xfff;
             if edges == 0xfff {
                 break;
@@ -232,7 +231,7 @@ impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
 
             // At this point, all surfaces should be filled.
             // Run Marching cube algorithms on the 3 surfaces
-            let cell_width = (Bounds::MAX_WIDTH >> self.lod);
+            let _cell_width = Bounds::MAX_WIDTH >> self.lod;
 
             build_surface!(XY; self, lod, &surface_xy_maxz, &surface_xy_minz, node; Vec3::new(1.0, 0.0, 0.0));
             build_surface!(XZ; self, lod, &surface_xz_miny, &surface_xz_maxy, node; Vec3::new(0.0, 1.0, 0.0));
