@@ -32,7 +32,7 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup.system())
+        .add_startup_system(setup_from_oct_file.system())
         .add_system(run.system())
         .run();
 }

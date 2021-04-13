@@ -4,6 +4,7 @@ use crate::alloc::changeset::ChangeSet;
 use std::mem::{size_of, ManuallyDrop};
 
 use std::ptr::NonNull;
+use crate::alloc::BlockAllocation;
 
 pub const BLOCK_MASK_DEGREE: u32 = 20;
 pub const NUM_SLOTS_IN_BLOCK: u32 = 1 << BLOCK_MASK_DEGREE;
@@ -61,7 +62,7 @@ pub trait ArenaAllocated: Sized + Default {}
 
 pub struct ArenaAllocator<T: ArenaAllocated> {
     block_allocator: Box<ArenaBlockAllocator>,
-    chunks: Vec<NonNull<ArenaSlot<T>>>,
+    chunks: Vec<(NonNull<ArenaSlot<T>>, BlockAllocation)>,
     freelist_heads: [Handle; 8],
     newspace_top: Handle,       // new space to be allocated
     pub(crate) size: u32,       // number of allocated slots
@@ -98,9 +99,14 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
     }
     pub fn alloc_block(&mut self) -> Handle {
         let chunk_index = self.chunks.len() as u32;
-        let chunk = unsafe { self.block_allocator.allocate_block().unwrap() };
+        let (chunk, allocation) = unsafe { self.block_allocator.allocate_block().unwrap() };
         self.chunks
-            .push(unsafe { NonNull::new_unchecked(chunk as _) });
+            .push(unsafe {
+                (
+                    NonNull::new_unchecked(chunk as _),
+                    allocation
+                )
+            });
         self.capacity += NUM_SLOTS_IN_BLOCK;
         Handle::from_index(chunk_index, 0)
     }
@@ -147,6 +153,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         let chunk_index = handle.get_chunk_num();
         unsafe {
             let base = self.chunks[chunk_index as usize]
+                .0
                 .as_ptr()
                 .add(slot_index as usize);
             for i in 0..len {
@@ -180,7 +187,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let base = self.chunks[chunk_index as usize].as_ptr();
+            let base = self.chunks[chunk_index as usize].0.as_ptr();
             &*base.add(slot_index as usize)
         }
     }
@@ -189,7 +196,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let base = self.chunks[chunk_index as usize].as_ptr();
+            let base = self.chunks[chunk_index as usize].0.as_ptr();
             &mut *base.add(slot_index as usize)
         }
     }
@@ -224,10 +231,10 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         }
         let chunks = &self.chunks;
         let mut iter = self.changeset.drain().map(|(chunk_index, range)| {
-            let ptr = chunks[chunk_index];
+            let ptr = &chunks[chunk_index].1;
             let size: u32 = size_of::<T>() as u32;
             let range = (range.start * size)..(range.end * size);
-            (ptr.as_ptr() as *mut u8, range)
+            (ptr, range)
         });
         unsafe {
             self.block_allocator.flush(&mut iter);

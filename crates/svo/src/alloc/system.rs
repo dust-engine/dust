@@ -4,6 +4,7 @@ use std::ptr::NonNull;
 use super::AllocError;
 use super::BlockAllocator;
 use std::alloc::{Allocator, Global, Layout};
+use crate::alloc::BlockAllocation;
 
 pub struct SystemBlockAllocator<A: Allocator = Global> {
     allocator: A,
@@ -20,7 +21,7 @@ impl SystemBlockAllocator {
 }
 
 impl BlockAllocator for SystemBlockAllocator {
-    unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError> {
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError> {
         let mem = self
             .allocator
             .allocate(Layout::from_size_align_unchecked(
@@ -28,20 +29,22 @@ impl BlockAllocator for SystemBlockAllocator {
                 1,
             ))
             .map_err(|_| AllocError::OutOfHostMemory)?;
-        Ok(mem.as_mut_ptr())
+        let ptr = mem.as_mut_ptr();
+        Ok((mem.as_mut_ptr(), BlockAllocation(ptr as u64)))
     }
 
-    unsafe fn deallocate_block(&mut self, block: *mut u8) {
+    unsafe fn deallocate_block(&self, block: BlockAllocation) {
         let _layout = Layout::new::<u8>()
             .repeat(self.block_size as usize)
             .unwrap();
         self.allocator.deallocate(
-            NonNull::new(block).unwrap(),
+            NonNull::new(block.0 as *mut u8).unwrap(),
             Layout::from_size_align_unchecked(self.block_size as usize, 1),
         );
+        std::mem::forget(block);
     }
 
-    unsafe fn flush(&mut self, _ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {}
+    unsafe fn flush(&self, _ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>) {}
 
     fn can_flush(&self) -> bool {
         true

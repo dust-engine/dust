@@ -83,6 +83,7 @@ impl SharedBuffer {
                     vk::MemoryPropertyFlags::DEVICE_LOCAL | vk::MemoryPropertyFlags::HOST_VISIBLE,
                 )
             });
+        let needs_staging = true;
         tracing::info!("SharedBuffer using staging: {:?}", needs_staging);
         let (buffer, allocation, allocation_info) = allocator
             .create_buffer(

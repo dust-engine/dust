@@ -3,10 +3,11 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 
 use crate::renderer::RenderContext;
-use dust_core::svo::alloc::{AllocError, BlockAllocator};
-use std::collections::HashMap;
+use dust_core::svo::alloc::{AllocError, BlockAllocator, BlockAllocation};
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use crossbeam::queue::SegQueue;
 
 pub struct IntegratedBlockAllocator {
     context: Arc<RenderContext>,
@@ -14,9 +15,8 @@ pub struct IntegratedBlockAllocator {
     memtype: u32,
     pub buffer: vk::Buffer,
 
-    current_offset: u64,
-    free_offsets: Vec<u64>,
-    allocations: HashMap<*mut u8, vk::DeviceMemory>,
+    current_offset: AtomicU64,
+    free_offsets: SegQueue<u64>,
     block_size: u64,
 }
 unsafe impl Send for IntegratedBlockAllocator {}
@@ -57,20 +57,17 @@ impl IntegratedBlockAllocator {
             bind_transfer_queue,
             memtype,
             buffer: device_buffer,
-            current_offset: 0,
-            free_offsets: Vec::new(),
-            allocations: HashMap::new(),
+            current_offset: AtomicU64::new(0),
+            free_offsets: SegQueue::new(),
             block_size,
         }
     }
 }
 
 impl BlockAllocator for IntegratedBlockAllocator {
-    unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError> {
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError> {
         let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
-            let val = self.current_offset;
-            self.current_offset += 1;
-            val
+            self.current_offset.fetch_add(1, Ordering::Relaxed)
         });
         let mem = self
             .context
@@ -107,25 +104,24 @@ impl BlockAllocator for IntegratedBlockAllocator {
                 vk::Fence::null(),
             )
             .map_err(super::utils::map_err)?;
-        self.allocations.insert(ptr, mem);
-        Ok(ptr)
+        let allocation = BlockAllocation(std::mem::transmute(mem));
+        Ok((ptr, allocation))
     }
 
-    unsafe fn deallocate_block(&mut self, block: *mut u8) {
-        let memory = self.allocations.remove(&block).unwrap();
+    unsafe fn deallocate_block(&self, block: BlockAllocation) {
+        let memory: vk::DeviceMemory = std::mem::transmute(block);
         self.context.device.unmap_memory(memory);
         self.context.device.free_memory(memory, None);
     }
 
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
+    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>) {
         // TODO: only do this for non-coherent memory
-        let allocations = &self.allocations;
         self.context
             .device
             .flush_mapped_memory_ranges(
                 &ranges
-                    .map(|(ptr, range)| {
-                        let memory = allocations[&ptr];
+                    .map(|(allocation, range)| {
+                        let memory: vk::DeviceMemory = std::mem::transmute(allocation.0);
                         vk::MappedMemoryRange::builder()
                             .memory(memory)
                             .offset(range.start as u64)
@@ -178,9 +174,6 @@ impl Drop for IntegratedBlockAllocator {
         unsafe {
             self.context.device.device_wait_idle().unwrap();
             self.context.device.destroy_buffer(self.buffer, None);
-            for i in self.allocations.values() {
-                self.context.device.free_memory(*i, None);
-            }
         }
     }
 }

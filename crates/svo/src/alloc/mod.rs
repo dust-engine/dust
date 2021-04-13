@@ -16,9 +16,16 @@ pub enum AllocError {
     TooManyObjects,
 }
 
+pub struct BlockAllocation(pub u64);
+impl Drop for BlockAllocation {
+    fn drop(&mut self) {
+        panic!("BlockAllocation must be returned to the BlockAllocator!")
+    }
+}
+
 pub trait BlockAllocator: Send + Sync {
-    unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError>;
-    unsafe fn deallocate_block(&mut self, block: *mut u8);
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>);
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError>;
+    unsafe fn deallocate_block(&self, block: BlockAllocation);
+    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>);
     fn can_flush(&self) -> bool;
 }

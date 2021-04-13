@@ -2,10 +2,11 @@ use crate::device_info::DeviceInfo;
 use crate::renderer::RenderContext;
 use ash::version::{DeviceV1_0, DeviceV1_1};
 use ash::vk;
-use dust_core::svo::alloc::{AllocError, BlockAllocator};
-use std::collections::HashMap;
+use dust_core::svo::alloc::{AllocError, BlockAllocator, BlockAllocation};
 use std::ops::Range;
 use std::sync::Arc;
+use crossbeam::queue::SegQueue;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct DiscreteBlock {
     system_mem: vk::DeviceMemory,
@@ -22,9 +23,8 @@ pub struct DiscreteBlockAllocator {
     pub device_buffer: vk::Buffer,
     device_memtype: u32,
 
-    current_offset: u64,
-    free_offsets: Vec<u64>,
-    allocations: HashMap<*mut u8, DiscreteBlock>,
+    current_offset: AtomicU64,
+    free_offsets: SegQueue<u64>,
 
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
@@ -98,9 +98,8 @@ impl DiscreteBlockAllocator {
             bind_transfer_queue,
             device_buffer,
             device_memtype,
-            current_offset: 0,
-            free_offsets: Vec::new(),
-            allocations: HashMap::new(),
+            current_offset: AtomicU64::new(0),
+            free_offsets: SegQueue::new(),
             command_pool,
             command_buffer,
             copy_completion_fence,
@@ -110,11 +109,9 @@ impl DiscreteBlockAllocator {
 }
 
 impl BlockAllocator for DiscreteBlockAllocator {
-    unsafe fn allocate_block(&mut self) -> Result<*mut u8, AllocError> {
+    unsafe fn allocate_block(&self) -> Result<(*mut u8, BlockAllocation), AllocError> {
         let resource_offset = self.free_offsets.pop().unwrap_or_else(|| {
-            let val = self.current_offset;
-            self.current_offset += 1;
-            val
+            self.current_offset.fetch_add(1, Ordering::Relaxed)
         });
         
         let system_buf = self.context
@@ -211,24 +208,23 @@ impl BlockAllocator for DiscreteBlockAllocator {
             offset: resource_offset,
             sparse_binding_completion_semaphore,
         };
-        self.allocations.insert(ptr, block);
-        Ok(ptr)
+        let block = Box::new(block);
+        let allocation = BlockAllocation(Box::into_raw(block) as u64);
+        Ok((ptr, allocation))
     }
 
-    unsafe fn deallocate_block(&mut self, block: *mut u8) {
-        let block = self.allocations.remove(&block).unwrap();
+    unsafe fn deallocate_block(&self, allocation: BlockAllocation) {
+        let block = allocation.0 as *mut DiscreteBlock;
+        let block = Box::from_raw(block);
 
         self.context.device.destroy_buffer(block.system_buf, None);
         self.context.device.free_memory(block.system_mem, None);
         self.context.device.free_memory(block.device_mem, None);
-        if self.current_offset == block.offset + 1 {
-            self.current_offset -= 1;
-        } else {
-            self.free_offsets.push(block.offset);
-        }
+        self.free_offsets.push(block.offset);
+        std::mem::forget(allocation);
     }
 
-    unsafe fn flush(&mut self, ranges: &mut dyn Iterator<Item = (*mut u8, Range<u32>)>) {
+    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>) {
         let device = &self.context.device;
         let mut semaphores: Vec<vk::Semaphore> = Vec::with_capacity(ranges.size_hint().0);
 
@@ -246,8 +242,9 @@ impl BlockAllocator for DiscreteBlockAllocator {
             )
             .unwrap();
 
-        for (block_ptr, range) in ranges {
-            let block = &self.allocations[&block_ptr];
+        for (block_allocation, range) in ranges {
+            let block = block_allocation.0 as *const DiscreteBlock;
+            let block = &*block;
             let location = block.offset * self.block_size as u64 + range.start as u64;
             semaphores.push(block.sparse_binding_completion_semaphore);
 
@@ -359,12 +356,6 @@ impl Drop for DiscreteBlockAllocator {
             device.destroy_command_pool(self.command_pool, None);
             device.destroy_buffer(self.device_buffer, None);
             device.destroy_fence(self.copy_completion_fence, None);
-            for i in self.allocations.values() {
-                device.destroy_buffer(i.system_buf, None);
-                device.destroy_semaphore(i.sparse_binding_completion_semaphore, None);
-                device.free_memory(i.device_mem, None);
-                device.free_memory(i.system_mem, None);
-            }
         }
     }
 }
