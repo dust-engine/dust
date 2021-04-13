@@ -93,8 +93,8 @@ fn setup(
     let winit_window = winit_windows.get_window(window_id).unwrap();
     unsafe {
         let mut renderer = Renderer::new(winit_window);
-        let (render_resources, block_allocator) = RenderResources::new(&renderer);
-        let arena = ArenaAllocator::new(block_allocator);
+        let render_resources = RenderResources::new(&renderer);
+        let arena = ArenaAllocator::new(render_resources.block_allocator.clone());
         let octree = Octree::new(arena);
 
         commands.insert_resource(octree);

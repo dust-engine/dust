@@ -5,6 +5,7 @@ use std::mem::{size_of, ManuallyDrop};
 
 use std::ptr::NonNull;
 use crate::alloc::BlockAllocation;
+use std::sync::Arc;
 
 pub const BLOCK_MASK_DEGREE: u32 = 20;
 pub const NUM_SLOTS_IN_BLOCK: u32 = 1 << BLOCK_MASK_DEGREE;
@@ -61,7 +62,7 @@ union ArenaSlot<T: ArenaAllocated> {
 pub trait ArenaAllocated: Sized + Default {}
 
 pub struct ArenaAllocator<T: ArenaAllocated> {
-    block_allocator: Box<ArenaBlockAllocator>,
+    block_allocator: Arc<ArenaBlockAllocator>,
     chunks: Vec<(NonNull<ArenaSlot<T>>, BlockAllocation)>,
     freelist_heads: [Handle; 8],
     newspace_top: Handle,       // new space to be allocated
@@ -80,7 +81,7 @@ unsafe impl<T: ArenaAllocated> Send for ArenaAllocator<T> {}
 unsafe impl<T: ArenaAllocated> Sync for ArenaAllocator<T> {}
 
 impl<T: ArenaAllocated> ArenaAllocator<T> {
-    pub fn new(block_allocator: Box<ArenaBlockAllocator>) -> Self {
+    pub fn new(block_allocator: Arc<ArenaBlockAllocator>) -> Self {
         debug_assert!(
             size_of::<T>() >= size_of::<FreeSlot>(),
             "Improper implementation of ArenaAllocated"
@@ -238,6 +239,17 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         });
         unsafe {
             self.block_allocator.flush(&mut iter);
+        }
+    }
+}
+
+
+impl<T: ArenaAllocated> Drop for ArenaAllocator<T> {
+    fn drop(&mut self) {
+        for (_, allocation) in self.chunks.drain(..) {
+            unsafe {
+                self.block_allocator.deallocate_block(allocation);
+            }
         }
     }
 }

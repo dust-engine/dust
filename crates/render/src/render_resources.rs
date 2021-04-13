@@ -14,10 +14,11 @@ pub struct RenderResources {
     pub allocator: vma::Allocator,
     pub block_allocator_buffer: vk::Buffer,
     pub texture_repo: TextureRepo,
+    pub block_allocator: Arc<dyn BlockAllocator>,
 }
 
 impl RenderResources {
-    pub unsafe fn new(renderer: &Renderer) -> (Self, Box<dyn BlockAllocator>) {
+    pub unsafe fn new(renderer: &Renderer) -> Self {
         let allocator = vk_mem::Allocator::new(&vma::AllocatorCreateInfo {
             physical_device: renderer.physical_device,
             device: &renderer.context.device,
@@ -55,7 +56,7 @@ impl RenderResources {
 
         let block_allocator_buffer: vk::Buffer;
         let device_type = renderer.info.physical_device_properties.device_type;
-        let block_allocator: Box<dyn BlockAllocator> = match device_type {
+        let block_allocator: Arc<dyn BlockAllocator> = match device_type {
             vk::PhysicalDeviceType::DISCRETE_GPU => {
                 let allocator = crate::block_alloc::DiscreteBlockAllocator::new(
                     renderer.context.clone(),
@@ -71,7 +72,7 @@ impl RenderResources {
                     &renderer.info,
                 );
                 block_allocator_buffer = allocator.device_buffer;
-                Box::new(allocator)
+                Arc::new(allocator)
             }
             vk::PhysicalDeviceType::INTEGRATED_GPU => {
                 let allocator = crate::block_alloc::IntegratedBlockAllocator::new(
@@ -88,16 +89,16 @@ impl RenderResources {
                     &renderer.info,
                 );
                 block_allocator_buffer = allocator.buffer;
-                Box::new(allocator)
+                Arc::new(allocator)
             }
             _ => panic!("Unsupported GPU"),
         };
-        let render_resources = RenderResources {
+        RenderResources {
             swapchain,
             allocator,
             block_allocator_buffer,
             texture_repo,
-        };
-        (render_resources, block_allocator)
+            block_allocator,
+        }
     }
 }
