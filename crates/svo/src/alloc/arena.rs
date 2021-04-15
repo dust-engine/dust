@@ -6,6 +6,7 @@ use std::mem::{size_of, ManuallyDrop};
 use crate::alloc::BlockAllocation;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 pub const BLOCK_MASK_DEGREE: u32 = 20;
 pub const NUM_SLOTS_IN_BLOCK: u32 = 1 << BLOCK_MASK_DEGREE;
@@ -36,7 +37,7 @@ impl Handle {
         self.0 >> BLOCK_MASK_DEGREE
     }
     #[inline]
-    pub fn from_index(chunk_index: u32, block_index: u32) -> Handle {
+    pub const fn from_index(chunk_index: u32, block_index: u32) -> Handle {
         Handle(chunk_index << BLOCK_MASK_DEGREE | block_index)
     }
 }
@@ -63,7 +64,7 @@ pub trait ArenaAllocated: Sized + Default {}
 
 pub struct ArenaAllocator<T: ArenaAllocated> {
     block_allocator: Arc<ArenaBlockAllocator>,
-    chunks: Vec<(NonNull<ArenaSlot<T>>, BlockAllocation)>,
+    chunks: HashMap<u32, (NonNull<ArenaSlot<T>>, BlockAllocation)>,
     freelist_heads: [Handle; 8],
     newspace_top: Handle,       // new space to be allocated
     pub(crate) size: u32,       // number of allocated slots
@@ -88,7 +89,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         );
         Self {
             block_allocator,
-            chunks: vec![],
+            chunks: HashMap::new(),
             freelist_heads: [Handle::none(); 8],
             // Space pointed by this is guaranteed to have free space > 8
             newspace_top: Handle::none(),
@@ -98,10 +99,23 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             changeset: ChangeSet::new(0),
         }
     }
+    pub fn reset(&mut self) {
+        for (_, (ptr, allocation)) in self.chunks.drain() {
+            unsafe {
+                self.block_allocator.deallocate_block(allocation);
+            }
+        }
+        self.freelist_heads = [Handle::none(); 8];
+        self.newspace_top = Handle::none();
+        self.size = 0;
+        self.num_blocks = 0;
+        self.capacity = 0;
+        self.changeset = ChangeSet::new(0)
+    }
     pub fn alloc_block(&mut self) -> u32 {
         let (chunk, allocation, chunk_index) = unsafe { self.block_allocator.allocate_block().unwrap() };
         self.chunks
-            .push(unsafe { (NonNull::new_unchecked(chunk as _), allocation) });
+            .insert(chunk_index, unsafe { (NonNull::new_unchecked(chunk as _), allocation) });
         self.capacity += NUM_SLOTS_IN_BLOCK;
         chunk_index
     }
@@ -176,7 +190,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let base = self.chunks[chunk_index as usize].0.as_ptr();
+            let base = self.chunks.get(&chunk_index).unwrap().0.as_ptr();
             &*base.add(slot_index as usize)
         }
     }
@@ -185,7 +199,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         let slot_index = handle.get_slot_num();
         let chunk_index = handle.get_chunk_num();
         unsafe {
-            let base = self.chunks[chunk_index as usize].0.as_ptr();
+            let base = self.chunks.get_mut(&chunk_index).unwrap().0.as_ptr();
             &mut *base.add(slot_index as usize)
         }
     }
@@ -220,7 +234,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         }
         let chunks = &self.chunks;
         let mut iter = self.changeset.drain().map(|(chunk_index, range)| {
-            let ptr = &chunks[chunk_index].1;
+            let ptr = &chunks.get(&chunk_index).unwrap().1;
             let size: u32 = size_of::<T>() as u32;
             let range = (range.start * size)..(range.end * size);
             (ptr, range)
@@ -233,7 +247,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
 
 impl<T: ArenaAllocated> Drop for ArenaAllocator<T> {
     fn drop(&mut self) {
-        for (_, allocation) in self.chunks.drain(..) {
+        for (_, (ptr, allocation)) in self.chunks.drain() {
             unsafe {
                 self.block_allocator.deallocate_block(allocation);
             }

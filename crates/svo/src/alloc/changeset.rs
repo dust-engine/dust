@@ -44,10 +44,10 @@ impl ChangeSet {
     }
 
     // returns: iterator of (chunk_index, range of slots)
-    pub fn drain<'a>(&'a mut self) -> impl Iterator<Item = (usize, Range<u32>)> + 'a {
+    pub fn drain<'a>(&'a mut self) -> impl Iterator<Item = (u32, Range<u32>)> + 'a {
         self.changed_chunks
             .drain()
-            .map(move |(i, changes)| (i as usize, changes.range.clone()))
+            .map(move |(i, changes)| (i, changes.range.clone()))
     }
     pub fn len(&self) -> usize {
         self.changed_chunks.len()

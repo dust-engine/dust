@@ -21,12 +21,20 @@ pub enum BoundsSpacialRelationship {
 
 impl Bounds {
     pub const MAX_WIDTH: u32 = (1 << 31);
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Bounds {
             x: 0,
             y: 0,
             z: 0,
             width: Self::MAX_WIDTH,
+        }
+    }
+    pub const fn with_width(width: u32) -> Self {
+        Bounds {
+            x: 0,
+            y: 0,
+            z: 0,
+            width,
         }
     }
     pub fn from_discrete_grid(location: (u64, u64, u64), width: u64, gridsize: u64) -> Self {

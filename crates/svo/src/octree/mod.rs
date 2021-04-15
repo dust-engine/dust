@@ -5,9 +5,9 @@ use crate::{Corner, Voxel};
 
 pub mod accessor;
 mod io;
-mod supertree;
+pub mod supertree;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 #[repr(C)]
 pub struct Node<T: Voxel> {
     _reserved: u8,
