@@ -119,15 +119,14 @@ fn world_update(
     if window_resized_events.iter().next().is_some() {
         unsafe {
             renderer.context.device.device_wait_idle().unwrap();
-            let _config = Swapchain::get_config(
+            let config = Swapchain::get_config(
                 renderer.physical_device,
                 renderer.context.surface,
                 &renderer.context.surface_loader,
                 &renderer.quirks,
             );
 
-            let _allocator = &render_resources.allocator;
-            //render_resources.swapchain.recreate(allocator, config);
+            render_resources.recreate(config);
             raytracer.bind_render_target(&mut render_resources.swapchain);
         }
     }

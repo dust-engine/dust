@@ -1,7 +1,7 @@
 use crate::material::Material;
 use crate::material_repo::TextureRepo;
 
-use crate::swapchain::Swapchain;
+use crate::swapchain::{Swapchain, SwapchainConfig};
 use crate::Renderer;
 use ash::vk;
 use dust_core::svo::alloc::BlockAllocator;
@@ -100,5 +100,8 @@ impl RenderResources {
             texture_repo,
             block_allocator,
         }
+    }
+    pub(crate) unsafe fn recreate(&mut self, config: SwapchainConfig) {
+        self.swapchain.recreate(&self.allocator, config);
     }
 }
