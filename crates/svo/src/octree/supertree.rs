@@ -1,6 +1,7 @@
 use crate::octree::{Octree, Node};
 use crate::{Voxel, Bounds, Corner};
 use crate::alloc::{ArenaAllocator, Handle};
+use std::collections::VecDeque;
 
 /**
 A supertree is an octree of octrees.
@@ -21,7 +22,7 @@ const GRID_DEGREE: u8 = 3;
 const GRID_SIZE: u32 = 1 << GRID_DEGREE as u32;
 const ROOT_HANDLE: Handle = Handle::from_index(0, 0);
 pub trait OctreeLoader<T: Voxel> {
-    fn load_region_with_lod(&self, x: u64, y: u64, z: u64, lod: u8) -> Option<Octree<T>>;
+    fn load_region_with_lod(&self, x: u64, y: u64, z: u64, distance_to_center: u8) -> Option<Octree<T>>;
     fn unload_region(&self, x: u64, y: u64, z: u64, octree: Octree<T>);
 }
 
@@ -79,12 +80,11 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
                 let z = distance(z);
                 x.max(y).max(z)
             };
-            let lod = self.max_lod - distance_to_center;
             *octree = self.loader.load_region_with_lod(
                 self.offset_x + x as u64,
                 self.offset_y + y as u64,
                 self.offset_z + z as u64,
-                lod,
+                distance_to_center,
             ).map(Box::new);
         }
         fn generate<T: Voxel>(octrees: &mut [Option<Box<Octree<T>>>], arena: &mut ArenaAllocator<Node<T>>, bounds: Bounds) -> Node<T> {
@@ -92,7 +92,6 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
             if bounds.width == 2 {
                 let mut data: [T; 8] = Default::default();
                 let mut octree_indexes: [usize; 8] = [0; 8];
-                let mut roots_original_handles: [Handle; 8] = Default::default();
                 let mut freemask: u8 = 0;
                 let mut num_children: u8 = 0;
                 for (i, corner) in Corner::all().enumerate() {
@@ -103,26 +102,25 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
                     let size = GRID_SIZE as usize;
                     let index: usize = x * size * size + y * size + z;
                     octree_indexes[i] = index;
-                    freemask = freemask << 1;
                     if let Some(octree) = &mut octrees[index] {
-                        freemask |= 1;
+                        freemask |= (1 << i);
                         data[i] = octree.root_data;
-                        roots_original_handles[i] = octree.root;
                         num_children += 1;
                     }
                 }
                 // move the root nodes together
                 let child_handle = if num_children > 0 {
                     let child_handle = arena.alloc(num_children as u32);
+                    arena.changed_block(child_handle, num_children as u32);
                     let mut current_offset: u8 = 0;
                     for i in 0..8 {
-                        if roots_original_handles[i].is_none() {
+                        if freemask & (1 << i) == 0 {
                             continue;
                         }
-                        let src_handle = roots_original_handles[i];
+                        let octree = octrees[octree_indexes[i]].as_mut().unwrap();
+                        let src_handle = octree.root;
+                        let src = octree.arena.get(src_handle).clone();
                         let dst_handle = child_handle.offset(current_offset as u32);
-                        octrees[octree_indexes[i]].as_mut().unwrap().root = dst_handle;
-                        let src = arena.get(src_handle).clone();
                         let dst_ptr = arena.get_mut(dst_handle);
                         *dst_ptr = src;
                         current_offset += 1;
@@ -148,14 +146,14 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
                     nodes[i] = generate(octrees, arena, bounds.half(corner));
                     let node: &Node<T> = &nodes[i];
                     data[i] = Voxel::avg(&node.data);
-                    freemask = freemask << 1;
                     if node.freemask != 0 {
-                        freemask |= 1;
+                        freemask |= (1 << i);
                         num_child += 1;
                     }
                 }
                 if num_child > 0 {
                     let children = arena.alloc(num_child as u32);
+                    arena.changed_block(children, num_child as u32);
                     let mut current_index = 0;
                     for i in 0..8 {
                         let node: &Node<T> = &nodes[i];
@@ -189,5 +187,34 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
         let new_root = generate(&mut self.octrees, &mut self.arena, Bounds::with_width(GRID_SIZE));
         // TODO: free the old tree.
         *self.arena.get_mut(ROOT_HANDLE) = new_root;
+        self.arena.changed(ROOT_HANDLE);
+
+        {
+            let mut queue: VecDeque<(u32, Handle)> = VecDeque::new();
+            queue.push_back((0, ROOT_HANDLE));
+            while !queue.is_empty() {
+                let (lod, handle) = queue.pop_front().unwrap();
+                if !self.arena.contains(handle) {
+                    continue;
+                }
+                let node = self.arena.get(handle);
+                for i in 0 .. lod {
+                    print!("    ");
+                }
+                println!("{:?}", node);
+                for i in 0 .. node.freemask.count_ones() {
+                    queue.push_front(
+                        (lod + 1, node.children.offset(i)));
+                }
+            }
+        }
+    }
+    pub fn flush(&mut self) {
+        self.arena.flush();
+        for octree in self.octrees.iter_mut() {
+            if let Some(octree) = octree {
+                octree.flush();
+            }
+        }
     }
 }

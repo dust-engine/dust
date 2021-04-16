@@ -20,6 +20,9 @@ memoffset = "0.6"
 log = "*"
 crossbeam = "0.8"
 
+fastnbt = "0.14.0"
+fastanvil = "0.14.1"
+
 [build-dependencies]
 shaderc = "0.7"
 

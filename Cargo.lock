@@ -1286,6 +1286,8 @@ dependencies = [
  "bevy",
  "crossbeam",
  "dust-core",
+ "fastanvil",
+ "fastnbt",
  "glam",
  "image",
  "log",

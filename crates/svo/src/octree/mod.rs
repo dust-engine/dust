@@ -2,6 +2,7 @@ use crate::alloc::ArenaAllocator;
 
 use crate::alloc::{ArenaAllocated, Handle};
 use crate::{Corner, Voxel};
+use std::fmt::{Debug, Formatter, Write};
 
 pub mod accessor;
 mod io;
@@ -15,6 +16,22 @@ pub struct Node<T: Voxel> {
     _reserved2: u16,
     children: Handle,
     data: [T; 8],
+}
+
+impl<T: Voxel> Debug for Node<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for i in 0 .. 8 {
+            if self.freemask & (1 << i)  == 0 {
+                self.data[i].fmt(f)?;
+            } else {
+                f.write_fmt(format_args!("\x1b[6;30;42m{:?}\x1b[0m", self.data[i]))?;
+            }
+            if i != 7 {
+                f.write_str(" | ")?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<T: Voxel> ArenaAllocated for Node<T> {}

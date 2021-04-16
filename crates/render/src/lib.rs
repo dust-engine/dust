@@ -16,8 +16,9 @@ mod render_resources;
 pub mod renderer;
 mod shared_buffer;
 pub mod swapchain;
+mod loader;
 
-use dust_core::CameraProjection;
+use dust_core::{CameraProjection, Voxel};
 use dust_core::SunLight;
 use glam::TransformRT;
 
@@ -44,6 +45,8 @@ use bevy::app::AppExit;
 
 use dust_core::svo::ArenaAllocator;
 use std::borrow::BorrowMut;
+use dust_core::svo::octree::supertree::Supertree;
+use crate::loader::Loader;
 
 #[derive(Default)]
 pub struct DustPlugin;
@@ -93,10 +96,12 @@ fn setup(
     unsafe {
         let renderer = Renderer::new(winit_window);
         let render_resources = RenderResources::new(&renderer);
-        let arena = ArenaAllocator::new(render_resources.block_allocator.clone());
-        let octree = Octree::new(arena);
+        let loader = crate::loader::Loader::new(render_resources.block_allocator.clone());
+        let supertree_arena = ArenaAllocator::new(render_resources.block_allocator.clone());
+        let supertree = Supertree::new(supertree_arena, loader, 3);
 
-        commands.insert_resource(octree);
+
+        commands.insert_resource(supertree);
         commands.insert_resource(renderer);
         commands.insert_resource(render_resources);
     };
@@ -104,7 +109,7 @@ fn setup(
 
 fn world_update(
     mut window_resized_events: EventReader<WindowResized>,
-    mut octree: ResMut<Octree>,
+    mut octree: ResMut<Supertree<Voxel, Loader>>,
     mut renderer: ResMut<Renderer>,
     mut render_resources: ResMut<RenderResources>,
     mut raytracer: ResMut<RayTracer>,

@@ -219,6 +219,11 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             &mut slot.occupied
         }
     }
+    #[inline]
+    pub fn contains(&self, handle: Handle) -> bool {
+        let chunk_index = handle.get_chunk_num();
+        self.chunks.contains_key(&chunk_index)
+    }
     pub fn changed(&mut self, index: Handle) {
         self.changeset.changed(index)
     }
