@@ -97,8 +97,7 @@ fn setup(
         let renderer = Renderer::new(winit_window);
         let render_resources = RenderResources::new(&renderer);
         let loader = crate::loader::Loader::new(render_resources.block_allocator.clone());
-        let supertree_arena = ArenaAllocator::new(render_resources.block_allocator.clone());
-        let supertree = Supertree::new(supertree_arena, loader, 3);
+        let supertree = Supertree::new(render_resources.block_allocator.clone(), loader, 3);
 
 
         commands.insert_resource(supertree);

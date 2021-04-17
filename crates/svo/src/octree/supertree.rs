@@ -1,7 +1,8 @@
 use crate::octree::{Octree, Node};
 use crate::{Voxel, Bounds, Corner};
-use crate::alloc::{ArenaAllocator, Handle};
+use crate::alloc::{ArenaAllocator, Handle, ChangeSet, BlockAllocator};
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 /**
 A supertree is an octree of octrees.
@@ -22,14 +23,16 @@ const GRID_DEGREE: u8 = 3;
 const GRID_SIZE: u32 = 1 << GRID_DEGREE as u32;
 const ROOT_HANDLE: Handle = Handle::from_index(0, 0);
 pub trait OctreeLoader<T: Voxel> {
-    fn load_region_with_lod(&self, x: u64, y: u64, z: u64, distance_to_center: u8) -> Option<Octree<T>>;
+    fn load_region_with_lod(&self, x: u64, y: u64, z: u64, distance_to_center: u8) -> Option<Box<Octree<T>>>;
     fn unload_region(&self, x: u64, y: u64, z: u64, octree: Octree<T>);
 }
 
 pub struct Supertree<T: Voxel, L: OctreeLoader<T>> {
     loader: L,
+    block_allocator: Arc<dyn BlockAllocator>,
     arena: ArenaAllocator<Node<T>>,
-    octrees: [Option<Box<Octree<T>>>; (GRID_SIZE * GRID_SIZE * GRID_SIZE) as usize],
+    // (octree, root of octree in the supertree)
+    octrees: [Option<(Box<Octree<T>>, Handle)>; (GRID_SIZE * GRID_SIZE * GRID_SIZE) as usize],
     max_lod: u8,
     offset_x: u64,
     offset_y: u64,
@@ -37,11 +40,13 @@ pub struct Supertree<T: Voxel, L: OctreeLoader<T>> {
 }
 
 impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
-    pub fn new(mut arena: ArenaAllocator<Node<T>>, loader: L, max_lod: u8) -> Self {
+    pub fn new(block_allocator: Arc<dyn BlockAllocator>, loader: L, max_lod: u8) -> Self {
+        let mut arena = ArenaAllocator::new(block_allocator.clone());
         let root = arena.alloc(1);
         assert_eq!(root, ROOT_HANDLE); // root is always assumed to be at (0, 0)
         let mut tree = Supertree {
             loader,
+            block_allocator,
             arena,
             octrees: unsafe { std::mem::zeroed() },
             max_lod,
@@ -85,9 +90,9 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
                 self.offset_y + y as u64,
                 self.offset_z + z as u64,
                 distance_to_center,
-            ).map(Box::new);
+            ).map(|octree| (octree, Handle::none()));
         }
-        fn generate<T: Voxel>(octrees: &mut [Option<Box<Octree<T>>>], arena: &mut ArenaAllocator<Node<T>>, bounds: Bounds) -> Node<T> {
+        fn generate<T: Voxel>(octrees: &mut [Option<(Box<Octree<T>>, Handle)>], arena: &mut ArenaAllocator<Node<T>>, bounds: Bounds) -> Node<T> {
             // Base case:
             if bounds.width == 2 {
                 let mut data: [T; 8] = Default::default();
@@ -104,7 +109,7 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
                     octree_indexes[i] = index;
                     if let Some(octree) = &mut octrees[index] {
                         freemask |= (1 << i);
-                        data[i] = octree.root_data;
+                        data[i] = octree.0.root_data;
                         num_children += 1;
                     }
                 }
@@ -118,8 +123,9 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
                             continue;
                         }
                         let octree = octrees[octree_indexes[i]].as_mut().unwrap();
-                        let src_handle = octree.root;
-                        let src = octree.arena.get(src_handle).clone();
+                        octree.1 = child_handle.offset(current_offset as u32);
+                        let src_handle = octree.0.root;
+                        let src = octree.0.arena.get(src_handle).clone();
                         let dst_handle = child_handle.offset(current_offset as u32);
                         let dst_ptr = arena.get_mut(dst_handle);
                         *dst_ptr = src;
@@ -188,33 +194,31 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
         // TODO: free the old tree.
         *self.arena.get_mut(ROOT_HANDLE) = new_root;
         self.arena.changed(ROOT_HANDLE);
-
-        {
-            let mut queue: VecDeque<(u32, Handle)> = VecDeque::new();
-            queue.push_back((0, ROOT_HANDLE));
-            while !queue.is_empty() {
-                let (lod, handle) = queue.pop_front().unwrap();
-                if !self.arena.contains(handle) {
-                    continue;
-                }
-                let node = self.arena.get(handle);
-                for i in 0 .. lod {
-                    print!("    ");
-                }
-                println!("{:?}", node);
-                for i in 0 .. node.freemask.count_ones() {
-                    queue.push_front(
-                        (lod + 1, node.children.offset(i)));
-                }
-            }
-        }
     }
     pub fn flush(&mut self) {
-        self.arena.flush();
-        for octree in self.octrees.iter_mut() {
-            if let Some(octree) = octree {
-                octree.flush();
+        if !self.block_allocator.can_flush() {
+            return;
+        }
+        for octree in self.octrees.iter() {
+            if let Some((octree, root)) = octree.as_ref() {
+                *self.arena.get_mut(*root) = octree.arena.get(octree.root).clone();
+                self.arena.changed(*root);
             }
+        }
+        let supertree_changelist = self.arena.flush();
+        let mut iterator = self.octrees
+            .iter_mut()
+            .filter(|octree| octree.is_some())
+            .map(|octree| {
+                let (octree, root) = octree.as_mut().unwrap();
+                octree
+            })
+            .flat_map(|octree| {
+                octree.arena.flush().into_iter()
+            })
+            .chain(supertree_changelist.into_iter());
+        unsafe {
+            self.block_allocator.flush(&mut iterator);
         }
     }
 }

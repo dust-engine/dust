@@ -115,7 +115,7 @@ impl BlockAllocator for IntegratedBlockAllocator {
         self.context.device.free_memory(memory, None);
     }
 
-    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>) {
+    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (BlockAllocation, Range<u32>)>) {
         // TODO: only do this for non-coherent memory
         self.context
             .device
@@ -123,6 +123,7 @@ impl BlockAllocator for IntegratedBlockAllocator {
                 &ranges
                     .map(|(allocation, range)| {
                         let memory: vk::DeviceMemory = std::mem::transmute(allocation.0);
+                        std::mem::forget(allocation);
                         vk::MappedMemoryRange::builder()
                             .memory(memory)
                             .offset(range.start as u64)

@@ -23,3 +23,6 @@ glam = { version = "0.13", features = ["transform-types"] }
 
 fastnbt = "0.14.0"
 fastanvil = "0.14.1"
+
+[profile.release]
+debug = true

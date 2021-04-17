@@ -44,7 +44,11 @@ impl BlockAllocator for SystemBlockAllocator {
         std::mem::forget(block);
     }
 
-    unsafe fn flush(&self, _ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>) {}
+    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (BlockAllocation, Range<u32>)>) {
+        ranges.for_each(|(allocation, range)| {
+            std::mem::forget(allocation);
+        });
+    }
 
     fn can_flush(&self) -> bool {
         true

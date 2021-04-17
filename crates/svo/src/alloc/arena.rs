@@ -7,6 +7,7 @@ use crate::alloc::BlockAllocation;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::ops::Range;
 
 pub const BLOCK_MASK_DEGREE: u32 = 20;
 pub const NUM_SLOTS_IN_BLOCK: u32 = 1 << BLOCK_MASK_DEGREE;
@@ -230,23 +231,14 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
     pub fn changed_block(&mut self, index: Handle, len: u32) {
         self.changeset.changed_block(index, len)
     }
-    pub fn flush(&mut self) {
-        if self.changeset.len() == 0 {
-            return;
-        }
-        if !self.block_allocator.can_flush() {
-            return;
-        }
+    pub fn flush(&mut self) -> Vec<(BlockAllocation, Range<u32>)> {
         let chunks = &self.chunks;
-        let mut iter = self.changeset.drain().map(|(chunk_index, range)| {
-            let ptr = &chunks.get(&chunk_index).unwrap().1;
+        self.changeset.drain().map(|(chunk_index, range)| {
+            let ptr = chunks.get(&chunk_index).unwrap().1.clone();
             let size: u32 = size_of::<T>() as u32;
             let range = (range.start * size)..(range.end * size);
             (ptr, range)
-        });
-        unsafe {
-            self.block_allocator.flush(&mut iter);
-        }
+        }).collect()
     }
 }
 

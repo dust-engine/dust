@@ -232,7 +232,7 @@ impl BlockAllocator for DiscreteBlockAllocator {
         std::mem::forget(allocation);
     }
 
-    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (&BlockAllocation, Range<u32>)>) {
+    unsafe fn flush(&self, ranges: &mut dyn Iterator<Item = (BlockAllocation, Range<u32>)>) {
         let device = &self.context.device;
         let mut semaphores: Vec<vk::Semaphore> = Vec::with_capacity(ranges.size_hint().0);
 
@@ -252,7 +252,10 @@ impl BlockAllocator for DiscreteBlockAllocator {
 
         for (block_allocation, range) in ranges {
             let block = block_allocation.0 as *const DiscreteBlock;
+            std::mem::forget(block_allocation);
             let block = &*block;
+
+            println!("Flushing {} {:?}", block.offset, range);
             let location = block.offset as u64 * self.block_size as u64 + range.start as u64;
             semaphores.push(block.sparse_binding_completion_semaphore);
 

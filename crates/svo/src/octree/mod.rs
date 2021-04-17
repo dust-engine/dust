@@ -121,9 +121,6 @@ impl<T: Voxel> Octree<T> {
                 .free(old_child_handle, old_mask.count_ones() as u8);
         }
     }
-    pub fn flush(&mut self) {
-        self.arena.flush();
-    }
 }
 
 #[cfg(test)]
