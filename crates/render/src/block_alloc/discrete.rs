@@ -271,7 +271,9 @@ impl BlockAllocator for DiscreteBlockAllocator {
             );
         }
         device.end_command_buffer(self.command_buffer).unwrap();
-        assert!(semaphores.len() > 0);
+        if semaphores.len() == 0 {
+            return;
+        }
         let wait_dst_stage_mask = vec![vk::PipelineStageFlags::TRANSFER; semaphores.len()];
         let wait_semaphore_values = vec![1; semaphores.len()];
 

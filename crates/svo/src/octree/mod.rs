@@ -8,7 +8,7 @@ pub mod accessor;
 mod io;
 pub mod supertree;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Eq)]
 #[repr(C)]
 pub struct Node<T: Voxel> {
     _reserved: u8,
@@ -31,6 +31,14 @@ impl<T: Voxel> Debug for Node<T> {
             }
         }
         Ok(())
+    }
+}
+
+impl<T: Voxel> PartialEq for Node<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.children == other.children &&
+            self.freemask == other.freemask &&
+            self.data == other.data
     }
 }
 

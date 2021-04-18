@@ -233,7 +233,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
     }
     pub fn flush(&mut self) -> Vec<(BlockAllocation, Range<u32>)> {
         let chunks = &self.chunks;
-        self.changeset.drain().map(|(chunk_index, range)| {
+        self.changeset.drain().into_iter().map(|(chunk_index, range)| {
             let ptr = chunks.get(&chunk_index).unwrap().1.clone();
             let size: u32 = size_of::<T>() as u32;
             let range = (range.start * size)..(range.end * size);

@@ -201,8 +201,13 @@ impl<T: Voxel, L: OctreeLoader<T>> Supertree<T, L> {
         }
         for octree in self.octrees.iter() {
             if let Some((octree, root)) = octree.as_ref() {
-                *self.arena.get_mut(*root) = octree.arena.get(octree.root).clone();
-                self.arena.changed(*root);
+                let supertree_root = self.arena.get_mut(*root);
+                let octree_root = octree.arena.get(octree.root);
+
+                if supertree_root != octree_root {
+                    *supertree_root = octree_root.clone();
+                    self.arena.changed(*root);
+                }
             }
         }
         let supertree_changelist = self.arena.flush();
