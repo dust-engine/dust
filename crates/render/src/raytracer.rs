@@ -379,7 +379,7 @@ impl RayTracer {
                     .pool_sizes(&[
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::UNIFORM_BUFFER,
-                            descriptor_count: 2,
+                            descriptor_count: 4,
                         },
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::STORAGE_BUFFER,
@@ -387,6 +387,10 @@ impl RayTracer {
                         },
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::INPUT_ATTACHMENT,
+                            descriptor_count: 1,
+                        },
+                        vk::DescriptorPoolSize {
+                            ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                             descriptor_count: 1,
                         },
                     ]),
@@ -420,12 +424,32 @@ impl RayTracer {
             .create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo::builder()
                     .flags(vk::DescriptorSetLayoutCreateFlags::empty())
-                    .bindings(&[vk::DescriptorSetLayoutBinding::builder()
-                        .binding(0)
-                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                        .descriptor_count(1)
-                        .build()]),
+                    .bindings(&[
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .descriptor_count(1)
+                            .build(), // Chunk Nodes
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .binding(1)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .descriptor_count(1)
+                            .build(), // Regular Materials,
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .binding(2)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .descriptor_count(1)
+                            .build(), // Colored Materials
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .binding(3)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .descriptor_count(1)
+                            .build(), // Textures
+                    ]),
                 None,
             )
             .unwrap();
@@ -442,8 +466,11 @@ impl RayTracer {
                 None,
             )
             .unwrap();
-        let mut desc_sets = device
+        let mut desc_sets = [vk::DescriptorSet::null(); 3];
+        let result = device
+            .fp_v1_0()
             .allocate_descriptor_sets(
+                device.handle(),
                 &vk::DescriptorSetAllocateInfo::builder()
                     .descriptor_pool(desc_pool)
                     .set_layouts(&[
@@ -452,12 +479,13 @@ impl RayTracer {
                         frame_desc_set_layout,
                     ])
                     .build(),
-            )
-            .unwrap();
-        assert_eq!(desc_sets.len(), 3);
-        let frame_desc_set = desc_sets.pop().unwrap();
-        let storage_desc_set = desc_sets.pop().unwrap();
-        let uniform_desc_set = desc_sets.pop().unwrap();
+                &mut desc_sets[0],
+            );
+        assert_eq!(result, vk::Result::SUCCESS);
+        let frame_desc_set = desc_sets[2];
+        let storage_desc_set = desc_sets[1];
+        let uniform_desc_set = desc_sets[0];
+        drop(desc_sets);
 
         let pipeline_layout = device
             .create_pipeline_layout(

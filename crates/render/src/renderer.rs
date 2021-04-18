@@ -23,6 +23,7 @@ pub struct RenderContext {
 
     pub surface: vk::SurfaceKHR,
     pub surface_loader: ash::extensions::khr::Surface,
+    pub debug_messenger: Option<(ash::extensions::ext::DebugUtils, vk::DebugUtilsMessengerEXT)>,
 }
 pub struct Renderer {
     pub context: Arc<RenderContext>,
@@ -220,7 +221,7 @@ impl Renderer {
                 )
                 .unwrap();
 
-            let _debug_messenger = {
+            let debug_messenger = {
                 // make sure VK_EXT_debug_utils is available
                 if instance_extensions.iter().any(|props| unsafe {
                     CStr::from_ptr(props.extension_name.as_ptr())
@@ -372,6 +373,7 @@ impl Renderer {
                 surface,
                 instance,
                 surface_loader,
+                debug_messenger
             };
             let renderer = Self {
                 context: Arc::new(context),
@@ -392,6 +394,9 @@ impl Renderer {
 impl Drop for RenderContext {
     fn drop(&mut self) {
         unsafe {
+            if let Some((debug_utils, messenger)) = self.debug_messenger.take() {
+                debug_utils.destroy_debug_utils_messenger(messenger, None);
+            }
             self.surface_loader.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
             self.instance.destroy_instance(None);
