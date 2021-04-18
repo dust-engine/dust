@@ -24,6 +24,11 @@ pub struct RenderContext {
     pub surface: vk::SurfaceKHR,
     pub surface_loader: ash::extensions::khr::Surface,
     pub debug_messenger: Option<(ash::extensions::ext::DebugUtils, vk::DebugUtilsMessengerEXT)>,
+
+    pub graphics_queue: vk::Queue,
+    pub transfer_binding_queue: vk::Queue,
+    pub graphics_queue_family: u32,
+    pub transfer_binding_queue_family: u32,
 }
 pub struct Renderer {
     pub context: Arc<RenderContext>,
@@ -161,7 +166,7 @@ unsafe extern "system" fn debug_utils_messenger_callback(
                 msg = format!("{}\n{}: {}", msg, info_label, data);
             }
         }
-        //println!("{}\n", msg);
+        println!("{}\n", msg);
     }
 
     log!(message_severity, "{}\n", {
@@ -373,7 +378,11 @@ impl Renderer {
                 surface,
                 instance,
                 surface_loader,
-                debug_messenger
+                debug_messenger,
+                graphics_queue,
+                transfer_binding_queue,
+                graphics_queue_family,
+                transfer_binding_queue_family
             };
             let renderer = Self {
                 context: Arc::new(context),

@@ -11,6 +11,7 @@ use std::ffi::CStr;
 use std::io::Cursor;
 use std::sync::Arc;
 use vk_mem as vma;
+use crate::material_repo::TextureRepoUploadState;
 
 pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -641,6 +642,26 @@ impl RayTracer {
             render_target.bind_render_pass(self);
         }
     }
+    pub fn bind_material_repo(&mut self, repo: &TextureRepoUploadState) {
+        unsafe {
+            self.context.device.update_descriptor_sets(
+                &[
+                    vk::WriteDescriptorSet::builder()
+                        .dst_set(self.storage_desc_set)
+                        .dst_binding(3)
+                        .dst_array_element(0)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(&[vk::DescriptorImageInfo {
+                            sampler: repo.sampler,
+                            image_view: repo.image_view,
+                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        }])
+                        .build(), // Camera
+                ],
+                &[],
+            );
+        }
+    }
 }
 
 impl RenderPassProvider for RayTracer {
@@ -802,6 +823,7 @@ pub mod systems {
                 renderer.graphics_queue_family,
             );
             raytracer.bind_block_allocator_buffer(render_resources.block_allocator_buffer);
+            raytracer.bind_material_repo(&render_resources.texture_repo);
             if let Some(mesh) = mesh.as_ref() {
                 raytracer.bind_mesh(&mesh, &render_resources.allocator);
             }

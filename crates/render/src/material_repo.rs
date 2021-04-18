@@ -11,11 +11,14 @@ pub struct TextureRepo {
 
 pub struct TextureRepoUploadState {
     pub image: vk::Image,
+    pub image_view: vk::ImageView,
     pub image_allocation: vma::Allocation,
     pub image_allocation_info: vma::AllocationInfo,
     pub staging_buffer: vk::Buffer,
     pub staging_buffer_allocation: vma::Allocation,
     pub staging_buffer_allocation_info: vma::AllocationInfo,
+    pub sampler: vk::Sampler,
+    pub image_len: u32,
 }
 impl TextureRepo {
     pub fn new() -> Self {
@@ -30,7 +33,6 @@ impl TextureRepo {
         allocator: &vma::Allocator,
         command_buffer: vk::CommandBuffer,
         graphics_queue_family: u32,
-        transfer_queue_family: u32,
     ) -> TextureRepoUploadState {
         let (image, image_allocation, image_allocation_info) = allocator
             .create_image(
@@ -108,7 +110,7 @@ impl TextureRepo {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
                         mip_level: 0,
                         base_array_layer: i as u32,
-                        layer_count: 1,
+                        layer_count: 1, // TODO: copy everyting in one BufferImageCopy?
                     },
                     image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
                     image_extent: vk::Extent3D {
@@ -126,14 +128,14 @@ impl TextureRepo {
                 .image(image)
                 .src_access_mask(vk::AccessFlags::empty())
                 .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .src_queue_family_index(transfer_queue_family)
-                .dst_queue_family_index(transfer_queue_family)
+                .src_queue_family_index(graphics_queue_family)
+                .dst_queue_family_index(graphics_queue_family)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: 0,
-                    layer_count: 1
+                    layer_count: self.materials.len() as u32
                 })
                 .build();
             device.cmd_pipeline_barrier(
@@ -146,7 +148,6 @@ impl TextureRepo {
                 &[image_memory_barrier]
             );
             let mut image_memory_barrier2 = image_memory_barrier.clone();
-            image_memory_barrier2.dst_queue_family_index = graphics_queue_family;
             image_memory_barrier2.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
             image_memory_barrier2.dst_access_mask = vk::AccessFlags::SHADER_READ;
             image_memory_barrier2.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
@@ -169,6 +170,44 @@ impl TextureRepo {
                 &[image_memory_barrier2]
             );
         }
+        let sampler = unsafe {
+            device.create_sampler(
+                &vk::SamplerCreateInfo::builder()
+                    .mag_filter(vk::Filter::LINEAR)
+                    .min_filter(vk::Filter::NEAREST)
+                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                    .address_mode_u(vk::SamplerAddressMode::REPEAT)
+                    .address_mode_v(vk::SamplerAddressMode::REPEAT)
+                    .address_mode_w(vk::SamplerAddressMode::REPEAT)
+                    .build(),
+                None
+            )
+                .unwrap()
+        };
+        let image_view = unsafe {
+            device.create_image_view(
+                &vk::ImageViewCreateInfo::builder()
+                    .image(image)
+                    .view_type(vk::ImageViewType::TYPE_2D_ARRAY)
+                    .format(vk::Format::R8G8B8A8_SRGB)
+                    .components(vk::ComponentMapping {
+                        r: vk::ComponentSwizzle::R,
+                        g: vk::ComponentSwizzle::G,
+                        b: vk::ComponentSwizzle::B,
+                        a: vk::ComponentSwizzle::A,
+                    })
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: self.materials.len() as u32
+                    })
+                    .build(),
+                None,
+            )
+                .unwrap()
+        };
         TextureRepoUploadState {
             image,
             image_allocation,
@@ -176,6 +215,9 @@ impl TextureRepo {
             staging_buffer,
             staging_buffer_allocation,
             staging_buffer_allocation_info,
+            sampler,
+            image_view,
+            image_len: self.materials.len() as u32,
         }
     }
 }

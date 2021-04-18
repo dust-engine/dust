@@ -56,7 +56,7 @@ impl RenderResources {
         let upload = unsafe {
             let command_pool = renderer.context.device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(renderer.transfer_binding_queue_family)
+                    .queue_family_index(renderer.graphics_queue_family)
                     .flags(vk::CommandPoolCreateFlags::TRANSIENT)
                     .build(),
                 None
@@ -80,19 +80,17 @@ impl RenderResources {
                     .build()
                 )
                 .unwrap();
-
             let upload = texture_repo.upload(
                 &renderer.context.device,
                 &allocator,
                 command_buffer,
                 renderer.graphics_queue_family,
-                renderer.transfer_binding_queue_family
             );
             let fence = renderer.context.device.create_fence(&vk::FenceCreateInfo::default(), None)
                 .unwrap();
             renderer.context.device.end_command_buffer(command_buffer).unwrap();
             renderer.context.device.queue_submit(
-                renderer.transfer_binding_queue,
+                renderer.graphics_queue,
                 &[
                     vk::SubmitInfo::builder()
                         .command_buffers(&[command_buffer])

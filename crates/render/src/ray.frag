@@ -73,6 +73,7 @@ layout(set = 1, binding = 1) readonly buffer ColoredMaterials {
 layout(set = 1, binding = 2) readonly buffer Materials {
     Material regularMaterials[];
 };
+layout(set = 1, binding = 3) uniform sampler2DArray TextureRepoSampler;
 layout (input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput inputDepth;
 
 Ray GenerateRay() {
@@ -187,9 +188,10 @@ void main() {
     if (voxel_id == 0) {
         f_color = vec4(0.0, 1.0, 0.0, 1.0);
     } else {
-        float sunLightFactor = max(0.3, dot(normal, Lights_Sunlight.dir));
-        f_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
-
+        float sunLightFactor = min(1.0, dot(normal, Lights_Sunlight.dir));
+        vec4 output_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
+        vec4 texture_color = texture(TextureRepoSampler, vec3(texcoords * 10.0, 0));
+        f_color = output_color * texture_color;
     }
     #endif
 }
