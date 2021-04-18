@@ -1292,6 +1292,7 @@ dependencies = [
  "memoffset",
  "raw-window-handle",
  "shaderc",
+ "smallvec",
  "tracing",
  "vk-mem",
 ]

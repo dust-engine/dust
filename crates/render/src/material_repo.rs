@@ -1,8 +1,11 @@
-use crate::material::{ColoredMaterial, Material};
+use crate::material::{ColoredMaterial, Material, MaterialDeviceLayout, ColoredMaterialDeviceLayout};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use image::GenericImageView;
 use vk_mem as vma;
+use std::mem::size_of;
+use glam::Vec4;
+use std::ops::Range;
 
 pub struct TextureRepo {
     pub materials: Vec<Material>,
@@ -19,6 +22,13 @@ pub struct TextureRepoUploadState {
     pub staging_buffer_allocation_info: vma::AllocationInfo,
     pub sampler: vk::Sampler,
     pub image_len: u32,
+
+
+    pub buffer: vk::Buffer,
+    pub buffer_allocation: vma::Allocation,
+    pub buffer_allocation_info: vma::AllocationInfo,
+    pub regular_material_range: Range<u32>,
+    pub colored_material_range: Range<u32>,
 }
 impl TextureRepo {
     pub fn new() -> Self {
@@ -208,6 +218,45 @@ impl TextureRepo {
             )
                 .unwrap()
         };
+
+        let (buffer, buffer_allocation, buffer_allocation_info) = allocator
+            .create_buffer(
+                &vk::BufferCreateInfo::builder()
+                    .flags(vk::BufferCreateFlags::empty())
+                    .size((self.materials.len() * size_of::<MaterialDeviceLayout>() + self.colored_materials.len() * size_of::<ColoredMaterial>()) as u64)
+                    .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                    .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
+                    .build(),
+                &vma::AllocationCreateInfo {
+                    usage: vma::MemoryUsage::CpuToGpu,
+                    flags: vma::AllocationCreateFlags::MAPPED,
+                    required_flags: Default::default(),
+                    preferred_flags: Default::default(),
+                    memory_type_bits: 0,
+                    pool: None,
+                    user_data: None
+                }
+            )
+            .unwrap();
+        let mut buffer_ptr = buffer_allocation_info.get_mapped_data() as *mut MaterialDeviceLayout;
+        unsafe {
+            for (i, material) in self.materials.iter().enumerate() {
+                let material_ref = unsafe { &mut *buffer_ptr };
+                material_ref.scale = material.scale;
+                material_ref.diffuse = i as u16;
+                buffer_ptr = buffer_ptr.add(1);
+            }
+            let mut buffer_ptr = buffer_ptr as *mut ColoredMaterialDeviceLayout;
+            for (i, material) in self.colored_materials.iter().enumerate() {
+                let material_ref = unsafe { &mut *buffer_ptr };
+                material_ref.diffuse = (i + self.materials.len()) as u16;
+                material_ref.scale = material.scale;
+                material_ref.palette = material.color_palette.map(|vec| Vec4::new(vec.x, vec.y, vec.z, 1.0));
+                buffer_ptr = buffer_ptr.add(1);
+            }
+        }
+
+        let barrier = (self.materials.len() * size_of::<MaterialDeviceLayout>()) as u32;
         TextureRepoUploadState {
             image,
             image_allocation,
@@ -218,6 +267,11 @@ impl TextureRepo {
             sampler,
             image_view,
             image_len: self.materials.len() as u32,
+            buffer,
+            buffer_allocation,
+            buffer_allocation_info,
+            regular_material_range: 0 .. barrier,
+            colored_material_range: barrier .. (barrier + (self.colored_materials.len() * size_of::<ColoredMaterialDeviceLayout>()) as u32)
         }
     }
 }

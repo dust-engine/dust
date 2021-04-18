@@ -12,6 +12,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 use vk_mem as vma;
 use crate::material_repo::TextureRepoUploadState;
+use smallvec::SmallVec;
 
 pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -380,11 +381,11 @@ impl RayTracer {
                     .pool_sizes(&[
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::UNIFORM_BUFFER,
-                            descriptor_count: 4,
+                            descriptor_count: 2,
                         },
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::STORAGE_BUFFER,
-                            descriptor_count: 1,
+                            descriptor_count: 3,
                         },
                         vk::DescriptorPoolSize {
                             ty: vk::DescriptorType::INPUT_ATTACHMENT,
@@ -434,13 +435,13 @@ impl RayTracer {
                             .build(), // Chunk Nodes
                         vk::DescriptorSetLayoutBinding::builder()
                             .binding(1)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                             .descriptor_count(1)
                             .build(), // Regular Materials,
                         vk::DescriptorSetLayoutBinding::builder()
                             .binding(2)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                             .descriptor_count(1)
                             .build(), // Colored Materials
@@ -643,21 +644,54 @@ impl RayTracer {
         }
     }
     pub fn bind_material_repo(&mut self, repo: &TextureRepoUploadState) {
-        unsafe {
-            self.context.device.update_descriptor_sets(
-                &[
-                    vk::WriteDescriptorSet::builder()
+        let buffer_info = [
+            vk::DescriptorBufferInfo {
+                buffer: repo.buffer,
+                offset: repo.regular_material_range.start as u64,
+                range: (repo.regular_material_range.end - repo.regular_material_range.start) as u64
+            },
+            vk::DescriptorBufferInfo {
+                buffer: repo.buffer,
+                offset: repo.colored_material_range.start as u64,
+                range: (repo.colored_material_range.end - repo.colored_material_range.start) as u64
+            }
+        ];
+        let image_info = [
+            vk::DescriptorImageInfo {
+                sampler: repo.sampler,
+                image_view: repo.image_view,
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            }
+        ];
+        let mut writes: SmallVec<[vk::WriteDescriptorSet; 3]> = SmallVec::new();
+        if !repo.regular_material_range.is_empty() {
+            writes.push(vk::WriteDescriptorSet::builder()
+                .dst_set(self.storage_desc_set)
+                .dst_binding(1)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&buffer_info[0..1])
+                .build()); // Regular Materials
+        }
+        if !repo.colored_material_range.is_empty() {
+            writes.push(vk::WriteDescriptorSet::builder()
+                .dst_set(self.storage_desc_set)
+                .dst_binding(2)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&buffer_info[1..2])
+                .build()); // Colored Materials
+        }
+        writes.push(vk::WriteDescriptorSet::builder()
                         .dst_set(self.storage_desc_set)
                         .dst_binding(3)
                         .dst_array_element(0)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(&[vk::DescriptorImageInfo {
-                            sampler: repo.sampler,
-                            image_view: repo.image_view,
-                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        }])
-                        .build(), // Camera
-                ],
+                        .image_info(&image_info)
+                        .build()); // Textures
+        unsafe {
+            self.context.device.update_descriptor_sets(
+                writes.as_slice(),
                 &[],
             );
         }

@@ -19,6 +19,7 @@ image = "0.23.14"
 memoffset = "0.6"
 log = "*"
 crossbeam = "0.8"
+smallvec = "1.6"
 
 [build-dependencies]
 shaderc = "0.7"

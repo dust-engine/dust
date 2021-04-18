@@ -67,11 +67,11 @@ struct ColoredMaterial {
     float _reserved2;
     vec4 palette[256];
 };
-layout(set = 1, binding = 1) readonly buffer ColoredMaterials {
-    ColoredMaterial coloredMaterials[];
+layout(set = 1, binding = 1) readonly buffer Materials {
+    Material u_RegularMaterials[];
 };
-layout(set = 1, binding = 2) readonly buffer Materials {
-    Material regularMaterials[];
+layout(set = 1, binding = 2) readonly buffer ColoredMaterials {
+    ColoredMaterial u_ColoredMaterials[];
 };
 layout(set = 1, binding = 3) uniform sampler2DArray TextureRepoSampler;
 layout (input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput inputDepth;
@@ -190,7 +190,13 @@ void main() {
     } else {
         float sunLightFactor = min(1.0, dot(normal, Lights_Sunlight.dir));
         vec4 output_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
-        vec4 texture_color = texture(TextureRepoSampler, vec3(texcoords * 10.0, 0));
+        vec4 texture_color = texture(
+            TextureRepoSampler,
+            vec3(
+                texcoords * 10.0,
+                uint(u_RegularMaterials[voxel_id - 1].diffuse)
+            )
+        );
         f_color = output_color * texture_color;
     }
     #endif
