@@ -1,5 +1,5 @@
 use crate::material::Material;
-use crate::material_repo::TextureRepo;
+use crate::material_repo::{TextureRepo, TextureRepoUploadState};
 
 use crate::swapchain::Swapchain;
 use crate::Renderer;
@@ -8,12 +8,13 @@ use dust_core::svo::alloc::BlockAllocator;
 use dust_core::svo::alloc::BLOCK_SIZE;
 use std::sync::Arc;
 use vk_mem as vma;
+use ash::version::DeviceV1_0;
 
 pub struct RenderResources {
     pub swapchain: Swapchain,
     pub allocator: vma::Allocator,
     pub block_allocator_buffer: vk::Buffer,
-    pub texture_repo: TextureRepo,
+    pub texture_repo: TextureRepoUploadState,
     pub block_allocator: Arc<dyn BlockAllocator>,
 }
 
@@ -51,8 +52,59 @@ impl RenderResources {
                 .unwrap()
                 .decode()
                 .unwrap(),
-            normal: None,
         });
+        let upload = unsafe {
+            let command_pool = renderer.context.device.create_command_pool(
+                &vk::CommandPoolCreateInfo::builder()
+                    .queue_family_index(renderer.transfer_binding_queue_family)
+                    .flags(vk::CommandPoolCreateFlags::TRANSIENT)
+                    .build(),
+                None
+            )
+                .unwrap();
+            let mut command_buffer = vk::CommandBuffer::null();
+            renderer.context.device
+                .fp_v1_0()
+                .allocate_command_buffers(
+                renderer.context.device.handle(),
+                &vk::CommandBufferAllocateInfo::builder()
+                    .command_buffer_count(1)
+                    .command_pool(command_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .build(),
+                    &mut command_buffer
+            );
+            renderer.context.device
+                .begin_command_buffer(command_buffer, &vk::CommandBufferBeginInfo::builder()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                    .build()
+                )
+                .unwrap();
+
+            let upload = texture_repo.upload(
+                &renderer.context.device,
+                &allocator,
+                command_buffer,
+                renderer.graphics_queue_family,
+                renderer.transfer_binding_queue_family
+            );
+            let fence = renderer.context.device.create_fence(&vk::FenceCreateInfo::default(), None)
+                .unwrap();
+            renderer.context.device.end_command_buffer(command_buffer).unwrap();
+            renderer.context.device.queue_submit(
+                renderer.transfer_binding_queue,
+                &[
+                    vk::SubmitInfo::builder()
+                        .command_buffers(&[command_buffer])
+                        .build(),
+                ],
+                fence
+            );
+            renderer.context.device.wait_for_fences(&[fence], true, u64::MAX);
+            renderer.context.device.destroy_fence(fence, None);
+            renderer.context.device.destroy_command_pool(command_pool, None);
+            upload
+        };
 
         let block_allocator_buffer: vk::Buffer;
         let device_type = renderer.info.physical_device_properties.device_type;
@@ -97,7 +149,7 @@ impl RenderResources {
             swapchain,
             allocator,
             block_allocator_buffer,
-            texture_repo,
+            texture_repo: upload,
             block_allocator,
         }
     }

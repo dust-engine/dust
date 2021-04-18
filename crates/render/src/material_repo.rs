@@ -29,8 +29,9 @@ impl TextureRepo {
         device: &ash::Device,
         allocator: &vma::Allocator,
         command_buffer: vk::CommandBuffer,
+        graphics_queue_family: u32,
+        transfer_queue_family: u32,
     ) -> TextureRepoUploadState {
-        let num_images: u32 = 10;
         let (image, image_allocation, image_allocation_info) = allocator
             .create_image(
                 &vk::ImageCreateInfo::builder()
@@ -38,17 +39,17 @@ impl TextureRepo {
                     .image_type(vk::ImageType::TYPE_2D)
                     .format(vk::Format::R8G8B8A8_SRGB)
                     .extent(vk::Extent3D {
-                        width: 0,
-                        height: 0,
+                        width: 16,
+                        height: 16,
                         depth: 1,
                     })
                     .mip_levels(1)
-                    .array_layers(num_images)
+                    .array_layers(self.materials.len() as u32)
                     .samples(vk::SampleCountFlags::TYPE_1)
                     .tiling(vk::ImageTiling::OPTIMAL)
                     .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                    .initial_layout(vk::ImageLayout::PREINITIALIZED)
+                    .initial_layout(vk::ImageLayout::UNDEFINED)
                     .build(),
                 &vma::AllocationCreateInfo {
                     usage: vma::MemoryUsage::GpuOnly,
@@ -64,7 +65,7 @@ impl TextureRepo {
                     .usage(vk::BufferUsageFlags::TRANSFER_SRC)
                     .build(),
                 &vma::AllocationCreateInfo {
-                    usage: vma::MemoryUsage::CpuToGpu,
+                    usage: vma::MemoryUsage::CpuOnly,
                     flags: vma::AllocationCreateFlags::MAPPED,
                     ..Default::default()
                 },
@@ -75,7 +76,7 @@ impl TextureRepo {
         let indices = {
             // Copy data into the buffer
             let mut current_offset: usize = 0;
-            let mut indices: Vec<usize> = Vec::with_capacity(num_images as usize);
+            let mut indices: Vec<usize> = Vec::with_capacity(self.materials.len());
             for (_i, material) in self.materials.iter().enumerate() {
                 let rgba8img = material.diffuse.as_rgba8().unwrap();
                 unsafe {
@@ -111,20 +112,61 @@ impl TextureRepo {
                     },
                     image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
                     image_extent: vk::Extent3D {
-                        width: material.diffuse.width(),
-                        height: material.diffuse.height(),
+                        width: 16,
+                        height: 16,
                         depth: 1,
                     },
                 }
             })
             .collect();
         unsafe {
+            let image_memory_barrier = vk::ImageMemoryBarrier::builder()
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .image(image)
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .src_queue_family_index(transfer_queue_family)
+                .dst_queue_family_index(transfer_queue_family)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1
+                })
+                .build();
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[image_memory_barrier]
+            );
+            let mut image_memory_barrier2 = image_memory_barrier.clone();
+            image_memory_barrier2.dst_queue_family_index = graphics_queue_family;
+            image_memory_barrier2.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            image_memory_barrier2.dst_access_mask = vk::AccessFlags::SHADER_READ;
+            image_memory_barrier2.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+            image_memory_barrier2.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+
             device.cmd_copy_buffer_to_image(
                 command_buffer,
                 staging_buffer,
                 image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &buffer_copies,
+            );
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[image_memory_barrier2]
             );
         }
         TextureRepoUploadState {

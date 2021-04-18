@@ -52,6 +52,27 @@ layout(set = 0, binding = 1) uniform Lights {
 layout(set = 1, binding = 0) readonly buffer Chunk {
     Node Chunk_Nodes[];
 };
+struct Material {
+    float scale;
+    uint16_t diffuse;
+    uint16_t normal;
+    float _reserved1;
+    float _reserved2;
+};
+struct ColoredMaterial {
+    float scale;
+    uint16_t diffuse;
+    uint16_t normal;
+    float _reserved1;
+    float _reserved2;
+    vec4 palette[256];
+};
+layout(set = 1, binding = 1) readonly buffer ColoredMaterials {
+    ColoredMaterial coloredMaterials[];
+};
+layout(set = 1, binding = 2) readonly buffer Materials {
+    Material regularMaterials[];
+};
 layout (input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput inputDepth;
 
 Ray GenerateRay() {
