@@ -65,7 +65,7 @@ struct ColoredMaterial {
     uint16_t normal;
     float _reserved1;
     float _reserved2;
-    vec4 palette[256];
+    vec4 palette[128];
 };
 layout(set = 1, binding = 1) readonly buffer Materials {
     Material u_RegularMaterials[];
@@ -191,9 +191,9 @@ void main() {
 
 
     if (voxel_id == 0) {
-        f_color = vec4(0.0, 1.0, 0.0, 1.0);
-        return;
-        // discard;
+        //f_color = vec4(0.0, 1.0, 0.0, 1.0);
+        //return;
+        discard;
     } else if ((voxel_id & 0x8000) == 0) {
         uint materialId = voxel_id - 1;
         diffuseTextureId = uint(u_RegularMaterials[materialId].diffuse);

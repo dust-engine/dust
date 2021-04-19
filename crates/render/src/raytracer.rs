@@ -731,7 +731,7 @@ impl RenderPassProvider for RayTracer {
             }],
         );
         let mut clear_values = [vk::ClearValue::default(), vk::ClearValue::default()];
-        clear_values[0].color.float32 = [1.0, 0.0, 0.0, 1.0];
+        clear_values[0].color.float32 = [1.0, 1.0, 1.0, 1.0];
         clear_values[1].depth_stencil = vk::ClearDepthStencilValue {
             depth: 1.0,
             stencil: 0,
