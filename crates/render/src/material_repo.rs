@@ -49,7 +49,7 @@ impl TextureRepo {
                 &vk::ImageCreateInfo::builder()
                     .flags(vk::ImageCreateFlags::empty())
                     .image_type(vk::ImageType::TYPE_2D)
-                    .format(vk::Format::R8G8B8A8_SRGB)
+                    .format(vk::Format::R8G8B8A8_UNORM)
                     .extent(vk::Extent3D {
                         width: 16,
                         height: 16,
@@ -183,7 +183,7 @@ impl TextureRepo {
         let sampler = unsafe {
             device.create_sampler(
                 &vk::SamplerCreateInfo::builder()
-                    .mag_filter(vk::Filter::LINEAR)
+                    .mag_filter(vk::Filter::NEAREST)
                     .min_filter(vk::Filter::NEAREST)
                     .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
                     .address_mode_u(vk::SamplerAddressMode::REPEAT)
@@ -199,7 +199,7 @@ impl TextureRepo {
                 &vk::ImageViewCreateInfo::builder()
                     .image(image)
                     .view_type(vk::ImageViewType::TYPE_2D_ARRAY)
-                    .format(vk::Format::R8G8B8A8_SRGB)
+                    .format(vk::Format::R8G8B8A8_UNORM)
                     .components(vk::ComponentMapping {
                         r: vk::ComponentSwizzle::R,
                         g: vk::ComponentSwizzle::G,

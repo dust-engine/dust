@@ -188,12 +188,12 @@ void main() {
     if (voxel_id == 0) {
         f_color = vec4(0.0, 1.0, 0.0, 1.0);
     } else {
-        float sunLightFactor = min(1.0, dot(normal, Lights_Sunlight.dir));
+        float sunLightFactor =min(1.0, max(0.3, dot(normal, Lights_Sunlight.dir)));
         vec4 output_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
         vec4 texture_color = texture(
             TextureRepoSampler,
             vec3(
-                texcoords * 10.0,
+                texcoords * u_RegularMaterials[voxel_id - 1].scale,
                 uint(u_RegularMaterials[voxel_id - 1].diffuse)
             )
         );

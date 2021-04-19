@@ -32,7 +32,7 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup_from_oct_file.system())
+        .add_startup_system(setup.system())
         .add_system(run.system())
         .run();
 }
@@ -102,7 +102,13 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                         "minecraft:cave_air" => continue,
                                         "minecraft:grass" => continue,
                                         "minecraft:tall_grass" => continue,
-                                        _ => Voxel::with_id(1),
+                                        "minecraft:stone" => Voxel::with_id(1),
+                                        "minecraft:bedrock" => Voxel::with_id(1),
+                                        "minecraft:dirt" => Voxel::with_id(2),
+                                        "minecraft:grass_block" => Voxel::with_id(2),
+                                        _ => {
+                                            Voxel::with_id(2)
+                                        },
                                     };
                                     mutator.set(
                                         x + chunk_x as u32 * 16 + region_x as u32 * 512,

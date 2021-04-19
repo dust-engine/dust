@@ -47,8 +47,16 @@ impl RenderResources {
         let mut texture_repo = TextureRepo::new();
         texture_repo.materials.push(Material {
             name: "Stone".into(),
-            scale: 1.0,
+            scale: 10.0,
             diffuse: image::io::Reader::open("./assets/stone.png")
+                .unwrap()
+                .decode()
+                .unwrap(),
+        });
+        texture_repo.materials.push(Material {
+            name: "Dirt".into(),
+            scale: 1.0,
+            diffuse: image::io::Reader::open("./assets/dirt.png")
                 .unwrap()
                 .decode()
                 .unwrap(),

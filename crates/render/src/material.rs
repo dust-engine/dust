@@ -7,6 +7,7 @@ pub struct Material {
     pub diffuse: image::DynamicImage,
 }
 
+#[repr(C)]
 pub(crate) struct MaterialDeviceLayout {
     pub(crate) scale: f32,
     pub(crate) diffuse: u16,
@@ -22,6 +23,7 @@ pub struct ColoredMaterial {
     pub color_palette: [Vec3; 128],
 }
 
+#[repr(C)]
 pub(crate) struct ColoredMaterialDeviceLayout {
     pub(crate) scale: f32,
     pub(crate) diffuse: u16,
