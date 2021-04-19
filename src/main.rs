@@ -105,9 +105,31 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                         "minecraft:stone" => Voxel::with_id(1),
                                         "minecraft:bedrock" => Voxel::with_id(1),
                                         "minecraft:dirt" => Voxel::with_id(2),
+                                        "minecraft:log" => Voxel::with_id(3),
+                                        "minecraft:log2" => Voxel::with_id(3),
+                                        "minecraft:planks" => Voxel::with_id(4),
+                                        "minecraft:gravel" => Voxel::with_id(5),
+                                        "minecraft:white_wool" => Voxel::colored(2, 0),
+                                        "minecraft:grey_wool" => Voxel::colored(2, 1),
+                                        "minecraft:green_wool" => Voxel::colored(2, 2),
+                                        "minecraft:black_wool" => Voxel::colored(2, 3),
+                                        "minecraft:blue_wool" => Voxel::colored(2, 4),
+                                        "minecraft:brown_wool" => Voxel::colored(2, 5),
+                                        "minecraft:cyan_wool" => Voxel::colored(2, 6),
+                                        "minecraft:light_blue_wool" => Voxel::colored(2, 7),
+                                        "minecraft:light_grey_wool" => Voxel::colored(2, 8),
+                                        "minecraft:lime_wool" => Voxel::colored(2, 9),
+                                        "minecraft:magenta_wool" => Voxel::colored(2, 10),
+                                        "minecraft:orange_wool" => Voxel::colored(2, 11),
+                                        "minecraft:pink_wool" => Voxel::colored(2, 12),
+                                        "minecraft:purple_wool" => Voxel::colored(2, 13),
+                                        "minecraft:red_wool" => Voxel::colored(2, 14),
+                                        "minecraft:yellow_wool" => Voxel::colored(2, 15),
                                         "minecraft:grass_block" => Voxel::colored(0, 0),
+                                        "minecraft:leaves" => Voxel::colored(1, 0),
+                                        "minecraft:leaves2" => Voxel::colored(1, 0),
                                         _ => {
-                                            Voxel::with_id(2)
+                                            Voxel::with_id(1)
                                         },
                                     };
                                     mutator.set(
