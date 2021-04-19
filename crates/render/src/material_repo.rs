@@ -56,7 +56,7 @@ impl TextureRepo {
                         depth: 1,
                     })
                     .mip_levels(1)
-                    .array_layers(self.materials.len() as u32)
+                    .array_layers((self.materials.len() + self.colored_materials.len()) as u32)
                     .samples(vk::SampleCountFlags::TYPE_1)
                     .tiling(vk::ImageTiling::OPTIMAL)
                     .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
@@ -88,8 +88,20 @@ impl TextureRepo {
         let indices = {
             // Copy data into the buffer
             let mut current_offset: usize = 0;
-            let mut indices: Vec<usize> = Vec::with_capacity(self.materials.len());
-            for (_i, material) in self.materials.iter().enumerate() {
+            let mut indices: Vec<usize> = Vec::with_capacity(self.materials.len() + self.colored_materials.len());
+            for material in self.materials.iter() {
+                let rgba8img = material.diffuse.as_rgba8().unwrap();
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        rgba8img.as_ptr(),
+                        staging_ptr.add(current_offset),
+                        rgba8img.len(),
+                    );
+                }
+                indices.push(current_offset);
+                current_offset += rgba8img.len();
+            }
+            for material in self.colored_materials.iter() {
                 let rgba8img = material.diffuse.as_rgba8().unwrap();
                 unsafe {
                     std::ptr::copy_nonoverlapping(
@@ -104,12 +116,11 @@ impl TextureRepo {
             indices
         };
 
-        let buffer_copies: Vec<_> = self
-            .materials
+        let buffer_copies: Vec<_> =
+        indices
             .iter()
-            .zip(indices.iter())
             .enumerate()
-            .map(|(i, (material, &indice))| {
+            .map(|(i, &indice)| {
                 vk::BufferImageCopy {
                     buffer_offset: indice as u64,
                     // If either of these values is zero, that aspect of the buffer memory is
@@ -145,7 +156,7 @@ impl TextureRepo {
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: 0,
-                    layer_count: self.materials.len() as u32
+                    layer_count: (self.materials.len() + self.colored_materials.len()) as u32
                 })
                 .build();
             device.cmd_pipeline_barrier(
@@ -211,7 +222,7 @@ impl TextureRepo {
                         base_mip_level: 0,
                         level_count: 1,
                         base_array_layer: 0,
-                        layer_count: self.materials.len() as u32
+                        layer_count: (self.materials.len() + self.colored_materials.len()) as u32
                     })
                     .build(),
                 None,
@@ -223,7 +234,7 @@ impl TextureRepo {
             .create_buffer(
                 &vk::BufferCreateInfo::builder()
                     .flags(vk::BufferCreateFlags::empty())
-                    .size((self.materials.len() * size_of::<MaterialDeviceLayout>() + self.colored_materials.len() * size_of::<ColoredMaterial>()) as u64)
+                    .size((self.materials.len() * size_of::<MaterialDeviceLayout>() + self.colored_materials.len() * size_of::<ColoredMaterialDeviceLayout>()) as u64)
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
                     .build(),
@@ -266,7 +277,7 @@ impl TextureRepo {
             staging_buffer_allocation_info,
             sampler,
             image_view,
-            image_len: self.materials.len() as u32,
+            image_len: (self.materials.len() + self.colored_materials.len()) as u32,
             buffer,
             buffer_allocation,
             buffer_allocation_info,

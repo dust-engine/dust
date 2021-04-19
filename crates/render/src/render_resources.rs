@@ -1,4 +1,4 @@
-use crate::material::Material;
+use crate::material::{Material, ColoredMaterialDeviceLayout, ColoredMaterial};
 use crate::material_repo::{TextureRepo, TextureRepoUploadState};
 
 use crate::swapchain::Swapchain;
@@ -9,6 +9,7 @@ use dust_core::svo::alloc::BLOCK_SIZE;
 use std::sync::Arc;
 use vk_mem as vma;
 use ash::version::DeviceV1_0;
+use glam::Vec3;
 
 pub struct RenderResources {
     pub swapchain: Swapchain,
@@ -55,12 +56,22 @@ impl RenderResources {
         });
         texture_repo.materials.push(Material {
             name: "Dirt".into(),
-            scale: 1.0,
+            scale: 10.0,
             diffuse: image::io::Reader::open("./assets/dirt.png")
                 .unwrap()
                 .decode()
                 .unwrap(),
         });
+        texture_repo.colored_materials.push(ColoredMaterial {
+            name: "Grass".into(),
+            scale: 10.0,
+            diffuse: image::io::Reader::open("./assets/grass_block_top.png")
+                .unwrap()
+                .decode()
+                .unwrap(),
+            color_palette: [Vec3::ZERO; 128]
+        });
+        texture_repo.colored_materials[0].color_palette[0] = Vec3::new(0.1, 1.0, 0.1);
         let upload = unsafe {
             let command_pool = renderer.context.device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()

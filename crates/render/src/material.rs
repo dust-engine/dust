@@ -19,7 +19,7 @@ pub(crate) struct MaterialDeviceLayout {
 pub struct ColoredMaterial {
     pub name: Cow<'static, str>,
     pub scale: f32,
-    pub diffuse: Option<image::DynamicImage>,
+    pub diffuse: image::DynamicImage,
     pub color_palette: [Vec3; 128],
 }
 

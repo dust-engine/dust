@@ -185,19 +185,38 @@ void main() {
         dot(-sign(normal) * vec3(hitpoint.y, hitpoint.z, hitpoint.y), normal)
     );
 
+    vec4 output_color;
+    uint diffuseTextureId;
+    float scale = 1.0;
+
+
     if (voxel_id == 0) {
         f_color = vec4(0.0, 1.0, 0.0, 1.0);
+        return;
+        // discard;
+    } else if ((voxel_id & 0x8000) == 0) {
+        uint materialId = voxel_id - 1;
+        diffuseTextureId = uint(u_RegularMaterials[materialId].diffuse);
+        output_color = vec4(1, 1, 1, 1);
+        scale = u_RegularMaterials[materialId].scale;
     } else {
-        float sunLightFactor =min(1.0, max(0.3, dot(normal, Lights_Sunlight.dir)));
-        vec4 output_color = vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
-        vec4 texture_color = texture(
+        uint materialId = voxel_id & 0xff; // lower 8 bits
+        uint colorId = (voxel_id >> 8) & 0x7f;
+        diffuseTextureId = uint(u_ColoredMaterials[materialId].diffuse);
+        output_color = u_ColoredMaterials[materialId].palette[colorId];
+        scale = u_ColoredMaterials[materialId].scale;
+    }
+
+    if (diffuseTextureId != 0xffffffff) {
+        output_color *= texture(
             TextureRepoSampler,
             vec3(
-                texcoords * u_RegularMaterials[voxel_id - 1].scale,
-                uint(u_RegularMaterials[voxel_id - 1].diffuse)
+                texcoords * scale,
+                diffuseTextureId
             )
         );
-        f_color = output_color * texture_color;
     }
+    float sunLightFactor =min(1.0, max(0.3, dot(normal, Lights_Sunlight.dir)));
+    f_color = output_color * vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
     #endif
 }

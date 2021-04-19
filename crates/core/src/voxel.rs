@@ -3,7 +3,12 @@ pub struct Voxel(u16);
 impl Voxel {
     pub const AIR: Voxel = Voxel(0);
     pub fn with_id(id: u16) -> Voxel {
+        assert_eq!(id >> 15, 0);
         Voxel(id)
+    }
+    pub fn colored(id: u8, color: u8) -> Voxel {
+        assert_eq!(color >> 7, 0);
+        Voxel((1 << 15) | ((color as u16) << 8) | id as u16)
     }
 }
 impl Default for Voxel {

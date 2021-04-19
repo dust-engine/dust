@@ -105,7 +105,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                         "minecraft:stone" => Voxel::with_id(1),
                                         "minecraft:bedrock" => Voxel::with_id(1),
                                         "minecraft:dirt" => Voxel::with_id(2),
-                                        "minecraft:grass_block" => Voxel::with_id(2),
+                                        "minecraft:grass_block" => Voxel::colored(0, 0),
                                         _ => {
                                             Voxel::with_id(2)
                                         },
