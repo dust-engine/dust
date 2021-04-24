@@ -10,14 +10,16 @@ struct Frame {
     render_finished_semaphore: vk::Semaphore,
     fence: vk::Fence,
 }
-struct SwapchainImage {
-    view: vk::ImageView,
+pub struct SwapchainImage {
+    pub desc_set: vk::DescriptorSet,
+    pub view: vk::ImageView,
+    pub image: vk::Image,
     fence: vk::Fence, // This fence was borrowed from the last rendered frame.
     // The reason we need a separate command buffer for each swapchain image
     // is that cmd_begin_render_pass contains a reference to the framebuffer
     // which is unique to each swapchain image.
-    command_buffer: vk::CommandBuffer,
-    framebuffer: vk::Framebuffer,
+    pub command_buffer: vk::CommandBuffer,
+    pub framebuffer: vk::Framebuffer,
 }
 pub(crate) struct DepthImage {
     image: vk::Image,
@@ -28,8 +30,7 @@ pub trait RenderPassProvider {
     unsafe fn record_command_buffer(
         &mut self,
         device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        framebuffer: vk::Framebuffer,
+        image: &SwapchainImage,
         config: &SwapchainConfig,
     );
     unsafe fn get_render_pass(&self) -> vk::RenderPass;
@@ -131,7 +132,7 @@ unsafe fn create_swapchain(
                 .image_color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR)
                 .image_format(config.format)
                 .image_extent(config.extent)
-                .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE)
                 .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                 .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
                 .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
@@ -193,6 +194,33 @@ unsafe fn create_framebuffer(
         )
         .unwrap()
 }
+unsafe fn update_image_desc_sets<I>(
+    device: &ash::Device,
+    iterator: I,
+) where I: Iterator<Item = (vk::DescriptorSet, vk::ImageView)> + Clone {
+    let image_infos = iterator
+        .clone()
+        .map(|(_, image_view)| vk::DescriptorImageInfo {
+            sampler: vk::Sampler::null(),
+            image_view,
+            image_layout: vk::ImageLayout::GENERAL
+        })
+        .collect::<Vec<vk::DescriptorImageInfo>>();
+    let descriptor_writes = iterator
+        .enumerate()
+        .map(|(i, (desc_set, _))| vk::WriteDescriptorSet::builder()
+            .dst_set(desc_set)
+            .dst_binding(0)
+            .dst_array_element(0)
+            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+            .image_info(&image_infos[i..=i])
+            .build())
+        .collect::<Vec<vk::WriteDescriptorSet>>();
+    device.update_descriptor_sets(
+        descriptor_writes.as_slice(),
+        &[]
+    );
+}
 pub struct Swapchain {
     context: Arc<RenderContext>,
     surface: vk::SurfaceKHR,
@@ -206,6 +234,7 @@ pub struct Swapchain {
     command_pool: vk::CommandPool,
     pub config: SwapchainConfig,
     render_pass: vk::RenderPass,
+    pub images_desc_set_layout: vk::DescriptorSetLayout,
 }
 pub struct SwapchainConfig {
     pub format: vk::Format,
@@ -271,19 +300,57 @@ impl Swapchain {
                     .build(),
             )
             .unwrap();
+        let desc_pool = device
+            .create_descriptor_pool(&vk::DescriptorPoolCreateInfo::builder()
+                .max_sets(images.len() as u32)
+                .pool_sizes(&[
+                    vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::STORAGE_IMAGE,
+                        descriptor_count: 3
+                    }
+                ])
+                .build(),
+                None
+            )
+            .unwrap();
+        let desc_set_layout = device
+            .create_descriptor_set_layout(&vk::DescriptorSetLayoutCreateInfo::builder()
+                .bindings(&[
+                    vk::DescriptorSetLayoutBinding::builder()
+                        .binding(0)
+                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .descriptor_count(1)
+                        .build(),
+                ]),
+            None
+            )
+            .unwrap();
+        let desc_sets = device
+            .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(desc_pool)
+                .set_layouts(vec![desc_set_layout; images.len()].as_slice())
+                .build()
+            )
+            .unwrap();
         let swapchain_images = images
             .into_iter()
             .zip(command_buffers.into_iter())
-            .map(|(image, command_buffer)| {
+            .zip(desc_sets.into_iter())
+            .map(|((image, command_buffer), desc_set)| {
                 let view = create_image_view(&device, image, &config);
                 SwapchainImage {
+                    desc_set,
+                    image,
                     view,
                     fence: vk::Fence::null(),
                     command_buffer,
                     framebuffer: vk::Framebuffer::null(),
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+
+        update_image_desc_sets(device, swapchain_images.iter().map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)));
         let mut frames_in_flight = Vec::with_capacity(num_frames_in_flight);
         for _i in 0..num_frames_in_flight {
             frames_in_flight.push(Frame::new(&device));
@@ -301,6 +368,7 @@ impl Swapchain {
             config,
             surface,
             render_pass: vk::RenderPass::null(),
+            images_desc_set_layout: desc_set_layout
         }
     }
 
@@ -329,6 +397,7 @@ impl Swapchain {
         let images = self.loader.get_swapchain_images(self.swapchain).unwrap();
         for (swapchain_image, image) in self.swapchain_images.iter_mut().zip(images.into_iter()) {
             swapchain_image.view = create_image_view(&self.context.device, image, &config);
+            swapchain_image.image = image;
             swapchain_image.framebuffer = vk::Framebuffer::null(); // this will be filled later on during bind_render_pass
         }
         self.depth_image = create_depth_image(&self.context.device, allocator, &config);
@@ -420,8 +489,7 @@ impl Swapchain {
                 .unwrap();
             render_pass_provider.record_command_buffer(
                 &self.context.device,
-                swapchain_image.command_buffer,
-                swapchain_image.framebuffer,
+                swapchain_image,
                 &self.config,
             );
             self.context

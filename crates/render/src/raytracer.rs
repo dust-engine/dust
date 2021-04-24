@@ -2,7 +2,7 @@ use crate::core::svo::mesher::Mesh;
 use crate::device_info::DeviceInfo;
 use crate::renderer::RenderContext;
 use crate::shared_buffer::{SharedBuffer, StagingStateLayout};
-use crate::swapchain::{RenderPassProvider, Swapchain, SwapchainConfig};
+use crate::swapchain::{RenderPassProvider, Swapchain, SwapchainConfig, SwapchainImage};
 use crate::State;
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -37,19 +37,22 @@ pub struct RayTracer {
     frame_desc_set_layout: vk::DescriptorSetLayout,
     pub depth_pipeline: vk::Pipeline,
     pub ray_pipeline: vk::Pipeline,
+    pub compute_pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
     pub render_pass: vk::RenderPass,
     pub depth_sampler: vk::Sampler,
 
     pub shared_buffer: SharedBuffer,
     mesh: Option<(vk::Buffer, u64, u32)>,
+    // count, size, invocation
+    limits: ([u32; 3], [u32; 3], u32),
 }
 
 unsafe fn create_pipelines(
     device: &ash::Device,
     pipeline_layout: vk::PipelineLayout,
     render_pass: vk::RenderPass,
-) -> [vk::Pipeline; 2] {
+) -> [vk::Pipeline; 3] {
     let vertex_shader_module = device
         .create_shader_module(
             &vk::ShaderModuleCreateInfo::builder()
@@ -76,6 +79,19 @@ unsafe fn create_pipelines(
             None,
         )
         .unwrap();
+    let compute_shader_module = device
+        .create_shader_module(
+            &vk::ShaderModuleCreateInfo::builder()
+                .code(
+                    &ash::util::read_spv(&mut Cursor::new(
+                        &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.comp.spv"))[..],
+                    ))
+                        .unwrap(),
+                )
+                .build(),
+            None,
+        )
+        .unwrap();
     let depth_prepass_vertex_shader_module = device
         .create_shader_module(
             &vk::ShaderModuleCreateInfo::builder()
@@ -89,7 +105,7 @@ unsafe fn create_pipelines(
             None,
         )
         .unwrap();
-    let mut pipelines: [vk::Pipeline; 2] = [vk::Pipeline::null(), vk::Pipeline::null()];
+    let mut pipelines: [vk::Pipeline; 3] = [vk::Pipeline::null(); 3];
     let result = device.fp_v1_0().create_graphics_pipelines(
         device.handle(),
         vk::PipelineCache::null(),
@@ -287,8 +303,31 @@ unsafe fn create_pipelines(
     );
     assert_eq!(result, vk::Result::SUCCESS);
 
+    let result = device.fp_v1_0()
+        .create_compute_pipelines(
+            device.handle(),
+            vk::PipelineCache::null(),
+            1,
+            [
+                vk::ComputePipelineCreateInfo::builder()
+                .stage(
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::COMPUTE)
+                        .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+                        .module(compute_shader_module)
+                        .build()
+                )
+                .layout(pipeline_layout)
+                .build()
+            ].as_ptr(),
+            std::ptr::null(),
+            pipelines.as_mut_ptr().add(2)
+        );
+    assert_eq!(result, vk::Result::SUCCESS);
+
     device.destroy_shader_module(vertex_shader_module, None);
     device.destroy_shader_module(fragment_shader_module, None);
+    device.destroy_shader_module(compute_shader_module, None);
     device.destroy_shader_module(depth_prepass_vertex_shader_module, None);
     pipelines
 }
@@ -297,7 +336,7 @@ impl RayTracer {
     pub unsafe fn new(
         context: Arc<RenderContext>,
         allocator: &vma::Allocator,
-        format: vk::Format,
+        swapchain: &Swapchain,
         info: &DeviceInfo,
         graphics_queue: vk::Queue,
         graphics_queue_family: u32,
@@ -316,7 +355,7 @@ impl RayTracer {
                 &vk::RenderPassCreateInfo::builder()
                     .attachments(&[
                         vk::AttachmentDescription::builder()
-                            .format(format)
+                            .format(swapchain.config.format)
                             .samples(vk::SampleCountFlags::TYPE_1)
                             .load_op(vk::AttachmentLoadOp::CLEAR)
                             .store_op(vk::AttachmentStoreOp::STORE)
@@ -495,6 +534,7 @@ impl RayTracer {
                     uniform_desc_set_layout,
                     storage_desc_set_layout,
                     frame_desc_set_layout,
+                    swapchain.images_desc_set_layout,
                 ]),
                 None,
             )
@@ -548,6 +588,7 @@ impl RayTracer {
             pipeline_layout,
             ray_pipeline: pipelines[1],
             depth_pipeline: pipelines[0],
+            compute_pipeline: pipelines[2],
             storage_desc_set,
             storage_desc_set_layout,
             uniform_desc_set,
@@ -559,6 +600,11 @@ impl RayTracer {
             mesh: None,
             frame_desc_set_layout,
             depth_sampler,
+            limits: (
+                info.physical_device_properties.limits.max_compute_work_group_count,
+                info.physical_device_properties.limits.max_compute_work_group_size,
+                info.physical_device_properties.limits.max_compute_work_group_invocations,
+            )
         };
         raytracer
     }
@@ -702,10 +748,31 @@ impl RenderPassProvider for RayTracer {
     unsafe fn record_command_buffer(
         &mut self,
         device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        framebuffer: vk::Framebuffer,
+        swapchain_image: &SwapchainImage,
         config: &SwapchainConfig,
     ) {
+        let command_buffer = swapchain_image.command_buffer;
+        let framebuffer = swapchain_image.framebuffer;
+        let max_compute_work_group_count = self.limits.0;
+        let max_compute_work_group_size = self.limits.1;
+        let default_local_workgroup_size: u32 = 4;
+        if max_compute_work_group_size[0] < default_local_workgroup_size || max_compute_work_group_size[1] < default_local_workgroup_size {
+            panic!("Max compute work group size too small. {} {}", max_compute_work_group_size[0], max_compute_work_group_size[1]);
+        }
+        fn div_round_up(a: u32, b: u32) -> u32 {
+            (a + b - 1) / b
+        }
+        let work_group_count = [
+            div_round_up(config.extent.width, default_local_workgroup_size),
+            div_round_up(config.extent.height, default_local_workgroup_size),
+        ];
+        if work_group_count[0] > max_compute_work_group_count[0] || work_group_count[1] > max_compute_work_group_count[1] {
+            panic!(
+                "Max compute work group count too small, {} {}",
+                max_compute_work_group_count[0],
+                max_compute_work_group_count[1])
+        }
+
         device.cmd_set_viewport(
             command_buffer,
             0,
@@ -739,66 +806,76 @@ impl RenderPassProvider for RayTracer {
         self.shared_buffer.record_cmd_buffer_copy(command_buffer);
         device.cmd_bind_descriptor_sets(
             command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
+            vk::PipelineBindPoint::COMPUTE,
             self.pipeline_layout,
             0,
             &[
                 self.uniform_desc_set,
                 self.storage_desc_set,
                 self.frame_desc_set,
+                swapchain_image.desc_set,
             ],
             &[],
         );
-        device.cmd_begin_render_pass(
+        device.cmd_bind_pipeline(
             command_buffer,
-            &vk::RenderPassBeginInfo::builder()
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: config.extent,
-                })
-                .framebuffer(framebuffer)
-                .render_pass(self.render_pass)
-                .clear_values(&clear_values),
-            vk::SubpassContents::INLINE,
+            vk::PipelineBindPoint::COMPUTE,
+            self.compute_pipeline,
         );
-        if let Some(mesh) = self.mesh {
-            let (buffer, i, index_count) = mesh;
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.depth_pipeline,
-            );
-            device.cmd_bind_vertex_buffers(command_buffer, 0, &[buffer], &[0]);
-            device.cmd_bind_index_buffer(command_buffer, buffer, i, vk::IndexType::UINT32);
-            device.cmd_draw_indexed(command_buffer, index_count, 1, 0, 0, 0);
-        }
-        device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
-        if self.mesh.is_some() {
-            device.cmd_set_stencil_reference(command_buffer, vk::StencilFaceFlags::FRONT, 1);
-        } else {
-            device.cmd_set_stencil_reference(command_buffer, vk::StencilFaceFlags::FRONT, 0);
-        }
-        {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.ray_pipeline,
-            );
-            device.cmd_bind_vertex_buffers(
-                command_buffer,
-                0,
-                &[self.shared_buffer.buffer],
-                &[offset_of!(StagingStateLayout, vertex_buffer) as u64],
-            );
-            device.cmd_bind_index_buffer(
-                command_buffer,
-                self.shared_buffer.buffer,
-                offset_of!(StagingStateLayout, index_buffer) as u64,
-                vk::IndexType::UINT16,
-            );
-            device.cmd_draw_indexed(command_buffer, CUBE_INDICES.len() as u32, 1, 0, 0, 0);
-        }
-        device.cmd_end_render_pass(command_buffer);
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+            vk::DependencyFlags::BY_REGION,
+            &[],
+            &[],
+            &[
+                vk::ImageMemoryBarrier::builder()
+                    .image(swapchain_image.image)
+                    .src_access_mask(vk::AccessFlags::empty())
+                    .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1
+                    })
+                    .old_layout(vk::ImageLayout::UNDEFINED)
+                    .new_layout(vk::ImageLayout::GENERAL)
+                    .build()
+            ]
+        );
+        device.cmd_dispatch(
+            command_buffer,
+            work_group_count[0],
+            work_group_count[1],
+            1,
+        );
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::DependencyFlags::BY_REGION,
+            &[],
+            &[],
+            &[
+                vk::ImageMemoryBarrier::builder()
+                    .image(swapchain_image.image)
+                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::empty())
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1
+                    })
+                    .old_layout(vk::ImageLayout::GENERAL)
+                    .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                    .build()
+            ]
+        );
     }
 
     unsafe fn get_render_pass(&self) -> RenderPass {
@@ -851,7 +928,7 @@ pub mod systems {
             let mut raytracer = RayTracer::new(
                 renderer.context.clone(),
                 &render_resources.allocator,
-                render_resources.swapchain.config.format,
+                &render_resources.swapchain,
                 &renderer.info,
                 renderer.graphics_queue,
                 renderer.graphics_queue_family,
