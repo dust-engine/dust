@@ -22,7 +22,7 @@
 //       --------- +x
 //      /
 //     /
-//   -z
+//   +z
 
 #[repr(u8)]
 #[derive(PartialEq, Eq, Copy, Clone)]
@@ -70,7 +70,7 @@ impl Corner {
         let a = *self as u8;
         let x = a >> 2;
         let y = (a & 0b010) >> 1;
-        let z = (!a) & 0b1;
+        let z = a & 0b1;
         (x, y, z)
     }
 
@@ -85,66 +85,66 @@ impl Corner {
         use Quadrant::*;
         match self {
             RearLeftBottom => [
-                (true, Bottom, LeftTop),
-                (false, Bottom, LeftTop),
-                (false, Left, RightBottom),
-                (true, Left, RightBottom),
-                (true, Rear, LeftBottom),
-                (false, Rear, LeftBottom),
-            ],
-            FrontLeftBottom => [
                 (true, Bottom, LeftBottom),
                 (false, Bottom, LeftBottom),
                 (false, Left, LeftBottom),
                 (true, Left, LeftBottom),
+                (true, Rear, LeftBottom),
+                (false, Rear, LeftBottom),
+            ],
+            FrontLeftBottom => [
+                (true, Bottom, LeftTop),
+                (false, Bottom, LeftTop),
+                (false, Left, RightBottom),
+                (true, Left, RightBottom),
                 (false, Front, LeftBottom),
                 (true, Front, LeftBottom),
             ],
             RearLeftTop => [
-                (false, Top, LeftTop),
-                (true, Top, LeftTop),
-                (false, Left, RightTop),
-                (true, Left, RightTop),
-                (true, Rear, LeftTop),
-                (false, Rear, LeftTop),
-            ],
-            FrontLeftTop => [
                 (false, Top, LeftBottom),
                 (true, Top, LeftBottom),
                 (false, Left, LeftTop),
                 (true, Left, LeftTop),
+                (true, Rear, LeftTop),
+                (false, Rear, LeftTop),
+            ],
+            FrontLeftTop => [
+                (false, Top, LeftTop),
+                (true, Top, LeftTop),
+                (false, Left, RightTop),
+                (true, Left, RightTop),
                 (false, Front, LeftTop),
                 (true, Front, LeftTop),
             ],
             RearRightBottom => [
-                (true, Bottom, RightTop),
-                (false, Bottom, RightTop),
-                (true, Right, RightBottom),
-                (false, Right, RightBottom),
-                (true, Rear, RightBottom),
-                (false, Rear, RightBottom),
-            ],
-            FrontRightBottom => [
                 (true, Bottom, RightBottom),
                 (false, Bottom, RightBottom),
                 (true, Right, LeftBottom),
                 (false, Right, LeftBottom),
+                (true, Rear, RightBottom),
+                (false, Rear, RightBottom),
+            ],
+            FrontRightBottom => [
+                (true, Bottom, RightTop),
+                (false, Bottom, RightTop),
+                (true, Right, RightBottom),
+                (false, Right, RightBottom),
                 (false, Front, RightBottom),
                 (true, Front, RightBottom),
             ],
             RearRightTop => [
-                (false, Top, RightTop),
-                (true, Top, RightTop),
-                (true, Right, RightTop),
-                (false, Right, RightTop),
-                (true, Rear, RightTop),
-                (false, Rear, RightTop),
-            ],
-            FrontRightTop => [
                 (false, Top, RightBottom),
                 (true, Top, RightBottom),
                 (true, Right, LeftTop),
                 (false, Right, LeftTop),
+                (true, Rear, RightTop),
+                (false, Rear, RightTop),
+            ],
+            FrontRightTop => [
+                (false, Top, RightTop),
+                (true, Top, RightTop),
+                (true, Right, RightTop),
+                (false, Right, RightTop),
                 (false, Front, RightTop),
                 (true, Front, RightTop),
             ],

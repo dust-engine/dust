@@ -81,7 +81,7 @@ impl Bounds {
                     0
                 }) as f32,
             (self.z
-                + if corner.is_on_face(Face::Rear) {
+                + if corner.is_on_face(Face::Front) {
                     self.width
                 } else {
                     0
@@ -99,7 +99,7 @@ impl Bounds {
         if dir.is_on_face(Face::Top) {
             bounds.y += bounds.width;
         }
-        if dir.is_on_face(Face::Rear) {
+        if dir.is_on_face(Face::Front) {
             bounds.z += bounds.width;
         }
         bounds

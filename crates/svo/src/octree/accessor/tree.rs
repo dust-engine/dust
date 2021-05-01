@@ -83,6 +83,24 @@ impl<'a, T: Voxel> NodeRefMut<'a, T> {
     pub fn is_virtual(&self) -> bool {
         self.inner.handle.is_none()
     }
+    /// Only applicable on leaf nodes
+    pub fn set_leaf_childmask(&mut self, childmask: u8) {
+        // TODO: assert that this is child node
+        if childmask == 0 {
+            return;
+        }
+        let new_child_handle = self.octree.arena.alloc(childmask.count_ones());
+        let handle = self.inner.handle;
+        let node_ref = self.octree.arena.get_mut(handle);
+        debug_assert_eq!(node_ref.freemask, 0);
+        node_ref.freemask = childmask;
+        node_ref.children = new_child_handle;
+    }
+    /// Only applicable on leaf nodes
+    pub fn set_leaf_child(&mut self, dir: Corner, value: T) {
+        let node_ref = self.octree.arena.get_mut(self.inner.handle);
+        node_ref.data[dir as usize] = value;
+    }
 }
 
 impl<T: Voxel> Octree<T> {

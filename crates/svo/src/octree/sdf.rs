@@ -1,21 +1,19 @@
 use crate::{Voxel, Corner};
-use super::{Octree, Node};
-use crate::alloc::{CHUNK_SIZE, ArenaAllocator};
-use std::mem::size_of;
+use super::{Node, Octree, accessor::tree::NodeRefMut};
+use crate::alloc::{ArenaAllocator};
 use glam::Vec3;
 
 impl<T: Voxel> Octree<T>
 {
-/*
     fn signed_distance_field_recursive<F>(
         signed_distance_field: &F,
         fill: T,
         lod: u8,
-        mut node: &mut Node<T>,
+        mut node: NodeRefMut<T>,
     ) where
         F: Fn(Vec3) -> f32,
     {
-        assert!(!node.inner.handle.is_none()); // Can't be a virtual node
+        assert!(!node.is_virtual()); // Can't be a virtual node
         let mut childmask: u8 = 0;
         for (i, dir) in Corner::all().enumerate() {
             let child = node.child(dir);
@@ -60,13 +58,10 @@ impl<T: Voxel> Octree<T>
             }
         }
     }
- */
-    pub fn from_signed_distance_field<F>(arena: ArenaAllocator<Node<T>>, field: F, fill: T, lod: u8) -> Octree<T>
+    pub fn from_signed_distance_field<F>(&mut self, field: F, fill: T, lod: u8)
         where
             F: Fn(Vec3) -> f32,
     {
-        let mut octree = Octree::new(arena);
-        //Octree::signed_distance_field_recursive(&field, fill, lod, &mut octree.ro);
-        octree
+        Octree::signed_distance_field_recursive(&field, fill, lod, self.get_tree_mutator());
     }
 }

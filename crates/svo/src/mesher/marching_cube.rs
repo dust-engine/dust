@@ -37,7 +37,7 @@ pub struct MarchingCubeMeshBuilder<T> {
 //       2----------6
 //      /|         /|
 //     3-|--------7 |
-//     | |        | |    <-----
+//     | |        | |    >----->
 //     | 0--------|-4
 //     |/         |/
 //     1----------5
@@ -123,10 +123,7 @@ impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
             let (v1, v2) = edge.vertices();
             let node1 = bounds.half(v1).center();
             let node2 = bounds.half(v2).center();
-            let mut pos = (node1 + node2) * (self.size * 0.5);
-            //pos.y -= 6.0;
-            //pos.x = self.size-pos.x;
-            pos.z = self.size - pos.z;
+            let pos = (node1 + node2) * (self.size * 0.5);
             self.vertices.push(pos.into());
             self.normals.push(color);
             self.current += 1;
@@ -233,7 +230,7 @@ impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
             // Run Marching cube algorithms on the 3 surfaces
             let _cell_width = Bounds::MAX_WIDTH >> self.lod;
 
-            build_surface!(XY; self, lod, &surface_xy_maxz, &surface_xy_minz, node; Vec3::new(1.0, 0.0, 0.0));
+            build_surface!(XY; self, lod, &surface_xy_minz, &surface_xy_maxz, node; Vec3::new(1.0, 0.0, 0.0));
             build_surface!(XZ; self, lod, &surface_xz_miny, &surface_xz_maxy, node; Vec3::new(0.0, 1.0, 0.0));
             build_surface!(YZ; self, lod, &surface_yz_minx, &surface_yz_maxx, node; Vec3::new(0.0, 0.0, 1.0));
 
@@ -260,6 +257,11 @@ impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use crate::{ArenaAllocator, alloc::BLOCK_SIZE};
+    use crate::alloc::SystemBlockAllocator;
+
     use super::*;
     extern crate test;
     use test::Bencher;
@@ -267,13 +269,16 @@ mod tests {
     #[bench]
     fn bench_sphere(b: &mut Bencher) {
         let lod = 6;
-        let octree: Octree<u16> = Octree::from_signed_distance_field(
+        let system_block_allocator = SystemBlockAllocator::new(BLOCK_SIZE as u32);
+        let arena = ArenaAllocator::new(Arc::new(system_block_allocator));
+        let mut octree: Octree<u16> = Octree::new(arena);
+        octree.from_signed_distance_field(
             |l: glam::Vec3| 0.4 - l.distance(Vec3::new(0.5, 0.5, 0.5)),
             1,
             lod,
         );
         b.iter(|| {
-            let mut builder: MarchingCubeMeshBuilder<u16> = MarchingCubeMeshBuilder::new(3.0, lod);
+            let builder: MarchingCubeMeshBuilder<u16> = MarchingCubeMeshBuilder::new(3.0, lod);
             let mesha = builder.build(&octree);
             mesha
         })
@@ -282,7 +287,10 @@ mod tests {
     #[bench]
     fn bench_inf_norm(b: &mut Bencher) {
         let lod = 6;
-        let octree: Octree<u16> = Octree::from_signed_distance_field(
+        let system_block_allocator = SystemBlockAllocator::new(BLOCK_SIZE as u32);
+        let arena = ArenaAllocator::new(Arc::new(system_block_allocator));
+        let mut octree: Octree<u16> = Octree::new(arena);
+        octree.from_signed_distance_field(
             |l: glam::Vec3| {
                 let l = l - Vec3::new(0.5, 0.5, 0.5);
                 0.4 - l.x.abs().max(l.y.abs()).max(l.z.abs())
@@ -291,7 +299,7 @@ mod tests {
             lod,
         );
         b.iter(|| {
-            let mut builder: MarchingCubeMeshBuilder<u16> = MarchingCubeMeshBuilder::new(3.0, lod);
+            let builder: MarchingCubeMeshBuilder<u16> = MarchingCubeMeshBuilder::new(3.0, lod);
             let mesha = builder.build(&octree);
             mesha
         })

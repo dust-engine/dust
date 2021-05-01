@@ -5,6 +5,7 @@ use crate::{Corner, Voxel};
 
 pub mod accessor;
 mod io;
+mod sdf;
 
 #[derive(Default)]
 #[repr(C)]
@@ -105,51 +106,5 @@ impl<T: Voxel> Octree<T> {
     }
     pub fn flush(&mut self) {
         self.arena.flush();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_set() {
-        let block_allocator = crate::alloc::SystemBlockAllocator::new();
-        let arena: ArenaAllocator<Node<u16>> = ArenaAllocator::new(Box::new(block_allocator));
-        let mut octree: Octree<u16> = Octree::new(arena);
-        for (i, corner) in Corner::all().enumerate() {
-            let (x, y, z) = corner.position_offset();
-            octree.set(x as u32, y as u32, z as u32, 8, 3);
-            assert_eq!(octree.get(x as u32, y as u32, z as u32, 8), 3);
-            if i < 4 {
-                assert_eq!(octree.get(0, 0, 0, 4), 0);
-            } else if i > 4 {
-                assert_eq!(octree.get(0, 0, 0, 4), 3);
-            }
-            if i < 7 {
-                assert_eq!(octree.arena.size, 3);
-                assert_eq!(octree.arena.num_blocks, 3);
-            } else {
-                assert_eq!(octree.arena.size, 2);
-                assert_eq!(octree.arena.num_blocks, 2);
-            }
-        }
-        for (i, corner) in Corner::all().enumerate() {
-            let (x, y, z) = corner.position_offset();
-            octree.set(2 + x as u32, y as u32, z as u32, 8, 5);
-            assert_eq!(octree.get(2 + x as u32, y as u32, z as u32, 8), 5);
-            if i < 4 {
-                assert_eq!(octree.get(1, 0, 0, 4), 0);
-            } else if i > 4 {
-                assert_eq!(octree.get(1, 0, 0, 4), 5);
-            }
-            if i < 7 {
-                assert_eq!(octree.arena.size, 3);
-                assert_eq!(octree.arena.num_blocks, 3);
-            } else {
-                assert_eq!(octree.arena.size, 2);
-                assert_eq!(octree.arena.num_blocks, 2);
-            }
-        }
     }
 }

@@ -8,6 +8,7 @@
 #![feature(alloc_layout_extra)]
 #![feature(maybe_uninit_extra)]
 #![feature(array_map)]
+#![feature(test)]
 
 pub mod alloc;
 pub mod bounds;
