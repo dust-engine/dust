@@ -1,17 +1,37 @@
 #version 460
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_8bit_storage : require
+struct Node {
+    uint8_t _padding1;
+    uint8_t freemask;
+    uint16_t _padding2;
+    uint children;
+    uint16_t data[8];
+};
 
 struct Ray {
     vec3 origin;
     vec3 dir;
 };
-
 struct Box {
     vec3 origin;
     float extent;
 };
+struct Sunlight {
+    vec3 color;
+    float padding1;
+    vec3 dir;
+    float padding2;
+};
+uint MaskLocationNthOne(uint mask, uint location) {
+    return bitCount(mask & ((1 << location) - 1));
+}
+
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-layout(rgba32f, set = 3, binding = 0) uniform image2D imgOutput;
+layout (constant_id = 0) const uint MAX_ITERATION_VALUE = 100;
+const Box GlobalBoundingBox = { vec3(0,0,0), 512 };
+layout(rgba32f, set = 2, binding = 0) uniform image2D imgOutput;
 
 layout(push_constant) uniform constants
 {
@@ -22,7 +42,38 @@ layout(set = 0, binding = 0) uniform u_Camera {
     mat3 rotation;
     vec3 position;
     float tanHalfFov;
-} Camera;
+} Camera;/*
+layout(set = 0, binding = 1) uniform Lights {
+    Sunlight Lights_Sunlight;
+};*/
+layout(set = 1, binding = 0) readonly buffer Chunk {
+    Node Chunk_Nodes[];
+};
+struct Material {
+    float scale;
+    uint16_t diffuse;
+    uint16_t normal;
+    float _reserved1;
+    float _reserved2;
+};
+struct ColoredMaterial {
+    float scale;
+    uint16_t diffuse;
+    uint16_t normal;
+    float _reserved1;
+    float _reserved2;
+    vec4 palette[128];
+};
+layout(set = 1, binding = 1) readonly buffer Materials {
+    Material u_RegularMaterials[];
+};
+layout(set = 1, binding = 2) readonly buffer ColoredMaterials {
+    ColoredMaterial u_ColoredMaterials[];
+};
+layout(set = 1, binding = 3) uniform sampler2DArray TextureRepoSampler;
+
+
+
 
 Ray GenerateRay() {
     uvec2 pixelRaster = gl_GlobalInvocationID.xy;
@@ -51,21 +102,127 @@ vec2 IntersectAABB(vec3 origin, vec3 dir, Box box) {
     float t_max = min(min(t2.x, t2.y), t2.z);
     return vec2(t_min, t_max);
 }
+bool ContainsAABB(vec3 point, Box box) {
+    vec3 min = box.origin;
+    vec3 max = min + box.extent;
+
+    vec3 s = step(min, point) - step(max, point);
+    bvec3 bs = bvec3(s);
+    return all(bs);
+}
+vec3 CubedNormalize(vec3 dir) {
+    vec3 dir_abs = abs(dir);
+    float max_element = max(dir_abs.x, max(dir_abs.y, dir_abs.z));
+    return -sign(dir) * step(max_element, dir_abs);
+}
+uint MaterialAtPosition(inout Box box, vec3 position) {
+    uint node_index = 0; // Assume root node
+
+    while(true) {
+        // start
+        // Calculate new box location
+        box.extent = box.extent / 2;
+        vec3 box_midpoint = box.origin + box.extent;
+        vec3 s = step(box_midpoint, position);
+        box.origin = box.origin + s * box.extent;
+
+
+        uint child_index = uint(dot(s, vec3(4,2,1)));
+        uint freemask = uint(Chunk_Nodes[node_index].freemask);
+        if ((freemask & (1 << child_index)) == 0) {
+            // is a leaf node
+            return uint(Chunk_Nodes[node_index].data[child_index]);
+        } else {
+            // has children
+            uint child_offset = MaskLocationNthOne(freemask, child_index);
+            node_index = Chunk_Nodes[node_index].children + child_offset;
+        }
+    }
+}
+
+uint RayMarch(Box initial_box, Ray ray, out vec3 hitpoint, out Box hitbox, out uint counter, float initialDistance) {
+    hitbox = initial_box;
+    vec3 entry_point = ray.origin + initialDistance * ray.dir;
+    vec3 test_point = entry_point;
+    uint material_id = 0;
+
+    for(
+    counter = 0;
+    counter < MAX_ITERATION_VALUE && ContainsAABB(test_point, GlobalBoundingBox);
+    counter++) {
+        // TODO: change this so that entry point doesn't get too big
+        hitbox = initial_box;
+        material_id = MaterialAtPosition(hitbox, test_point);
+        if (material_id > 0) {
+            // Hit some materials
+            break;
+        }
+        // calculate the next t_min
+        vec2 new_intersection = IntersectAABB(entry_point, ray.dir, hitbox);
+
+        entry_point = entry_point + ray.dir * new_intersection.y;
+        test_point = entry_point + sign(ray.dir) * hitbox.extent * 0.001;
+    }
+    hitpoint = entry_point;
+    return material_id;
+}
+
+#define DEBUG_RENDERING
 
 void main() {
     Ray ray = GenerateRay();
-    Box box;
-    box.origin = vec3(0, 0, 0);
-    box.extent = 1;
-    vec2 intersection = IntersectAABB(ray.origin, ray.dir, box);
 
-    vec4 color;
-    if (intersection.x < intersection.y) {
-        color = vec4(1.0, 0.0, 0.0, 1.0);
+    float depth;
+    vec3 hitpoint;
+    Box hitbox;
+    uint iteration_times;
+    uint voxel_id = RayMarch(GlobalBoundingBox, ray, hitpoint, hitbox, iteration_times, 0);
+    float iteration = float(iteration_times) / float(MAX_ITERATION_VALUE); // 0 to 1
+    #ifdef DEBUG_RENDERING
+    vec4 f_color = vec4(iteration, iteration, iteration, 1.0);
+    #else
+    vec3 normal = CubedNormalize(hitpoint - (hitbox.origin + hitbox.extent/2));
+    vec2 texcoords = vec2(
+        dot(vec3(hitpoint.z, hitpoint.x, -hitpoint.x), normal),
+        dot(-sign(normal) * vec3(hitpoint.y, hitpoint.z, hitpoint.y), normal)
+    );
+
+    vec4 output_color;
+    uint diffuseTextureId;
+    float scale = 1.0;
+
+
+    if (voxel_id == 0) {
+        //f_color = vec4(0.0, 1.0, 0.0, 1.0);
+        //return;
+        return;
+    } else if ((voxel_id & 0x8000) == 0) {
+        uint materialId = voxel_id - 1;
+        diffuseTextureId = uint(u_RegularMaterials[materialId].diffuse);
+        output_color = vec4(1, 1, 1, 1);
+        scale = u_RegularMaterials[materialId].scale;
     } else {
-        color = vec4(0.0, 0.0, 0.0, 1.0);
+        uint materialId = voxel_id & 0xff; // lower 8 bits
+        uint colorId = (voxel_id >> 8) & 0x7f;
+        diffuseTextureId = uint(u_ColoredMaterials[materialId].diffuse);
+        output_color = u_ColoredMaterials[materialId].palette[colorId];
+        scale = u_ColoredMaterials[materialId].scale;
     }
 
-    
-    imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);
+    if (diffuseTextureId != 0xffffffff) {
+        output_color *= texture(
+            TextureRepoSampler,
+            vec3(
+                texcoords * scale,
+                diffuseTextureId
+            )
+        );
+    }
+    float sunLightFactor =min(1.0, max(0.3, dot(normal, Lights_Sunlight.dir)));
+
+
+
+    vec4 f_color = output_color * vec4(sunLightFactor, sunLightFactor, sunLightFactor, 1.0);
+    #endif
+    imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), f_color);
 }

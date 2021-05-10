@@ -1,4 +1,4 @@
-use crate::core::svo::mesher::Mesh;
+
 use crate::device_info::DeviceInfo;
 use crate::material_repo::TextureRepoUploadState;
 use crate::renderer::RenderContext;
@@ -14,18 +14,6 @@ use std::io::Cursor;
 use std::sync::Arc;
 use vk_mem as vma;
 
-pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
-pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
-    (-1.0, -1.0, -1.0), // 0
-    (-1.0, -1.0, 1.0),  // 1
-    (-1.0, 1.0, -1.0),  // 2
-    (-1.0, 1.0, 1.0),   // 3
-    (1.0, -1.0, -1.0),  // 4
-    (1.0, -1.0, 1.0),   // 5
-    (1.0, 1.0, -1.0),   // 6
-    (1.0, 1.0, 1.0),    // 7
-];
-
 struct PushConstants {
     width: u32,
     height: u32,
@@ -39,15 +27,11 @@ pub struct RayTracer {
     storage_desc_set_layout: vk::DescriptorSetLayout,
     pub uniform_desc_set: vk::DescriptorSet,
     uniform_desc_set_layout: vk::DescriptorSetLayout,
-    pub frame_desc_set: vk::DescriptorSet,
-    frame_desc_set_layout: vk::DescriptorSetLayout,
     pub compute_pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
     pub render_pass: vk::RenderPass,
-    pub depth_sampler: vk::Sampler,
 
     pub shared_buffer: SharedBuffer,
-    mesh: Option<(vk::Buffer, u64, u32)>,
     // count, size, invocation
     limits: ([u32; 3], [u32; 3], u32),
 }
@@ -224,59 +208,41 @@ impl RayTracer {
                         vk::DescriptorSetLayoutBinding::builder()
                             .binding(0)
                             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE)
                             .descriptor_count(1)
                             .build(), // Chunk Nodes
                         vk::DescriptorSetLayoutBinding::builder()
                             .binding(1)
                             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE)
                             .descriptor_count(1)
                             .build(), // Regular Materials,
                         vk::DescriptorSetLayoutBinding::builder()
                             .binding(2)
                             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE)
                             .descriptor_count(1)
                             .build(), // Colored Materials
                         vk::DescriptorSetLayoutBinding::builder()
                             .binding(3)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE)
                             .descriptor_count(1)
                             .build(), // Textures
                     ]),
                 None,
             )
             .unwrap();
-        let frame_desc_set_layout = device
-            .create_descriptor_set_layout(
-                &vk::DescriptorSetLayoutCreateInfo::builder()
-                    .flags(vk::DescriptorSetLayoutCreateFlags::empty())
-                    .bindings(&[vk::DescriptorSetLayoutBinding::builder()
-                        .binding(0)
-                        .descriptor_type(vk::DescriptorType::INPUT_ATTACHMENT)
-                        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                        .descriptor_count(1)
-                        .build()]),
-                None,
-            )
-            .unwrap();
-        let mut desc_sets = [vk::DescriptorSet::null(); 3];
+        let mut desc_sets = [vk::DescriptorSet::null(); 2];
         let result = device.fp_v1_0().allocate_descriptor_sets(
             device.handle(),
             &vk::DescriptorSetAllocateInfo::builder()
                 .descriptor_pool(desc_pool)
-                .set_layouts(&[
-                    uniform_desc_set_layout,
-                    storage_desc_set_layout,
-                    frame_desc_set_layout,
-                ])
+                .set_layouts(&[uniform_desc_set_layout, storage_desc_set_layout])
                 .build(),
             &mut desc_sets[0],
         );
         assert_eq!(result, vk::Result::SUCCESS);
-        let frame_desc_set = desc_sets[2];
         let storage_desc_set = desc_sets[1];
         let uniform_desc_set = desc_sets[0];
         drop(desc_sets);
@@ -287,7 +253,6 @@ impl RayTracer {
                     .set_layouts(&[
                         uniform_desc_set_layout,
                         storage_desc_set_layout,
-                        frame_desc_set_layout,
                         swapchain.images_desc_set_layout,
                     ])
                     .push_constant_ranges(&[vk::PushConstantRange {
@@ -317,20 +282,6 @@ impl RayTracer {
             &[],
         );
 
-        let depth_sampler = device
-            .create_sampler(
-                &vk::SamplerCreateInfo::builder()
-                    .mag_filter(vk::Filter::NEAREST)
-                    .min_filter(vk::Filter::NEAREST)
-                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
-                    .address_mode_u(vk::SamplerAddressMode::REPEAT)
-                    .address_mode_v(vk::SamplerAddressMode::REPEAT)
-                    .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                    .compare_enable(false)
-                    .build(),
-                None,
-            )
-            .unwrap();
         let raytracer = Self {
             context,
             pipeline_layout,
@@ -342,10 +293,6 @@ impl RayTracer {
             shared_buffer,
             desc_pool,
             uniform_desc_set_layout,
-            frame_desc_set,
-            mesh: None,
-            frame_desc_set_layout,
-            depth_sampler,
             limits: (
                 info.physical_device_properties
                     .limits
@@ -383,58 +330,8 @@ impl RayTracer {
             &[],
         );
     }
-
-    pub fn bind_mesh(&mut self, mesh: &Mesh, allocator: &vma::Allocator) {
-        let vertex_size = (mesh.vertices.len() * 3 * std::mem::size_of::<f32>()) as u64;
-        let index_size = (mesh.indices.len() * std::mem::size_of::<u32>()) as u64;
-        let (buffer, _allocation, allocation_info) = allocator
-            .create_buffer(
-                &vk::BufferCreateInfo::builder()
-                    .usage(vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER)
-                    .size(vertex_size + index_size)
-                    .build(),
-                &vma::AllocationCreateInfo {
-                    usage: vma::MemoryUsage::CpuToGpu,
-                    flags: vma::AllocationCreateFlags::MAPPED,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let ptr = allocation_info.get_mapped_data();
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                mesh.vertices.as_ptr() as *const u8,
-                ptr,
-                vertex_size as usize,
-            );
-
-            std::ptr::copy_nonoverlapping(
-                mesh.indices.as_ptr() as *const u8,
-                ptr.add(vertex_size as usize),
-                index_size as usize,
-            );
-        }
-
-        self.mesh = Some((buffer, vertex_size, mesh.indices.len() as u32))
-    }
     pub fn bind_render_target(&mut self, render_target: &mut Swapchain) {
         unsafe {
-            self.context.device.update_descriptor_sets(
-                &[
-                    vk::WriteDescriptorSet::builder()
-                        .dst_set(self.frame_desc_set)
-                        .dst_binding(0)
-                        .dst_array_element(0)
-                        .descriptor_type(vk::DescriptorType::INPUT_ATTACHMENT)
-                        .image_info(&[vk::DescriptorImageInfo {
-                            sampler: self.depth_sampler,
-                            image_view: render_target.depth_image.view,
-                            image_layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                        }])
-                        .build(), // Camera
-                ],
-                &[],
-            );
             render_target.bind_render_pass(self);
         }
     }
@@ -504,7 +401,6 @@ impl RenderPassProvider for RayTracer {
         config: &SwapchainConfig,
     ) {
         let command_buffer = swapchain_image.command_buffer;
-        let _framebuffer = swapchain_image.framebuffer;
         let max_compute_work_group_count = self.limits.0;
         let max_compute_work_group_size = self.limits.1;
         let default_local_workgroup_size: u32 = 8;
@@ -582,7 +478,6 @@ impl RenderPassProvider for RayTracer {
             &[
                 self.uniform_desc_set,
                 self.storage_desc_set,
-                self.frame_desc_set,
                 swapchain_image.desc_set,
             ],
             &[],
@@ -678,7 +573,7 @@ pub mod systems {
 
     pub fn create_raytracer(
         mut commands: Commands,
-        mesh: Res<Option<dust_core::svo::mesher::Mesh>>,
+        _mesh: Res<Option<dust_core::svo::mesher::Mesh>>,
         renderer: Res<Renderer>,
         mut render_resources: ResMut<RenderResources>,
     ) {
@@ -693,9 +588,6 @@ pub mod systems {
             );
             raytracer.bind_block_allocator_buffer(render_resources.block_allocator_buffer);
             raytracer.bind_material_repo(&render_resources.texture_repo);
-            if let Some(mesh) = mesh.as_ref() {
-                raytracer.bind_mesh(&mesh, &render_resources.allocator);
-            }
             raytracer.bind_render_target(&mut render_resources.swapchain);
             raytracer
         };
