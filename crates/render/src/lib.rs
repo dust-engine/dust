@@ -124,7 +124,6 @@ fn world_update(
                 renderer.physical_device,
                 renderer.context.surface,
                 &renderer.context.surface_loader,
-                &renderer.quirks,
             );
 
             render_resources.swapchain.recreate(&render_resources.allocator, config);
@@ -142,8 +141,7 @@ fn world_update(
     };
     unsafe {
         octree.flush();
-        let extent = render_resources.swapchain.config.extent;
-        raytracer.update(&state, extent.width as f32 / extent.height as f32);
+        raytracer.update(&state);
         render_resources.swapchain.render_frame();
     }
 }

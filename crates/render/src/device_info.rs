@@ -10,10 +10,6 @@ pub struct DeviceInfo {
     pub features: vk::PhysicalDeviceFeatures,
 }
 
-#[derive(Default, Debug)]
-pub struct Quirks {
-    pub flip_y_requires_shift: bool,
-}
 
 impl DeviceInfo {
     pub unsafe fn new(
@@ -36,23 +32,11 @@ impl DeviceInfo {
             .iter()
             .any(|ep| unsafe { CStr::from_ptr(ep.extension_name.as_ptr()) } == extension)
     }
-    pub fn required_device_extensions_and_quirks(&self) -> (Vec<&CStr>, Quirks) {
+    pub fn required_device_extensions(&self) -> Vec<&CStr> {
         let mut requested_extensions: Vec<&CStr> = Vec::new();
 
         requested_extensions.push(ash::extensions::khr::Swapchain::name());
 
-        let mut quirks = Quirks::default();
-        if self.api_version() < vk::make_version(1, 1, 0) {
-            if self.supports_extension(vk::KhrMaintenance1Fn::name()) {
-                requested_extensions.push(vk::KhrMaintenance1Fn::name());
-                quirks.flip_y_requires_shift = true;
-            } else {
-                requested_extensions.push(vk::AmdNegativeViewportHeightFn::name());
-                quirks.flip_y_requires_shift = false;
-            }
-        } else {
-            quirks.flip_y_requires_shift = true;
-        }
-        (requested_extensions, quirks)
+        requested_extensions
     }
 }

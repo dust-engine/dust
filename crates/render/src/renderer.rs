@@ -1,16 +1,8 @@
-use crate::device_info::{DeviceInfo, Quirks};
-
-
-
+use crate::device_info::{DeviceInfo};
 
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
 use std::ffi::CStr;
-
-
-
-
-
 
 use std::sync::Arc;
 
@@ -33,7 +25,6 @@ pub struct RenderContext {
 pub struct Renderer {
     pub context: Arc<RenderContext>,
     pub physical_device: vk::PhysicalDevice,
-    pub quirks: Quirks,
 
     pub graphics_queue: vk::Queue,
     pub transfer_binding_queue: vk::Queue,
@@ -331,7 +322,7 @@ impl Renderer {
                 .unwrap()
                 .0 as u32;
 
-            let (extension_names, quirks) = device_info.required_device_extensions_and_quirks();
+            let extension_names = device_info.required_device_extensions();
             let device = instance
                 .create_device(
                     physical_device,
@@ -387,7 +378,6 @@ impl Renderer {
             let renderer = Self {
                 context: Arc::new(context),
                 physical_device,
-                quirks,
                 graphics_queue,
                 transfer_binding_queue,
                 graphics_queue_family,

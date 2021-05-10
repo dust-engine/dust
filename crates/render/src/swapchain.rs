@@ -1,4 +1,3 @@
-use crate::device_info::Quirks;
 use crate::renderer::RenderContext;
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -239,14 +238,12 @@ pub struct Swapchain {
 pub struct SwapchainConfig {
     pub format: vk::Format,
     pub extent: vk::Extent2D,
-    pub flip_y_requires_shift: bool,
 }
 impl Swapchain {
     pub unsafe fn get_config(
         physical_device: vk::PhysicalDevice,
         surface: vk::SurfaceKHR,
         surface_loader: &ash::extensions::khr::Surface,
-        quirks: &Quirks,
     ) -> SwapchainConfig {
         let caps = surface_loader
             .get_physical_device_surface_capabilities(physical_device, surface)
@@ -263,7 +260,6 @@ impl Swapchain {
         SwapchainConfig {
             format,
             extent,
-            flip_y_requires_shift: quirks.flip_y_requires_shift,
         }
     }
     pub unsafe fn new(

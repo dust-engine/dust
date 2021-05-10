@@ -26,6 +26,12 @@ pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
     (1.0, 1.0, 1.0),    // 7
 ];
 
+struct PushConstants {
+    width: u32,
+    height: u32,
+    aspect_ratio: f32,
+}
+
 pub struct RayTracer {
     context: Arc<RenderContext>,
     desc_pool: vk::DescriptorPool,
@@ -35,8 +41,6 @@ pub struct RayTracer {
     uniform_desc_set_layout: vk::DescriptorSetLayout,
     pub frame_desc_set: vk::DescriptorSet,
     frame_desc_set_layout: vk::DescriptorSetLayout,
-    pub depth_pipeline: vk::Pipeline,
-    pub ray_pipeline: vk::Pipeline,
     pub compute_pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
     pub render_pass: vk::RenderPass,
@@ -52,33 +56,7 @@ unsafe fn create_pipelines(
     device: &ash::Device,
     pipeline_layout: vk::PipelineLayout,
     render_pass: vk::RenderPass,
-) -> [vk::Pipeline; 3] {
-    let vertex_shader_module = device
-        .create_shader_module(
-            &vk::ShaderModuleCreateInfo::builder()
-                .code(
-                    &ash::util::read_spv(&mut Cursor::new(
-                        &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.vert.spv"))[..],
-                    ))
-                    .unwrap(),
-                )
-                .build(),
-            None,
-        )
-        .unwrap();
-    let fragment_shader_module = device
-        .create_shader_module(
-            &vk::ShaderModuleCreateInfo::builder()
-                .code(
-                    &ash::util::read_spv(&mut Cursor::new(
-                        &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.frag.spv"))[..],
-                    ))
-                    .unwrap(),
-                )
-                .build(),
-            None,
-        )
-        .unwrap();
+) -> vk::Pipeline {
     let compute_shader_module = device
         .create_shader_module(
             &vk::ShaderModuleCreateInfo::builder()
@@ -92,216 +70,7 @@ unsafe fn create_pipelines(
             None,
         )
         .unwrap();
-    let depth_prepass_vertex_shader_module = device
-        .create_shader_module(
-            &vk::ShaderModuleCreateInfo::builder()
-                .code(
-                    &ash::util::read_spv(&mut Cursor::new(
-                        &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/depth.vert.spv"))[..],
-                    ))
-                    .unwrap(),
-                )
-                .build(),
-            None,
-        )
-        .unwrap();
-    let mut pipelines: [vk::Pipeline; 3] = [vk::Pipeline::null(); 3];
-    let result = device.fp_v1_0().create_graphics_pipelines(
-        device.handle(),
-        vk::PipelineCache::null(),
-        2,
-        [
-            vk::GraphicsPipelineCreateInfo::builder()
-                .flags(vk::PipelineCreateFlags::empty())
-                .stages(&[vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::VERTEX)
-                    .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
-                    .module(depth_prepass_vertex_shader_module)
-                    .build()])
-                .vertex_input_state(
-                    &vk::PipelineVertexInputStateCreateInfo::builder()
-                        .vertex_attribute_descriptions(&[vk::VertexInputAttributeDescription {
-                            location: 0,
-                            binding: 0,
-                            format: vk::Format::R32G32B32_SFLOAT,
-                            offset: 0,
-                        }])
-                        .vertex_binding_descriptions(&[vk::VertexInputBindingDescription {
-                            binding: 0,
-                            stride: std::mem::size_of::<[f32; 3]>() as u32,
-                            input_rate: vk::VertexInputRate::VERTEX,
-                        }])
-                        .build(),
-                )
-                .input_assembly_state(
-                    &vk::PipelineInputAssemblyStateCreateInfo::builder()
-                        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-                        .primitive_restart_enable(false)
-                        .build(),
-                )
-                .viewport_state(
-                    &vk::PipelineViewportStateCreateInfo::builder()
-                        .viewports(&[vk::Viewport::default()])
-                        .scissors(&[vk::Rect2D::default()])
-                        .build(),
-                )
-                .rasterization_state(
-                    &vk::PipelineRasterizationStateCreateInfo::builder()
-                        .depth_clamp_enable(false)
-                        .rasterizer_discard_enable(false)
-                        .polygon_mode(vk::PolygonMode::FILL)
-                        .cull_mode(vk::CullModeFlags::BACK)
-                        .front_face(vk::FrontFace::CLOCKWISE)
-                        .depth_bias_enable(false)
-                        .line_width(1.0)
-                        .build(),
-                )
-                .multisample_state(
-                    &vk::PipelineMultisampleStateCreateInfo::builder()
-                        .sample_shading_enable(false)
-                        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-                        .build(),
-                )
-                .depth_stencil_state(
-                    &vk::PipelineDepthStencilStateCreateInfo::builder()
-                        .depth_test_enable(true)
-                        .depth_compare_op(vk::CompareOp::LESS)
-                        .depth_write_enable(true)
-                        .depth_bounds_test_enable(false)
-                        .stencil_test_enable(true)
-                        .front(vk::StencilOpState {
-                            fail_op: vk::StencilOp::ZERO,
-                            pass_op: vk::StencilOp::REPLACE,
-                            depth_fail_op: vk::StencilOp::REPLACE,
-                            compare_op: vk::CompareOp::ALWAYS,
-                            compare_mask: 0,
-                            write_mask: 1,
-                            reference: 1,
-                        })
-                        .build(),
-                )
-                .color_blend_state(
-                    &vk::PipelineColorBlendStateCreateInfo::builder()
-                        .logic_op_enable(false)
-                        .attachments(&[])
-                        .build(),
-                )
-                .dynamic_state(
-                    &vk::PipelineDynamicStateCreateInfo::builder()
-                        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR])
-                        .build(),
-                )
-                .layout(pipeline_layout)
-                .render_pass(render_pass)
-                .subpass(0)
-                .base_pipeline_handle(vk::Pipeline::null())
-                .base_pipeline_index(-1)
-                .build(),
-            vk::GraphicsPipelineCreateInfo::builder()
-                .flags(vk::PipelineCreateFlags::empty())
-                .stages(&[
-                    vk::PipelineShaderStageCreateInfo::builder()
-                        .stage(vk::ShaderStageFlags::VERTEX)
-                        .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
-                        .module(vertex_shader_module)
-                        .build(),
-                    vk::PipelineShaderStageCreateInfo::builder()
-                        .stage(vk::ShaderStageFlags::FRAGMENT)
-                        .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
-                        .module(fragment_shader_module)
-                        .build(),
-                ])
-                .vertex_input_state(
-                    &vk::PipelineVertexInputStateCreateInfo::builder()
-                        .vertex_attribute_descriptions(&[vk::VertexInputAttributeDescription {
-                            location: 0,
-                            binding: 0,
-                            format: vk::Format::R32G32B32_SFLOAT,
-                            offset: 0,
-                        }])
-                        .vertex_binding_descriptions(&[vk::VertexInputBindingDescription {
-                            binding: 0,
-                            stride: std::mem::size_of::<[f32; 3]>() as u32,
-                            input_rate: vk::VertexInputRate::VERTEX,
-                        }])
-                        .build(),
-                )
-                .input_assembly_state(
-                    &vk::PipelineInputAssemblyStateCreateInfo::builder()
-                        .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
-                        .primitive_restart_enable(false)
-                        .build(),
-                )
-                .viewport_state(
-                    &vk::PipelineViewportStateCreateInfo::builder()
-                        .viewports(&[vk::Viewport::default()])
-                        .scissors(&[vk::Rect2D::default()])
-                        .build(),
-                )
-                .rasterization_state(
-                    &vk::PipelineRasterizationStateCreateInfo::builder()
-                        .depth_clamp_enable(false)
-                        .rasterizer_discard_enable(false)
-                        .polygon_mode(vk::PolygonMode::FILL)
-                        .cull_mode(vk::CullModeFlags::BACK)
-                        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-                        .depth_bias_enable(false)
-                        .line_width(1.0)
-                        .build(),
-                )
-                .multisample_state(
-                    &vk::PipelineMultisampleStateCreateInfo::builder()
-                        .sample_shading_enable(false)
-                        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-                        .build(),
-                )
-                .depth_stencil_state(
-                    &vk::PipelineDepthStencilStateCreateInfo::builder()
-                        .depth_test_enable(false)
-                        .depth_write_enable(false)
-                        .depth_bounds_test_enable(false)
-                        .stencil_test_enable(true)
-                        .front(vk::StencilOpState {
-                            fail_op: vk::StencilOp::KEEP,
-                            pass_op: vk::StencilOp::KEEP,
-                            depth_fail_op: vk::StencilOp::KEEP,
-                            compare_op: vk::CompareOp::EQUAL,
-                            compare_mask: 1,
-                            write_mask: 0,
-                            reference: 1,
-                        })
-                        .build(),
-                )
-                .color_blend_state(
-                    &vk::PipelineColorBlendStateCreateInfo::builder()
-                        .logic_op_enable(false)
-                        .attachments(&[vk::PipelineColorBlendAttachmentState::builder()
-                            .color_write_mask(vk::ColorComponentFlags::all())
-                            .blend_enable(false)
-                            .build()])
-                        .build(),
-                )
-                .dynamic_state(
-                    &vk::PipelineDynamicStateCreateInfo::builder()
-                        .dynamic_states(&[
-                            vk::DynamicState::VIEWPORT,
-                            vk::DynamicState::SCISSOR,
-                            vk::DynamicState::STENCIL_REFERENCE,
-                        ])
-                        .build(),
-                )
-                .layout(pipeline_layout)
-                .render_pass(render_pass)
-                .subpass(1)
-                .base_pipeline_handle(vk::Pipeline::null())
-                .base_pipeline_index(-1)
-                .build(),
-        ]
-        .as_ptr(),
-        std::ptr::null(),
-        pipelines.as_mut_ptr(),
-    );
-    assert_eq!(result, vk::Result::SUCCESS);
+    let mut pipeline: vk::Pipeline = vk::Pipeline::null();
 
     let result = device.fp_v1_0()
         .create_compute_pipelines(
@@ -321,15 +90,12 @@ unsafe fn create_pipelines(
                 .build()
             ].as_ptr(),
             std::ptr::null(),
-            pipelines.as_mut_ptr().add(2)
+            &mut pipeline
         );
     assert_eq!(result, vk::Result::SUCCESS);
 
-    device.destroy_shader_module(vertex_shader_module, None);
-    device.destroy_shader_module(fragment_shader_module, None);
     device.destroy_shader_module(compute_shader_module, None);
-    device.destroy_shader_module(depth_prepass_vertex_shader_module, None);
-    pipelines
+    pipeline
 }
 
 impl RayTracer {
@@ -349,7 +115,6 @@ impl RayTracer {
             graphics_queue,
             graphics_queue_family,
         );
-        shared_buffer.copy_vertex_index(&CUBE_POSITIONS, &CUBE_INDICES);
         let render_pass = device
             .create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
@@ -447,16 +212,10 @@ impl RayTracer {
                             .binding(0)
                             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                             .stage_flags(
-                                vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::VERTEX,
+                                vk::ShaderStageFlags::COMPUTE,
                             )
                             .descriptor_count(1)
                             .build(), // Camera
-                        vk::DescriptorSetLayoutBinding::builder()
-                            .binding(1)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                            .descriptor_count(1)
-                            .build(), // Lights
                     ]),
                 None,
             )
@@ -530,16 +289,24 @@ impl RayTracer {
 
         let pipeline_layout = device
             .create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder().set_layouts(&[
-                    uniform_desc_set_layout,
-                    storage_desc_set_layout,
-                    frame_desc_set_layout,
-                    swapchain.images_desc_set_layout,
-                ]),
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[
+                        uniform_desc_set_layout,
+                        storage_desc_set_layout,
+                        frame_desc_set_layout,
+                        swapchain.images_desc_set_layout,
+                    ])
+                    .push_constant_ranges(&[
+                        vk::PushConstantRange {
+                            stage_flags: vk::ShaderStageFlags::COMPUTE,
+                            offset: 0,
+                            size: std::mem::size_of::<PushConstants>() as u32
+                        }
+                    ]),
                 None,
             )
             .unwrap();
-        let pipelines = create_pipelines(device, pipeline_layout, render_pass);
+        let pipeline = create_pipelines(device, pipeline_layout, render_pass);
 
         device.update_descriptor_sets(
             &[
@@ -551,20 +318,9 @@ impl RayTracer {
                     .buffer_info(&[vk::DescriptorBufferInfo {
                         buffer: shared_buffer.buffer,
                         offset: 0,
-                        range: 192,
+                        range: std::mem::size_of::<[f32; 16]>() as u64,
                     }])
                     .build(), // Camera
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(uniform_desc_set)
-                    .dst_binding(1)
-                    .dst_array_element(0)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(&[vk::DescriptorBufferInfo {
-                        buffer: shared_buffer.buffer,
-                        offset: offset_of!(StagingStateLayout, sunlight) as u64,
-                        range: 64,
-                    }])
-                    .build(), // Lights
             ],
             &[],
         );
@@ -586,9 +342,7 @@ impl RayTracer {
         let raytracer = Self {
             context,
             pipeline_layout,
-            ray_pipeline: pipelines[1],
-            depth_pipeline: pipelines[0],
-            compute_pipeline: pipelines[2],
+            compute_pipeline: pipeline,
             storage_desc_set,
             storage_desc_set_layout,
             uniform_desc_set,
@@ -608,11 +362,10 @@ impl RayTracer {
         };
         raytracer
     }
-    pub fn update(&mut self, state: &State, aspect_ratio: f32) {
+    pub fn update(&mut self, state: &State) {
         self.shared_buffer.write_camera(
             state.camera_projection,
             state.camera_transform,
-            aspect_ratio,
         );
         self.shared_buffer.write_light(state.sunlight);
     }
@@ -755,7 +508,7 @@ impl RenderPassProvider for RayTracer {
         let framebuffer = swapchain_image.framebuffer;
         let max_compute_work_group_count = self.limits.0;
         let max_compute_work_group_size = self.limits.1;
-        let default_local_workgroup_size: u32 = 4;
+        let default_local_workgroup_size: u32 = 8;
         if max_compute_work_group_size[0] < default_local_workgroup_size || max_compute_work_group_size[1] < default_local_workgroup_size {
             panic!("Max compute work group size too small. {} {}", max_compute_work_group_size[0], max_compute_work_group_size[1]);
         }
@@ -778,13 +531,9 @@ impl RenderPassProvider for RayTracer {
             0,
             &[vk::Viewport {
                 x: 0.0,
-                y: if config.flip_y_requires_shift {
-                    config.extent.height as f32
-                } else {
-                    0.0
-                },
+                y: 0.0,
                 width: config.extent.width as f32,
-                height: -(config.extent.height as f32),
+                height: config.extent.height as f32,
                 min_depth: 0.0,
                 max_depth: 1.0,
             }],
@@ -796,6 +545,21 @@ impl RenderPassProvider for RayTracer {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: config.extent,
             }],
+        );
+        let push_constants = PushConstants {
+            width: config.extent.width,
+            height: config.extent.height,
+            aspect_ratio: (config.extent.width as f32) / (config.extent.height as f32)
+        };
+        device.cmd_push_constants(
+            command_buffer,
+            self.pipeline_layout,
+            vk::ShaderStageFlags::COMPUTE,
+            0,
+            std::slice::from_raw_parts(
+                &push_constants as *const PushConstants as *const u8,
+                std::mem::size_of_val(&push_constants)
+            )
         );
         let mut clear_values = [vk::ClearValue::default(), vk::ClearValue::default()];
         clear_values[0].color.float32 = [1.0, 1.0, 1.0, 1.0];
@@ -900,10 +664,7 @@ impl Drop for RayTracer {
                 .destroy_pipeline_layout(self.pipeline_layout, None);
             self.context
                 .device
-                .destroy_pipeline(self.ray_pipeline, None);
-            self.context
-                .device
-                .destroy_pipeline(self.depth_pipeline, None);
+                .destroy_pipeline(self.compute_pipeline, None);
             self.context
                 .device
                 .destroy_render_pass(self.render_pass, None);

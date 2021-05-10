@@ -48,10 +48,10 @@ fn setup_from_oct_file(
     *mesh = Some(MarchingCubeMeshBuilder::new(512.0, 9).build(&octree));
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(50.0, 6.0, 50.0);
+    bundle.transform.translation = Vec3::new(3.0, 0.5, 3.0);
     bundle
         .transform
-        .look_at(Vec3::new(100.0, 0.0, 120.0), Vec3::Y);
+        .look_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y);
     commands
         .spawn()
         .insert_bundle(bundle)

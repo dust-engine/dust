@@ -1,10 +1,11 @@
 use ash::vk;
+use bevy::render::camera::Camera;
 
 use crate::renderer::RenderContext;
 use ash::version::DeviceV1_0;
 use dust_core::CameraProjection;
 use dust_core::SunLight;
-use glam::{Mat4, TransformRT, Vec3};
+use glam::{Mat3, Mat4, TransformRT, Vec3};
 use std::mem::size_of;
 use std::sync::Arc;
 use vk_mem as vma;
@@ -18,25 +19,17 @@ struct StagingState {
 }
 
 const SHARED_BUFFER_FRAME_UPDATE_SIZE: u64 = 256;
+#[repr(C)]
 pub struct StagingStateLayout {
-    pub view_proj: Mat4,
-    pub rotation_view_proj: Mat4,
+    pub camera_view_col0: [f32; 3],
+    pub padding0: f32,
+    pub camera_view_col1: [f32; 3],
+    pub padding1: f32,
+    pub camera_view_col2: [f32; 3],
+    pub padding2: f32,
+
     pub camera_position: Vec3,
-    placeholder: f32,
-    pub forward: Vec3,
-    placeholder2: f32,
-    pub fov: f32,
-    pub near: f32,
-    pub far: f32,
-    pub aspect_ratio: f32,
-    // -- 192
-    pub sunlight: SunLight,
-    _padding1: [f32; 8],
-    // -- 256
-    pub vertex_buffer: [(f32, f32, f32); 8],
-    _padding3: f32,
-    pub index_buffer: [u16; 14],
-    // -- 384
+    pub tan_half_fov: f32,
 }
 
 /**
@@ -58,7 +51,6 @@ pub struct SharedBuffer {
     allocation: vma::Allocation,
     allocation_info: vma::AllocationInfo,
     layout: &'static mut StagingStateLayout,
-    static_data_dirty: bool,
 }
 unsafe impl Send for SharedBuffer {}
 unsafe impl Sync for SharedBuffer {}
@@ -157,62 +149,30 @@ impl SharedBuffer {
             allocation,
             context,
             layout: &mut *ptr,
-            static_data_dirty: true,
             allocation_info,
         };
         shared_buffer
-    }
-
-    pub unsafe fn copy_vertex_index(
-        &mut self,
-        vertex_buffer: &[(f32, f32, f32); 8],
-        index_buffer: &[u16; 14],
-    ) {
-        self.layout.vertex_buffer = vertex_buffer.clone();
-        self.layout.index_buffer = index_buffer.clone();
     }
 
     pub fn write_camera(
         &mut self,
         camera_projection: &CameraProjection,
         transform: &TransformRT,
-        aspect_ratio: f32,
     ) {
-        let rotation_only_proj_matrix =
-            Mat4::from_rotation_translation(transform.rotation, Vec3::ZERO);
-        let proj_matrix =
-            Mat4::from_rotation_translation(transform.rotation, transform.translation);
-        let forward_vector = transform.rotation * Vec3::new(0.0, 0.0, -1.0);
-
-        let cubed_projection_matrix = CameraProjection {
-            fov: camera_projection.fov,
-            near: 0.5,
-            far: 2.0,
-        };
-        self.layout.view_proj =
-            camera_projection.get_projection_matrix(aspect_ratio) * proj_matrix.inverse(); // The normal ViewProj matrix
-        self.layout.rotation_view_proj = cubed_projection_matrix
-            .get_projection_matrix(aspect_ratio)
-            * rotation_only_proj_matrix.inverse();
+        let rotation_matrix = Mat3::from_quat(transform.rotation).to_cols_array_2d();
+        self.layout.camera_view_col0 = rotation_matrix[0];
+        self.layout.camera_view_col1 = rotation_matrix[1];
+        self.layout.camera_view_col2 = rotation_matrix[2];
         self.layout.camera_position = transform.translation;
-        self.layout.forward = forward_vector.normalize();
-        self.layout.far = camera_projection.far;
-        self.layout.near = camera_projection.near;
-        self.layout.fov = camera_projection.fov;
-        self.layout.aspect_ratio = aspect_ratio;
+        self.layout.tan_half_fov = (camera_projection.fov / 2.0).tan();
     }
 
     pub fn write_light(&mut self, sunlight: &SunLight) {
-        self.layout.sunlight = sunlight.clone();
+        //self.layout.sunlight = sunlight.clone();
     }
 
     pub unsafe fn record_cmd_buffer_copy(&mut self, cmd_buffer: vk::CommandBuffer) {
-        let size = if self.static_data_dirty {
-            self.static_data_dirty = false;
-            size_of::<StagingStateLayout>() as u64
-        } else {
-            SHARED_BUFFER_FRAME_UPDATE_SIZE
-        };
+        let size = size_of::<StagingStateLayout>() as u64;
         if let Some(staging_buffer) = self.staging.as_ref() {
             self.context.device.cmd_copy_buffer(
                 cmd_buffer,

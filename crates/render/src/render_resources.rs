@@ -35,7 +35,6 @@ impl RenderResources {
             renderer.physical_device,
             renderer.context.surface,
             &renderer.context.surface_loader,
-            &renderer.quirks,
         );
         let swapchain = Swapchain::new(
             renderer.context.clone(),

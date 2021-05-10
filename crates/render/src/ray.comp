@@ -1,9 +1,71 @@
 #version 460
 
-layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
-layout(rgba32f, set = 3, binding = 0) uniform image2D img_output;
+struct Ray {
+    vec3 origin;
+    vec3 dir;
+};
+
+struct Box {
+    vec3 origin;
+    float extent;
+};
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(rgba32f, set = 3, binding = 0) uniform image2D imgOutput;
+
+layout(push_constant) uniform constants
+{
+	uvec2 extents;
+    float aspectRatio;
+} PushConstants;
+layout(set = 0, binding = 0) uniform u_Camera {
+    mat3 rotation;
+    vec3 position;
+    float tanHalfFov;
+} Camera;
+
+Ray GenerateRay() {
+    uvec2 pixelRaster = gl_GlobalInvocationID.xy;
+
+    vec2 pixelNDC = vec2(pixelRaster) / vec2(PushConstants.extents);
+    vec2 pixelCamera = 2 * pixelNDC - 1;
+    pixelCamera.y *= -1;
+    pixelCamera.x *= PushConstants.aspectRatio;
+    pixelCamera *= Camera.tanHalfFov;
+
+    vec3 pixelCameraWorld = Camera.rotation * vec3(pixelCamera, -1);
+    Ray ray;
+    ray.origin = Camera.position;
+    ray.dir = normalize(pixelCameraWorld);
+    return ray;
+}
+
+vec2 IntersectAABB(vec3 origin, vec3 dir, Box box) {
+    vec3 box_min = box.origin;
+    vec3 box_max = box_min + box.extent;
+    vec3 tMin = (box_min - origin) / dir;
+    vec3 tMax = (box_max - origin) / dir;
+    vec3 t1 = min(tMin, tMax);
+    vec3 t2 = max(tMin, tMax);
+    float t_min = max(max(t1.x, t1.y), t1.z);
+    float t_max = min(min(t2.x, t2.y), t2.z);
+    return vec2(t_min, t_max);
+}
+
 void main() {
-    vec4 color = vec4(0.0, 1.0, 1.0, 1.0);
-    ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
-    imageStore(img_output, pixel_coords, color);
+    Ray ray = GenerateRay();
+    Box box;
+    box.origin = vec3(0, 0, 0);
+    box.extent = 1;
+    vec2 intersection = IntersectAABB(ray.origin, ray.dir, box);
+
+    vec4 color;
+    if (intersection.x < intersection.y) {
+        color = vec4(1.0, 0.0, 0.0, 1.0);
+    } else {
+        color = vec4(0.0, 0.0, 0.0, 1.0);
+    }
+
+    
+    imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);
 }
