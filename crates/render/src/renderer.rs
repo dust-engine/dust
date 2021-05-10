@@ -1,4 +1,4 @@
-use crate::device_info::{DeviceInfo};
+use crate::device_info::DeviceInfo;
 
 use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
@@ -373,7 +373,7 @@ impl Renderer {
                 graphics_queue,
                 transfer_binding_queue,
                 graphics_queue_family,
-                transfer_binding_queue_family
+                transfer_binding_queue_family,
             };
             let renderer = Self {
                 context: Arc::new(context),

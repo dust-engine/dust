@@ -1,11 +1,10 @@
 use ash::vk;
-use bevy::render::camera::Camera;
 
 use crate::renderer::RenderContext;
 use ash::version::DeviceV1_0;
 use dust_core::CameraProjection;
 use dust_core::SunLight;
-use glam::{Mat3, Mat4, TransformRT, Vec3};
+use glam::{Mat3, TransformRT, Vec3};
 use std::mem::size_of;
 use std::sync::Arc;
 use vk_mem as vma;
@@ -154,11 +153,7 @@ impl SharedBuffer {
         shared_buffer
     }
 
-    pub fn write_camera(
-        &mut self,
-        camera_projection: &CameraProjection,
-        transform: &TransformRT,
-    ) {
+    pub fn write_camera(&mut self, camera_projection: &CameraProjection, transform: &TransformRT) {
         let rotation_matrix = Mat3::from_quat(transform.rotation).to_cols_array_2d();
         self.layout.camera_view_col0 = rotation_matrix[0];
         self.layout.camera_view_col1 = rotation_matrix[1];
@@ -167,7 +162,7 @@ impl SharedBuffer {
         self.layout.tan_half_fov = (camera_projection.fov / 2.0).tan();
     }
 
-    pub fn write_light(&mut self, sunlight: &SunLight) {
+    pub fn write_light(&mut self, _sunlight: &SunLight) {
         //self.layout.sunlight = sunlight.clone();
     }
 

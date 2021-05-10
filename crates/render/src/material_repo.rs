@@ -1,11 +1,13 @@
-use crate::material::{ColoredMaterial, Material, MaterialDeviceLayout, ColoredMaterialDeviceLayout};
+use crate::material::{
+    ColoredMaterial, ColoredMaterialDeviceLayout, Material, MaterialDeviceLayout,
+};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use image::GenericImageView;
-use vk_mem as vma;
-use std::mem::size_of;
 use glam::Vec4;
+
+use std::mem::size_of;
 use std::ops::Range;
+use vk_mem as vma;
 
 pub struct TextureRepo {
     pub materials: Vec<Material>,
@@ -22,7 +24,6 @@ pub struct TextureRepoUploadState {
     pub staging_buffer_allocation_info: vma::AllocationInfo,
     pub sampler: vk::Sampler,
     pub image_len: u32,
-
 
     pub buffer: vk::Buffer,
     pub buffer_allocation: vma::Allocation,
@@ -88,7 +89,8 @@ impl TextureRepo {
         let indices = {
             // Copy data into the buffer
             let mut current_offset: usize = 0;
-            let mut indices: Vec<usize> = Vec::with_capacity(self.materials.len() + self.colored_materials.len());
+            let mut indices: Vec<usize> =
+                Vec::with_capacity(self.materials.len() + self.colored_materials.len());
             for material in self.materials.iter() {
                 let rgba8img = material.diffuse.as_rgba8().unwrap();
                 unsafe {
@@ -116,8 +118,7 @@ impl TextureRepo {
             indices
         };
 
-        let buffer_copies: Vec<_> =
-        indices
+        let buffer_copies: Vec<_> = indices
             .iter()
             .enumerate()
             .map(|(i, &indice)| {
@@ -156,7 +157,7 @@ impl TextureRepo {
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: 0,
-                    layer_count: (self.materials.len() + self.colored_materials.len()) as u32
+                    layer_count: (self.materials.len() + self.colored_materials.len()) as u32,
                 })
                 .build();
             device.cmd_pipeline_barrier(
@@ -166,7 +167,7 @@ impl TextureRepo {
                 vk::DependencyFlags::empty(),
                 &[],
                 &[],
-                &[image_memory_barrier]
+                &[image_memory_barrier],
             );
             let mut image_memory_barrier2 = image_memory_barrier.clone();
             image_memory_barrier2.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
@@ -188,45 +189,48 @@ impl TextureRepo {
                 vk::DependencyFlags::empty(),
                 &[],
                 &[],
-                &[image_memory_barrier2]
+                &[image_memory_barrier2],
             );
         }
         let sampler = unsafe {
-            device.create_sampler(
-                &vk::SamplerCreateInfo::builder()
-                    .mag_filter(vk::Filter::NEAREST)
-                    .min_filter(vk::Filter::NEAREST)
-                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
-                    .address_mode_u(vk::SamplerAddressMode::REPEAT)
-                    .address_mode_v(vk::SamplerAddressMode::REPEAT)
-                    .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                    .build(),
-                None
-            )
+            device
+                .create_sampler(
+                    &vk::SamplerCreateInfo::builder()
+                        .mag_filter(vk::Filter::NEAREST)
+                        .min_filter(vk::Filter::NEAREST)
+                        .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                        .address_mode_u(vk::SamplerAddressMode::REPEAT)
+                        .address_mode_v(vk::SamplerAddressMode::REPEAT)
+                        .address_mode_w(vk::SamplerAddressMode::REPEAT)
+                        .build(),
+                    None,
+                )
                 .unwrap()
         };
         let image_view = unsafe {
-            device.create_image_view(
-                &vk::ImageViewCreateInfo::builder()
-                    .image(image)
-                    .view_type(vk::ImageViewType::TYPE_2D_ARRAY)
-                    .format(vk::Format::R8G8B8A8_UNORM)
-                    .components(vk::ComponentMapping {
-                        r: vk::ComponentSwizzle::R,
-                        g: vk::ComponentSwizzle::G,
-                        b: vk::ComponentSwizzle::B,
-                        a: vk::ComponentSwizzle::A,
-                    })
-                    .subresource_range(vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: (self.materials.len() + self.colored_materials.len()) as u32
-                    })
-                    .build(),
-                None,
-            )
+            device
+                .create_image_view(
+                    &vk::ImageViewCreateInfo::builder()
+                        .image(image)
+                        .view_type(vk::ImageViewType::TYPE_2D_ARRAY)
+                        .format(vk::Format::R8G8B8A8_UNORM)
+                        .components(vk::ComponentMapping {
+                            r: vk::ComponentSwizzle::R,
+                            g: vk::ComponentSwizzle::G,
+                            b: vk::ComponentSwizzle::B,
+                            a: vk::ComponentSwizzle::A,
+                        })
+                        .subresource_range(vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: (self.materials.len() + self.colored_materials.len())
+                                as u32,
+                        })
+                        .build(),
+                    None,
+                )
                 .unwrap()
         };
 
@@ -234,7 +238,12 @@ impl TextureRepo {
             .create_buffer(
                 &vk::BufferCreateInfo::builder()
                     .flags(vk::BufferCreateFlags::empty())
-                    .size((self.materials.len() * size_of::<MaterialDeviceLayout>() + self.colored_materials.len() * size_of::<ColoredMaterialDeviceLayout>()) as u64)
+                    .size(
+                        (self.materials.len() * size_of::<MaterialDeviceLayout>()
+                            + self.colored_materials.len()
+                                * size_of::<ColoredMaterialDeviceLayout>())
+                            as u64,
+                    )
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
                     .build(),
@@ -245,8 +254,8 @@ impl TextureRepo {
                     preferred_flags: Default::default(),
                     memory_type_bits: 0,
                     pool: None,
-                    user_data: None
-                }
+                    user_data: None,
+                },
             )
             .unwrap();
         let mut buffer_ptr = buffer_allocation_info.get_mapped_data() as *mut MaterialDeviceLayout;
@@ -262,7 +271,9 @@ impl TextureRepo {
                 let material_ref = unsafe { &mut *buffer_ptr };
                 material_ref.diffuse = (i + self.materials.len()) as u16;
                 material_ref.scale = material.scale;
-                material_ref.palette = material.color_palette.map(|vec| Vec4::new(vec.x, vec.y, vec.z, 1.0));
+                material_ref.palette = material
+                    .color_palette
+                    .map(|vec| Vec4::new(vec.x, vec.y, vec.z, 1.0));
                 buffer_ptr = buffer_ptr.add(1);
             }
         }
@@ -281,8 +292,11 @@ impl TextureRepo {
             buffer,
             buffer_allocation,
             buffer_allocation_info,
-            regular_material_range: 0 .. barrier,
-            colored_material_range: barrier .. (barrier + (self.colored_materials.len() * size_of::<ColoredMaterialDeviceLayout>()) as u32)
+            regular_material_range: 0..barrier,
+            colored_material_range: barrier
+                ..(barrier
+                    + (self.colored_materials.len() * size_of::<ColoredMaterialDeviceLayout>())
+                        as u32),
         }
     }
 }

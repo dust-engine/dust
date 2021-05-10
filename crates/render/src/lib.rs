@@ -126,7 +126,9 @@ fn world_update(
                 &renderer.context.surface_loader,
             );
 
-            render_resources.swapchain.recreate(&render_resources.allocator, config);
+            render_resources
+                .swapchain
+                .recreate(&render_resources.allocator, config);
             raytracer.bind_render_target(&mut render_resources.swapchain);
         }
     }

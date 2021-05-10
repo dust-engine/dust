@@ -1,18 +1,18 @@
 use crate::core::svo::mesher::Mesh;
 use crate::device_info::DeviceInfo;
+use crate::material_repo::TextureRepoUploadState;
 use crate::renderer::RenderContext;
-use crate::shared_buffer::{SharedBuffer, StagingStateLayout};
+use crate::shared_buffer::SharedBuffer;
 use crate::swapchain::{RenderPassProvider, Swapchain, SwapchainConfig, SwapchainImage};
 use crate::State;
 use ash::version::DeviceV1_0;
 use ash::vk;
 use ash::vk::RenderPass;
+use smallvec::SmallVec;
 use std::ffi::CStr;
 use std::io::Cursor;
 use std::sync::Arc;
 use vk_mem as vma;
-use crate::material_repo::TextureRepoUploadState;
-use smallvec::SmallVec;
 
 pub const CUBE_INDICES: [u16; 14] = [3, 7, 1, 5, 4, 7, 6, 3, 2, 1, 0, 4, 2, 6];
 pub const CUBE_POSITIONS: [(f32, f32, f32); 8] = [
@@ -55,7 +55,7 @@ pub struct RayTracer {
 unsafe fn create_pipelines(
     device: &ash::Device,
     pipeline_layout: vk::PipelineLayout,
-    render_pass: vk::RenderPass,
+    _render_pass: vk::RenderPass,
 ) -> vk::Pipeline {
     let compute_shader_module = device
         .create_shader_module(
@@ -64,7 +64,7 @@ unsafe fn create_pipelines(
                     &ash::util::read_spv(&mut Cursor::new(
                         &include_bytes!(concat!(env!("OUT_DIR"), "/shaders/ray.comp.spv"))[..],
                     ))
-                        .unwrap(),
+                    .unwrap(),
                 )
                 .build(),
             None,
@@ -72,26 +72,24 @@ unsafe fn create_pipelines(
         .unwrap();
     let mut pipeline: vk::Pipeline = vk::Pipeline::null();
 
-    let result = device.fp_v1_0()
-        .create_compute_pipelines(
-            device.handle(),
-            vk::PipelineCache::null(),
-            1,
-            [
-                vk::ComputePipelineCreateInfo::builder()
-                .stage(
-                    vk::PipelineShaderStageCreateInfo::builder()
-                        .stage(vk::ShaderStageFlags::COMPUTE)
-                        .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
-                        .module(compute_shader_module)
-                        .build()
-                )
-                .layout(pipeline_layout)
-                .build()
-            ].as_ptr(),
-            std::ptr::null(),
-            &mut pipeline
-        );
+    let result = device.fp_v1_0().create_compute_pipelines(
+        device.handle(),
+        vk::PipelineCache::null(),
+        1,
+        [vk::ComputePipelineCreateInfo::builder()
+            .stage(
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::COMPUTE)
+                    .name(CStr::from_bytes_with_nul_unchecked(b"main\0"))
+                    .module(compute_shader_module)
+                    .build(),
+            )
+            .layout(pipeline_layout)
+            .build()]
+        .as_ptr(),
+        std::ptr::null(),
+        &mut pipeline,
+    );
     assert_eq!(result, vk::Result::SUCCESS);
 
     device.destroy_shader_module(compute_shader_module, None);
@@ -108,7 +106,7 @@ impl RayTracer {
         graphics_queue_family: u32,
     ) -> Self {
         let device = &context.device;
-        let mut shared_buffer = SharedBuffer::new(
+        let shared_buffer = SharedBuffer::new(
             context.clone(),
             allocator,
             &info.memory_properties,
@@ -211,9 +209,7 @@ impl RayTracer {
                         vk::DescriptorSetLayoutBinding::builder()
                             .binding(0)
                             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                            .stage_flags(
-                                vk::ShaderStageFlags::COMPUTE,
-                            )
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE)
                             .descriptor_count(1)
                             .build(), // Camera
                     ]),
@@ -267,20 +263,18 @@ impl RayTracer {
             )
             .unwrap();
         let mut desc_sets = [vk::DescriptorSet::null(); 3];
-        let result = device
-            .fp_v1_0()
-            .allocate_descriptor_sets(
-                device.handle(),
-                &vk::DescriptorSetAllocateInfo::builder()
-                    .descriptor_pool(desc_pool)
-                    .set_layouts(&[
-                        uniform_desc_set_layout,
-                        storage_desc_set_layout,
-                        frame_desc_set_layout,
-                    ])
-                    .build(),
-                &mut desc_sets[0],
-            );
+        let result = device.fp_v1_0().allocate_descriptor_sets(
+            device.handle(),
+            &vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(desc_pool)
+                .set_layouts(&[
+                    uniform_desc_set_layout,
+                    storage_desc_set_layout,
+                    frame_desc_set_layout,
+                ])
+                .build(),
+            &mut desc_sets[0],
+        );
         assert_eq!(result, vk::Result::SUCCESS);
         let frame_desc_set = desc_sets[2];
         let storage_desc_set = desc_sets[1];
@@ -296,13 +290,11 @@ impl RayTracer {
                         frame_desc_set_layout,
                         swapchain.images_desc_set_layout,
                     ])
-                    .push_constant_ranges(&[
-                        vk::PushConstantRange {
-                            stage_flags: vk::ShaderStageFlags::COMPUTE,
-                            offset: 0,
-                            size: std::mem::size_of::<PushConstants>() as u32
-                        }
-                    ]),
+                    .push_constant_ranges(&[vk::PushConstantRange {
+                        stage_flags: vk::ShaderStageFlags::COMPUTE,
+                        offset: 0,
+                        size: std::mem::size_of::<PushConstants>() as u32,
+                    }]),
                 None,
             )
             .unwrap();
@@ -355,18 +347,22 @@ impl RayTracer {
             frame_desc_set_layout,
             depth_sampler,
             limits: (
-                info.physical_device_properties.limits.max_compute_work_group_count,
-                info.physical_device_properties.limits.max_compute_work_group_size,
-                info.physical_device_properties.limits.max_compute_work_group_invocations,
-            )
+                info.physical_device_properties
+                    .limits
+                    .max_compute_work_group_count,
+                info.physical_device_properties
+                    .limits
+                    .max_compute_work_group_size,
+                info.physical_device_properties
+                    .limits
+                    .max_compute_work_group_invocations,
+            ),
         };
         raytracer
     }
     pub fn update(&mut self, state: &State) {
-        self.shared_buffer.write_camera(
-            state.camera_projection,
-            state.camera_transform,
-        );
+        self.shared_buffer
+            .write_camera(state.camera_projection, state.camera_transform);
         self.shared_buffer.write_light(state.sunlight);
     }
     pub unsafe fn bind_block_allocator_buffer(&mut self, block_allocator_buffer: vk::Buffer) {
@@ -447,52 +443,55 @@ impl RayTracer {
             vk::DescriptorBufferInfo {
                 buffer: repo.buffer,
                 offset: repo.regular_material_range.start as u64,
-                range: (repo.regular_material_range.end - repo.regular_material_range.start) as u64
+                range: (repo.regular_material_range.end - repo.regular_material_range.start) as u64,
             },
             vk::DescriptorBufferInfo {
                 buffer: repo.buffer,
                 offset: repo.colored_material_range.start as u64,
-                range: (repo.colored_material_range.end - repo.colored_material_range.start) as u64
-            }
+                range: (repo.colored_material_range.end - repo.colored_material_range.start) as u64,
+            },
         ];
-        let image_info = [
-            vk::DescriptorImageInfo {
-                sampler: repo.sampler,
-                image_view: repo.image_view,
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            }
-        ];
+        let image_info = [vk::DescriptorImageInfo {
+            sampler: repo.sampler,
+            image_view: repo.image_view,
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        }];
         let mut writes: SmallVec<[vk::WriteDescriptorSet; 3]> = SmallVec::new();
         if !repo.regular_material_range.is_empty() {
-            writes.push(vk::WriteDescriptorSet::builder()
-                .dst_set(self.storage_desc_set)
-                .dst_binding(1)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&buffer_info[0..1])
-                .build()); // Regular Materials
+            writes.push(
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(self.storage_desc_set)
+                    .dst_binding(1)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info[0..1])
+                    .build(),
+            ); // Regular Materials
         }
         if !repo.colored_material_range.is_empty() {
-            writes.push(vk::WriteDescriptorSet::builder()
-                .dst_set(self.storage_desc_set)
-                .dst_binding(2)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&buffer_info[1..2])
-                .build()); // Colored Materials
+            writes.push(
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(self.storage_desc_set)
+                    .dst_binding(2)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info[1..2])
+                    .build(),
+            ); // Colored Materials
         }
-        writes.push(vk::WriteDescriptorSet::builder()
-                        .dst_set(self.storage_desc_set)
-                        .dst_binding(3)
-                        .dst_array_element(0)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(&image_info)
-                        .build()); // Textures
+        writes.push(
+            vk::WriteDescriptorSet::builder()
+                .dst_set(self.storage_desc_set)
+                .dst_binding(3)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&image_info)
+                .build(),
+        ); // Textures
         unsafe {
-            self.context.device.update_descriptor_sets(
-                writes.as_slice(),
-                &[],
-            );
+            self.context
+                .device
+                .update_descriptor_sets(writes.as_slice(), &[]);
         }
     }
 }
@@ -505,12 +504,17 @@ impl RenderPassProvider for RayTracer {
         config: &SwapchainConfig,
     ) {
         let command_buffer = swapchain_image.command_buffer;
-        let framebuffer = swapchain_image.framebuffer;
+        let _framebuffer = swapchain_image.framebuffer;
         let max_compute_work_group_count = self.limits.0;
         let max_compute_work_group_size = self.limits.1;
         let default_local_workgroup_size: u32 = 8;
-        if max_compute_work_group_size[0] < default_local_workgroup_size || max_compute_work_group_size[1] < default_local_workgroup_size {
-            panic!("Max compute work group size too small. {} {}", max_compute_work_group_size[0], max_compute_work_group_size[1]);
+        if max_compute_work_group_size[0] < default_local_workgroup_size
+            || max_compute_work_group_size[1] < default_local_workgroup_size
+        {
+            panic!(
+                "Max compute work group size too small. {} {}",
+                max_compute_work_group_size[0], max_compute_work_group_size[1]
+            );
         }
         fn div_round_up(a: u32, b: u32) -> u32 {
             (a + b - 1) / b
@@ -519,11 +523,13 @@ impl RenderPassProvider for RayTracer {
             div_round_up(config.extent.width, default_local_workgroup_size),
             div_round_up(config.extent.height, default_local_workgroup_size),
         ];
-        if work_group_count[0] > max_compute_work_group_count[0] || work_group_count[1] > max_compute_work_group_count[1] {
+        if work_group_count[0] > max_compute_work_group_count[0]
+            || work_group_count[1] > max_compute_work_group_count[1]
+        {
             panic!(
                 "Max compute work group count too small, {} {}",
-                max_compute_work_group_count[0],
-                max_compute_work_group_count[1])
+                max_compute_work_group_count[0], max_compute_work_group_count[1]
+            )
         }
 
         device.cmd_set_viewport(
@@ -549,7 +555,7 @@ impl RenderPassProvider for RayTracer {
         let push_constants = PushConstants {
             width: config.extent.width,
             height: config.extent.height,
-            aspect_ratio: (config.extent.width as f32) / (config.extent.height as f32)
+            aspect_ratio: (config.extent.width as f32) / (config.extent.height as f32),
         };
         device.cmd_push_constants(
             command_buffer,
@@ -558,8 +564,8 @@ impl RenderPassProvider for RayTracer {
             0,
             std::slice::from_raw_parts(
                 &push_constants as *const PushConstants as *const u8,
-                std::mem::size_of_val(&push_constants)
-            )
+                std::mem::size_of_val(&push_constants),
+            ),
         );
         let mut clear_values = [vk::ClearValue::default(), vk::ClearValue::default()];
         clear_values[0].color.float32 = [1.0, 1.0, 1.0, 1.0];
@@ -593,29 +599,22 @@ impl RenderPassProvider for RayTracer {
             vk::DependencyFlags::BY_REGION,
             &[],
             &[],
-            &[
-                vk::ImageMemoryBarrier::builder()
-                    .image(swapchain_image.image)
-                    .src_access_mask(vk::AccessFlags::empty())
-                    .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
-                    .subresource_range(vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1
-                    })
-                    .old_layout(vk::ImageLayout::UNDEFINED)
-                    .new_layout(vk::ImageLayout::GENERAL)
-                    .build()
-            ]
+            &[vk::ImageMemoryBarrier::builder()
+                .image(swapchain_image.image)
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::GENERAL)
+                .build()],
         );
-        device.cmd_dispatch(
-            command_buffer,
-            work_group_count[0],
-            work_group_count[1],
-            1,
-        );
+        device.cmd_dispatch(command_buffer, work_group_count[0], work_group_count[1], 1);
         device.cmd_pipeline_barrier(
             command_buffer,
             vk::PipelineStageFlags::COMPUTE_SHADER,
@@ -623,22 +622,20 @@ impl RenderPassProvider for RayTracer {
             vk::DependencyFlags::BY_REGION,
             &[],
             &[],
-            &[
-                vk::ImageMemoryBarrier::builder()
-                    .image(swapchain_image.image)
-                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::empty())
-                    .subresource_range(vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1
-                    })
-                    .old_layout(vk::ImageLayout::GENERAL)
-                    .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                    .build()
-            ]
+            &[vk::ImageMemoryBarrier::builder()
+                .image(swapchain_image.image)
+                .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                .dst_access_mask(vk::AccessFlags::empty())
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .old_layout(vk::ImageLayout::GENERAL)
+                .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                .build()],
         );
     }
 
@@ -674,7 +671,7 @@ impl Drop for RayTracer {
 
 pub mod systems {
     use super::RayTracer;
-    
+
     use crate::render_resources::RenderResources;
     use crate::Renderer;
     use bevy::prelude::*;

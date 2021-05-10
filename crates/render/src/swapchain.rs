@@ -193,32 +193,31 @@ unsafe fn create_framebuffer(
         )
         .unwrap()
 }
-unsafe fn update_image_desc_sets<I>(
-    device: &ash::Device,
-    iterator: I,
-) where I: Iterator<Item = (vk::DescriptorSet, vk::ImageView)> + Clone {
+unsafe fn update_image_desc_sets<I>(device: &ash::Device, iterator: I)
+where
+    I: Iterator<Item = (vk::DescriptorSet, vk::ImageView)> + Clone,
+{
     let image_infos = iterator
         .clone()
         .map(|(_, image_view)| vk::DescriptorImageInfo {
             sampler: vk::Sampler::null(),
             image_view,
-            image_layout: vk::ImageLayout::GENERAL
+            image_layout: vk::ImageLayout::GENERAL,
         })
         .collect::<Vec<vk::DescriptorImageInfo>>();
     let descriptor_writes = iterator
         .enumerate()
-        .map(|(i, (desc_set, _))| vk::WriteDescriptorSet::builder()
-            .dst_set(desc_set)
-            .dst_binding(0)
-            .dst_array_element(0)
-            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-            .image_info(&image_infos[i..=i])
-            .build())
+        .map(|(i, (desc_set, _))| {
+            vk::WriteDescriptorSet::builder()
+                .dst_set(desc_set)
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                .image_info(&image_infos[i..=i])
+                .build()
+        })
         .collect::<Vec<vk::WriteDescriptorSet>>();
-    device.update_descriptor_sets(
-        descriptor_writes.as_slice(),
-        &[]
-    );
+    device.update_descriptor_sets(descriptor_writes.as_slice(), &[]);
 }
 pub struct Swapchain {
     context: Arc<RenderContext>,
@@ -257,10 +256,7 @@ impl Swapchain {
 
         let format = supported_formats[0].format;
         let extent = caps.current_extent;
-        SwapchainConfig {
-            format,
-            extent,
-        }
+        SwapchainConfig { format, extent }
     }
     pub unsafe fn new(
         context: Arc<RenderContext>,
@@ -297,21 +293,20 @@ impl Swapchain {
             )
             .unwrap();
         let desc_pool = device
-            .create_descriptor_pool(&vk::DescriptorPoolCreateInfo::builder()
-                .max_sets(images.len() as u32)
-                .pool_sizes(&[
-                    vk::DescriptorPoolSize {
+            .create_descriptor_pool(
+                &vk::DescriptorPoolCreateInfo::builder()
+                    .max_sets(images.len() as u32)
+                    .pool_sizes(&[vk::DescriptorPoolSize {
                         ty: vk::DescriptorType::STORAGE_IMAGE,
-                        descriptor_count: 3
-                    }
-                ])
-                .build(),
-                None
+                        descriptor_count: 3,
+                    }])
+                    .build(),
+                None,
             )
             .unwrap();
         let desc_set_layout = device
-            .create_descriptor_set_layout(&vk::DescriptorSetLayoutCreateInfo::builder()
-                .bindings(&[
+            .create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
                     vk::DescriptorSetLayoutBinding::builder()
                         .binding(0)
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
@@ -319,14 +314,15 @@ impl Swapchain {
                         .descriptor_count(1)
                         .build(),
                 ]),
-            None
+                None,
             )
             .unwrap();
         let desc_sets = device
-            .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(desc_pool)
-                .set_layouts(vec![desc_set_layout; images.len()].as_slice())
-                .build()
+            .allocate_descriptor_sets(
+                &vk::DescriptorSetAllocateInfo::builder()
+                    .descriptor_pool(desc_pool)
+                    .set_layouts(vec![desc_set_layout; images.len()].as_slice())
+                    .build(),
             )
             .unwrap();
         let swapchain_images = images
@@ -346,7 +342,12 @@ impl Swapchain {
             })
             .collect::<Vec<_>>();
 
-        update_image_desc_sets(device, swapchain_images.iter().map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)));
+        update_image_desc_sets(
+            device,
+            swapchain_images
+                .iter()
+                .map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)),
+        );
         let mut frames_in_flight = Vec::with_capacity(num_frames_in_flight);
         for _i in 0..num_frames_in_flight {
             frames_in_flight.push(Frame::new(&device));
@@ -364,7 +365,7 @@ impl Swapchain {
             config,
             surface,
             render_pass: vk::RenderPass::null(),
-            images_desc_set_layout: desc_set_layout
+            images_desc_set_layout: desc_set_layout,
         }
     }
 

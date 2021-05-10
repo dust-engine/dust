@@ -1,15 +1,15 @@
-use crate::material::{Material, ColoredMaterialDeviceLayout, ColoredMaterial};
+use crate::material::{ColoredMaterial, Material};
 use crate::material_repo::{TextureRepo, TextureRepoUploadState};
 
 use crate::swapchain::Swapchain;
 use crate::Renderer;
+use ash::version::DeviceV1_0;
 use ash::vk;
 use dust_core::svo::alloc::BlockAllocator;
 use dust_core::svo::alloc::BLOCK_SIZE;
+use glam::Vec3;
 use std::sync::Arc;
 use vk_mem as vma;
-use ash::version::DeviceV1_0;
-use glam::Vec3;
 
 pub struct RenderResources {
     pub swapchain: Swapchain,
@@ -92,7 +92,7 @@ impl RenderResources {
                 .unwrap()
                 .decode()
                 .unwrap(),
-            color_palette: [Vec3::ONE; 128]
+            color_palette: [Vec3::ONE; 128],
         });
         texture_repo.colored_materials[0].color_palette[0] = Vec3::new(0.1, 1.0, 0.1);
         texture_repo.colored_materials.push(ColoredMaterial {
@@ -102,7 +102,7 @@ impl RenderResources {
                 .unwrap()
                 .decode()
                 .unwrap(),
-            color_palette: [Vec3::ONE; 128]
+            color_palette: [Vec3::ONE; 128],
         });
         texture_repo.colored_materials[1].color_palette[0] = Vec3::new(0.1, 0.8, 0.1);
         texture_repo.colored_materials.push(ColoredMaterial {
@@ -112,17 +112,13 @@ impl RenderResources {
                 .unwrap()
                 .decode()
                 .unwrap(),
-            color_palette: [Vec3::ONE; 128]
+            color_palette: [Vec3::ONE; 128],
         });
         fn to_vec(color: u32) -> Vec3 {
             let r = color & 0xff;
             let g = (color >> 8) & 0xff;
             let b = (color >> 16) & 0xff;
-            let color = Vec3::new(
-                r as f32,
-                g as f32,
-                b as f32
-            ) / 255.0;
+            let color = Vec3::new(r as f32, g as f32, b as f32) / 255.0;
             color
         }
         texture_repo.colored_materials[2].color_palette[0] = to_vec(0xffffff); // white_wool
@@ -142,32 +138,36 @@ impl RenderResources {
         texture_repo.colored_materials[2].color_palette[14] = to_vec(0xc21813); // red_wool
         texture_repo.colored_materials[2].color_palette[15] = to_vec(0xf6e109); // yellow_wool
 
-
         let upload = unsafe {
-            let command_pool = renderer.context.device.create_command_pool(
-                &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(renderer.graphics_queue_family)
-                    .flags(vk::CommandPoolCreateFlags::TRANSIENT)
-                    .build(),
-                None
-            )
+            let command_pool = renderer
+                .context
+                .device
+                .create_command_pool(
+                    &vk::CommandPoolCreateInfo::builder()
+                        .queue_family_index(renderer.graphics_queue_family)
+                        .flags(vk::CommandPoolCreateFlags::TRANSIENT)
+                        .build(),
+                    None,
+                )
                 .unwrap();
             let mut command_buffer = vk::CommandBuffer::null();
-            renderer.context.device
-                .fp_v1_0()
-                .allocate_command_buffers(
+            renderer.context.device.fp_v1_0().allocate_command_buffers(
                 renderer.context.device.handle(),
                 &vk::CommandBufferAllocateInfo::builder()
                     .command_buffer_count(1)
                     .command_pool(command_pool)
                     .level(vk::CommandBufferLevel::PRIMARY)
                     .build(),
-                    &mut command_buffer
+                &mut command_buffer,
             );
-            renderer.context.device
-                .begin_command_buffer(command_buffer, &vk::CommandBufferBeginInfo::builder()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-                    .build()
+            renderer
+                .context
+                .device
+                .begin_command_buffer(
+                    command_buffer,
+                    &vk::CommandBufferBeginInfo::builder()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                        .build(),
                 )
                 .unwrap();
             let upload = texture_repo.upload(
@@ -176,21 +176,32 @@ impl RenderResources {
                 command_buffer,
                 renderer.graphics_queue_family,
             );
-            let fence = renderer.context.device.create_fence(&vk::FenceCreateInfo::default(), None)
+            let fence = renderer
+                .context
+                .device
+                .create_fence(&vk::FenceCreateInfo::default(), None)
                 .unwrap();
-            renderer.context.device.end_command_buffer(command_buffer).unwrap();
+            renderer
+                .context
+                .device
+                .end_command_buffer(command_buffer)
+                .unwrap();
             renderer.context.device.queue_submit(
                 renderer.graphics_queue,
-                &[
-                    vk::SubmitInfo::builder()
-                        .command_buffers(&[command_buffer])
-                        .build(),
-                ],
-                fence
+                &[vk::SubmitInfo::builder()
+                    .command_buffers(&[command_buffer])
+                    .build()],
+                fence,
             );
-            renderer.context.device.wait_for_fences(&[fence], true, u64::MAX);
+            renderer
+                .context
+                .device
+                .wait_for_fences(&[fence], true, u64::MAX);
             renderer.context.device.destroy_fence(fence, None);
-            renderer.context.device.destroy_command_pool(command_pool, None);
+            renderer
+                .context
+                .device
+                .destroy_command_pool(command_pool, None);
             upload
         };
 

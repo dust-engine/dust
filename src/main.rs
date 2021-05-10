@@ -49,9 +49,7 @@ fn setup_from_oct_file(
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(3.0, 0.5, 3.0);
-    bundle
-        .transform
-        .look_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y);
+    bundle.transform.look_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y);
     commands
         .spawn()
         .insert_bundle(bundle)
@@ -128,9 +126,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                         "minecraft:grass_block" => Voxel::colored(0, 0),
                                         "minecraft:leaves" => Voxel::colored(1, 0),
                                         "minecraft:leaves2" => Voxel::colored(1, 0),
-                                        _ => {
-                                            Voxel::with_id(1)
-                                        },
+                                        _ => Voxel::with_id(1),
                                     };
                                     mutator.set(
                                         x + chunk_x as u32 * 16 + region_x as u32 * 512,

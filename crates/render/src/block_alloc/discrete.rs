@@ -1,6 +1,6 @@
 use crate::device_info::DeviceInfo;
 use crate::renderer::RenderContext;
-use ash::version::{DeviceV1_0};
+use ash::version::DeviceV1_0;
 use ash::vk;
 use crossbeam::queue::SegQueue;
 use dust_core::svo::alloc::{AllocError, BlockAllocation, BlockAllocator};

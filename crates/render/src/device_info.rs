@@ -10,7 +10,6 @@ pub struct DeviceInfo {
     pub features: vk::PhysicalDeviceFeatures,
 }
 
-
 impl DeviceInfo {
     pub unsafe fn new(
         entry: &ash::Entry,

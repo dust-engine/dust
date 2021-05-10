@@ -30,5 +30,5 @@ pub(crate) struct ColoredMaterialDeviceLayout {
     pub(crate) normal: u16,
     _reserved1: f32,
     _reserved2: f32,
-    pub(crate) palette: [Vec4; 128]
+    pub(crate) palette: [Vec4; 128],
 }
