@@ -397,6 +397,12 @@ impl Swapchain {
             swapchain_image.image = image;
             swapchain_image.framebuffer = vk::Framebuffer::null(); // this will be filled later on during bind_render_pass
         }
+        update_image_desc_sets(
+            &self.context.device,
+            self.swapchain_images
+                .iter()
+                .map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)),
+        );
         self.depth_image = create_depth_image(&self.context.device, allocator, &config);
         self.config = config;
     }
