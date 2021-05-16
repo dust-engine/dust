@@ -238,7 +238,7 @@ struct StackItem {
 };
 
 #define CAST_STACK_DEPTH 23
-#define MAX_RAYCAST_ITERATIONS  100
+#define MAX_RAYCAST_ITERATIONS  1000
 void main() {
     vec4 color = vec4(0.0, 0.0 ,0.0 ,1.0);
     StackItem stack[CAST_STACK_DEPTH + 1];
@@ -263,7 +263,7 @@ void main() {
     // Select octant mask to mirror the coordinate system so
     // that ray direction is negative along each axis.
 
-    int octant_mask = 7;
+    int octant_mask = 0; // This is different from the original esvo because our coordinate system was flipped.
     if (ray.dir.x > 0.0f) octant_mask ^= 4, t_bias.x = 3.0f * t_coef.x - t_bias.x;
     if (ray.dir.y > 0.0f) octant_mask ^= 2, t_bias.y = 3.0f * t_coef.y - t_bias.y;
     if (ray.dir.z > 0.0f) octant_mask ^= 1, t_bias.z = 3.0f * t_coef.z - t_bias.z;
@@ -317,10 +317,11 @@ void main() {
 
         // Process voxel if the corresponding bit in valid mask is set
         // and the active t-span is non-empty.
+        uint child_shift = idx ^ octant_mask;
         if (
             (
-                ((child_descriptor.freemask & (1 << idx)) != 0) ||
-                (uint(Chunk_Nodes[parent].data[idx]) != 0)
+                ((child_descriptor.freemask & (1 << child_shift)) != 0) ||
+                (uint(Chunk_Nodes[parent].data[child_shift]) != 0)
             ) &&
             (t_min <= t_max)
         ) {
@@ -337,7 +338,7 @@ void main() {
 
             if (t_min <= tv_max) {
                 // Terminate if the corresponding bit in the non-leaf mask is not set.
-                if ((child_descriptor.freemask & (1 << idx)) == 0)
+                if ((child_descriptor.freemask & (1 << child_shift)) == 0)
                     break;
 
 
@@ -355,7 +356,7 @@ void main() {
                 h = tc_max;
 
                 // Find child descriptor corresponding to the current voxel.
-                parent = child_descriptor.children + MaskLocationNthOne(child_descriptor.freemask, idx);
+                parent = child_descriptor.children + MaskLocationNthOne(child_descriptor.freemask, child_shift);
 
 
                 // Select child voxel that the ray enters first.
@@ -413,7 +414,7 @@ void main() {
             pos.x = uintBitsToFloat(shx << scale);
             pos.y = uintBitsToFloat(shy << scale);
             pos.z = uintBitsToFloat(shz << scale);
-            idx  = (shx & 1) | ((shy & 1) << 1) | ((shz & 1) << 2);
+            idx  = (shz & 1) | ((shy & 1) << 1) | ((shx & 1) << 2);
 
             // Prevent same parent from being stored again and invalidate cached child descriptor.
 
@@ -425,13 +426,12 @@ void main() {
     // Indicate miss if we are outside the octree.
     if (scale >= CAST_STACK_DEPTH || iter > MAX_RAYCAST_ITERATIONS) {
         t_min = 2.0f;
-        color.b = 0.5;
     }
     // Undo mirroring of the coordinate system.
 
-    if ((octant_mask & 1) == 0) pos.x = 3.0f - scale_exp2 - pos.x;
+    if ((octant_mask & 4) == 0) pos.x = 3.0f - scale_exp2 - pos.x;
     if ((octant_mask & 2) == 0) pos.y = 3.0f - scale_exp2 - pos.y;
-    if ((octant_mask & 4) == 0) pos.z = 3.0f - scale_exp2 - pos.z;
+    if ((octant_mask & 1) == 0) pos.z = 3.0f - scale_exp2 - pos.z;
 
     // Output results.
 /*
@@ -448,7 +448,11 @@ void main() {
     if (t_min > 1.0) {
         // No hit
     } else {
-        color.g = float(iter) / 10;
+        float v = float(iter) / 100;
+        color.r = v;
+        color.g = v;
+        color.b = v;
+        color.a = 1;
     }
     
     imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);
