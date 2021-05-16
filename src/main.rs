@@ -48,8 +48,8 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     accessor.set(0, 0, 0, 8, Voxel::with_id(1));*/
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(0.0, 0.0, 0.0);
-    bundle.transform.look_at(Vec3::new(1.0, 1.0, 1.0), Vec3::Y);
+    bundle.transform.translation = Vec3::new(1.0, 1.1, 1.0);
+    bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
     commands
         .spawn()
         .insert_bundle(bundle)
@@ -57,6 +57,7 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
             accel: 0.1,
             max_speed: 0.5,
             sensitivity: 1.0,
+            enabled: false,
             ..Default::default()
         });
 }

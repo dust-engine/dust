@@ -238,7 +238,7 @@ struct StackItem {
 };
 
 #define CAST_STACK_DEPTH 23
-#define MAX_RAYCAST_ITERATIONS  1000
+#define MAX_RAYCAST_ITERATIONS  100
 void main() {
     vec4 color = vec4(0.0, 0.0 ,0.0 ,1.0);
     StackItem stack[CAST_STACK_DEPTH + 1];
