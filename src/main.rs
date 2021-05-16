@@ -43,8 +43,8 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     Octree::read(&mut octree, &mut reader, 12).unwrap();
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(15.0, 30.0, 15.0);
-    bundle.transform.look_at(Vec3::new(100.0, 0.0, 100.0), Vec3::Y);
+    bundle.transform.translation = Vec3::new(0.0, 51.2, 0.0);
+    bundle.transform.look_at(Vec3::new(512.0, -256.0, 512.0), Vec3::Y);
     commands
         .spawn()
         .insert_bundle(bundle)
