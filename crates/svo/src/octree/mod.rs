@@ -9,7 +9,7 @@ mod io;
 #[derive(Default)]
 #[repr(C)]
 pub struct Node<T: Voxel> {
-    _reserved: u8,
+    occupancy: u8,
     freemask: u8,
     _reserved2: u16,
     children: Handle,

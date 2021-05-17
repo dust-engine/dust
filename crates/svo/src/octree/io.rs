@@ -181,6 +181,15 @@ impl<T: Voxel> Octree<T> {
                         &mut node_ref.data as *mut T as *mut u8,
                         size_of::<[T; 8]>(),
                     ))?;
+
+                    let mut occupancy: u8 = 0;
+                    for i in node_ref.data {                        
+                        occupancy = occupancy >> 1;
+                        if i != T::default() {
+                            occupancy |= 0b10000000;
+                        }
+                    }
+                    node_ref.occupancy = occupancy;
                 }
             }
             slots_loaded += block_size as u32;

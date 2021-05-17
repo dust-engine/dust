@@ -2,7 +2,7 @@
 #extension GL_EXT_shader_16bit_storage : require
 #extension GL_EXT_shader_8bit_storage : require
 struct Node {
-    uint8_t _padding1;
+    uint8_t occupancy;
     uint8_t freemask;
     uint16_t _padding2;
     uint children;
@@ -107,7 +107,7 @@ struct StackItem {
 };
 
 #define CAST_STACK_DEPTH 23
-#define MAX_RAYCAST_ITERATIONS  100
+#define MAX_RAYCAST_ITERATIONS  1000
 void main() {
     vec4 color = vec4(0.0, 0.0 ,0.0 ,1.0);
     StackItem stack[CAST_STACK_DEPTH + 1];
@@ -172,7 +172,7 @@ void main() {
             break;
         // Fetch child descriptor unless it is already valid.
         if (child_descriptor.children == 0) {
-            child_descriptor.freemask = uint(Chunk_Nodes[parent].freemask);
+            child_descriptor.freemask = uint(Chunk_Nodes[parent].freemask) | (uint(Chunk_Nodes[parent].occupancy) << 8);
             child_descriptor.children = Chunk_Nodes[parent].children;
         }
 
@@ -190,7 +190,7 @@ void main() {
         if (
             (
                 ((child_descriptor.freemask & (1 << child_shift)) != 0) ||
-                (uint(Chunk_Nodes[parent].data[child_shift]) != 0)
+                (((child_descriptor.freemask >> 8) & (1 << child_shift )) != 0) // check occupancy
             ) &&
             (t_min <= t_max)
         ) {
@@ -317,7 +317,7 @@ void main() {
     if (t_min > 1.0) {
         // No hit
     } else {
-        float v = float(iter) / 100;
+        float v = float(iter) / 1000;
         color.r = v;
         color.g = v;
         color.b = v;
