@@ -2,8 +2,7 @@
 #extension GL_EXT_shader_16bit_storage : require
 #extension GL_EXT_shader_8bit_storage : require
 struct Node {
-    uint8_t occupancy;
-    uint8_t freemask;
+    uint16_t occupancy_freemask;
     uint16_t _padding2;
     uint children;
     uint16_t data[8];
@@ -29,8 +28,6 @@ uint MaskLocationNthOne(uint mask, uint location) {
 
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-layout (constant_id = 0) const uint MAX_ITERATION_VALUE = 100;
-const Box GlobalBoundingBox = { vec3(0,0,0), 512 };
 layout(rgba32f, set = 2, binding = 0) uniform image2D imgOutput;
 
 layout(push_constant) uniform constants
@@ -99,7 +96,7 @@ vec3 CubedNormalize(vec3 dir) {
 
 struct ChildDescriptor {
     uint children;
-    uint freemask;
+    uint occupancy_freemask;
 };
 struct StackItem {
     uint parent;
@@ -107,9 +104,8 @@ struct StackItem {
 };
 
 #define CAST_STACK_DEPTH 23
-#define MAX_RAYCAST_ITERATIONS  1000
+#define MAX_RAYCAST_ITERATIONS  200
 void main() {
-    vec4 color = vec4(0.0, 0.0 ,0.0 ,1.0);
     StackItem stack[CAST_STACK_DEPTH + 1];
 
 
@@ -145,16 +141,13 @@ void main() {
     float h = t_max;
     t_min = max(t_min, 0.0f);
     t_max = min(t_max, 1.0f);
-    if (t_min <= t_max) {
-        color.r = 1.0;
-    }
     
     // Initialize the current voxel to the first child of the root.
 
     uint   parent           = 0;
     ChildDescriptor   child_descriptor;
     child_descriptor.children = 0;
-    child_descriptor.freemask = 0; // invalid until fetched
+    child_descriptor.occupancy_freemask = 0; // invalid until fetched
     uint    idx              = 0;
     vec3 pos              = vec3(1.0f, 1.0f, 1.0f);
     uint    scale            = CAST_STACK_DEPTH - 1;
@@ -166,13 +159,11 @@ void main() {
 
     // Traverse voxels along the ray as long as the current voxel
     // stays within the octree.
-    while(scale < CAST_STACK_DEPTH){
+    while(scale < CAST_STACK_DEPTH && iter < MAX_RAYCAST_ITERATIONS){
         iter++;
-        if (iter > MAX_RAYCAST_ITERATIONS)
-            break;
         // Fetch child descriptor unless it is already valid.
         if (child_descriptor.children == 0) {
-            child_descriptor.freemask = uint(Chunk_Nodes[parent].freemask) | (uint(Chunk_Nodes[parent].occupancy) << 8);
+            child_descriptor.occupancy_freemask = uint(Chunk_Nodes[parent].occupancy_freemask);
             child_descriptor.children = Chunk_Nodes[parent].children;
         }
 
@@ -189,8 +180,8 @@ void main() {
         uint child_shift = idx ^ octant_mask;
         if (
             (
-                ((child_descriptor.freemask & (1 << child_shift)) != 0) ||
-                (((child_descriptor.freemask >> 8) & (1 << child_shift )) != 0) // check occupancy
+                ((child_descriptor.occupancy_freemask & (1 << child_shift)) != 0) ||
+                (((child_descriptor.occupancy_freemask >> 8) & (1 << child_shift )) != 0) // check occupancy
             ) &&
             (t_min <= t_max)
         ) {
@@ -207,7 +198,7 @@ void main() {
 
             if (t_min <= tv_max) {
                 // Terminate if the corresponding bit in the non-leaf mask is not set.
-                if ((child_descriptor.freemask & (1 << child_shift)) == 0)
+                if ((child_descriptor.occupancy_freemask & (1 << child_shift)) == 0)
                     break;
 
 
@@ -225,7 +216,7 @@ void main() {
                 h = tc_max;
 
                 // Find child descriptor corresponding to the current voxel.
-                parent = child_descriptor.children + MaskLocationNthOne(child_descriptor.freemask, child_shift);
+                parent = child_descriptor.children + MaskLocationNthOne(child_descriptor.occupancy_freemask, child_shift);
 
 
                 // Select child voxel that the ray enters first.
@@ -317,12 +308,7 @@ void main() {
     if (t_min > 1.0) {
         // No hit
     } else {
-        float v = float(iter) / 1000;
-        color.r = v;
-        color.g = v;
-        color.b = v;
-        color.a = 1;
+        float v = float(iter) / 200;
+        imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), vec4(v,v,v,1));
     }
-    
-    imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);
 }
