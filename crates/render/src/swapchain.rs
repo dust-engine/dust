@@ -135,7 +135,7 @@ unsafe fn create_swapchain(
                 .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                 .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
                 .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-                .present_mode(vk::PresentModeKHR::FIFO)
+                .present_mode(vk::PresentModeKHR::IMMEDIATE)
                 .clipped(true)
                 .image_array_layers(1)
                 .build(),

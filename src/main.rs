@@ -7,6 +7,7 @@ use std::io::BufWriter;
 use std::ops::DerefMut;
 
 mod fly_camera;
+mod fps_counter;
 
 fn main() {
     App::build()
@@ -22,6 +23,7 @@ fn main() {
             mode: bevy::window::WindowMode::Windowed,
             ..Default::default()
         })
+        .insert_resource(fps_counter::FPSCounter::default())
         .add_plugin(bevy::log::LogPlugin::default())
         .add_plugin(bevy::core::CorePlugin::default())
         .add_plugin(bevy::transform::TransformPlugin::default())
@@ -34,6 +36,7 @@ fn main() {
         .add_plugin(fly_camera::FlyCameraPlugin)
         .add_startup_system(setup_from_oct_file.system())
         .add_system(run.system())
+        .add_system(fps_counter::fps_counter.system())
         .run();
 }
 
