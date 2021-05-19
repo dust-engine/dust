@@ -26,8 +26,9 @@ uint MaskLocationNthOne(uint mask, uint location) {
     return bitCount(mask & ((1 << location) - 1));
 }
 
-
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+#define GROUP_SIZE_X 8
+#define GROUP_SIZE_Y 8
+layout(local_size_x = GROUP_SIZE_X, local_size_y = GROUP_SIZE_Y, local_size_z = 1) in;
 layout(rgba32f, set = 2, binding = 0) uniform image2D imgOutput;
 
 layout(push_constant) uniform constants
@@ -105,8 +106,9 @@ struct StackItem {
 
 #define CAST_STACK_DEPTH 23
 #define MAX_RAYCAST_ITERATIONS  200
+
+shared StackItem stack[GROUP_SIZE_X * GROUP_SIZE_Y][CAST_STACK_DEPTH];
 void main() {
-    StackItem stack[CAST_STACK_DEPTH + 1];
 
 
     Ray ray = GenerateRay();
@@ -211,7 +213,7 @@ void main() {
                     StackItem item;
                     item.parent = parent;
                     item.t_max = t_max;
-                    stack[scale] = item;
+                    stack[gl_LocalInvocationIndex][scale] = item;
                 }
                 h = tc_max;
 
@@ -264,7 +266,7 @@ void main() {
 
             // Restore parent voxel from the stack.
 
-            StackItem stackVal = stack[scale];
+            StackItem stackVal = stack[gl_LocalInvocationIndex][scale];
             parent = stackVal.parent;
             t_max = stackVal.t_max;
 

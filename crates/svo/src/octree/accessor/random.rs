@@ -30,6 +30,11 @@ fn set_recursive<T: Voxel>(
         // is leaf node
         let node_ref = octree.arena.get_mut(handle);
         node_ref.data[corner as usize] = item;
+        if item == T::default() {
+            node_ref.occupancy &= 1 << corner;
+        } else {
+            node_ref.occupancy |= 1 << corner;
+        }
         if node_ref.freemask & (1 << corner) != 0 {
             // has children. Cut them off.
             todo!()
@@ -48,6 +53,11 @@ fn set_recursive<T: Voxel>(
         let node_ref = octree.arena.get_mut(handle);
         let freemask = node_ref.freemask;
         node_ref.data[corner as usize] = avg;
+        if avg == T::default() {
+            node_ref.occupancy &= 1 << corner;
+        } else {
+            node_ref.occupancy |= 1 << corner;
+        }
         if collapsed {
             octree.reshape(handle, freemask & !(1 << corner));
         }

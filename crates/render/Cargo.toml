@@ -7,7 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { git = "https://github.com/bevyengine/bevy.git" }
 dust-core = { path = "../core" }
 tracing = "*"
 raw-window-handle = "*"
@@ -20,6 +19,13 @@ memoffset = "0.6"
 log = "*"
 crossbeam = "0.8"
 smallvec = "1.6"
+
+[dependencies.bevy]
+git = "https://github.com/bevyengine/bevy.git"
+default-features = false
+features = [
+    "bevy_winit"
+]
 
 [build-dependencies]
 shaderc = "0.7"

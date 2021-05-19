@@ -9,7 +9,7 @@ pub struct FPSCounter {
 impl Default for FPSCounter {
     fn default() -> Self {
         FPSCounter {
-            events: VecDeque::new(),
+            events: VecDeque::with_capacity(150),
             first_record: None,
         }
     }
