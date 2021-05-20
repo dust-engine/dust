@@ -107,13 +107,14 @@ struct StackItem {
 #define CAST_STACK_DEPTH 23
 #define MAX_RAYCAST_ITERATIONS  200
 
-shared StackItem stack[GROUP_SIZE_X * GROUP_SIZE_Y][CAST_STACK_DEPTH];
+#define STACK_HEIGHT 4
+shared StackItem stack_data[GROUP_SIZE_X * GROUP_SIZE_Y][STACK_HEIGHT];
+
 void main() {
-
-
     Ray ray = GenerateRay();
     ray.dir *= 100;
-    const float epsilon = exp2(-CAST_STACK_DEPTH);
+    uint stack_len = 0;
+    //const float epsilon = exp2(-CAST_STACK_DEPTH);
     uint iter = 0;
 
 
@@ -143,7 +144,7 @@ void main() {
     float h = t_max;
     t_min = max(t_min, 0.0f);
     t_max = min(t_max, 1.0f);
-    
+    float t_max_original = t_max;
     // Initialize the current voxel to the first child of the root.
 
     uint   parent           = 0;
@@ -161,7 +162,7 @@ void main() {
 
     // Traverse voxels along the ray as long as the current voxel
     // stays within the octree.
-    while(scale < CAST_STACK_DEPTH && iter < MAX_RAYCAST_ITERATIONS){
+    while(iter < MAX_RAYCAST_ITERATIONS) {
         iter++;
         // Fetch child descriptor unless it is already valid.
         if (child_descriptor.children == 0) {
@@ -207,13 +208,14 @@ void main() {
                 // PUSH
                 // Write current parent to the stack.
 
-                if (tc_max < h)
+                //if (tc_max < h)
                 {
                     // stack.write(scale, parent, t_max);
+                    stack_len = min(stack_len + 1, STACK_HEIGHT);
                     StackItem item;
                     item.parent = parent;
                     item.t_max = t_max;
-                    stack[gl_LocalInvocationIndex][scale] = item;
+                    stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT] = item;
                 }
                 h = tc_max;
 
@@ -261,26 +263,43 @@ void main() {
             if ((step_mask & 4) != 0) differing_bits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scale_exp2);
             if ((step_mask & 2) != 0) differing_bits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scale_exp2);
             if ((step_mask & 1) != 0) differing_bits |= floatBitsToUint(pos.z) ^ floatBitsToUint(pos.z + scale_exp2);
-            scale = (floatBitsToUint(float(differing_bits)) >> 23) - 127; // position of the highest bit
-            scale_exp2 = uintBitsToFloat((scale - CAST_STACK_DEPTH + 127) << 23); // exp2f(scale - s_max)
+            uint new_scale = (floatBitsToUint(float(differing_bits)) >> 23) - 127; // position of the highest bit
+            if (new_scale >= CAST_STACK_DEPTH) {
+                break;
+            }
+            uint backoff = new_scale - scale;
+            if (backoff <= stack_len) {
+                // pop
+                stack_len -= backoff;
+                scale = new_scale;
+                scale_exp2 = uintBitsToFloat((scale - CAST_STACK_DEPTH + 127) << 23); // exp2f(scale - s_max)
+                StackItem stackVal = stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT];
+                parent = stackVal.parent;
+                t_max = stackVal.t_max;
 
-            // Restore parent voxel from the stack.
+                uint shx = floatBitsToUint(pos.x) >> scale;
+                uint shy = floatBitsToUint(pos.y) >> scale;
+                uint shz = floatBitsToUint(pos.z) >> scale;
+                pos.x = uintBitsToFloat(shx << scale);
+                pos.y = uintBitsToFloat(shy << scale);
+                pos.z = uintBitsToFloat(shz << scale);
+                idx  = (shz & 1) | ((shy & 1) << 1) | ((shx & 1) << 2);
+            } else {
+                // restart
+                stack_len = 0;
+                scale = CAST_STACK_DEPTH - 1;
+                scale_exp2 = 0.5;
+                t_min += exp2(-CAST_STACK_DEPTH);
 
-            StackItem stackVal = stack[gl_LocalInvocationIndex][scale];
-            parent = stackVal.parent;
-            t_max = stackVal.t_max;
-
-            uint shx = floatBitsToUint(pos.x) >> scale;
-            uint shy = floatBitsToUint(pos.y) >> scale;
-            uint shz = floatBitsToUint(pos.z) >> scale;
-            pos.x = uintBitsToFloat(shx << scale);
-            pos.y = uintBitsToFloat(shy << scale);
-            pos.z = uintBitsToFloat(shz << scale);
-            idx  = (shz & 1) | ((shy & 1) << 1) | ((shx & 1) << 2);
-
-            // Prevent same parent from being stored again and invalidate cached child descriptor.
-
-            h = 0.0f;
+                parent = 0;
+                t_max = t_max_original;
+                pos = vec3(1.0f, 1.0f, 1.0f);
+                idx = 0;
+                if (1.5f * t_coef.x - t_bias.x > t_min) idx ^= 4, pos.x = 1.5f;
+                if (1.5f * t_coef.y - t_bias.y > t_min) idx ^= 2, pos.y = 1.5f;
+                if (1.5f * t_coef.z - t_bias.z > t_min) idx ^= 1, pos.z = 1.5f;
+            }
+            h = 0.0;
             child_descriptor.children = 0;
         }
     }
@@ -307,10 +326,15 @@ void main() {
     res.stackPtr = scale;
 */
 
+    vec4 color = vec4(0.0, 0.0, 0.0 ,1.0);
     if (t_min > 1.0) {
         // No hit
     } else {
         float v = float(iter) / 200;
-        imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), vec4(v,v,v,1));
+        color.r = v;
+        color.g = v;
+        color.b = v;
     }
+    
+    imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);
 }
