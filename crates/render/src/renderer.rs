@@ -348,6 +348,10 @@ impl Renderer {
                             sparse_residency_buffer: 1,
                             ..Default::default()
                         })
+                        .push_next(&mut vk::PhysicalDeviceShaderFloat16Int8Features::builder()
+                            .shader_int8(false)
+                            .build()
+                        )
                         .push_next(
                             &mut vk::PhysicalDevice16BitStorageFeatures::builder()
                                 .storage_buffer16_bit_access(true)

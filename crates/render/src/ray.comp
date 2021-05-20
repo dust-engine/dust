@@ -1,6 +1,7 @@
 #version 460
 #extension GL_EXT_shader_16bit_storage : require
 #extension GL_EXT_shader_8bit_storage : require
+#extension GL_KHR_shader_subgroup_vote : require
 struct Node {
     uint16_t occupancy_freemask;
     uint16_t _padding2;
@@ -29,7 +30,7 @@ uint MaskLocationNthOne(uint mask, uint location) {
 #define GROUP_SIZE_X 8
 #define GROUP_SIZE_Y 8
 layout(local_size_x = GROUP_SIZE_X, local_size_y = GROUP_SIZE_Y, local_size_z = 1) in;
-layout(rgba32f, set = 2, binding = 0) uniform image2D imgOutput;
+layout(rgba32f, set = 2, binding = 0) uniform writeonly image2D imgOutput;
 
 layout(push_constant) uniform constants
 {
@@ -182,10 +183,10 @@ void main() {
         // and the active t-span is non-empty.
         uint child_shift = idx ^ octant_mask;
         if (
-            (
-                ((child_descriptor.occupancy_freemask & (1 << child_shift)) != 0) ||
-                (((child_descriptor.occupancy_freemask >> 8) & (1 << child_shift )) != 0) // check occupancy
-            ) &&
+            // This bit will be 1 if there exists anything inside this node, or if the node itself is a solid leaf.
+            // This bit will be 0 if the node is a leaf, empty node.
+            // That is to say, if this bit is 0, the corresponding bit in the freemask is guaranteed to be 0.
+            (((child_descriptor.occupancy_freemask >> 8) & (1 << child_shift )) != 0) && // check occupancy.
             (t_min <= t_max)
         ) {
             // Terminate if the voxel is small enough.
@@ -195,7 +196,8 @@ void main() {
             // INTERSECT
             // Intersect active t-span with the cube and evaluate
             // tx(), ty(), and tz() at the center of the voxel.
-            float tv_max = min(t_max, tc_max);
+            //float tv_max = min(t_max, tc_max);
+            float tv_max = tc_max; // We kinda assume that t_max will always be less thant tc_max.
             float half_length = scale_exp2 * 0.5f;
             vec3 t_center = half_length * t_coef + t_corner;
 
@@ -244,10 +246,11 @@ void main() {
         // ADVANCE
         // Step along the ray
 
+        bvec3 b_step_mask = lessThanEqual(t_corner, vec3(tc_max, tc_max, tc_max));
         uint step_mask = 0;
-        if (t_corner.x <= tc_max) step_mask ^= 4, pos.x -= scale_exp2;
-        if (t_corner.y <= tc_max) step_mask ^= 2, pos.y -= scale_exp2;
-        if (t_corner.z <= tc_max) step_mask ^= 1, pos.z -= scale_exp2;
+        if (b_step_mask.x) step_mask ^= 4, pos.x -= scale_exp2;
+        if (b_step_mask.y) step_mask ^= 2, pos.y -= scale_exp2;
+        if (b_step_mask.z) step_mask ^= 1, pos.z -= scale_exp2;
 
         // Update active t-span and flip bits of the child slot index.
 
@@ -260,31 +263,30 @@ void main() {
             // POP
             // Find the highest differing bit between the two positions.
             uint differing_bits = 0;
-            if ((step_mask & 4) != 0) differing_bits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scale_exp2);
-            if ((step_mask & 2) != 0) differing_bits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scale_exp2);
-            if ((step_mask & 1) != 0) differing_bits |= floatBitsToUint(pos.z) ^ floatBitsToUint(pos.z + scale_exp2);
+            if (b_step_mask.x) differing_bits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scale_exp2);
+            if (b_step_mask.y) differing_bits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scale_exp2);
+            if (b_step_mask.z) differing_bits |= floatBitsToUint(pos.z) ^ floatBitsToUint(pos.z + scale_exp2);
             uint new_scale = (floatBitsToUint(float(differing_bits)) >> 23) - 127; // position of the highest bit
             if (new_scale >= CAST_STACK_DEPTH) {
                 break;
             }
             uint backoff = new_scale - scale;
-            if (backoff <= stack_len) {
-                // pop
-                stack_len -= backoff;
-                scale = new_scale;
-                scale_exp2 = uintBitsToFloat((scale - CAST_STACK_DEPTH + 127) << 23); // exp2f(scale - s_max)
-                StackItem stackVal = stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT];
-                parent = stackVal.parent;
-                t_max = stackVal.t_max;
+            scale = new_scale;
+            bool needs_restart = backoff > stack_len;
+            stack_len -= backoff;
+            scale_exp2 = uintBitsToFloat((scale - CAST_STACK_DEPTH + 127) << 23); // exp2f(scale - s_max)
+            StackItem stackVal = stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT];
+            parent = stackVal.parent;
+            t_max = stackVal.t_max;
 
-                uint shx = floatBitsToUint(pos.x) >> scale;
-                uint shy = floatBitsToUint(pos.y) >> scale;
-                uint shz = floatBitsToUint(pos.z) >> scale;
-                pos.x = uintBitsToFloat(shx << scale);
-                pos.y = uintBitsToFloat(shy << scale);
-                pos.z = uintBitsToFloat(shz << scale);
-                idx  = (shz & 1) | ((shy & 1) << 1) | ((shx & 1) << 2);
-            } else {
+            uvec3 sh = floatBitsToUint(pos) >> scale;
+            pos = uintBitsToFloat(sh << scale);
+            idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
+
+            h = 0.0;
+            child_descriptor.children = 0;
+
+            if (needs_restart) {
                 // restart
                 stack_len = 0;
                 scale = CAST_STACK_DEPTH - 1;
@@ -299,8 +301,6 @@ void main() {
                 if (1.5f * t_coef.y - t_bias.y > t_min) idx ^= 2, pos.y = 1.5f;
                 if (1.5f * t_coef.z - t_bias.z > t_min) idx ^= 1, pos.z = 1.5f;
             }
-            h = 0.0;
-            child_descriptor.children = 0;
         }
     }
 

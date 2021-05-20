@@ -3,7 +3,8 @@ const GLSL_SHADER_FILES: [&str; 1] = ["./src/ray.comp"];
 fn main() {
     use shaderc::{CompileOptions, Compiler, Error, ShaderKind};
     let mut compiler = Compiler::new().unwrap();
-    let options = CompileOptions::new().unwrap();
+    let mut options = CompileOptions::new().unwrap();
+    options.set_target_spirv(shaderc::SpirvVersion::V1_3);
 
     let mut out_path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).to_path_buf();
     out_path.push("shaders");

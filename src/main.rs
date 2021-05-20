@@ -41,14 +41,14 @@ fn main() {
 }
 
 fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
-   let file = std::fs::File::open("./test.oct").unwrap();
+    let file = std::fs::File::open("./test.oct").unwrap();
     let mut reader = std::io::BufReader::new(file);
     Octree::read(&mut octree, &mut reader, 12).unwrap();
-    /*let mut accessor = octree.get_random_mutator();
-    accessor.set(1, 0, 0, 8, Voxel::with_id(1));
-    accessor.set(0, 1, 0, 8, Voxel::with_id(1));
-    accessor.set(1, 1, 0, 8, Voxel::with_id(1));
-    accessor.set(0, 0, 0, 8, Voxel::with_id(1));*/
+    //let mut accessor = octree.get_random_mutator();
+    //accessor.set(1, 1, 1, 8, Voxel::with_id(1));
+    //accessor.set(3, 1, 1, 8, Voxel::with_id(1));
+    //accessor.set(1, 1, 0, 8, Voxel::with_id(1));
+    //accessor.set(0, 0, 0, 8, Voxel::with_id(1));
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.0, 1.1, 1.0);
@@ -59,7 +59,7 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
         .insert(FlyCamera{
             accel: 0.1,
             max_speed: 0.5,
-            sensitivity: 1.0,
+            sensitivity: 10.0,
             enabled: false,
             ..Default::default()
         });
