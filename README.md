@@ -2,7 +2,7 @@
 
 <p align="center">
 <a href="https://discord.gg/9Kn7aUkCRZ">
-    <img src="https://img.shields.io/discord/726947023231647798.svg?logo=discord&style=flat-square&color=7289DA">
+    <img src="https://img.shields.io/discord/832160152534515714.svg?logo=discord&style=flat-square&color=7289DA">
 </a>
 <!--<a href="https://github.com/dust-engine/dust/blob/master/LICENSE.md">
     <img src="https://img.shields.io/github/license/dust-engine/dust?color=%2339c48a&style=flat-square">
