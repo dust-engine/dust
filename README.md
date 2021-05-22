@@ -16,9 +16,9 @@
 <a href="https://github.com/dust-engine/dust/graphs/commit-activity">
     <img src="https://img.shields.io/github/commit-activity/w/dust-engine/dust?color=%234287f5&logo=github&style=flat-square">
 </a>
-<a href="https://github.com/dust-engine/dust/actions">
+<!--<a href="https://github.com/dust-engine/dust/actions">
     <img src="https://img.shields.io/github/workflow/status/dust-engine/dust/Rust?style=flat-square&logo=github-actions&logoColor=fff">
-</a>
+</a>-->
 </p>
 
 This is a voxel game engine written in Rust that is currently in development.
