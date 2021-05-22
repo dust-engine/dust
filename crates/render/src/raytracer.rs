@@ -1,4 +1,3 @@
-
 use crate::device_info::DeviceInfo;
 use crate::material_repo::TextureRepoUploadState;
 use crate::renderer::RenderContext;

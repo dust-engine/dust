@@ -1,5 +1,5 @@
-use std::collections::VecDeque;
 use bevy::prelude::*;
+use std::collections::VecDeque;
 
 pub struct FPSCounter {
     events: VecDeque<u128>,
@@ -15,11 +15,7 @@ impl Default for FPSCounter {
     }
 }
 
-pub fn fps_counter(
-    time: Res<Time>,
-    mut counter: ResMut<FPSCounter>,
-    mut windows: ResMut<Windows>,
-) {
+pub fn fps_counter(time: Res<Time>, mut counter: ResMut<FPSCounter>, mut windows: ResMut<Windows>) {
     let now = time.time_since_startup().as_millis();
     counter.events.push_back(now);
     if let Some(first_record) = counter.first_record {

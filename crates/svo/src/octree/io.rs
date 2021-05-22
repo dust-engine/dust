@@ -183,7 +183,7 @@ impl<T: Voxel> Octree<T> {
                     ))?;
 
                     let mut occupancy: u8 = 0;
-                    for i in node_ref.data {                        
+                    for i in node_ref.data {
                         occupancy = occupancy >> 1;
                         if i != T::default() {
                             occupancy |= 0b10000000;

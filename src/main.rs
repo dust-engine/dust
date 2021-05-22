@@ -53,16 +53,13 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.0, 1.1, 1.0);
     bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
-    commands
-        .spawn()
-        .insert_bundle(bundle)
-        .insert(FlyCamera{
-            accel: 0.1,
-            max_speed: 0.5,
-            sensitivity: 10.0,
-            enabled: false,
-            ..Default::default()
-        });
+    commands.spawn().insert_bundle(bundle).insert(FlyCamera {
+        accel: 0.1,
+        max_speed: 0.5,
+        sensitivity: 10.0,
+        enabled: false,
+        ..Default::default()
+    });
 }
 
 fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
@@ -164,18 +161,13 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(0.0, 0.0, 0.0);
-    bundle
-        .transform
-        .look_at(Vec3::new(1.0, 1.0, 1.0), Vec3::Y);
-    commands
-        .spawn()
-        .insert_bundle(bundle)
-        .insert(FlyCamera{
-                accel: 0.01,
-                max_speed: 0.05,
-                sensitivity: 1.0,
-                ..Default::default()
-        });
+    bundle.transform.look_at(Vec3::new(1.0, 1.0, 1.0), Vec3::Y);
+    commands.spawn().insert_bundle(bundle).insert(FlyCamera {
+        accel: 0.01,
+        max_speed: 0.05,
+        sensitivity: 1.0,
+        ..Default::default()
+    });
 }
 
 fn run(mut sunlight: ResMut<SunLight>, time: Res<Time>) {

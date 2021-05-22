@@ -1,6 +1,5 @@
 #![allow(incomplete_features)]
 #![feature(untagged_unions)]
-#![feature(const_fn)]
 #![feature(const_generics)]
 #![feature(const_evaluatable_checked)]
 #![feature(allocator_api)]

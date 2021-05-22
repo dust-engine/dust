@@ -27,5 +27,9 @@ fastanvil = "0.14.1"
 git = "https://github.com/bevyengine/bevy.git"
 default-features = false
 features = [
-    "bevy_winit"
+    "bevy_winit",
+    "x11"
 ]
+
+[profile.release]
+# lto = "thin"

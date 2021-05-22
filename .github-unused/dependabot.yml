@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "cargo"
+  - package-ecosystem: "cargo"
+    directory: "/crates/type-recordr"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "cargo"
+  - package-ecosystem: "cargo"
+    directory: "/crates/plugin-server"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "cargo"
+  - package-ecosystem: "cargo"
+    directory: "/crates/core"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "cargo"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "actions"
