@@ -10,6 +10,7 @@ categories = ["game-engines", "graphics", "rendering"]
 keywords = ["dust-engine", "plugin"]
 
 [dependencies]
+cargo_metadata = "0.13.1"
 
 [features]
 default = ["create"]
