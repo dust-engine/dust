@@ -17,6 +17,10 @@ version = "1.0.0"
 edition = "2018"
 ...
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
 [dependencies]
 dust-engine = { version = "1.0.0", registry = "dust-plugins" }
 other-plugin = { version = "1.0.0", registry = "dust-plugins" }
@@ -30,7 +34,7 @@ Build.rs:
 
 ```rust
 fn main() {
-    dust::plugin::create::link_dependencies(); // This does the trick to make all the rlibs work.
+    dust_plugin::link_dependencies(); // This does the trick to make all the rlibs work.
 }
 ```
 
