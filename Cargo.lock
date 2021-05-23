@@ -825,6 +825,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dust-plugin"
+version = "0.1.0"
+
+[[package]]
 name = "dust-render"
 version = "0.1.0"
 dependencies = [
