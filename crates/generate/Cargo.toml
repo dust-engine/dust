@@ -1,5 +1,5 @@
 [package]
-name = "dust-plugin"
+name = "dust-terrain-gen"
 version = "0.1.0"
 edition = "2018"
 authors = [
@@ -7,12 +7,8 @@ authors = [
     "iMplode nZ <rg@youxplode.com>"
 ]
 categories = ["game-engines", "graphics", "rendering"]
-keywords = ["dust-engine", "plugin"]
+keywords = ["dust-engine", "terrain-generation"]
 
 [dependencies]
+itertools = "0.10.0"
 
-[features]
-default = ["create"]
-create = []
-load = []
-server = []
