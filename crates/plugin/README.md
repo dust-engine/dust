@@ -17,6 +17,9 @@ version = "1.0.0"
 edition = "2018"
 ...
 
+[package.metadata.dust]
+plugin = true
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

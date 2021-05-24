@@ -190,9 +190,7 @@ impl Renderer {
             let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
             extensions.push(ash::extensions::ext::DebugUtils::name());
 
-            let layers: [&CStr; 1] = [&CStr::from_bytes_with_nul_unchecked(
-                b"VK_LAYER_KHRONOS_validation\0",
-            )];
+            let layers: [&CStr; 0] = [];
             let instance = entry
                 .create_instance(
                     &vk::InstanceCreateInfo::builder()

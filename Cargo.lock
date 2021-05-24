@@ -861,6 +861,7 @@ name = "dust-plugin"
 version = "0.1.0"
 dependencies = [
  "cargo_metadata",
+ "serde_json",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ keywords = ["dust-engine", "plugin"]
 
 [dependencies]
 cargo_metadata = "0.13.1"
+serde_json = "1.0.64"
 
 [features]
 default = ["create"]
