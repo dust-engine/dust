@@ -10,5 +10,7 @@ categories = ["game-engines", "graphics", "rendering"]
 keywords = ["dust-engine", "terrain-generation"]
 
 [dependencies]
+glam = "0.15.2"
 itertools = "0.10.0"
+smallvec = "1.6.1"
 
