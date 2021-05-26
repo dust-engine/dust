@@ -11,6 +11,6 @@ keywords = ["dust-engine", "terrain-generation"]
 
 [dependencies]
 glam = "0.15.2"
-itertools = "0.10.0"
 smallvec = "1.6.1"
-
+derive-new = "0.5.9"
+soa_derive = "0.10.0"

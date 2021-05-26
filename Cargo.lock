@@ -825,6 +825,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-new"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3418329ca0ad70234b9735dc4ceed10af4df60eff9c8e7b06cb5e520d92c3535"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -899,9 +910,11 @@ dependencies = [
 name = "dust-terrain-gen"
 version = "0.1.0"
 dependencies = [
+ "derive-new",
  "glam 0.15.2",
  "itertools",
  "smallvec",
+ "soa_derive",
 ]
 
 [[package]]
@@ -1989,6 +2002,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "soa_derive"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9530263f0a29b2abb4043c75378812ee56a350fa2d4ef7e94d7ef9bf02c450f7"
+dependencies = [
+ "soa_derive_internal",
+]
+
+[[package]]
+name = "soa_derive_internal"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02dc9a44e01656154bb31f6c9d9ee2d2fbe1fc57d40b808a87537d0c5baea70f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
