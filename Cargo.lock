@@ -86,6 +86,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33954243bd79057c2de7338850b85983a44588021f8a5fee574a8888c6de4344"
 
 [[package]]
+name = "approx"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f2a05fd1bd10b2527e20a2cd32d8873d115b8b39fe219ee25f42a8aca6ba278"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "ash"
 version = "0.32.0"
 source = "git+https://github.com/MaikKlein/ash#5bc52dcd0a707340275733a0c89261176be32053"
@@ -2228,9 +2237,9 @@ dependencies = [
 [[package]]
 name = "voronoice"
 version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dba5505084395324409ac50fb05ad40d06f2c0a544a66bc2aff2dafff1be88b2"
+source = "git+https://github.com/iMplode-nZ/voronoice?branch=master#20a4b2c0de23251eda2d8691f8d29cd86f46c992"
 dependencies = [
+ "approx",
  "delaunator",
 ]
 

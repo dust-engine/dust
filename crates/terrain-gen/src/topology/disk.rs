@@ -4,7 +4,9 @@ use glam::DVec2;
 use rand::rngs::SmallRng;
 use rand::Rng;
 use rand::SeedableRng;
+use smallvec::SmallVec;
 use std::f64::consts::PI;
+use voronoice::NeighborSiteIterator;
 use voronoice::VoronoiBuilder;
 
 #[derive(new)]
@@ -44,11 +46,33 @@ impl Partitioner<Disk> for DiskPartitioner {
                 }
             })
             .collect::<Vec<_>>();
-        let voronoi_diagram = VoronoiBuilder::default()
+        let diagram = VoronoiBuilder::default()
             .set_sites(points)
             .set_lloyd_relaxation_iterations(self.relaxation_iterations as usize)
             .build()
             .unwrap();
+        let boundary_points = diagram
+            .vertices()
+            .iter()
+            .map(|p| DVec2::new(p.x, p.y))
+            .collect::<Vec<_>>();
+        let positions = diagram
+            .sites()
+            .iter()
+            .map(|p| DVec2::new(p.x, p.y))
+            .collect::<Vec<_>>();
+        let cell_boundaries = diagram
+            .cells()
+            .iter()
+            .map(|ps| ps.iter().map(|p| *p as u32).collect::<SmallVec<[u32; 8]>>())
+            .collect::<Vec<_>>();
+        let connections = (0..positions.len())
+            .map(|i| {
+                NeighborSiteIterator::new(&diagram, i)
+                    .map(|p| p as u32)
+                    .collect::<SmallVec<[u32; 8]>>()
+            })
+            .collect::<Vec<_>>();
         todo!()
     }
 }

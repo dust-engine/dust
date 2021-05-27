@@ -13,5 +13,5 @@ keywords = ["dust-engine", "terrain-generation"]
 glam = "0.15.2"
 smallvec = "1.6.1"
 derive-new = "0.5.9"
-voronoice = "0.0.1"
+voronoice = { git = "https://github.com/iMplode-nZ/voronoice", branch = "master" }
 rand = { version = "0.8.3", features = ["small_rng"] }
