@@ -814,6 +814,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "delaunator"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3dd9122b66dafadfbc335c706ff5acac5350d1eb799a56c1bac41825e762ddc"
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -912,9 +918,9 @@ version = "0.1.0"
 dependencies = [
  "derive-new",
  "glam 0.15.2",
- "itertools",
+ "rand",
  "smallvec",
- "soa_derive",
+ "voronoice",
 ]
 
 [[package]]
@@ -1225,15 +1231,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2b3ea6ff95e175473f8ffe6a7eb7c00d054240321b84c57051175fe3c1e075e"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "itertools"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37d572918e350e82412fe766d24b15e6682fb2ed2bbe018280caa810397cb319"
-dependencies = [
- "either",
 ]
 
 [[package]]
@@ -2005,26 +2002,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "soa_derive"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9530263f0a29b2abb4043c75378812ee56a350fa2d4ef7e94d7ef9bf02c450f7"
-dependencies = [
- "soa_derive_internal",
-]
-
-[[package]]
-name = "soa_derive_internal"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02dc9a44e01656154bb31f6c9d9ee2d2fbe1fc57d40b808a87537d0c5baea70f"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "spirv-std"
 version = "0.4.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2246,6 +2223,15 @@ dependencies = [
  "ash",
  "bitflags",
  "cc",
+]
+
+[[package]]
+name = "voronoice"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dba5505084395324409ac50fb05ad40d06f2c0a544a66bc2aff2dafff1be88b2"
+dependencies = [
+ "delaunator",
 ]
 
 [[package]]

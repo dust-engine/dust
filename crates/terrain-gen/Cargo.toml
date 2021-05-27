@@ -13,4 +13,5 @@ keywords = ["dust-engine", "terrain-generation"]
 glam = "0.15.2"
 smallvec = "1.6.1"
 derive-new = "0.5.9"
-soa_derive = "0.10.0"
+voronoice = "0.0.1"
+rand = { version = "0.8.3", features = ["small_rng"] }
