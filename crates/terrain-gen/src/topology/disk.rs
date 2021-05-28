@@ -1,3 +1,4 @@
+use crate::partition::*;
 use crate::topology::*;
 use derive_new::*;
 use glam::DVec2;
@@ -73,7 +74,15 @@ impl Partitioner<Disk> for DiskPartitioner {
                     .collect::<SmallVec<[u32; 8]>>()
             })
             .collect::<Vec<_>>();
-        todo!()
+        Partition {
+            cells: CellVec {
+                position: positions,
+                size: vec![],
+                boundary: cell_boundaries,
+                connections,
+            },
+            boundary_points,
+        }
     }
 }
 
