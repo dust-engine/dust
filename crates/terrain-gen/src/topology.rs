@@ -37,8 +37,8 @@ pub trait SurfaceVector<Point: SurfacePoint<Self>>:
 
 /// A method of generating a partition from a topology.
 pub trait Partitioner<Top: Topology> {
-    fn generate_partition(&self, top: Top) -> Partition<Top>;
+    fn partition(&self, top: Top) -> Partition<Top>;
 }
 
 /* Implemented Topologies */
-mod disk;
+pub mod disk;

@@ -10,9 +10,9 @@ use std::f64::consts::PI;
 use voronoice::NeighborSiteIterator;
 use voronoice::VoronoiBuilder;
 
-#[derive(new)]
+#[derive(new, Debug, Clone, Copy, PartialEq)]
 pub struct Disk {
-    radius: f64,
+    pub radius: f64,
 }
 
 impl Disk {
@@ -29,14 +29,14 @@ impl Topology for Disk {
     type Partitioner = DiskPartitioner;
 }
 
-#[derive(new)]
+#[derive(new, Debug, Clone, Copy, PartialEq)]
 pub struct DiskPartitioner {
-    num_points: u32,
-    relaxation_iterations: u32,
+    pub num_points: u32,
+    pub relaxation_iterations: u32,
 }
 
 impl Partitioner<Disk> for DiskPartitioner {
-    fn generate_partition(&self, disk: Disk) -> Partition<Disk> {
+    fn partition(&self, disk: Disk) -> Partition<Disk> {
         let mut rng = SmallRng::from_entropy();
         let points = (0..self.num_points)
             .map(|_| {

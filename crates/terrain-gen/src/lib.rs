@@ -1,2 +1,2 @@
-mod partition;
-mod topology;
+pub mod partition;
+pub mod topology;
