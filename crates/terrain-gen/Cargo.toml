@@ -21,7 +21,7 @@ harness = false
 glam = "0.15.2"
 smallvec = "1.6.1"
 derive-new = "0.5.9"
-voronoice = { git = "https://github.com/iMplode-nZ/voronoice", branch = "master" }
+voronoice = { git = "https://github.com/dust-engine/voronoice", branch = "master" }
 rand = { version = "0.8.3", features = ["small_rng"] }
 ahash = "0.7.2"
 

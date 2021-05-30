@@ -2671,7 +2671,7 @@ dependencies = [
 [[package]]
 name = "voronoice"
 version = "0.0.1"
-source = "git+https://github.com/iMplode-nZ/voronoice?branch=master#d5ff6c40836fb935a22681e26b9e6409275b61c1"
+source = "git+https://github.com/dust-engine/voronoice?branch=master#e286cfb92785ae07b32e22db9d1f369b7418625a"
 dependencies = [
  "approx",
  "delaunator",
