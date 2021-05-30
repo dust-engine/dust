@@ -7,11 +7,10 @@ use topology::disk::*;
 #[macroquad::main("test")]
 async fn main() {
     let disk = Disk::new(1.0);
-    let partitioner = DiskPartitioner::new(100, 0);
     let size = 2.0;
-    let aspect = screen_height() / screen_width();
-    let partition = DiskPartitioner::new(100, 0).partition(disk);
+    let partition = DiskPartitioner::new(100, 5).partition(disk, 0);
     loop {
+        let aspect = screen_height() / screen_width();
         set_camera(&Camera2D::from_display_rect(Rect::new(
             -size,
             -size * aspect,

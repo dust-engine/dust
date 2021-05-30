@@ -1,5 +1,6 @@
 use crate::partition::*;
 use crate::topology::*;
+use ahash::AHasher;
 use derive_new::*;
 use glam::DVec2;
 use rand::rngs::SmallRng;
@@ -7,6 +8,8 @@ use rand::Rng;
 use rand::SeedableRng;
 use smallvec::SmallVec;
 use std::f64::consts::PI;
+use std::hash::Hash;
+use std::hash::Hasher;
 use voronoice::NeighborSiteIterator;
 use voronoice::VoronoiBuilder;
 
@@ -36,8 +39,10 @@ pub struct DiskPartitioner {
 }
 
 impl Partitioner<Disk> for DiskPartitioner {
-    fn partition(&self, disk: Disk) -> Partition<Disk> {
-        let mut rng = SmallRng::from_entropy();
+    fn partition(&self, disk: Disk, seed: impl Hash) -> Partition<Disk> {
+        let mut hasher = AHasher::new_with_keys(0, 0);
+        seed.hash(&mut hasher);
+        let mut rng = SmallRng::seed_from_u64(hasher.finish());
         let points = (0..self.num_points)
             .map(|_| {
                 let point = disk.random_point(&mut rng);

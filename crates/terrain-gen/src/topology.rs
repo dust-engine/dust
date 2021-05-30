@@ -1,5 +1,6 @@
 use crate::partition::Partition;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::ops::Add;
 use std::ops::Div;
 use std::ops::Mul;
@@ -37,7 +38,7 @@ pub trait SurfaceVector<Point: SurfacePoint<Self>>:
 
 /// A method of generating a partition from a topology.
 pub trait Partitioner<Top: Topology> {
-    fn partition(&self, top: Top) -> Partition<Top>;
+    fn partition(&self, top: Top, seed: impl Hash) -> Partition<Top>;
 }
 
 /* Implemented Topologies */
