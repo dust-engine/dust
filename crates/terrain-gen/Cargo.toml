@@ -25,4 +25,5 @@ voronoice = { git = "https://github.com/iMplode-nZ/voronoice", branch = "master"
 rand = { version = "0.8.3", features = ["small_rng"] }
 
 [dev-dependencies]
+itertools = "0.10.0"
 macroquad = "0.3.4"
