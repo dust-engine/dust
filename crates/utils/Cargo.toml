@@ -1,0 +1,15 @@
+[package]
+name = "dust-utils"
+version = "0.1.0"
+edition = "2018"
+authors = [
+    "Zhixing Zhang <me@neoto.xin>",
+    "iMplode nZ <rg@youxplode.com>"
+]
+categories = ["game-engines", "graphics", "rendering"]
+keywords = ["dust-engine"]
+
+[lib]
+name = "dust_utils"
+
+[dependencies]

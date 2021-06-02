@@ -1088,9 +1088,14 @@ dependencies = [
  "itertools",
  "macroquad",
  "rand",
+ "rayon",
  "smallvec",
  "voronoice",
 ]
+
+[[package]]
+name = "dust-utils"
+version = "0.1.0"
 
 [[package]]
 name = "either"
