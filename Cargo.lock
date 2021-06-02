@@ -1084,6 +1084,7 @@ version = "0.1.0"
 dependencies = [
  "ahash 0.7.4",
  "derive-new",
+ "dust-utils",
  "glam 0.15.2",
  "itertools",
  "macroquad",

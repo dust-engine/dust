@@ -5,3 +5,4 @@
 
 pub mod hlist;
 pub mod hkt;
+pub mod num;
