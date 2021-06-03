@@ -1,4 +1,5 @@
 use crate::num;
+use derive_new::*;
 
 pub trait HList: private::Sealed {}
 
@@ -7,7 +8,7 @@ pub struct HNil;
 impl private::Sealed for HNil {}
 impl HList for HNil {}
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+#[derive(new, Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub struct HCons<H, T: HList> {
     pub head: H,
     pub tail: T,
@@ -86,6 +87,20 @@ macro_rules! hlist_bound {
         trait $name: dust_utils::hlist::HList {}
         impl $name for dust_utils::hlist::HNil {}
         impl<H: $first $(+ $next)*, T: $name> $name for dust_utils::hlist::HCons<H, T> {}
+    }
+}
+
+mod tests {
+    use super::*;
+    #[test]
+    fn test() {
+        let mut list = HCons::new(1, HCons::new("foo", HCons::new(true, HNil)));
+        let first: &mut u32 = list.h_get_mut();
+        *first = 2;
+        let second: &str = *list.h_get();
+        assert_eq!(second, "foo");
+        let subset = <HCons<u32, HCons<bool, HNil>> as SubsetOf<_, _>>::subset(list);
+        assert_eq!(subset, HCons::new(2, HCons::new(true, HNil)));
     }
 }
 

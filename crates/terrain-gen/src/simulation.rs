@@ -10,13 +10,16 @@ trait Phase: Clone {
 }
 
 trait Phases<L: PhaseHList, Tag>: PhaseHList {
-    // fn run(&mut self);
+    fn run(&mut self);
 }
 
-impl<L: PhaseHList> Phases<L, HNil> for HNil {}
+impl<L: PhaseHList> Phases<L, HNil> for HNil {
+    fn run(&mut self) {}
+}
 impl<L: PhaseHList, H: Phase, T: Phases<L, TT>, TT: HList, HT> Phases<L, HCons<HT, TT>>
     for HCons<H, T>
 where
     H::Inputs: SubsetOf<L, HT>,
 {
+    fn run(&mut self) {}
 }

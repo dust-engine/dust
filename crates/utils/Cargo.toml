@@ -13,3 +13,4 @@ keywords = ["dust-engine"]
 name = "dust_utils"
 
 [dependencies]
+derive-new = "0.5.9"

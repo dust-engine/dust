@@ -1097,6 +1097,9 @@ dependencies = [
 [[package]]
 name = "dust-utils"
 version = "0.1.0"
+dependencies = [
+ "derive-new",
+]
 
 [[package]]
 name = "either"
