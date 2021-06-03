@@ -90,6 +90,7 @@ macro_rules! hlist_bound {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]

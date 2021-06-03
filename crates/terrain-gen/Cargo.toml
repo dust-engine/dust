@@ -16,6 +16,7 @@ name = "dust_terrain_gen"
 name = "test"
 path = "test/main.rs"
 harness = false
+test = false
 
 [dependencies]
 glam = "0.15.2"
