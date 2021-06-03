@@ -1,19 +1,22 @@
 use dust_utils::hlist::*;
 use dust_utils::hlist_bound;
-use dust_utils::hkt::Mapping;
 
-struct State<T>(T);
+hlist_bound![PhaseHList: Phase];
 
-struct InputMapping;
-impl Mapping for InputMapping {
-    type Lift<T> = (State<T/*::Value*/>, T);
+trait Phase: Clone {
+    type Inputs: PhaseHList;
+
+    fn execute(&mut self, inputs: Self::Inputs);
 }
 
-hlist_bound![HListPhaseBound: Phase];
+trait Phases<L: PhaseHList, Tag>: PhaseHList {
+    // fn run(&mut self);
+}
 
-trait Phase {
-    type Value;
-    type Inputs: HListPhaseBound;
-
-    fn execute(&mut self, inputs: <Self::Inputs as HList>::Mapped<InputMapping>) -> State<Self::Value>;
+impl<L: PhaseHList> Phases<L, HNil> for HNil {}
+impl<L: PhaseHList, H: Phase, T: Phases<L, TT>, TT: HList, HT> Phases<L, HCons<HT, TT>>
+    for HCons<H, T>
+where
+    H::Inputs: SubsetOf<L, HT>,
+{
 }

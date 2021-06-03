@@ -1,16 +1,11 @@
-use crate::hkt::Mapping;
 use crate::num;
 
-pub trait HList: private::Sealed {
-    type Mapped<M: Mapping>: HList;
-}
+pub trait HList: private::Sealed {}
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
-pub struct HNil();
+pub struct HNil;
 impl private::Sealed for HNil {}
-impl HList for HNil {
-    type Mapped<M: Mapping> = HNil;
-}
+impl HList for HNil {}
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub struct HCons<H, T: HList> {
@@ -18,42 +13,70 @@ pub struct HCons<H, T: HList> {
     pub tail: T,
 }
 impl<H, T: HList> private::Sealed for HCons<H, T> {}
-impl<H, T: HList> HList for HCons<H, T> {
-    type Mapped<M: Mapping> = HCons<M::Lift<H>, T::Mapped<M>>;
-}
+impl<H, T: HList> HList for HCons<H, T> {}
 
-// Macros:
-// bound_hlist![HListCopyCloneBound: Copy + Clone]
-// bound_mapping! {
-//     type ThisMapping = T: Copy + Clone =>> Wrapper<T>;
-// }
-// bound_mapping! {
-//     type ThisMapping = <T: Copy + Clone>(t: T) -> Wrapper<T> {
-//         Wrapper::new(t)
-//     };
-// }
-
-trait HContains<T, Tag> {
+pub trait HContains<T, Tag> {
     fn h_get(&self) -> &T;
     fn h_get_mut(&mut self) -> &mut T;
+    fn h_extract(self) -> T;
 }
 
 impl<H, T: HList> HContains<H, num::Z> for HCons<H, T> {
+    #[inline]
     fn h_get(&self) -> &H {
         &self.head
     }
-
+    #[inline]
     fn h_get_mut(&mut self) -> &mut H {
         &mut self.head
     }
+    #[inline]
+    fn h_extract(self) -> H {
+        self.head
+    }
 }
 
-impl<H, S, T: HList, N: num::Count> HContains<S, num::S<N>> for HCons<H, T> where T: HContains<S, N> {
+impl<H, S, T: HList, N: num::Count> HContains<S, num::S<N>> for HCons<H, T>
+where
+    T: HContains<S, N>,
+{
+    #[inline]
     fn h_get(&self) -> &S {
         self.tail.h_get()
     }
+    #[inline]
     fn h_get_mut(&mut self) -> &mut S {
         self.tail.h_get_mut()
+    }
+    #[inline]
+    fn h_extract(self) -> S {
+        self.tail.h_extract()
+    }
+}
+
+pub trait SubsetOf<X, Tag> {
+    fn subset(x: X) -> Self;
+}
+
+impl<X> SubsetOf<X, HNil> for HNil {
+    #[inline]
+    fn subset(_: X) -> Self {
+        HNil
+    }
+}
+
+impl<X, H, HT, T, TT> SubsetOf<X, HCons<HT, TT>> for HCons<H, T>
+where
+    T: HList + SubsetOf<X, TT>,
+    TT: HList,
+    X: HContains<H, HT> + Clone,
+{
+    #[inline]
+    fn subset(x: X) -> Self {
+        HCons {
+            head: x.clone().h_extract(),
+            tail: SubsetOf::subset(x),
+        }
     }
 }
 

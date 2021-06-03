@@ -2,5 +2,5 @@
 #![feature(generic_associated_types)]
 
 pub mod partition;
-pub mod topology;
 pub mod simulation;
+pub mod topology;
