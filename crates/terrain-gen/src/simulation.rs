@@ -1,70 +1,95 @@
 use dust_utils::hlist::*;
+use parking_lot::Mutex;
 
-trait PhaseHList: HList {
-    type State: StateHList;
+trait PhaseHList<'x>: HList + 'x {
+    type State: StateHList<'x>;
+    type ValueRef<'a>: HList where 'x: 'a;
+    type Ref<'a>: HList where 'x: 'a;
 }
-impl PhaseHList for HNil {
+impl<'x> PhaseHList<'x> for HNil {
     type State = HNil;
+    type ValueRef<'a> where 'x: 'a = HNil;
+    type Ref<'a> where 'x: 'a = HNil;
 }
-impl<H: Phase, T: PhaseHList> PhaseHList for HCons<H, T> {
-    type State = HCons<State<H>, T::State>;
+impl<'x, H: Phase<'x>, T: PhaseHList<'x>> PhaseHList<'x> for HCons<H, T> {
+    type State = HCons<StateLock<'x, H>, T::State>;
+    type ValueRef<'a> where 'x: 'a = HCons<&'a H::Value, T::ValueRef<'a>>;
+    type Ref<'a> where 'x: 'a = HCons<&'a H, T::Ref<'a>>;
 }
 
-trait StateHList: HList {}
-impl StateHList for HNil {}
-impl<HP: Phase, T: StateHList> StateHList for HCons<State<HP>, T> {}
+trait StateHList<'x>: HList + 'x {
+    type Phase: PhaseHList<'x>;
 
-struct State<P: Phase> {
+    // TODO:
+    // fn to_inputs(&self) -> ValueRef, Ref;
+}
+impl StateHList<'_> for HNil {
+    type Phase = HNil;
+}
+impl<'x, HP: Phase<'x>, T: StateHList<'x>> StateHList<'x> for HCons<StateLock<'x, HP>, T> {
+    type Phase = HCons<HP, T::Phase>;
+}
+
+type StateLock<'x, P: Phase<'x>> = Mutex<State<'x, P>>;
+
+struct State<'x, P: Phase<'x>> {
     phase: P,
-    value: P::Value,
-    computation_state: ComputationState,
+    value: Option<P::Value>,
 }
 
-enum ComputationState {
-    Before,
-    Running,
-    After
+trait Phase<'x>: Clone + 'x {
+    type Inputs: PhaseHList<'x>;
+    type Value: 'x;
+
+    fn execute(
+        &mut self,
+        inputs: <Self::Inputs as PhaseHList<'x>>::ValueRef<'_>,
+        phase_inputs: <Self::Inputs as PhaseHList<'x>>::Ref<'_>,
+    ) -> Self::Value;
 }
 
-trait Phase: Clone {
-    type Inputs: PhaseHList;
-    type Value;
-
-    fn execute(&mut self, inputs: Self::Inputs) -> Self::Value;
-}
-
-trait SelfPhases<Tag, SubsetTag>: Phases<Self, Tag, SubsetTag> + Clone {
+trait SelfPhases<'x, Tag, SubsetTag>: Phases<'x, Self, Tag, SubsetTag> + Clone {
     fn execute_all(&self) {
         <Self as Phases<Self, Tag, SubsetTag>>::execute_all(self)
     }
 }
-impl<T, Tag, SubsetTag> SelfPhases<Tag, SubsetTag> for T where T: Phases<T, Tag, SubsetTag> + Clone {}
+impl<'x, T, Tag, SubsetTag> SelfPhases<'x, Tag, SubsetTag> for T where T: Phases<'x, T, Tag, SubsetTag> + Clone {}
 
-trait Phases<L: PhaseHList + Clone, Tag, SubsetTag>: PhaseHList + SubsetOf<L, SubsetTag> {
+trait Phases<'x, L: StateHList<'x> + Clone, Tag, SubsetTag>: StateHList<'x> + SubsetOf<L, SubsetTag> {
     fn execute_all(this: &L);
 }
 
-impl<L: PhaseHList + Clone> Phases<L, HNil, HNil> for HNil {
+impl<'x, L: StateHList<'x> + Clone> Phases<'x, L, HNil, HNil> for HNil {
     fn execute_all(_this: &L) {}
 }
-impl<
-        L: PhaseHList + Clone,
-        H: Phase,
-        T: Phases<L, TT, TST>,
+impl<'x,
+        L: StateHList<'x> + Clone,
+        HP: Phase<'x>,
+        T: Phases<'x, L, TT, TST>,
         HT,
         TT: HList,
         ST,
         HST,
         TST: HList,
-    > Phases<L, HCons<(HT, HST), TT>, HCons<ST, TST>> for HCons<H, T>
+    > Phases<'x, L, HCons<(HT, HST), TT>, HCons<ST, TST>> for HCons<StateLock<'x, HP>, T>
 where
-    H::Inputs: Phases<L, HT, HST>,
-    L: HContains<H, ST>,
+    <HP::Inputs as PhaseHList<'x>>::State: Phases<'x, L, HT, HST>,
+    L: HContains<StateLock<'x, HP>, ST>,
 {
     fn execute_all(this: &L) {
-        H::Inputs::execute_all(this);
-        let head = this.h_get();
-        head.execute(H::Inputs::subset(this.clone()));
+        <HP::Inputs as PhaseHList>::State::execute_all(this);
+        {
+            let head = this
+                .h_get()
+                .try_lock()
+                .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph");
+            if head.value.is_none() {
+                head.value = Some(
+                    head.phase
+                        .execute(<HP::Inputs as PhaseHList<'x>>::State::subset(this.clone())),
+                );
+            }
+        }
         T::execute_all(this);
     }
 }

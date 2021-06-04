@@ -1088,6 +1088,7 @@ dependencies = [
  "glam 0.15.2",
  "itertools",
  "macroquad",
+ "parking_lot",
  "rand",
  "rayon",
  "smallvec",

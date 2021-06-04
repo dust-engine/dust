@@ -27,6 +27,7 @@ rand = { version = "0.8.3", features = ["small_rng"] }
 ahash = "0.7.2"
 rayon = "1.5.1"
 dust-utils = { path = "../utils"}
+parking_lot = "0.11.1"
 
 [dev-dependencies]
 itertools = "0.10.0"
