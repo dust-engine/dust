@@ -3,31 +3,73 @@ use parking_lot::Mutex;
 
 trait PhaseHList<'x>: HList + 'x {
     type State: StateHList<'x>;
-    type ValueRef<'a>: HList where 'x: 'a;
-    type Ref<'a>: HList where 'x: 'a;
+    type ValueRef<'a>: HList
+    where
+        'x: 'a;
+    type Ref<'a>: HList
+    where
+        'x: 'a;
 }
 impl<'x> PhaseHList<'x> for HNil {
     type State = HNil;
-    type ValueRef<'a> where 'x: 'a = HNil;
-    type Ref<'a> where 'x: 'a = HNil;
+    type ValueRef<'a>
+    where
+        'x: 'a,
+    = HNil;
+    type Ref<'a>
+    where
+        'x: 'a,
+    = HNil;
 }
 impl<'x, H: Phase<'x>, T: PhaseHList<'x>> PhaseHList<'x> for HCons<H, T> {
     type State = HCons<StateLock<'x, H>, T::State>;
-    type ValueRef<'a> where 'x: 'a = HCons<&'a H::Value, T::ValueRef<'a>>;
-    type Ref<'a> where 'x: 'a = HCons<&'a H, T::Ref<'a>>;
+    type ValueRef<'a>
+    where
+        'x: 'a,
+    = HCons<&'a H::Value, T::ValueRef<'a>>;
+    type Ref<'a>
+    where
+        'x: 'a,
+    = HCons<&'a H, T::Ref<'a>>;
 }
 
 trait StateHList<'x>: HList + 'x {
     type Phase: PhaseHList<'x>;
 
-    // TODO:
-    // fn to_inputs(&self) -> ValueRef, Ref;
+    fn to_inputs<'a>(
+        &'a self,
+    ) -> (
+        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
+        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
+    ) where 'x: 'a;
 }
-impl StateHList<'_> for HNil {
+impl<'x> StateHList<'x> for HNil {
     type Phase = HNil;
+    fn to_inputs<'a>(
+        &'a self,
+    ) -> (
+        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
+        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
+    ) where 'x: 'a {
+        (HNil, HNil)
+    }
 }
 impl<'x, HP: Phase<'x>, T: StateHList<'x>> StateHList<'x> for HCons<StateLock<'x, HP>, T> {
     type Phase = HCons<HP, T::Phase>;
+    fn to_inputs<'a>(
+        &'a self,
+    ) -> (
+        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
+        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
+    ) where 'x: 'a {
+        let HCons { head, tail } = self;
+        let state = self
+            .head
+            .try_lock()
+            .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph");
+        let (t_value_ref, t_ref) = tail.to_inputs();
+        (HCons::new(&state.value.unwrap(), t_value_ref), HCons::new(&state.phase, t_ref))
+    }
 }
 
 type StateLock<'x, P: Phase<'x>> = Mutex<State<'x, P>>;
@@ -53,16 +95,22 @@ trait SelfPhases<'x, Tag, SubsetTag>: Phases<'x, Self, Tag, SubsetTag> + Clone {
         <Self as Phases<Self, Tag, SubsetTag>>::execute_all(self)
     }
 }
-impl<'x, T, Tag, SubsetTag> SelfPhases<'x, Tag, SubsetTag> for T where T: Phases<'x, T, Tag, SubsetTag> + Clone {}
+impl<'x, T, Tag, SubsetTag> SelfPhases<'x, Tag, SubsetTag> for T where
+    T: Phases<'x, T, Tag, SubsetTag> + Clone
+{
+}
 
-trait Phases<'x, L: StateHList<'x> + Clone, Tag, SubsetTag>: StateHList<'x> + SubsetOf<L, SubsetTag> {
+trait Phases<'x, L: StateHList<'x> + Clone, Tag, SubsetTag>:
+    StateHList<'x> + SubsetOf<L, SubsetTag>
+{
     fn execute_all(this: &L);
 }
 
 impl<'x, L: StateHList<'x> + Clone> Phases<'x, L, HNil, HNil> for HNil {
     fn execute_all(_this: &L) {}
 }
-impl<'x,
+impl<
+        'x,
         L: StateHList<'x> + Clone,
         HP: Phase<'x>,
         T: Phases<'x, L, TT, TST>,
@@ -94,7 +142,7 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(never_compile)]
 mod tests {
     use super::*;
     #[derive(Debug, Copy, Clone)]
