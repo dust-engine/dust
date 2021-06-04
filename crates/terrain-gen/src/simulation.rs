@@ -1,12 +1,36 @@
 use dust_utils::hlist::*;
-use dust_utils::hlist_bound;
 
-hlist_bound![PhaseHList: Phase];
+trait PhaseHList: HList {
+    type State: StateHList;
+}
+impl PhaseHList for HNil {
+    type State = HNil;
+}
+impl<H: Phase, T: PhaseHList> PhaseHList for HCons<H, T> {
+    type State = HCons<State<H>, T::State>;
+}
+
+trait StateHList: HList {}
+impl StateHList for HNil {}
+impl<HP: Phase, T: StateHList> StateHList for HCons<State<HP>, T> {}
+
+struct State<P: Phase> {
+    phase: P,
+    value: P::Value,
+    computation_state: ComputationState,
+}
+
+enum ComputationState {
+    Before,
+    Running,
+    After
+}
 
 trait Phase: Clone {
     type Inputs: PhaseHList;
+    type Value;
 
-    fn execute(&self, inputs: Self::Inputs);
+    fn execute(&mut self, inputs: Self::Inputs) -> Self::Value;
 }
 
 trait SelfPhases<Tag, SubsetTag>: Phases<Self, Tag, SubsetTag> + Clone {
@@ -27,11 +51,11 @@ impl<
         L: PhaseHList + Clone,
         H: Phase,
         T: Phases<L, TT, TST>,
-        TT: HList,
         HT,
+        TT: HList,
         ST,
-        TST: HList,
         HST,
+        TST: HList,
     > Phases<L, HCons<(HT, HST), TT>, HCons<ST, TST>> for HCons<H, T>
 where
     H::Inputs: Phases<L, HT, HST>,

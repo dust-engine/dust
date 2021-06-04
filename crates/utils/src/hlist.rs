@@ -81,15 +81,6 @@ where
     }
 }
 
-#[macro_export]
-macro_rules! hlist_bound {
-    ($name:ident : $first:tt $(+ $next:tt)*) => {
-        trait $name: dust_utils::hlist::HList {}
-        impl $name for dust_utils::hlist::HNil {}
-        impl<H: $first $(+ $next)*, T: $name> $name for dust_utils::hlist::HCons<H, T> {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
