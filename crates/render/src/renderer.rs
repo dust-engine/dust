@@ -157,7 +157,6 @@ unsafe extern "system" fn debug_utils_messenger_callback(
                 msg = format!("{}\n{}: {}", msg, info_label, data);
             }
         }
-        println!("{}\n", msg);
     }
 
     log!(message_severity, "{}\n", {

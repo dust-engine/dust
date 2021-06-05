@@ -1,6 +1,7 @@
 #![feature(array_methods)]
 #![feature(array_map)]
 #![feature(backtrace)]
+#![feature(maybe_uninit_extra)]
 #[macro_use]
 extern crate memoffset;
 

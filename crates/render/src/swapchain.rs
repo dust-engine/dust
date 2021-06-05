@@ -1,6 +1,7 @@
 use crate::renderer::RenderContext;
 use ash::version::DeviceV1_0;
 use ash::vk;
+use std::mem::MaybeUninit;
 use std::sync::Arc;
 use vk_mem as vma;
 
@@ -219,15 +220,17 @@ where
         .collect::<Vec<vk::WriteDescriptorSet>>();
     device.update_descriptor_sets(descriptor_writes.as_slice(), &[]);
 }
+
+const NUM_FRAMES_IN_FLIGHT: usize = 3;
 pub struct Swapchain {
     context: Arc<RenderContext>,
     surface: vk::SurfaceKHR,
     current_frame: usize,
     loader: ash::extensions::khr::Swapchain,
     swapchain: vk::SwapchainKHR,
-    frames_in_flight: Vec<Frame>,          // number of frames in flight
+    frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT],          // number of frames in flight
     swapchain_images: Vec<SwapchainImage>, // number of images in swapchain
-    pub(crate) depth_image: DepthImage,
+    depth_image: DepthImage,
     graphics_queue: vk::Queue,
     command_pool: vk::CommandPool,
     pub config: SwapchainConfig,
@@ -266,7 +269,6 @@ impl Swapchain {
         graphics_queue_family_index: u32,
         graphics_queue: vk::Queue,
     ) -> Self {
-        let num_frames_in_flight = 3;
         let instance = &context.instance;
         let device = &context.device;
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, device);
@@ -348,10 +350,13 @@ impl Swapchain {
                 .iter()
                 .map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)),
         );
-        let mut frames_in_flight = Vec::with_capacity(num_frames_in_flight);
-        for _i in 0..num_frames_in_flight {
-            frames_in_flight.push(Frame::new(&device));
+        let mut frames_in_flight: [MaybeUninit<Frame>; NUM_FRAMES_IN_FLIGHT] = unsafe {
+            MaybeUninit::uninit().assume_init()
+        };
+        for i in 0..NUM_FRAMES_IN_FLIGHT {
+            frames_in_flight[i].write(Frame::new(&device));
         }
+        let frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT] = unsafe { std::mem::transmute(frames_in_flight) };
         Self {
             command_pool,
             context,
@@ -467,7 +472,7 @@ impl Swapchain {
             .unwrap();
 
         self.current_frame = self.current_frame + 1;
-        if self.current_frame >= 3 {
+        if self.current_frame >= self.frames_in_flight.len() {
             self.current_frame = 0;
         }
     }
