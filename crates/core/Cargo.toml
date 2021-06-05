@@ -9,4 +9,4 @@ edition = "2018"
 [dependencies]
 svo = { path = "../svo" }
 
-glam = { version = "0.13", features = ["transform-types"] }
+glam = { version = "0.15.2" }

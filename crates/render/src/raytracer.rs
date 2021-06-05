@@ -4,7 +4,6 @@ use crate::renderer::RenderContext;
 use crate::shared_buffer::SharedBuffer;
 use crate::swapchain::{RenderPassProvider, Swapchain, SwapchainConfig, SwapchainImage};
 use crate::State;
-use ash::version::DeviceV1_0;
 use ash::vk;
 use ash::vk::RenderPass;
 use smallvec::SmallVec;

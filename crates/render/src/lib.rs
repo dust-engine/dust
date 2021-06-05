@@ -40,7 +40,6 @@ use dust_core::Octree;
 use crate::raytracer::RayTracer;
 use crate::render_resources::RenderResources;
 use crate::swapchain::Swapchain;
-use ash::version::DeviceV1_0;
 use bevy::app::AppExit;
 
 use dust_core::svo::ArenaAllocator;

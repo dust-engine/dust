@@ -3,7 +3,6 @@ use crate::material_repo::{TextureRepo, TextureRepoUploadState};
 
 use crate::swapchain::Swapchain;
 use crate::Renderer;
-use ash::version::DeviceV1_0;
 use ash::vk;
 use dust_core::svo::alloc::BlockAllocator;
 use dust_core::svo::alloc::BLOCK_SIZE;

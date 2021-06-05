@@ -18,7 +18,7 @@ members = ["crates/*"]
 [dependencies]
 dust-render = { path = "./crates/render" }
 dust-core = { path = "./crates/core" }
-glam = { version = "0.13", features = ["transform-types"] }
+glam = { version = "0.15.2", features = ["transform-types"] }
 
 fastnbt = "0.14.0"
 fastanvil = "0.14.1"

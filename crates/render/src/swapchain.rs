@@ -1,5 +1,4 @@
 use crate::renderer::RenderContext;
-use ash::version::DeviceV1_0;
 use ash::vk;
 use std::mem::MaybeUninit;
 use std::sync::Arc;

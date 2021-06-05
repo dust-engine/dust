@@ -1,7 +1,6 @@
 use ash::vk;
 
 use crate::renderer::RenderContext;
-use ash::version::DeviceV1_0;
 use dust_core::CameraProjection;
 use dust_core::SunLight;
 use glam::{Mat3, TransformRT, Vec3};

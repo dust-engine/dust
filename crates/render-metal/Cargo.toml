@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 raw-window-handle = "*"
 dust-core = { path = "../core" }
-glam = { version = "0.13", features = ["transform-types"] }
+glam = { version = "0.15.2" }
 
 [build-dependencies]
 serde = "1.0"
