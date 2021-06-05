@@ -1,5 +1,7 @@
 use dust_utils::hlist::*;
+use parking_lot::MappedMutexGuard;
 use parking_lot::Mutex;
+use parking_lot::MutexGuard;
 
 trait PhaseHList<'x>: HList + 'x {
     type State: StateHList<'x>;
@@ -9,6 +11,8 @@ trait PhaseHList<'x>: HList + 'x {
     type Ref<'a>: HList
     where
         'x: 'a;
+
+    fn to_state(self) -> Self::State;
 }
 impl<'x> PhaseHList<'x> for HNil {
     type State = HNil;
@@ -20,79 +24,59 @@ impl<'x> PhaseHList<'x> for HNil {
     where
         'x: 'a,
     = HNil;
+
+    fn to_state(self) -> Self::State {
+        HNil
+    }
 }
 impl<'x, H: Phase<'x>, T: PhaseHList<'x>> PhaseHList<'x> for HCons<H, T> {
     type State = HCons<StateLock<'x, H>, T::State>;
     type ValueRef<'a>
     where
         'x: 'a,
-    = HCons<&'a H::Value, T::ValueRef<'a>>;
+    = HCons<MappedMutexGuard<'a, H::Value>, T::ValueRef<'a>>;
     type Ref<'a>
     where
         'x: 'a,
-    = HCons<&'a H, T::Ref<'a>>;
+    = HCons<MutexGuard<'a, H>, T::Ref<'a>>;
+
+    fn to_state(self) -> Self::State {
+        HCons::new(StateLock {
+            phase: Mutex::new(self.head),
+            value: Mutex::new(None),
+        }, self.tail.to_state())
+    }
 }
 
 trait StateHList<'x>: HList + 'x {
     type Phase: PhaseHList<'x>;
-
-    fn to_inputs<'a>(
-        &'a self,
-    ) -> (
-        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
-        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
-    ) where 'x: 'a;
 }
 impl<'x> StateHList<'x> for HNil {
     type Phase = HNil;
-    fn to_inputs<'a>(
-        &'a self,
-    ) -> (
-        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
-        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
-    ) where 'x: 'a {
-        (HNil, HNil)
-    }
 }
 impl<'x, HP: Phase<'x>, T: StateHList<'x>> StateHList<'x> for HCons<StateLock<'x, HP>, T> {
     type Phase = HCons<HP, T::Phase>;
-    fn to_inputs<'a>(
-        &'a self,
-    ) -> (
-        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
-        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
-    ) where 'x: 'a {
-        let HCons { head, tail } = self;
-        let state = self
-            .head
-            .try_lock()
-            .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph");
-        let (t_value_ref, t_ref) = tail.to_inputs();
-        (HCons::new(&state.value.unwrap(), t_value_ref), HCons::new(&state.phase, t_ref))
-    }
 }
 
-type StateLock<'x, P: Phase<'x>> = Mutex<State<'x, P>>;
-
-struct State<'x, P: Phase<'x>> {
-    phase: P,
-    value: Option<P::Value>,
+struct StateLock<'x, P: Phase<'x>> {
+    phase: Mutex<P>,
+    value: Mutex<Option<P::Value>>,
 }
 
 trait Phase<'x>: Clone + 'x {
     type Inputs: PhaseHList<'x>;
     type Value: 'x;
 
-    fn execute(
-        &mut self,
-        inputs: <Self::Inputs as PhaseHList<'x>>::ValueRef<'_>,
-        phase_inputs: <Self::Inputs as PhaseHList<'x>>::Ref<'_>,
-    ) -> Self::Value;
+    fn execute<'a>(
+        &'a mut self,
+        inputs: <Self::Inputs as PhaseHList<'x>>::ValueRef<'a>,
+        phase_inputs: <Self::Inputs as PhaseHList<'x>>::Ref<'a>,
+    ) -> Self::Value where 'x: 'a;
 }
 
 trait SelfPhases<'x, Tag, SubsetTag>: Phases<'x, Self, Tag, SubsetTag> + Clone {
     fn execute_all(&self) {
-        <Self as Phases<Self, Tag, SubsetTag>>::execute_all(self)
+        <Self as Phases<Self, Tag, SubsetTag>>::execute_all(self);
     }
 }
 impl<'x, T, Tag, SubsetTag> SelfPhases<'x, Tag, SubsetTag> for T where
@@ -103,11 +87,28 @@ impl<'x, T, Tag, SubsetTag> SelfPhases<'x, Tag, SubsetTag> for T where
 trait Phases<'x, L: StateHList<'x> + Clone, Tag, SubsetTag>:
     StateHList<'x> + SubsetOf<L, SubsetTag>
 {
-    fn execute_all(this: &L);
+    fn execute_all<'a>(
+        this: &'a L,
+    ) -> (
+        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
+        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
+    )
+    where
+        'x: 'a;
 }
 
 impl<'x, L: StateHList<'x> + Clone> Phases<'x, L, HNil, HNil> for HNil {
-    fn execute_all(_this: &L) {}
+    fn execute_all<'a>(
+        _this: &'a L,
+    ) -> (
+        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
+        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
+    )
+    where
+        'x: 'a,
+    {
+        (HNil, HNil)
+    }
 }
 impl<
         'x,
@@ -124,25 +125,48 @@ where
     <HP::Inputs as PhaseHList<'x>>::State: Phases<'x, L, HT, HST>,
     L: HContains<StateLock<'x, HP>, ST>,
 {
-    fn execute_all(this: &L) {
-        <HP::Inputs as PhaseHList>::State::execute_all(this);
-        {
-            let head = this
-                .h_get()
-                .try_lock()
-                .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph");
-            if head.value.is_none() {
-                head.value = Some(
-                    head.phase
-                        .execute(<HP::Inputs as PhaseHList<'x>>::State::subset(this.clone())),
+    fn execute_all<'a>(
+        this: &'a L,
+    ) -> (
+        <Self::Phase as PhaseHList<'x>>::ValueRef<'a>,
+        <Self::Phase as PhaseHList<'x>>::Ref<'a>,
+    )
+    where
+        'x: 'a,
+    {
+        let state = this.h_get();
+        let mut value = state
+            .value
+            .try_lock()
+            .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph.");
+        let mut phase = state
+            .phase
+            .try_lock()
+            .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph.");
+
+        if value.is_none() {
+            let (inputs, phase_inputs) =
+                <<HP::Inputs as PhaseHList<'x>>::State as Phases<'x, L, HT, HST>>::execute_all(
+                    this,
                 );
-            }
+            *value = Some(
+                phase.execute(unsafe { transmute::transmute(inputs) }, unsafe {
+                    transmute::transmute(phase_inputs)
+                }),
+            );
         }
-        T::execute_all(this);
+        let (t_value_ref, t_ref) = T::execute_all(this);
+        (
+            HCons::new(
+                MutexGuard::map(value, |x| x.as_mut().expect("Invalid state.")),
+                t_value_ref,
+            ),
+            HCons::new(phase, t_ref),
+        )
     }
 }
 
-#[cfg(never_compile)]
+#[cfg(test)]
 mod tests {
     use super::*;
     #[derive(Debug, Copy, Clone)]
@@ -152,25 +176,43 @@ mod tests {
     #[derive(Debug, Copy, Clone)]
     struct Third(bool);
 
-    impl Phase for First {
+    impl<'x> Phase<'x> for First {
         type Inputs = HNil;
+        type Value = String;
 
-        fn execute(&self, _inputs: Self::Inputs) {
+        fn execute<'a>(
+            &'a mut self,
+            inputs: <Self::Inputs as PhaseHList<'x>>::ValueRef<'a>,
+            phase_inputs: <Self::Inputs as PhaseHList<'x>>::Ref<'a>,
+        ) -> Self::Value where 'x: 'a {
             println!("First: {:?}", self);
+            "abcde".to_string()
         }
     }
-    impl Phase for Second {
+    impl<'x> Phase<'x> for Second {
         type Inputs = HCons<First, HNil>;
+        type Value = bool;
 
-        fn execute(&self, inputs: Self::Inputs) {
+        fn execute<'a>(
+            &'a mut self,
+            inputs: <Self::Inputs as PhaseHList<'x>>::ValueRef<'a>,
+            phase_inputs: <Self::Inputs as PhaseHList<'x>>::Ref<'a>,
+        ) -> Self::Value where 'x: 'a {
             println!("Second: {:?}. Inputs: {:?}", self, inputs);
+            false
         }
     }
-    impl Phase for Third {
+    impl<'x> Phase<'x> for Third {
         type Inputs = HCons<First, HCons<Second, HNil>>;
+        type Value = ();
 
-        fn execute(&self, inputs: Self::Inputs) {
+        fn execute<'a>(
+            &'a mut self,
+            inputs: <Self::Inputs as PhaseHList<'x>>::ValueRef<'a>,
+            phase_inputs: <Self::Inputs as PhaseHList<'x>>::Ref<'a>,
+        ) -> Self::Value where 'x: 'a {
             println!("Third: {:?}. Inputs: {:?}", self, inputs);
+            ()
         }
     }
 
@@ -179,7 +221,7 @@ mod tests {
         let list = HCons::new(
             First(10),
             HCons::new(Third(false), HCons::new(Second("thing".to_string()), HNil)),
-        );
-        list.execute_all();
+        ).to_state();
+        SelfPhases::execute_all(&list);
     }
 }

@@ -1092,6 +1092,7 @@ dependencies = [
  "rand",
  "rayon",
  "smallvec",
+ "transmute",
  "voronoice",
 ]
 
@@ -2627,6 +2628,12 @@ dependencies = [
  "tracing-subscriber",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "transmute"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6bfa5cafb4fe645f98326eefeb2d6b124257b5029d7e2ec12b0b30940d56f7d"
 
 [[package]]
 name = "ttf-parser"
