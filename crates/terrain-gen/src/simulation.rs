@@ -1,7 +1,8 @@
 use dust_utils::hlist::*;
-use parking_lot::MappedMutexGuard;
-use parking_lot::Mutex;
-use parking_lot::MutexGuard;
+use parking_lot::MappedRwLockReadGuard;
+use parking_lot::RwLock;
+use parking_lot::RwLockReadGuard;
+use std::any::type_name;
 
 trait PhaseHList<'x>: HList + 'x {
     type State: StateHList<'x>;
@@ -45,17 +46,17 @@ impl<'x, H: Phase<'x>, T: PhaseHList<'x>> PhaseHList<'x> for HCons<H, T> {
     type ValueRef<'a>
     where
         'x: 'a,
-    = HCons<MappedMutexGuard<'a, H::Value>, T::ValueRef<'a>>;
+    = HCons<MappedRwLockReadGuard<'a, H::Value>, T::ValueRef<'a>>;
     type Ref<'a>
     where
         'x: 'a,
-    = HCons<MutexGuard<'a, H>, T::Ref<'a>>;
+    = HCons<RwLockReadGuard<'a, H>, T::Ref<'a>>;
 
     fn to_state(self) -> Self::State {
         HCons::new(
             StateLock {
-                phase: Mutex::new(self.head),
-                value: Mutex::new(None),
+                phase: RwLock::new(self.head),
+                value: RwLock::new(None),
             },
             self.tail.to_state(),
         )
@@ -110,9 +111,10 @@ impl<'x, 'a, HP: Phase<'x>, T: StateRefHList<'x, 'a>> StateRefHList<'x, 'a>
     type Phase = HCons<HP, T::Phase>;
 }
 
+#[derive(Debug)]
 struct StateLock<'x, P: Phase<'x>> {
-    phase: Mutex<P>,
-    value: Mutex<Option<P::Value>>,
+    phase: RwLock<P>,
+    value: RwLock<Option<P::Value>>,
 }
 
 trait Phase<'x>: 'x {
@@ -182,36 +184,63 @@ where
         <Self::Phase as PhaseHList<'x>>::Ref<'a>,
     ) {
         let state = this.h_get();
-        let mut value = state
-            .value
-            .try_lock()
-            .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph.");
-        let mut phase = state
-            .phase
-            .try_lock()
-            .expect("Unable to unlock mutex. This is due to a cycle in the dependency graph.");
+        let mut phase_value = (
+            state
+                .phase
+                .try_read()
+                .expect("Unable to lock RwLock due to a cycle in the dependency graph."),
+            state
+                .value
+                .try_read()
+                .expect("Unable to lock RwLock due to a cycle in the dependency graph."),
+        );
 
-        if value.is_none() {
-            let (inputs, phase_inputs) = <<HP::Inputs as PhaseHList<'x>>::StateRef<'a> as Phases<
-                'x,
-                'a,
-                L,
-                HT,
-                HST,
-            >>::execute_all(this);
-            *value = Some(
-                phase.execute(unsafe { transmute::transmute(inputs) }, unsafe {
-                    transmute::transmute(phase_inputs)
-                }),
-            );
+        if phase_value.1.is_none() {
+            take_mut::take(&mut phase_value, |(phase, value)| {
+                drop(phase);
+                drop(value);
+                let mut phase = state
+                    .phase
+                    .try_write()
+                    .expect("Unable to lock RwLock due to a cycle in the dependency graph.");
+                let mut value = state
+                    .value
+                    .try_write()
+                    .expect("Unable to lock RwLock due to a cycle in the dependency graph.");
+                let (inputs, phase_inputs) = <<HP::Inputs as PhaseHList<'x>>::StateRef<'a> as Phases<
+                    'x,
+                    'a,
+                    L,
+                    HT,
+                    HST,
+                >>::execute_all(this);
+                *value = Some(
+                    phase.execute(unsafe { transmute::transmute(inputs) }, unsafe {
+                        transmute::transmute(phase_inputs)
+                    }),
+                );
+                drop(phase);
+                drop(value);
+                (
+                    state
+                        .phase
+                        .try_read()
+                        .expect("Invalid state. This should never happen."),
+                    state
+                        .value
+                        .try_read()
+                        .expect("Invalid state. This should never happen."),
+                )
+            });
         }
+
         let (t_value_ref, t_ref) = T::execute_all(this);
         (
             HCons::new(
-                MutexGuard::map(value, |x| x.as_mut().expect("Invalid state.")),
+                RwLockReadGuard::map(phase_value.1, |x| x.as_ref().expect("Invalid state.")),
                 t_value_ref,
             ),
-            HCons::new(phase, t_ref),
+            HCons::new(phase_value.0, t_ref),
         )
     }
 }
@@ -283,5 +312,6 @@ mod tests {
         )
         .to_state();
         SelfPhases::execute_all(list.to_ref());
+        println!("{:?}", list);
     }
 }

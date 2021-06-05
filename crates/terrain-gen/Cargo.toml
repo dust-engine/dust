@@ -29,6 +29,7 @@ rayon = "1.5.1"
 dust-utils = { path = "../utils"}
 parking_lot = "0.11.1"
 transmute = "0.1.1"
+take_mut = "0.2.2"
 
 [dev-dependencies]
 itertools = "0.10.0"
