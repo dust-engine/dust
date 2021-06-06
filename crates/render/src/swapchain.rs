@@ -268,6 +268,7 @@ unsafe fn update_image_desc_sets(device: &ash::Device, swapchain_images: &[Swapc
 const NUM_FRAMES_IN_FLIGHT: usize = 3;
 pub struct Swapchain {
     context: Arc<RenderContext>,
+    allocator: Arc<vma::Allocator>,
     surface: vk::SurfaceKHR,
     current_frame: usize,
     loader: ash::extensions::khr::Swapchain,
@@ -308,7 +309,7 @@ impl Swapchain {
     }
     pub unsafe fn new(
         context: Arc<RenderContext>,
-        allocator: &vma::Allocator,
+        allocator: Arc<vma::Allocator>,
         surface: vk::SurfaceKHR,
         config: SwapchainConfig,
         graphics_queue_family_index: u32,
@@ -318,8 +319,8 @@ impl Swapchain {
         let device = &context.device;
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, device);
         let swapchain = create_swapchain(&swapchain_loader, surface, &config);
-        let depth_image = create_depth_image(device, allocator, &config);
-        let beam_image = create_beam_image(device, allocator, &config);
+        let depth_image = create_depth_image(device, &allocator, &config);
+        let beam_image = create_beam_image(device, &allocator, &config);
         let images = swapchain_loader.get_swapchain_images(swapchain).unwrap();
         // First, create the command pool
         let command_pool = device
@@ -422,6 +423,7 @@ impl Swapchain {
             surface,
             images_desc_set_layout: desc_set_layout,
             images_desc_set_pool: desc_pool,
+            allocator,
         }
     }
 
@@ -560,6 +562,13 @@ impl Drop for Swapchain {
             self.context
                 .device
                 .destroy_image_view(self.depth_image.view, None);
+            self.allocator
+                .destroy_image(self.depth_image.image, &self.depth_image.allocation);
+            self.context
+                .device
+                .destroy_image_view(self.beam_image.view, None);
+            self.allocator
+                .destroy_image(self.beam_image.image, &self.beam_image.allocation);
             // allocator destroy image
             for frame in self.frames_in_flight.iter() {
                 self.context.device.destroy_fence(frame.fence, None);

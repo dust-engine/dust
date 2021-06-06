@@ -12,7 +12,7 @@ use vk_mem as vma;
 
 pub struct RenderResources {
     pub swapchain: Swapchain,
-    pub allocator: vma::Allocator,
+    pub allocator: Arc<vma::Allocator>,
     pub block_allocator_buffer: vk::Buffer,
     pub texture_repo: TextureRepoUploadState,
     pub block_allocator: Arc<dyn BlockAllocator>,
@@ -30,6 +30,7 @@ impl RenderResources {
             heap_size_limits: None,
         })
         .unwrap();
+        let allocator = Arc::new(allocator);
         let swapchain_config = Swapchain::get_config(
             renderer.physical_device,
             renderer.context.surface,
@@ -37,7 +38,7 @@ impl RenderResources {
         );
         let swapchain = Swapchain::new(
             renderer.context.clone(),
-            &allocator,
+            allocator.clone(),
             renderer.context.surface,
             swapchain_config,
             renderer.graphics_queue_family,
