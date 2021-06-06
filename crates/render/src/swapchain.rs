@@ -266,6 +266,7 @@ pub struct Swapchain {
     command_pool: vk::CommandPool,
     pub config: SwapchainConfig,
     pub images_desc_set_layout: vk::DescriptorSetLayout,
+    pub images_desc_set_pool: vk::DescriptorPool,
 }
 pub struct SwapchainConfig {
     pub format: vk::Format,
@@ -401,6 +402,7 @@ impl Swapchain {
             config,
             surface,
             images_desc_set_layout: desc_set_layout,
+            images_desc_set_pool: desc_pool,
         }
     }
 
@@ -526,6 +528,12 @@ impl Swapchain {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            self.context
+                .device
+                .destroy_descriptor_set_layout(self.images_desc_set_layout, None);
+            self.context
+                .device
+                .destroy_descriptor_pool(self.images_desc_set_pool, None);
             for swapchain_image in self.swapchain_images.iter() {
                 self.context
                     .device
