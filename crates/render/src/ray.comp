@@ -77,7 +77,8 @@ layout(set = 1, binding = 3) uniform sampler2DArray TextureRepoSampler;
 Ray GenerateRay() {
     uvec2 pixelRaster = gl_GlobalInvocationID.xy;
 
-    vec2 pixelNDC = vec2(pixelRaster) / vec2(PushConstants.extents);
+    // Also adding 0.5 here, because we want it to stay in the middle of the pixel
+    vec2 pixelNDC = (vec2(pixelRaster) + 0.5) / vec2(PushConstants.extents);
     vec2 pixelCamera = 2 * pixelNDC - 1;
     pixelCamera.y *= -1;
     pixelCamera.x *= PushConstants.aspectRatio;

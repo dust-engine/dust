@@ -2,10 +2,10 @@ use crate::device_info::DeviceInfo;
 use crate::material_repo::TextureRepoUploadState;
 use crate::renderer::RenderContext;
 use crate::shared_buffer::SharedBuffer;
-use crate::swapchain::{RenderPassProvider, Swapchain, SwapchainConfig, SwapchainImage};
+use crate::swapchain::{Swapchain, SwapchainConfig, SwapchainImage};
 use crate::State;
+use crate::utils::div_round_up;
 use ash::vk;
-use ash::vk::RenderPass;
 use smallvec::SmallVec;
 use std::ffi::CStr;
 use std::io::Cursor;
@@ -27,7 +27,6 @@ pub struct RayTracer {
     uniform_desc_set_layout: vk::DescriptorSetLayout,
     pub compute_pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
-    pub render_pass: vk::RenderPass,
 
     pub shared_buffer: SharedBuffer,
     // count, size, invocation
@@ -37,7 +36,6 @@ pub struct RayTracer {
 unsafe fn create_pipelines(
     device: &ash::Device,
     pipeline_layout: vk::PipelineLayout,
-    _render_pass: vk::RenderPass,
 ) -> vk::Pipeline {
     let compute_shader_module = device
         .create_shader_module(
@@ -95,68 +93,6 @@ impl RayTracer {
             graphics_queue,
             graphics_queue_family,
         );
-        let render_pass = device
-            .create_render_pass(
-                &vk::RenderPassCreateInfo::builder()
-                    .attachments(&[
-                        vk::AttachmentDescription::builder()
-                            .format(swapchain.config.format)
-                            .samples(vk::SampleCountFlags::TYPE_1)
-                            .load_op(vk::AttachmentLoadOp::CLEAR)
-                            .store_op(vk::AttachmentStoreOp::STORE)
-                            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-                            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-                            .initial_layout(vk::ImageLayout::UNDEFINED)
-                            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                            .build(),
-                        vk::AttachmentDescription::builder()
-                            .format(vk::Format::D32_SFLOAT_S8_UINT)
-                            .samples(vk::SampleCountFlags::TYPE_1)
-                            .load_op(vk::AttachmentLoadOp::CLEAR)
-                            .store_op(vk::AttachmentStoreOp::STORE)
-                            .stencil_load_op(vk::AttachmentLoadOp::CLEAR)
-                            .stencil_store_op(vk::AttachmentStoreOp::STORE)
-                            .initial_layout(vk::ImageLayout::UNDEFINED)
-                            .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                            .build(),
-                    ])
-                    .subpasses(&[
-                        vk::SubpassDescription::builder()
-                            .depth_stencil_attachment(&vk::AttachmentReference {
-                                attachment: 1,
-                                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                            })
-                            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                            .build(),
-                        vk::SubpassDescription::builder()
-                            .color_attachments(&[vk::AttachmentReference {
-                                attachment: 0,
-                                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                            }])
-                            .depth_stencil_attachment(&vk::AttachmentReference {
-                                attachment: 1,
-                                layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                            })
-                            .input_attachments(&[vk::AttachmentReference {
-                                attachment: 1,
-                                layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                            }])
-                            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                            .build(),
-                    ])
-                    .dependencies(&[vk::SubpassDependency {
-                        src_subpass: 0, // TODO
-                        dst_subpass: 1,
-                        src_stage_mask: vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                        dst_stage_mask: vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-                        src_access_mask: vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                        dst_access_mask: vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
-                        dependency_flags: vk::DependencyFlags::BY_REGION,
-                    }])
-                    .build(),
-                None,
-            )
-            .unwrap();
         let desc_pool = device
             .create_descriptor_pool(
                 &vk::DescriptorPoolCreateInfo::builder()
@@ -261,7 +197,7 @@ impl RayTracer {
                 None,
             )
             .unwrap();
-        let pipeline = create_pipelines(device, pipeline_layout, render_pass);
+        let pipeline = create_pipelines(device, pipeline_layout);
 
         device.update_descriptor_sets(
             &[
@@ -287,7 +223,6 @@ impl RayTracer {
             storage_desc_set,
             storage_desc_set_layout,
             uniform_desc_set,
-            render_pass,
             shared_buffer,
             desc_pool,
             uniform_desc_set_layout,
@@ -389,10 +324,7 @@ impl RayTracer {
                 .update_descriptor_sets(writes.as_slice(), &[]);
         }
     }
-}
-
-impl RenderPassProvider for RayTracer {
-    unsafe fn record_command_buffer(
+    pub(crate) unsafe fn record_command_buffer(
         &mut self,
         device: &ash::Device,
         swapchain_image: &SwapchainImage,
@@ -409,9 +341,6 @@ impl RenderPassProvider for RayTracer {
                 "Max compute work group size too small. {} {}",
                 max_compute_work_group_size[0], max_compute_work_group_size[1]
             );
-        }
-        fn div_round_up(a: u32, b: u32) -> u32 {
-            (a + b - 1) / b
         }
         let work_group_count = [
             div_round_up(config.extent.width, default_local_workgroup_size),
@@ -531,10 +460,6 @@ impl RenderPassProvider for RayTracer {
                 .build()],
         );
     }
-
-    unsafe fn get_render_pass(&self) -> RenderPass {
-        self.render_pass
-    }
 }
 
 impl Drop for RayTracer {
@@ -555,9 +480,6 @@ impl Drop for RayTracer {
             self.context
                 .device
                 .destroy_pipeline(self.compute_pipeline, None);
-            self.context
-                .device
-                .destroy_render_pass(self.render_pass, None);
         }
     }
 }

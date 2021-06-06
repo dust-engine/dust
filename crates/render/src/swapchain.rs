@@ -1,4 +1,6 @@
+use crate::raytracer::RayTracer;
 use crate::renderer::RenderContext;
+use crate::utils::div_round_up;
 use ash::vk;
 use std::mem::MaybeUninit;
 use std::sync::Arc;
@@ -18,21 +20,11 @@ pub struct SwapchainImage {
     // is that cmd_begin_render_pass contains a reference to the framebuffer
     // which is unique to each swapchain image.
     pub command_buffer: vk::CommandBuffer,
-    pub framebuffer: vk::Framebuffer,
 }
 pub(crate) struct DepthImage {
     image: vk::Image,
     pub(crate) view: vk::ImageView,
     allocation: vma::Allocation,
-}
-pub trait RenderPassProvider {
-    unsafe fn record_command_buffer(
-        &mut self,
-        device: &ash::Device,
-        image: &SwapchainImage,
-        config: &SwapchainConfig,
-    );
-    unsafe fn get_render_pass(&self) -> vk::RenderPass;
 }
 impl Frame {
     unsafe fn new(device: &ash::Device) -> Self {
@@ -118,6 +110,68 @@ unsafe fn create_depth_image(
     }
 }
 
+unsafe fn create_beam_image(
+    device: &ash::Device,
+    allocator: &vma::Allocator,
+    config: &SwapchainConfig,
+) -> DepthImage {
+    let (image, allocation, _allocation_info) = allocator
+        .create_image(
+            &vk::ImageCreateInfo::builder()
+                .flags(vk::ImageCreateFlags::empty())
+                .image_type(vk::ImageType::TYPE_2D)
+                .format(vk::Format::D32_SFLOAT)
+                .extent(vk::Extent3D {
+                    width: div_round_up(config.extent.width, 8),
+                    height: div_round_up(config.extent.height, 8),
+                    depth: 1,
+                })
+                .mip_levels(1)
+                .array_layers(1)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .tiling(vk::ImageTiling::OPTIMAL)
+                .usage(
+                    vk::ImageUsageFlags::INPUT_ATTACHMENT,
+                )
+                .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .build(),
+            &vma::AllocationCreateInfo {
+                usage: vma::MemoryUsage::GpuOnly,
+                flags: vma::AllocationCreateFlags::NONE,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let view = device
+        .create_image_view(
+            &vk::ImageViewCreateInfo::builder()
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(vk::Format::D32_SFLOAT)
+                .components(vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::R,
+                    g: vk::ComponentSwizzle::G,
+                    b: vk::ComponentSwizzle::B,
+                    a: vk::ComponentSwizzle::A,
+                })
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::DEPTH,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .image(image),
+            None,
+        )
+        .unwrap();
+    DepthImage {
+        image,
+        view,
+        allocation,
+    }
+}
+
 unsafe fn create_swapchain(
     loader: &ash::extensions::khr::Swapchain,
     surface: vk::SurfaceKHR,
@@ -172,27 +226,6 @@ unsafe fn create_image_view(
         )
         .unwrap()
 }
-unsafe fn create_framebuffer(
-    device: &ash::Device,
-    view: vk::ImageView,
-    depth_view: vk::ImageView,
-    render_pass: vk::RenderPass,
-    config: &SwapchainConfig,
-) -> vk::Framebuffer {
-    device
-        .create_framebuffer(
-            &vk::FramebufferCreateInfo::builder()
-                .height(config.extent.height)
-                .width(config.extent.width)
-                .layers(1)
-                .attachments(&[view, depth_view])
-                .render_pass(render_pass)
-                .flags(vk::FramebufferCreateFlags::empty())
-                .build(),
-            None,
-        )
-        .unwrap()
-}
 unsafe fn update_image_desc_sets<I>(device: &ash::Device, iterator: I)
 where
     I: Iterator<Item = (vk::DescriptorSet, vk::ImageView)> + Clone,
@@ -230,10 +263,10 @@ pub struct Swapchain {
     frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT],          // number of frames in flight
     swapchain_images: Vec<SwapchainImage>, // number of images in swapchain
     depth_image: DepthImage,
+    beam_image: DepthImage,
     graphics_queue: vk::Queue,
     command_pool: vk::CommandPool,
     pub config: SwapchainConfig,
-    render_pass: vk::RenderPass,
     pub images_desc_set_layout: vk::DescriptorSetLayout,
 }
 pub struct SwapchainConfig {
@@ -273,6 +306,7 @@ impl Swapchain {
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, device);
         let swapchain = create_swapchain(&swapchain_loader, surface, &config);
         let depth_image = create_depth_image(device, allocator, &config);
+        let beam_image = create_beam_image(device, allocator, &config);
         let images = swapchain_loader.get_swapchain_images(swapchain).unwrap();
         // First, create the command pool
         let command_pool = device
@@ -338,7 +372,6 @@ impl Swapchain {
                     view,
                     fence: vk::Fence::null(),
                     command_buffer,
-                    framebuffer: vk::Framebuffer::null(),
                 }
             })
             .collect::<Vec<_>>();
@@ -365,10 +398,10 @@ impl Swapchain {
             frames_in_flight,
             swapchain_images,
             depth_image,
+            beam_image,
             graphics_queue,
             config,
             surface,
-            render_pass: vk::RenderPass::null(),
             images_desc_set_layout: desc_set_layout,
         }
     }
@@ -380,9 +413,6 @@ impl Swapchain {
             .destroy_image_view(self.depth_image.view, None);
         allocator.destroy_image(self.depth_image.image, &self.depth_image.allocation);
         for swapchain_image in self.swapchain_images.iter() {
-            self.context
-                .device
-                .destroy_framebuffer(swapchain_image.framebuffer, None);
             self.context
                 .device
                 .destroy_image_view(swapchain_image.view, None);
@@ -399,7 +429,6 @@ impl Swapchain {
         for (swapchain_image, image) in self.swapchain_images.iter_mut().zip(images.into_iter()) {
             swapchain_image.view = create_image_view(&self.context.device, image, &config);
             swapchain_image.image = image;
-            swapchain_image.framebuffer = vk::Framebuffer::null(); // this will be filled later on during bind_render_pass
         }
         update_image_desc_sets(
             &self.context.device,
@@ -412,9 +441,6 @@ impl Swapchain {
     }
 
     pub unsafe fn render_frame(&mut self) {
-        if self.render_pass == vk::RenderPass::null() {
-            return;
-        }
         let frame_in_flight = &self.frames_in_flight[self.current_frame];
         self.context
             .device
@@ -475,16 +501,8 @@ impl Swapchain {
             self.current_frame = 0;
         }
     }
-    pub unsafe fn bind_render_pass(&mut self, render_pass_provider: &mut impl RenderPassProvider) {
-        self.render_pass = render_pass_provider.get_render_pass();
+    pub unsafe fn bind_render_pass(&mut self, render_pass_provider: &mut RayTracer) {
         for swapchain_image in self.swapchain_images.iter_mut() {
-            swapchain_image.framebuffer = create_framebuffer(
-                &self.context.device,
-                swapchain_image.view,
-                self.depth_image.view,
-                self.render_pass,
-                &self.config,
-            );
             self.context
                 .device
                 .begin_command_buffer(
@@ -511,9 +529,6 @@ impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
             for swapchain_image in self.swapchain_images.iter() {
-                self.context
-                    .device
-                    .destroy_framebuffer(swapchain_image.framebuffer, None);
                 self.context
                     .device
                     .destroy_image_view(swapchain_image.view, None);
