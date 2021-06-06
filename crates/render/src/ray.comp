@@ -31,6 +31,7 @@ uint MaskLocationNthOne(uint mask, uint location) {
 #define GROUP_SIZE_Y 8
 layout(local_size_x = GROUP_SIZE_X, local_size_y = GROUP_SIZE_Y, local_size_z = 1) in;
 layout(rgba32f, set = 2, binding = 0) uniform writeonly image2D imgOutput;
+layout(r32f, set = 2, binding = 1) uniform readonly image2D beamDepthInput;
 
 layout(push_constant) uniform constants
 {

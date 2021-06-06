@@ -224,7 +224,7 @@ impl Renderer {
                     .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
                     .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
                     .pfn_user_callback(Some(debug_utils_messenger_callback));
-                let handle = unsafe { ext.create_debug_utils_messenger(&info, None) }.unwrap();
+                let handle = ext.create_debug_utils_messenger(&info, None).unwrap();
                 Some((ext, handle))
             } else {
                 None

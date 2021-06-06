@@ -224,28 +224,42 @@ unsafe fn create_image_view(
         )
         .unwrap()
 }
-unsafe fn update_image_desc_sets<I>(device: &ash::Device, iterator: I)
-where
-    I: Iterator<Item = (vk::DescriptorSet, vk::ImageView)> + Clone,
+unsafe fn update_image_desc_sets(device: &ash::Device, swapchain_images: &[SwapchainImage], beam_image: &DepthImage)
 {
-    let image_infos = iterator
-        .clone()
-        .map(|(_, image_view)| vk::DescriptorImageInfo {
+    let image_infos = swapchain_images
+        .iter()
+        .map(|swapchain_image| vk::DescriptorImageInfo {
             sampler: vk::Sampler::null(),
-            image_view,
+            image_view: swapchain_image.view,
             image_layout: vk::ImageLayout::GENERAL,
         })
         .collect::<Vec<vk::DescriptorImageInfo>>();
-    let descriptor_writes = iterator
+    let beam_info = [vk::DescriptorImageInfo {
+        sampler: vk::Sampler::null(),
+        image_view: beam_image.view,
+        image_layout: vk::ImageLayout::GENERAL,
+    }];
+    let descriptor_writes = swapchain_images
+        .iter()
         .enumerate()
-        .map(|(i, (desc_set, _))| {
-            vk::WriteDescriptorSet::builder()
-                .dst_set(desc_set)
-                .dst_binding(0)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                .image_info(&image_infos[i..=i])
-                .build()
+        .flat_map(|(i, swapchain_image)| {
+            std::iter::once(
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(swapchain_image.desc_set)
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .image_info(&image_infos[i..=i])
+                    .build())
+                .chain(std::iter::once(
+                    vk::WriteDescriptorSet::builder()
+                    .dst_set(swapchain_image.desc_set)
+                    .dst_binding(1)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .image_info(&beam_info)
+                    .build()
+                ))
         })
         .collect::<Vec<vk::WriteDescriptorSet>>();
     device.update_descriptor_sets(descriptor_writes.as_slice(), &[]);
@@ -332,7 +346,7 @@ impl Swapchain {
                     .max_sets(images.len() as u32)
                     .pool_sizes(&[vk::DescriptorPoolSize {
                         ty: vk::DescriptorType::STORAGE_IMAGE,
-                        descriptor_count: 3,
+                        descriptor_count: images.len() as u32 * 2,
                     }])
                     .build(),
                 None,
@@ -346,7 +360,13 @@ impl Swapchain {
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                         .descriptor_count(1)
-                        .build(),
+                        .build(), // Primary Output Image
+                    vk::DescriptorSetLayoutBinding::builder()
+                        .binding(1)
+                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .descriptor_count(1)
+                        .build(), // Beam Image
                 ]),
                 None,
             )
@@ -377,9 +397,8 @@ impl Swapchain {
 
         update_image_desc_sets(
             device,
-            swapchain_images
-                .iter()
-                .map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)),
+            &swapchain_images,
+            &beam_image
         );
         let mut frames_in_flight: [MaybeUninit<Frame>; NUM_FRAMES_IN_FLIGHT] =
             MaybeUninit::uninit().assume_init();
@@ -432,9 +451,8 @@ impl Swapchain {
         }
         update_image_desc_sets(
             &self.context.device,
-            self.swapchain_images
-                .iter()
-                .map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)),
+            &self.swapchain_images,
+            &self.beam_image
         );
         self.depth_image = create_depth_image(&self.context.device, allocator, &config);
         self.config = config;
