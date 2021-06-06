@@ -10,7 +10,7 @@ edition = "2018"
 dust-core = { path = "../core" }
 tracing = "*"
 raw-window-handle = "*"
-glam = { version = "0.15.2" }
+glam = { version = "0.15.2", features = ["transform-types"] }
 ash-window = { git = "https://github.com/MaikKlein/ash" }
 ash = { git = "https://github.com/MaikKlein/ash" } # wait for 0.33.0 for queue_bind_sparse
 vk-mem = { git = "https://github.com/dust-engine/vk-mem-rs" }

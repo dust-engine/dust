@@ -137,7 +137,7 @@ impl RenderResources {
         texture_repo.colored_materials[2].color_palette[14] = to_vec(0xc21813); // red_wool
         texture_repo.colored_materials[2].color_palette[15] = to_vec(0xf6e109); // yellow_wool
 
-        let upload = unsafe {
+        let upload = {
             let command_pool = renderer
                 .context
                 .device
@@ -150,7 +150,7 @@ impl RenderResources {
                 )
                 .unwrap();
             let mut command_buffer = vk::CommandBuffer::null();
-            renderer.context.device.fp_v1_0().allocate_command_buffers(
+            let result = renderer.context.device.fp_v1_0().allocate_command_buffers(
                 renderer.context.device.handle(),
                 &vk::CommandBufferAllocateInfo::builder()
                     .command_buffer_count(1)
@@ -159,6 +159,7 @@ impl RenderResources {
                     .build(),
                 &mut command_buffer,
             );
+            assert_eq!(result, vk::Result::SUCCESS);
             renderer
                 .context
                 .device
@@ -191,11 +192,12 @@ impl RenderResources {
                     .command_buffers(&[command_buffer])
                     .build()],
                 fence,
-            );
+            ).unwrap();
             renderer
                 .context
                 .device
-                .wait_for_fences(&[fence], true, u64::MAX);
+                .wait_for_fences(&[fence], true, u64::MAX)
+                .unwrap();
             renderer.context.device.destroy_fence(fence, None);
             renderer
                 .context

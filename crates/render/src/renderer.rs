@@ -181,213 +181,211 @@ impl Renderer {
     /// The application needs to ensure that when the Renderer was dropped,
     /// the BlockAllocator will not be used anymore.
     pub unsafe fn new(window_handle: &impl raw_window_handle::HasRawWindowHandle) -> Renderer {
-        unsafe {
-            let entry = ash::Entry::new().unwrap();
-            let instance_extensions = entry.enumerate_instance_extension_properties().unwrap();
+        let entry = ash::Entry::new().unwrap();
+        let instance_extensions = entry.enumerate_instance_extension_properties().unwrap();
 
-            let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
-            extensions.push(ash::extensions::ext::DebugUtils::name());
+        let mut extensions = ash_window::enumerate_required_extensions(window_handle).unwrap();
+        extensions.push(ash::extensions::ext::DebugUtils::name());
 
-            let layers: [&CStr; 0] = [];
-            let instance = entry
-                .create_instance(
-                    &vk::InstanceCreateInfo::builder()
-                        .application_info(
-                            &vk::ApplicationInfo::builder()
-                                .application_name(&CStr::from_bytes_with_nul_unchecked(
-                                    b"Dust Application\0",
-                                ))
-                                .application_version(0)
-                                .engine_name(&CStr::from_bytes_with_nul_unchecked(b"Dust Engine\0"))
-                                .engine_version(0)
-                                .api_version(vk::make_version(1, 2, 0)),
-                        )
-                        .enabled_layer_names(&layers.map(|str| str.as_ptr() as *const i8))
-                        .enabled_extension_names(
-                            &extensions
-                                .iter()
-                                .map(|&str| str.as_ptr())
-                                .collect::<Vec<_>>(),
-                        ),
-                    None,
-                )
-                .unwrap();
+        let layers: [&CStr; 0] = [];
+        let instance = entry
+            .create_instance(
+                &vk::InstanceCreateInfo::builder()
+                    .application_info(
+                        &vk::ApplicationInfo::builder()
+                            .application_name(&CStr::from_bytes_with_nul_unchecked(
+                                b"Dust Application\0",
+                            ))
+                            .application_version(0)
+                            .engine_name(&CStr::from_bytes_with_nul_unchecked(b"Dust Engine\0"))
+                            .engine_version(0)
+                            .api_version(vk::make_version(1, 2, 0)),
+                    )
+                    .enabled_layer_names(&layers.map(|str| str.as_ptr() as *const i8))
+                    .enabled_extension_names(
+                        &extensions
+                            .iter()
+                            .map(|&str| str.as_ptr())
+                            .collect::<Vec<_>>(),
+                    ),
+                None,
+            )
+            .unwrap();
 
-            let debug_messenger = {
-                // make sure VK_EXT_debug_utils is available
-                if instance_extensions.iter().any(|props| unsafe {
-                    CStr::from_ptr(props.extension_name.as_ptr())
-                        == ash::extensions::ext::DebugUtils::name()
-                }) {
-                    let ext = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-                    let info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-                        .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
-                        .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
-                        .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
-                        .pfn_user_callback(Some(debug_utils_messenger_callback));
-                    let handle = unsafe { ext.create_debug_utils_messenger(&info, None) }.unwrap();
-                    Some((ext, handle))
-                } else {
-                    None
-                }
-            };
+        let debug_messenger = {
+            // make sure VK_EXT_debug_utils is available
+            if instance_extensions.iter().any(|props| unsafe {
+                CStr::from_ptr(props.extension_name.as_ptr())
+                    == ash::extensions::ext::DebugUtils::name()
+            }) {
+                let ext = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+                let info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                    .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
+                    .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
+                    .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
+                    .pfn_user_callback(Some(debug_utils_messenger_callback));
+                let handle = unsafe { ext.create_debug_utils_messenger(&info, None) }.unwrap();
+                Some((ext, handle))
+            } else {
+                None
+            }
+        };
 
-            let surface =
-                ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();
-            let available_physical_devices: Vec<_> = instance
-                .enumerate_physical_devices()
-                .unwrap()
-                .into_iter()
-                .map(|physical_device| {
-                    let device_info = DeviceInfo::new(&entry, &instance, physical_device);
-                    (physical_device, device_info)
-                })
-                .filter(|(_physical_device, device_info)| {
-                    device_info.features.sparse_residency_buffer != 0
-                        && device_info.features.sparse_binding != 0
-                })
-                .collect();
-            let (physical_device, device_info) = available_physical_devices
-                .iter()
-                .find(|(_physical_device, device_info)| {
-                    device_info.physical_device_properties.device_type
-                        == vk::PhysicalDeviceType::DISCRETE_GPU
-                })
-                .or_else(|| {
-                    available_physical_devices
-                        .iter()
-                        .find(|(_physical_device, device_info)| {
-                            device_info.physical_device_properties.device_type
-                                == vk::PhysicalDeviceType::INTEGRATED_GPU
-                        })
-                })
-                .expect("Unable to find a supported graphics card");
-            let physical_device = *physical_device;
-            let device_info = device_info.clone();
-            println!(
-                "Selected graphics card: {}",
-                CStr::from_ptr(&device_info.physical_device_properties.device_name as *const _)
-                    .to_string_lossy()
-            );
-            let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
+        let surface =
+            ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();
+        let available_physical_devices: Vec<_> = instance
+            .enumerate_physical_devices()
+            .unwrap()
+            .into_iter()
+            .map(|physical_device| {
+                let device_info = DeviceInfo::new(&entry, &instance, physical_device);
+                (physical_device, device_info)
+            })
+            .filter(|(_physical_device, device_info)| {
+                device_info.features.sparse_residency_buffer != 0
+                    && device_info.features.sparse_binding != 0
+            })
+            .collect();
+        let (physical_device, device_info) = available_physical_devices
+            .iter()
+            .find(|(_physical_device, device_info)| {
+                device_info.physical_device_properties.device_type
+                    == vk::PhysicalDeviceType::DISCRETE_GPU
+            })
+            .or_else(|| {
+                available_physical_devices
+                    .iter()
+                    .find(|(_physical_device, device_info)| {
+                        device_info.physical_device_properties.device_type
+                            == vk::PhysicalDeviceType::INTEGRATED_GPU
+                    })
+            })
+            .expect("Unable to find a supported graphics card");
+        let physical_device = *physical_device;
+        let device_info = device_info.clone();
+        println!(
+            "Selected graphics card: {}",
+            CStr::from_ptr(&device_info.physical_device_properties.device_name as *const _)
+                .to_string_lossy()
+        );
+        let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
 
-            let available_queue_family =
-                instance.get_physical_device_queue_family_properties(physical_device);
-            let graphics_queue_family = available_queue_family
-                .iter()
-                .enumerate()
-                .find(|&(i, family)| {
-                    family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                        && surface_loader
-                            .get_physical_device_surface_support(physical_device, i as u32, surface)
-                            .unwrap_or(false)
-                })
-                .unwrap()
-                .0 as u32;
-            let transfer_binding_queue_family = available_queue_family
-                .iter()
-                .enumerate()
-                .find(|&(_, family)| {
-                    !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                        && !family.queue_flags.contains(vk::QueueFlags::COMPUTE)
-                        && family
+        let available_queue_family =
+            instance.get_physical_device_queue_family_properties(physical_device);
+        let graphics_queue_family = available_queue_family
+            .iter()
+            .enumerate()
+            .find(|&(i, family)| {
+                family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                    && surface_loader
+                        .get_physical_device_surface_support(physical_device, i as u32, surface)
+                        .unwrap_or(false)
+            })
+            .unwrap()
+            .0 as u32;
+        let transfer_binding_queue_family = available_queue_family
+            .iter()
+            .enumerate()
+            .find(|&(_, family)| {
+                !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                    && !family.queue_flags.contains(vk::QueueFlags::COMPUTE)
+                    && family
+                        .queue_flags
+                        .contains(vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING)
+            })
+            .or_else(|| {
+                available_queue_family
+                    .iter()
+                    .enumerate()
+                    .find(|&(_, family)| {
+                        !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                            && family.queue_flags.contains(
+                                vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING,
+                            )
+                    })
+            })
+            .or_else(|| {
+                available_queue_family
+                    .iter()
+                    .enumerate()
+                    .find(|&(_, family)| {
+                        family
                             .queue_flags
                             .contains(vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING)
-                })
-                .or_else(|| {
-                    available_queue_family
-                        .iter()
-                        .enumerate()
-                        .find(|&(_, family)| {
-                            !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                                && family.queue_flags.contains(
-                                    vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING,
-                                )
-                        })
-                })
-                .or_else(|| {
-                    available_queue_family
-                        .iter()
-                        .enumerate()
-                        .find(|&(_, family)| {
-                            family
-                                .queue_flags
-                                .contains(vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING)
-                        })
-                })
-                .unwrap()
-                .0 as u32;
+                    })
+            })
+            .unwrap()
+            .0 as u32;
 
-            let extension_names = device_info.required_device_extensions();
-            let device = instance
-                .create_device(
-                    physical_device,
-                    &vk::DeviceCreateInfo::builder()
-                        .queue_create_infos(&[
-                            vk::DeviceQueueCreateInfo::builder()
-                                .queue_family_index(graphics_queue_family)
-                                .queue_priorities(&[1.0])
-                                .build(),
-                            vk::DeviceQueueCreateInfo::builder()
-                                .queue_family_index(transfer_binding_queue_family)
-                                .queue_priorities(&[0.5])
-                                .build(),
-                        ])
-                        .enabled_extension_names(
-                            &extension_names
-                                .into_iter()
-                                .map(|str| str.as_ptr())
-                                .collect::<Vec<_>>(),
-                        )
-                        .enabled_features(&vk::PhysicalDeviceFeatures {
-                            sparse_binding: 1,
-                            sparse_residency_buffer: 1,
-                            ..Default::default()
-                        })
-                        .push_next(
-                            &mut vk::PhysicalDeviceShaderFloat16Int8Features::builder()
-                                .shader_int8(false)
-                                .build(),
-                        )
-                        .push_next(
-                            &mut vk::PhysicalDevice16BitStorageFeatures::builder()
-                                .storage_buffer16_bit_access(true)
-                                .build(),
-                        )
-                        .push_next(
-                            &mut vk::PhysicalDevice8BitStorageFeatures::builder()
-                                .uniform_and_storage_buffer8_bit_access(true)
-                                .build(),
-                        ),
-                    None,
-                )
-                .unwrap();
-            let graphics_queue = device.get_device_queue(graphics_queue_family, 0);
-            let transfer_binding_queue = device.get_device_queue(transfer_binding_queue_family, 0);
-            let context = RenderContext {
-                entry,
-                device,
-                surface,
-                instance,
-                surface_loader,
-                debug_messenger,
-                graphics_queue,
-                transfer_binding_queue,
-                graphics_queue_family,
-                transfer_binding_queue_family,
-            };
-            let renderer = Self {
-                context: Arc::new(context),
+        let extension_names = device_info.required_device_extensions();
+        let device = instance
+            .create_device(
                 physical_device,
-                graphics_queue,
-                transfer_binding_queue,
-                graphics_queue_family,
-                transfer_binding_queue_family,
-                info: device_info,
-            };
+                &vk::DeviceCreateInfo::builder()
+                    .queue_create_infos(&[
+                        vk::DeviceQueueCreateInfo::builder()
+                            .queue_family_index(graphics_queue_family)
+                            .queue_priorities(&[1.0])
+                            .build(),
+                        vk::DeviceQueueCreateInfo::builder()
+                            .queue_family_index(transfer_binding_queue_family)
+                            .queue_priorities(&[0.5])
+                            .build(),
+                    ])
+                    .enabled_extension_names(
+                        &extension_names
+                            .into_iter()
+                            .map(|str| str.as_ptr())
+                            .collect::<Vec<_>>(),
+                    )
+                    .enabled_features(&vk::PhysicalDeviceFeatures {
+                        sparse_binding: 1,
+                        sparse_residency_buffer: 1,
+                        ..Default::default()
+                    })
+                    .push_next(
+                        &mut vk::PhysicalDeviceShaderFloat16Int8Features::builder()
+                            .shader_int8(false)
+                            .build(),
+                    )
+                    .push_next(
+                        &mut vk::PhysicalDevice16BitStorageFeatures::builder()
+                            .storage_buffer16_bit_access(true)
+                            .build(),
+                    )
+                    .push_next(
+                        &mut vk::PhysicalDevice8BitStorageFeatures::builder()
+                            .uniform_and_storage_buffer8_bit_access(true)
+                            .build(),
+                    ),
+                None,
+            )
+            .unwrap();
+        let graphics_queue = device.get_device_queue(graphics_queue_family, 0);
+        let transfer_binding_queue = device.get_device_queue(transfer_binding_queue_family, 0);
+        let context = RenderContext {
+            entry,
+            device,
+            surface,
+            instance,
+            surface_loader,
+            debug_messenger,
+            graphics_queue,
+            transfer_binding_queue,
+            graphics_queue_family,
+            transfer_binding_queue_family,
+        };
+        let renderer = Self {
+            context: Arc::new(context),
+            physical_device,
+            graphics_queue,
+            transfer_binding_queue,
+            graphics_queue_family,
+            transfer_binding_queue_family,
+            info: device_info,
+        };
 
-            renderer
-        }
+        renderer
     }
 }
 

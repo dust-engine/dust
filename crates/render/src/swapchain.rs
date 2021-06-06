@@ -130,9 +130,7 @@ unsafe fn create_beam_image(
                 .array_layers(1)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .tiling(vk::ImageTiling::OPTIMAL)
-                .usage(
-                    vk::ImageUsageFlags::INPUT_ATTACHMENT,
-                )
+                .usage(vk::ImageUsageFlags::INPUT_ATTACHMENT)
                 .sharing_mode(vk::SharingMode::EXCLUSIVE)
                 .initial_layout(vk::ImageLayout::UNDEFINED)
                 .build(),
@@ -260,8 +258,8 @@ pub struct Swapchain {
     current_frame: usize,
     loader: ash::extensions::khr::Swapchain,
     swapchain: vk::SwapchainKHR,
-    frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT],          // number of frames in flight
-    swapchain_images: Vec<SwapchainImage>, // number of images in swapchain
+    frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT], // number of frames in flight
+    swapchain_images: Vec<SwapchainImage>,           // number of images in swapchain
     depth_image: DepthImage,
     beam_image: DepthImage,
     graphics_queue: vk::Queue,
@@ -382,13 +380,13 @@ impl Swapchain {
                 .iter()
                 .map(|swapchain_image| (swapchain_image.desc_set, swapchain_image.view)),
         );
-        let mut frames_in_flight: [MaybeUninit<Frame>; NUM_FRAMES_IN_FLIGHT] = unsafe {
-            MaybeUninit::uninit().assume_init()
-        };
+        let mut frames_in_flight: [MaybeUninit<Frame>; NUM_FRAMES_IN_FLIGHT] =
+            MaybeUninit::uninit().assume_init();
         for i in 0..NUM_FRAMES_IN_FLIGHT {
             frames_in_flight[i].write(Frame::new(&device));
         }
-        let frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT] = unsafe { std::mem::transmute(frames_in_flight) };
+        let frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT] =
+            std::mem::transmute(frames_in_flight);
         Self {
             command_pool,
             context,

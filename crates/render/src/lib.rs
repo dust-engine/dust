@@ -14,10 +14,10 @@ mod material;
 mod material_repo;
 mod raytracer;
 mod render_resources;
-mod utils;
 pub mod renderer;
 mod shared_buffer;
 pub mod swapchain;
+mod utils;
 
 use dust_core::CameraProjection;
 use dust_core::SunLight;

@@ -1,6 +1,5 @@
 use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
-use dust_core::svo::mesher::MarchingCubeMeshBuilder;
 use dust_core::{Octree, SunLight, Voxel};
 use dust_render::RaytracerCameraBundle;
 use std::io::BufWriter;

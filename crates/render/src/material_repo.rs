@@ -260,14 +260,14 @@ impl TextureRepo {
         let mut buffer_ptr = buffer_allocation_info.get_mapped_data() as *mut MaterialDeviceLayout;
         unsafe {
             for (i, material) in self.materials.iter().enumerate() {
-                let material_ref = unsafe { &mut *buffer_ptr };
+                let material_ref = &mut *buffer_ptr;
                 material_ref.scale = material.scale;
                 material_ref.diffuse = i as u16;
                 buffer_ptr = buffer_ptr.add(1);
             }
             let mut buffer_ptr = buffer_ptr as *mut ColoredMaterialDeviceLayout;
             for (i, material) in self.colored_materials.iter().enumerate() {
-                let material_ref = unsafe { &mut *buffer_ptr };
+                let material_ref = &mut *buffer_ptr;
                 material_ref.diffuse = (i + self.materials.len()) as u16;
                 material_ref.scale = material.scale;
                 material_ref.palette = material
