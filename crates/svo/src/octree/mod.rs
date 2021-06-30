@@ -108,7 +108,7 @@ impl<T: Voxel> Octree<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(untested)]
 mod tests {
     use super::*;
 

@@ -1,6 +1,6 @@
 use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
-use dust_core::{Octree, SunLight, Voxel};
+use dust_core::{Octree, SunLight, Voxel, CameraProjection};
 use dust_render::RaytracerCameraBundle;
 use std::io::BufWriter;
 use std::ops::DerefMut;
@@ -33,10 +33,17 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup_from_oct_file.system())
+        .add_startup_system(setup.system())
         .add_system(run.system())
+        .add_system(update_camera.system())
         .add_system(fps_counter::fps_counter.system())
         .run();
+}
+
+fn update_camera(mut query: Query<&mut CameraProjection>) {
+    for mut cp in query.iter_mut() {
+        cp.fov *= 0.999;
+    }
 }
 
 fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
@@ -50,7 +57,7 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     //accessor.set(0, 0, 0, 8, Voxel::with_id(1));
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(1.0, 1.1, 1.0);
+    bundle.transform.translation = Vec3::new(1.0901, 1.1, 1.0894);
     bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
     commands.spawn().insert_bundle(bundle).insert(FlyCamera {
         accel: 0.1,
