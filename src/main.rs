@@ -33,23 +33,16 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup.system())
+        .add_startup_system(setup_from_oct_file.system())
         .add_system(run.system())
-        .add_system(update_camera.system())
         .add_system(fps_counter::fps_counter.system())
         .run();
-}
-
-fn update_camera(mut query: Query<&mut CameraProjection>) {
-    for mut cp in query.iter_mut() {
-        cp.fov *= 0.999;
-    }
 }
 
 fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     let file = std::fs::File::open("./test.oct").unwrap();
     let mut reader = std::io::BufReader::new(file);
-    Octree::read(&mut octree, &mut reader, 12).unwrap();
+    Octree::read(&mut octree, &mut reader, 10).unwrap();
     //let mut accessor = octree.get_random_mutator();
     //accessor.set(1, 1, 1, 8, Voxel::with_id(1));
     //accessor.set(3, 1, 1, 8, Voxel::with_id(1));
@@ -57,7 +50,7 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     //accessor.set(0, 0, 0, 8, Voxel::with_id(1));
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(1.0901, 1.1, 1.0894);
+    bundle.transform.translation = Vec3::new(1.0901, 1.2, 1.0894);
     bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
     commands.spawn().insert_bundle(bundle).insert(FlyCamera {
         accel: 0.1,
@@ -72,14 +65,13 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     let octree = octree.deref_mut();
     let octree_ptr = octree as *mut Octree;
     let octree: &'static mut Octree = unsafe { &mut *octree_ptr };
-    std::thread::spawn(move || {
         let region_dir = "./assets/region";
         let mut load_region = |region_x: i32, region_y: i32| {
             let file =
                 std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y))
                     .unwrap();
-            let region_x = region_x + 7;
-            let region_y = region_y + 6;
+            // let region_x = region_x + 7;
+            // let region_y = region_y + 6;
             let mut region = fastanvil::Region::new(file);
 
             region
@@ -144,7 +136,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                         x + chunk_x as u32 * 16 + region_x as u32 * 512,
                                         y,
                                         z + chunk_z as u32 * 16 + region_y as u32 * 512,
-                                        8192,
+                                        512,
                                         voxel,
                                     );
                                 }
@@ -155,23 +147,22 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                 .unwrap();
             println!("Region loaded: {} {}", region_x, region_y);
         };
-        for x in -7..=5 {
-            for y in -6..=4 {
+        for x in 0..=0 {
+            for y in 0..=0 {
                 load_region(x, y);
             }
         }
         let file = std::fs::File::create("./test.oct").unwrap();
         let mut bufwriter = BufWriter::new(file);
         octree.write(&mut bufwriter).unwrap();
-    });
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(0.0, 0.0, 0.0);
-    bundle.transform.look_at(Vec3::new(1.0, 1.0, 1.0), Vec3::Y);
+    bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);
+    bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
     commands.spawn().insert_bundle(bundle).insert(FlyCamera {
-        accel: 0.01,
+        accel: 1.0,
         max_speed: 0.05,
-        sensitivity: 1.0,
+        sensitivity: 5.0,
         ..Default::default()
     });
 }

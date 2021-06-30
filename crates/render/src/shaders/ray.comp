@@ -323,10 +323,11 @@ void main() {
     if (t_min > 1.0) {
         // No hit
     } else {
-        float v = float(iter) / 200;
+        float v = float(iter) / MAX_RAYCAST_ITERATIONS;
         color.r = v;
         color.g = v;
         color.b = v;
+        // color.rgb = vec3(1 - 1 / (t_min * 30 + 1));
     }
     
     imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);

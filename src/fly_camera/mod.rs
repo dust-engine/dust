@@ -115,7 +115,7 @@ impl Default for FlyCamera {
             key_right: KeyCode::D,
             key_up: KeyCode::Space,
             key_down: KeyCode::LShift,
-            enabled: true,
+            enabled: false,
         }
     }
 }
@@ -220,6 +220,27 @@ fn mouse_motion_system(
     }
 }
 
+fn cursor_grab_system(
+    mut windows: ResMut<Windows>,
+    btn: Res<Input<MouseButton>>,
+    key: Res<Input<KeyCode>>,
+    mut query: Query<&mut FlyCamera>,
+) {
+    let window = windows.get_primary_mut().unwrap();
+
+    if btn.just_pressed(MouseButton::Left) {
+        window.set_cursor_lock_mode(true);
+        window.set_cursor_visibility(false);
+        query.for_each_mut(|mut c| c.enabled = true);
+    }
+
+    if key.just_pressed(KeyCode::Escape) {
+        window.set_cursor_lock_mode(false);
+        window.set_cursor_visibility(true);
+        query.for_each_mut(|mut c| c.enabled = false);
+    }
+}
+
 /**
 Include this plugin to add the systems for the FlyCamera bundle.
 ```no_compile
@@ -233,7 +254,9 @@ pub struct FlyCameraPlugin;
 
 impl Plugin for FlyCameraPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_system(camera_movement_system.system())
+        app
+            .add_system(cursor_grab_system.system())
+            .add_system(camera_movement_system.system())
             .add_system(camera_2d_movement_system.system())
             .add_system(mouse_motion_system.system());
     }
