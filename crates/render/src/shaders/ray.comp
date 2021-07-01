@@ -327,7 +327,6 @@ void main() {
         color.r = v;
         color.g = v;
         color.b = v;
-        // color.rgb = vec3(1 - 1 / (t_min * 30 + 1));
     }
     
     imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);

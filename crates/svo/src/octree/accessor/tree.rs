@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use crate::alloc::Handle;
 use crate::octree::Octree;
 use crate::{Bounds, Corner, Voxel};
@@ -5,7 +6,8 @@ use crate::{Bounds, Corner, Voxel};
 struct NodeInner<T: Voxel> {
     handle: Handle,
     bounds: Bounds,
-    data: T,
+    occupancy: bool,
+    _data_marker: PhantomData<T>,
 }
 impl<T: Voxel> NodeInner<T> {
     fn child(&self, dir: Corner, octree: &Octree<T>) -> NodeInner<T> {
@@ -14,8 +16,9 @@ impl<T: Voxel> NodeInner<T> {
             // Virtual Node
             NodeInner {
                 handle: Handle::none(),
-                data: self.data,
+                occupancy: self.occupancy,
                 bounds: new_bounds,
+                _data_marker: PhantomData,
             }
         } else {
             let node_ref = octree.arena.get(self.handle);
@@ -26,8 +29,9 @@ impl<T: Voxel> NodeInner<T> {
             };
             NodeInner {
                 handle: new_handle,
-                data: node_ref.data[dir as usize],
+                occupancy: node_ref.occupancy & (1 << dir as u32) != 0,
                 bounds: new_bounds,
+                _data_marker: PhantomData,
             }
         }
     }
@@ -39,8 +43,8 @@ pub struct NodeRef<'a, T: Voxel> {
 }
 impl<'a, T: Voxel> NodeRef<'a, T> {
     #[inline]
-    pub fn get(&self) -> T {
-        self.inner.data
+    pub fn get(&self) -> bool {
+        self.inner.occupancy
     }
 
     #[inline]
@@ -67,8 +71,8 @@ pub struct NodeRefMut<'a, T: Voxel> {
     octree: &'a mut Octree<T>,
 }
 impl<'a, T: Voxel> NodeRefMut<'a, T> {
-    pub fn get(&self) -> T {
-        self.inner.data
+    pub fn get(&self) -> bool {
+        self.inner.occupancy
     }
     pub fn child(&mut self, dir: Corner) -> NodeRefMut<T> {
         let inner = self.inner.child(dir, self.octree);
@@ -87,26 +91,28 @@ impl<'a, T: Voxel> NodeRefMut<'a, T> {
 
 impl<T: Voxel> Octree<T> {
     pub fn get_tree_accessor(&self) -> NodeRef<T> {
-        let data = self.root_data;
+        let occupancy = self.root_occupancy;
         let handle = self.root;
         NodeRef {
             octree: self,
             inner: NodeInner {
                 handle,
                 bounds: Bounds::new(),
-                data,
+                occupancy,
+                _data_marker: PhantomData,
             },
         }
     }
     pub fn get_tree_mutator(&mut self) -> NodeRefMut<T> {
-        let data = self.root_data;
+        let occupancy = self.root_occupancy;
         let handle = self.root;
         NodeRefMut {
             octree: self,
             inner: NodeInner {
                 handle,
                 bounds: Bounds::new(),
-                data,
+                occupancy,
+                _data_marker: PhantomData,
             },
         }
     }

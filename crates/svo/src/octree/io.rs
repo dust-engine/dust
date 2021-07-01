@@ -15,12 +15,12 @@ use std::slice::{from_raw_parts, from_raw_parts_mut};
 impl<T: Voxel> Octree<T> {
     pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         // Writing some metadata
-        unsafe {
+        /*unsafe {
             writer.write(from_raw_parts(
                 &self.root_data as *const T as *const u8,
                 size_of::<T>(),
             ))?;
-        }
+        }*/
         // starting to DFS
         let mut queue: VecDeque<(Handle, u8, u8)> = VecDeque::new(); // todo: optimize this with_capacity
         let mut current_index: u32 = 1; // The file address of the next available slot.
@@ -59,10 +59,10 @@ impl<T: Voxel> Octree<T> {
                         current_index += child_block_size;
                     }
 
-                    writer.write(from_raw_parts::<u8>(
+                    /*writer.write(from_raw_parts::<u8>(
                         &node_ref.data as *const T as *const u8,
                         size_of::<[T; 8]>(),
-                    ))?;
+                    ))?;*/
                 }
             }
         }
@@ -112,13 +112,13 @@ impl<T: Voxel> Octree<T> {
             vec
         };
 
-        unsafe {
+        /*unsafe {
             // Read the root data
             reader.read_exact(from_raw_parts_mut(
                 &mut octree.root_data as *mut T as *mut u8,
                 size_of::<T>(),
             ))?;
-        }
+        }*/
 
         // Mapping from file-space indices to (Parent, BlockSize)
         let mut block_size_map: VecDeque<(Handle, u8)> = VecDeque::new(); // todo: optimize with_capacity
@@ -177,11 +177,11 @@ impl<T: Voxel> Octree<T> {
                         node_ref.freemask = 0; // Force to be a leaf
                     }
 
-                    reader.read_exact(from_raw_parts_mut::<u8>(
+                    /*reader.read_exact(from_raw_parts_mut::<u8>(
                         &mut node_ref.data as *mut T as *mut u8,
                         size_of::<[T; 8]>(),
-                    ))?;
-
+                    ))?;*/
+                    /*
                     let mut occupancy: u8 = 0;
                     for i in node_ref.data {
                         occupancy = occupancy >> 1;
@@ -190,6 +190,7 @@ impl<T: Voxel> Octree<T> {
                         }
                     }
                     node_ref.occupancy = occupancy;
+                    */
                 }
             }
             slots_loaded += block_size as u32;

@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use crate::alloc::ArenaAllocator;
 
 use crate::alloc::{ArenaAllocated, Handle};
@@ -13,7 +14,7 @@ pub struct Node<T: Voxel> {
     occupancy: u8,
     _reserved2: u16,
     children: Handle,
-    data: [T; 8],
+    _marker: PhantomData<T>,
 }
 
 impl<T: Voxel> ArenaAllocated for Node<T> {}
@@ -33,7 +34,8 @@ impl<T: Voxel> Node<T> {
 pub struct Octree<T: Voxel> {
     arena: ArenaAllocator<Node<T>>,
     pub(crate) root: Handle,
-    root_data: T,
+    root_occupancy: bool,
+    _root_marker: PhantomData<T>,
 }
 
 impl<T: Voxel> Octree<T> {
@@ -42,7 +44,8 @@ impl<T: Voxel> Octree<T> {
         Octree {
             arena,
             root,
-            root_data: Default::default(),
+            root_occupancy: false,
+            _root_marker: Default::default(),
         }
     }
     pub fn reshape(&mut self, node_handle: Handle, new_mask: u8) {
