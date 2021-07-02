@@ -2,6 +2,7 @@ struct Node {
     uint16_t occupancy_freemask;
     uint16_t _padding2;
     uint children;
+    uint8_t extended_occupancy[8];
     // uint16_t data[8];
 };
 

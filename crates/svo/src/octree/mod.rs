@@ -15,6 +15,7 @@ pub struct Node<T: Voxel> {
     _reserved2: u16,
     children: Handle,
     _marker: PhantomData<T>,
+    extended_occupancy: [u8; 8],
 }
 
 impl<T: Voxel> ArenaAllocated for Node<T> {}

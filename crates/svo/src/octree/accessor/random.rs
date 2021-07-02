@@ -11,7 +11,7 @@ fn set_recursive<T: Voxel>(
     mut z: u32,
     mut gridsize: u32,
     occupancy: bool,
-) -> (bool, bool) {
+) -> (bool, u8, bool) {
     gridsize = gridsize / 2;
     let mut corner: u8 = 0;
     if x >= gridsize {
@@ -47,7 +47,7 @@ fn set_recursive<T: Voxel>(
         }
 
         let new_handle = octree.arena.get(handle).child_handle(corner.into());
-        let (avg, collapsed) = set_recursive(octree, new_handle, x, y, z, gridsize, occupancy);
+        let (avg, all, collapsed) = set_recursive(octree, new_handle, x, y, z, gridsize, occupancy);
 
         let node_ref = octree.arena.get_mut(handle);
         let freemask = node_ref.freemask;
@@ -56,6 +56,7 @@ fn set_recursive<T: Voxel>(
         } else {
             node_ref.occupancy |= 1 << corner;
         }
+        node_ref.extended_occupancy[corner as usize] = all;
         if collapsed {
             octree.reshape(handle, freemask & !(1 << corner));
         }
@@ -66,12 +67,12 @@ fn set_recursive<T: Voxel>(
         // node has no children
         if (node_ref.occupancy == 255 || node_ref.occupancy == 1) && node_ref.occupancy >> 7 == occupancy as u8 {
             // collapse node
-            return (occupancy, true);
+            return (occupancy, node_ref.occupancy, true);
         }
     }
     let avg = node_ref.occupancy != 0;
     octree.arena.changed(handle);
-    return (avg, false);
+    return (avg, node_ref.occupancy, false);
 }
 
 pub fn get<T: Voxel>(
@@ -137,7 +138,7 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
         get(self.octree, x, y, z, gridsize)
     }
     pub fn set(&mut self, x: u32, y: u32, z: u32, gridsize: u32, item: bool) {
-        let (data, _collapsed) =
+        let (data, _ext, _collapsed) =
             set_recursive(self.octree, self.octree.root, x, y, z, gridsize, item);
         self.octree.root_occupancy = data;
     }
