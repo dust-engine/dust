@@ -71,8 +71,9 @@ fn set_recursive<T: Voxel>(
         }
     }
     let avg = node_ref.occupancy != 0;
+    let all = node_ref.occupancy;
     octree.arena.changed(handle);
-    return (avg, node_ref.occupancy, false);
+    return (avg, all, false);
 }
 
 pub fn get<T: Voxel>(
