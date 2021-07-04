@@ -33,7 +33,7 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup_from_oct_file.system())
+        .add_startup_system(setup.system())
         .add_system(run.system())
         .add_system(fps_counter::fps_counter.system())
         .run();
@@ -135,7 +135,7 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                         x + chunk_x as u32 * 16 + region_x as u32 * 512,
                                         y,
                                         z + chunk_z as u32 * 16 + region_y as u32 * 512,
-                                        512,
+                                        512 * 2, // In order to have dummy root node.
                                         true,
                                     );
                                 }

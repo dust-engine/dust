@@ -97,7 +97,7 @@ struct StackItem {
 #define CAST_STACK_DEPTH 23
 #define MAX_RAYCAST_ITERATIONS  200
 
-#define STACK_HEIGHT 4
+#define STACK_HEIGHT 8
 shared StackItem stack_data[GROUP_SIZE_X * GROUP_SIZE_Y][STACK_HEIGHT];
 
 void main() {
