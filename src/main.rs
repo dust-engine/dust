@@ -159,8 +159,8 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);
     bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
     commands.spawn().insert_bundle(bundle).insert(FlyCamera {
-        accel: 1.0,
-        max_speed: 0.02,
+        accel: 0.2,
+        max_speed: 0.005,
         sensitivity: 10.0,
         ..Default::default()
     });

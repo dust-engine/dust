@@ -1,5 +1,6 @@
 struct Node {
-    uint16_t occupancy_freemask;
+    uint8_t freemask;
+    uint8_t occupancy;
     uint16_t _padding2;
     uint children;
     uint8_t extended_occupancy[8];

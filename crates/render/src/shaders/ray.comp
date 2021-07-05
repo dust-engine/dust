@@ -85,9 +85,9 @@ vec3 CubedNormalize(vec3 dir) {
     return -sign(dir) * step(max_element, dir_abs);
 }
 
-struct ChildDescriptor {
+struct ParentDescriptor {
     uint children;
-    uint occupancy_freemask;
+    uint this_occupancy_freemask;
 };
 struct StackItem {
     uint parent;
@@ -138,9 +138,10 @@ void main() {
     // Initialize the current voxel to the first child of the root.
 
     uint   parent           = 0;
-    ChildDescriptor   child_descriptor;
-    child_descriptor.children = 0;
-    child_descriptor.occupancy_freemask = 0; // invalid until fetched
+    ParentDescriptor   parent_descriptor;
+    parent_descriptor.children = 0;
+    parent_descriptor.this_occupancy_freemask = 0; // invalid until fetched
+    uint parent_shift = 0;
     uint    idx              = 0;
     uint    scale            = CAST_STACK_DEPTH - 1;
     float  scale_exp2       = 0.5f; // exp2f(scale - s_max)
@@ -158,12 +159,13 @@ void main() {
     while(iter < MAX_RAYCAST_ITERATIONS) {
         iter++;
         // Fetch child descriptor unless it is already valid.
-        if (child_descriptor.children == 0) {
-            child_descriptor.occupancy_freemask = uint(Chunk_Nodes[parent].occupancy_freemask);
-            child_descriptor.children = Chunk_Nodes[parent].children;
+        if (parent_descriptor.children == 0) {
+            parent_descriptor.this_occupancy_freemask = uint(Chunk_Nodes[parent].freemask) ^ (uint(Chunk_Nodes[parent].extended_occupancy[parent_shift]) << 8);
+            parent_descriptor.children = Chunk_Nodes[parent].children;
         }
 
-        
+        // Position of the child within the parent. (now within the child of the parent due to the extended occupancy)        
+        uint child_shift = idx ^ octant_mask;
 
         // Determine maximum t-value of the cube by evaluating
         // tx(), ty(), and tz() at its corner.
@@ -173,12 +175,11 @@ void main() {
 
         // Process voxel if the corresponding bit in valid mask is set
         // and the active t-span is non-empty.
-        uint child_shift = idx ^ octant_mask;
         if (
             // This bit will be 1 if there exists anything inside this node, or if the node itself is a solid leaf.
             // This bit will be 0 if the node is a leaf, empty node.
             // That is to say, if this bit is 0, the corresponding bit in the freemask is guaranteed to be 0.
-            (((child_descriptor.occupancy_freemask >> 8) & (1 << child_shift )) != 0) && // check occupancy.
+            (((parent_descriptor.this_occupancy_freemask >> 8) & (1 << child_shift )) != 0) && // check occupancy.
             (t_min <= t_max)
         ) {
             // Terminate if the voxel is small enough.
@@ -195,7 +196,7 @@ void main() {
 
             if (t_min <= tv_max) {
                 // Terminate if the corresponding bit in the non-leaf mask is not set.
-                if ((child_descriptor.occupancy_freemask & (1 << child_shift)) == 0)
+                if ((parent_descriptor.this_occupancy_freemask & (1 << parent_shift)) == 0)
                     break;
 
 
@@ -214,8 +215,8 @@ void main() {
                 h = tc_max;
 
                 // Find child descriptor corresponding to the current voxel.
-                parent = child_descriptor.children + MaskLocationNthOne(child_descriptor.occupancy_freemask, child_shift);
-
+                parent = parent_descriptor.children + MaskLocationNthOne(parent_descriptor.this_occupancy_freemask, parent_shift);
+                parent_shift = child_shift;
 
                 // Select child voxel that the ray enters first.
 
@@ -232,7 +233,7 @@ void main() {
                 // Update active t-span and invalidate cached child descriptor.
 
                 t_max = tv_max;
-                child_descriptor.children = 0;
+                parent_descriptor.children = 0;
                 continue;
             }
         }
@@ -278,8 +279,8 @@ void main() {
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
 
             h = 0.0;
-            child_descriptor.children = 0;
-            t_min += exp2(-CAST_STACK_DEPTH);
+            parent_descriptor.children = 0;
+            t_min += exp2(float(-CAST_STACK_DEPTH));
 
             if (needs_restart) {
                 // restart
@@ -287,6 +288,7 @@ void main() {
                 scale = CAST_STACK_DEPTH - 1;
                 scale_exp2 = 0.5;
                 parent = 0;
+                parent_shift = 0;
                 t_max = t_max_original;
                 pos = vec3(1.0f, 1.0f, 1.0f);
                 idx = 0;
