@@ -95,7 +95,7 @@ struct StackItem {
 };
 
 #define CAST_STACK_DEPTH 23
-#define MAX_RAYCAST_ITERATIONS  200
+#define MAX_RAYCAST_ITERATIONS 800
 
 #define STACK_HEIGHT 8
 shared StackItem stack_data[GROUP_SIZE_X * GROUP_SIZE_Y][STACK_HEIGHT];
@@ -196,9 +196,6 @@ void main() {
 
             if (t_min <= tv_max) {
                 // Terminate if the corresponding bit in the non-leaf mask is not set.
-                if ((parent_descriptor.this_occupancy_freemask & (1 << parent_shift)) == 0)
-                    break;
-
 
                 // PUSH
                 // Write current parent to the stack.
@@ -234,6 +231,10 @@ void main() {
 
                 t_max = tv_max;
                 parent_descriptor.children = 0;
+
+                // TODO: MOVE THIS SOMEWHERE ELSE TO MAKE IT FASTER
+                if ((uint(Chunk_Nodes[parent].freemask) & (1 << parent_shift)) == 0)
+                    break;
                 continue;
             }
         }
@@ -267,7 +268,7 @@ void main() {
             }
             uint backoff = new_scale - scale;
             scale = new_scale;
-            bool needs_restart = backoff > stack_len;
+            bool needs_restart = true; // backoff > stack_len;
             stack_len -= backoff;
             scale_exp2 = uintBitsToFloat((scale - CAST_STACK_DEPTH + 127) << 23); // exp2f(scale - s_max)
             StackItem stackVal = stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT];
@@ -277,6 +278,7 @@ void main() {
             uvec3 sh = floatBitsToUint(pos) >> scale;
             pos = uintBitsToFloat(sh << scale);
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
+            parent_shift = octant_mask ^ idx;
 
             h = 0.0;
             parent_descriptor.children = 0;
