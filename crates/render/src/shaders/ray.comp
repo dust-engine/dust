@@ -160,7 +160,7 @@ void main() {
         iter++;
         // Fetch child descriptor unless it is already valid.
         if (parent_descriptor.children == 0) {
-            parent_descriptor.this_occupancy_freemask = uint(Chunk_Nodes[parent].freemask) ^ (uint(Chunk_Nodes[parent].extended_occupancy[parent_shift]) << 8);
+            parent_descriptor.this_occupancy_freemask = uint(Chunk_Nodes[parent].freemask) | (uint(Chunk_Nodes[parent].extended_occupancy[parent_shift]) << 8);
             parent_descriptor.children = Chunk_Nodes[parent].children;
         }
 
@@ -278,7 +278,8 @@ void main() {
             uvec3 sh = floatBitsToUint(pos) >> scale;
             pos = uintBitsToFloat(sh << scale);
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
-            parent_shift = octant_mask ^ idx;
+            uvec3 sh2 = sh >> 1;
+            parent_shift = octant_mask ^ ((sh2.z & 1) | ((sh2.y & 1) << 1) | ((sh2.x ^ 1) << 2));
 
             h = 0.0;
             parent_descriptor.children = 0;
