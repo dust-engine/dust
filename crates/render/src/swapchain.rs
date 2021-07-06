@@ -224,8 +224,11 @@ unsafe fn create_image_view(
         )
         .unwrap()
 }
-unsafe fn update_image_desc_sets(device: &ash::Device, swapchain_images: &[SwapchainImage], beam_image: &DepthImage)
-{
+unsafe fn update_image_desc_sets(
+    device: &ash::Device,
+    swapchain_images: &[SwapchainImage],
+    beam_image: &DepthImage,
+) {
     let image_infos = swapchain_images
         .iter()
         .map(|swapchain_image| vk::DescriptorImageInfo {
@@ -250,16 +253,17 @@ unsafe fn update_image_desc_sets(device: &ash::Device, swapchain_images: &[Swapc
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                     .image_info(&image_infos[i..=i])
-                    .build())
-                .chain(std::iter::once(
-                    vk::WriteDescriptorSet::builder()
+                    .build(),
+            )
+            .chain(std::iter::once(
+                vk::WriteDescriptorSet::builder()
                     .dst_set(swapchain_image.desc_set)
                     .dst_binding(1)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                     .image_info(&beam_info)
-                    .build()
-                ))
+                    .build(),
+            ))
         })
         .collect::<Vec<vk::WriteDescriptorSet>>();
     device.update_descriptor_sets(descriptor_writes.as_slice(), &[]);
@@ -396,18 +400,13 @@ impl Swapchain {
             })
             .collect::<Vec<_>>();
 
-        update_image_desc_sets(
-            device,
-            &swapchain_images,
-            &beam_image
-        );
+        update_image_desc_sets(device, &swapchain_images, &beam_image);
         let mut frames_in_flight: [MaybeUninit<Frame>; NUM_FRAMES_IN_FLIGHT] =
             MaybeUninit::uninit().assume_init();
         for i in 0..NUM_FRAMES_IN_FLIGHT {
             frames_in_flight[i].write(Frame::new(&device));
         }
-        let frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT] =
-            std::mem::transmute(frames_in_flight);
+        let frames_in_flight: [Frame; NUM_FRAMES_IN_FLIGHT] = std::mem::transmute(frames_in_flight);
         Self {
             command_pool,
             context,
@@ -454,7 +453,7 @@ impl Swapchain {
         update_image_desc_sets(
             &self.context.device,
             &self.swapchain_images,
-            &self.beam_image
+            &self.beam_image,
         );
         self.depth_image = create_depth_image(&self.context.device, allocator, &config);
         self.config = config;

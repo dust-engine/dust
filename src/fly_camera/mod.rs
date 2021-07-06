@@ -254,8 +254,7 @@ pub struct FlyCameraPlugin;
 
 impl Plugin for FlyCameraPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app
-            .add_system(cursor_grab_system.system())
+        app.add_system(cursor_grab_system.system())
             .add_system(camera_movement_system.system())
             .add_system(camera_2d_movement_system.system())
             .add_system(mouse_motion_system.system());

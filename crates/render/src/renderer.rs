@@ -231,8 +231,7 @@ impl Renderer {
             }
         };
 
-        let surface =
-            ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();
+        let surface = ash_window::create_surface(&entry, &instance, window_handle, None).unwrap();
         let available_physical_devices: Vec<_> = instance
             .enumerate_physical_devices()
             .unwrap()
@@ -299,9 +298,9 @@ impl Renderer {
                     .enumerate()
                     .find(|&(_, family)| {
                         !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                            && family.queue_flags.contains(
-                                vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING,
-                            )
+                            && family
+                                .queue_flags
+                                .contains(vk::QueueFlags::TRANSFER | vk::QueueFlags::SPARSE_BINDING)
                     })
             })
             .or_else(|| {

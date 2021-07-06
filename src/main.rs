@@ -1,6 +1,6 @@
 use crate::fly_camera::FlyCamera;
 use bevy::prelude::*;
-use dust_core::{Octree, SunLight, Voxel, CameraProjection};
+use dust_core::{CameraProjection, Octree, SunLight, Voxel};
 use dust_render::RaytracerCameraBundle;
 use std::io::BufWriter;
 use std::ops::DerefMut;
@@ -33,7 +33,7 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup.system())
+        .add_startup_system(setup_dbg.system())
         .add_system(run.system())
         .add_system(fps_counter::fps_counter.system())
         .run();
@@ -60,100 +60,113 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     });
 }
 
+fn setup_dbg(mut commands: Commands, mut octree: ResMut<Octree>) {
+    let mut mutator = octree.get_random_mutator();
+    mutator.set(0, 0, 0, 128, true);
+    let mut bundle = RaytracerCameraBundle::default();
+    bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);
+    bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
+    commands.spawn().insert_bundle(bundle).insert(FlyCamera {
+        accel: 0.2,
+        max_speed: 0.005,
+        sensitivity: 10.0,
+        ..Default::default()
+    });
+}
+
 fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     let octree = octree.deref_mut();
     let octree_ptr = octree as *mut Octree;
     let octree: &'static mut Octree = unsafe { &mut *octree_ptr };
-        let region_dir = "./assets/region";
-        let mut load_region = |region_x: i32, region_y: i32| {
-            let file =
-                std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y))
-                    .unwrap();
-            // let region_x = region_x + 7;
-            // let region_y = region_y + 6;
-            let mut region = fastanvil::Region::new(file);
+    let region_dir = "./assets/region";
+    let mut load_region = |region_x: i32, region_y: i32| {
+        let file =
+            std::fs::File::open(format!("{}/r.{}.{}.mca", region_dir, region_x, region_y)).unwrap();
+        // let region_x = region_x + 7;
+        // let region_y = region_y + 6;
+        let mut region = fastanvil::Region::new(file);
 
-            region
-                .for_each_chunk(|chunk_x, chunk_z, chunk_data| {
-                    let mut mutator = octree.get_random_mutator();
-                    let chunk: fastanvil::Chunk =
-                        fastnbt::de::from_bytes(chunk_data.as_slice()).unwrap();
+        region
+            .for_each_chunk(|chunk_x, chunk_z, chunk_data| {
+                let mut mutator = octree.get_random_mutator();
+                let chunk: fastanvil::Chunk =
+                    fastnbt::de::from_bytes(chunk_data.as_slice()).unwrap();
 
-                    if let Some(sections) = chunk.level.sections {
-                        for section in sections {
-                            if section.palette.is_none() {
-                                continue;
-                            }
-                            let palette = section.palette.unwrap();
-                            if let Some(block_states) = section.block_states {
-                                let bits_per_item = (block_states.0.len() * 8) / 4096;
-                                let mut buff: [u16; 4096] = [0; 4096];
-                                block_states.unpack_into(bits_per_item, &mut buff);
-                                for (i, indice) in buff.iter().enumerate() {
-                                    let indice = *indice;
-                                    let block = &palette[indice as usize];
-                                    let x = (i & 0xF) as u32;
-                                    let z = ((i >> 4) & 0xF) as u32;
-                                    let y = (i >> 8) as u32;
+                if let Some(sections) = chunk.level.sections {
+                    for section in sections {
+                        if section.palette.is_none() {
+                            continue;
+                        }
+                        let palette = section.palette.unwrap();
+                        if let Some(block_states) = section.block_states {
+                            let bits_per_item = (block_states.0.len() * 8) / 4096;
+                            let mut buff: [u16; 4096] = [0; 4096];
+                            block_states.unpack_into(bits_per_item, &mut buff);
+                            for (i, indice) in buff.iter().enumerate() {
+                                let indice = *indice;
+                                let block = &palette[indice as usize];
+                                let x = (i & 0xF) as u32;
+                                let z = ((i >> 4) & 0xF) as u32;
+                                let y = (i >> 8) as u32;
 
-                                    let y = y + section.y as u32 * 16;
-                                    assert_eq!(i >> 12, 0);
-                                    let voxel = match block.name {
-                                        "minecraft:air" => continue,
-                                        "minecraft:cave_air" => continue,
-                                        "minecraft:grass" => continue,
-                                        "minecraft:tall_grass" => continue,
-                                        "minecraft:stone" => Voxel::with_id(1),
-                                        "minecraft:bedrock" => Voxel::with_id(1),
-                                        "minecraft:dirt" => Voxel::with_id(2),
-                                        "minecraft:log" => Voxel::with_id(3),
-                                        "minecraft:log2" => Voxel::with_id(3),
-                                        "minecraft:planks" => Voxel::with_id(4),
-                                        "minecraft:gravel" => Voxel::with_id(5),
-                                        "minecraft:white_wool" => Voxel::colored(2, 0),
-                                        "minecraft:grey_wool" => Voxel::colored(2, 1),
-                                        "minecraft:green_wool" => Voxel::colored(2, 2),
-                                        "minecraft:black_wool" => Voxel::colored(2, 3),
-                                        "minecraft:blue_wool" => Voxel::colored(2, 4),
-                                        "minecraft:brown_wool" => Voxel::colored(2, 5),
-                                        "minecraft:cyan_wool" => Voxel::colored(2, 6),
-                                        "minecraft:light_blue_wool" => Voxel::colored(2, 7),
-                                        "minecraft:light_grey_wool" => Voxel::colored(2, 8),
-                                        "minecraft:lime_wool" => Voxel::colored(2, 9),
-                                        "minecraft:magenta_wool" => Voxel::colored(2, 10),
-                                        "minecraft:orange_wool" => Voxel::colored(2, 11),
-                                        "minecraft:pink_wool" => Voxel::colored(2, 12),
-                                        "minecraft:purple_wool" => Voxel::colored(2, 13),
-                                        "minecraft:red_wool" => Voxel::colored(2, 14),
-                                        "minecraft:yellow_wool" => Voxel::colored(2, 15),
-                                        "minecraft:grass_block" => Voxel::colored(0, 0),
-                                        "minecraft:leaves" => Voxel::colored(1, 0),
-                                        "minecraft:leaves2" => Voxel::colored(1, 0),
-                                        _ => Voxel::with_id(1),
-                                    };
-                                    mutator.set(
-                                        x + chunk_x as u32 * 16 + region_x as u32 * 512,
-                                        y,
-                                        z + chunk_z as u32 * 16 + region_y as u32 * 512,
-                                        512 * 2, // In order to have dummy root node.
-                                        true,
-                                    );
-                                }
+                                let y = y + section.y as u32 * 16;
+                                assert_eq!(i >> 12, 0);
+                                let voxel = match block.name {
+                                    "minecraft:air" => continue,
+                                    "minecraft:cave_air" => continue,
+                                    "minecraft:grass" => continue,
+                                    "minecraft:tall_grass" => continue,
+                                    "minecraft:stone" => Voxel::with_id(1),
+                                    "minecraft:bedrock" => Voxel::with_id(1),
+                                    "minecraft:dirt" => Voxel::with_id(2),
+                                    "minecraft:log" => Voxel::with_id(3),
+                                    "minecraft:log2" => Voxel::with_id(3),
+                                    "minecraft:planks" => Voxel::with_id(4),
+                                    "minecraft:gravel" => Voxel::with_id(5),
+                                    "minecraft:white_wool" => Voxel::colored(2, 0),
+                                    "minecraft:grey_wool" => Voxel::colored(2, 1),
+                                    "minecraft:green_wool" => Voxel::colored(2, 2),
+                                    "minecraft:black_wool" => Voxel::colored(2, 3),
+                                    "minecraft:blue_wool" => Voxel::colored(2, 4),
+                                    "minecraft:brown_wool" => Voxel::colored(2, 5),
+                                    "minecraft:cyan_wool" => Voxel::colored(2, 6),
+                                    "minecraft:light_blue_wool" => Voxel::colored(2, 7),
+                                    "minecraft:light_grey_wool" => Voxel::colored(2, 8),
+                                    "minecraft:lime_wool" => Voxel::colored(2, 9),
+                                    "minecraft:magenta_wool" => Voxel::colored(2, 10),
+                                    "minecraft:orange_wool" => Voxel::colored(2, 11),
+                                    "minecraft:pink_wool" => Voxel::colored(2, 12),
+                                    "minecraft:purple_wool" => Voxel::colored(2, 13),
+                                    "minecraft:red_wool" => Voxel::colored(2, 14),
+                                    "minecraft:yellow_wool" => Voxel::colored(2, 15),
+                                    "minecraft:grass_block" => Voxel::colored(0, 0),
+                                    "minecraft:leaves" => Voxel::colored(1, 0),
+                                    "minecraft:leaves2" => Voxel::colored(1, 0),
+                                    _ => Voxel::with_id(1),
+                                };
+                                mutator.set(
+                                    x + chunk_x as u32 * 16 + region_x as u32 * 512,
+                                    y,
+                                    z + chunk_z as u32 * 16 + region_y as u32 * 512,
+                                    512 * 2, // In order to have dummy root node.
+                                    true,
+                                );
                             }
                         }
                     }
-                })
-                .unwrap();
-            println!("Region loaded: {} {}", region_x, region_y);
-        };
-        for x in 0..=0 {
-            for y in 0..=0 {
-                load_region(x, y);
-            }
+                }
+            })
+            .unwrap();
+        println!("Region loaded: {} {}", region_x, region_y);
+    };
+    for x in 0..=0 {
+        for y in 0..=0 {
+            load_region(x, y);
         }
-        let file = std::fs::File::create("./test.oct").unwrap();
-        let mut bufwriter = BufWriter::new(file);
-        octree.write(&mut bufwriter).unwrap();
+    }
+    let file = std::fs::File::create("./test.oct").unwrap();
+    let mut bufwriter = BufWriter::new(file);
+    octree.write(&mut bufwriter).unwrap();
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);

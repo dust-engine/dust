@@ -92,7 +92,6 @@ struct ParentDescriptor {
 struct StackItem {
     uint parent;
     float t_max;
-    uint parent_shift;
 };
 
 #define CAST_STACK_DEPTH 23
@@ -208,7 +207,6 @@ void main() {
                     StackItem item;
                     item.parent = parent;
                     item.t_max = t_max;
-                    item.parent_shift = parent_shift;
                     stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT] = item;
                 }
                 h = tc_max;
@@ -276,11 +274,11 @@ void main() {
             StackItem stackVal = stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT];
             parent = stackVal.parent;
             t_max = stackVal.t_max;
-            parent_shift = stackVal.parent_shift;
 
             uvec3 sh = floatBitsToUint(pos) >> scale;
             pos = uintBitsToFloat(sh << scale);
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
+            parent_shift = octant_mask ^ ((sh.z & 2) | ((sh.y & 2) << 1) | ((sh.x & 2) << 2));
 
             h = 0.0;
             parent_descriptor.children = 0;

@@ -1,11 +1,16 @@
-use std::path::Path;
 use shaderc::{IncludeCallbackResult, IncludeType, ResolvedInclude};
+use std::path::Path;
 
 const GLSL_ENTRY_FILES: [&str; 1] = ["./src/shaders/ray.comp"];
 const GLSL_INCLUDE_DIR: &str = "./src/shaders";
 const MAX_INCLUDE_DEPTH: usize = 10;
 
-fn include_callback(filename: &str, ty: IncludeType, _origin_filename: &str, depth: usize) -> IncludeCallbackResult {
+fn include_callback(
+    filename: &str,
+    ty: IncludeType,
+    _origin_filename: &str,
+    depth: usize,
+) -> IncludeCallbackResult {
     if depth > MAX_INCLUDE_DEPTH {
         panic!("Max include depth {} exceeded", MAX_INCLUDE_DEPTH);
     }
@@ -14,16 +19,16 @@ fn include_callback(filename: &str, ty: IncludeType, _origin_filename: &str, dep
     match std::fs::read_to_string(&path) {
         Ok(content) => {
             println!("cargo:rerun-if-changed={}", path.to_str().unwrap());
-            let resolved_name = path.into_os_string().into_string().expect("Path contains invalid characters");
+            let resolved_name = path
+                .into_os_string()
+                .into_string()
+                .expect("Path contains invalid characters");
             Ok(ResolvedInclude {
                 resolved_name,
                 content,
             })
-
-        },
-        Err(err) => {
-            Err(err.to_string())
         }
+        Err(err) => Err(err.to_string()),
     }
 }
 

@@ -65,7 +65,9 @@ fn set_recursive<T: Voxel>(
     let node_ref = octree.arena.get_mut(handle);
     if node_ref.freemask == 0 {
         // node has no children
-        if (node_ref.occupancy == 255 || node_ref.occupancy == 1) && node_ref.occupancy >> 7 == occupancy as u8 {
+        if (node_ref.occupancy == 255 || node_ref.occupancy == 1)
+            && node_ref.occupancy >> 7 == occupancy as u8
+        {
             // collapse node
             return (occupancy, node_ref.occupancy, true);
         }

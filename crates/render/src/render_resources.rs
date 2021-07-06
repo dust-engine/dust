@@ -187,13 +187,17 @@ impl RenderResources {
                 .device
                 .end_command_buffer(command_buffer)
                 .unwrap();
-            renderer.context.device.queue_submit(
-                renderer.graphics_queue,
-                &[vk::SubmitInfo::builder()
-                    .command_buffers(&[command_buffer])
-                    .build()],
-                fence,
-            ).unwrap();
+            renderer
+                .context
+                .device
+                .queue_submit(
+                    renderer.graphics_queue,
+                    &[vk::SubmitInfo::builder()
+                        .command_buffers(&[command_buffer])
+                        .build()],
+                    fence,
+                )
+                .unwrap();
             renderer
                 .context
                 .device

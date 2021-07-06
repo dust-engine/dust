@@ -228,7 +228,9 @@ impl BlockAllocator for DiscreteBlockAllocator {
         self.context.device.destroy_buffer(block.system_buf, None);
         self.context.device.free_memory(block.system_mem, None);
         self.context.device.free_memory(block.device_mem, None);
-        self.context.device.destroy_semaphore(block.sparse_binding_completion_semaphore, None);
+        self.context
+            .device
+            .destroy_semaphore(block.sparse_binding_completion_semaphore, None);
         self.free_offsets.push(block.offset);
         std::mem::forget(allocation);
     }
