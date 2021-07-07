@@ -94,10 +94,10 @@ struct StackItem {
     float t_max;
 };
 
-#define CAST_STACK_DEPTH 23
+#define CAST_STACK_DEPTH 22
 #define MAX_RAYCAST_ITERATIONS  200
 
-#define STACK_HEIGHT 4
+#define STACK_HEIGHT 8
 shared StackItem stack_data[GROUP_SIZE_X * GROUP_SIZE_Y][STACK_HEIGHT];
 
 void main() {
@@ -260,21 +260,22 @@ void main() {
             if (b_step_mask.x) differing_bits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scale_exp2);
             if (b_step_mask.y) differing_bits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scale_exp2);
             if (b_step_mask.z) differing_bits |= floatBitsToUint(pos.z) ^ floatBitsToUint(pos.z + scale_exp2);
-            uint new_scale = (floatBitsToUint(float(differing_bits)) >> 23) - 127; // position of the highest bit
+            uint new_scale = (floatBitsToUint(float(differing_bits)) >> 23) - 127 - (23 - CAST_STACK_DEPTH); // position of the highest bit
             if (new_scale >= CAST_STACK_DEPTH) {
                 break;
             }
             uint backoff = new_scale - scale;
             scale = new_scale;
             bool needs_restart = backoff > stack_len;
+
             stack_len -= backoff;
             scale_exp2 = uintBitsToFloat((scale - CAST_STACK_DEPTH + 127) << 23); // exp2f(scale - s_max)
             StackItem stackVal = stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT];
             parent = stackVal.parent;
             t_max = stackVal.t_max;
 
-            uvec3 sh = floatBitsToUint(pos) >> scale;
-            pos = uintBitsToFloat(sh << scale);
+            uvec3 sh = floatBitsToUint(pos) >> (scale + (23 - CAST_STACK_DEPTH));
+            pos = uintBitsToFloat(sh << (scale + (23 - CAST_STACK_DEPTH)));
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
 
             h = 0.0;
