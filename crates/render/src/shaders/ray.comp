@@ -268,7 +268,7 @@ void main() {
             }
             uint backoff = new_scale - scale;
             scale = new_scale;
-            bool needs_restart = backoff > stack_len;
+            bool needs_restart = backoff > stack_len || new_scale == CAST_STACK_DEPTH - 1;
 
             stack_len -= backoff;
             scale_exp2 = uintBitsToFloat((scale - CAST_STACK_DEPTH + 127) << 23); // exp2f(scale - s_max)
@@ -276,10 +276,12 @@ void main() {
             parent = stackVal.parent;
             t_max = stackVal.t_max;
 
+            // pos from 1 to 2 (not including 2). Exponent always 1.
             uvec3 sh = floatBitsToUint(pos) >> (scale + (23 - CAST_STACK_DEPTH));
             pos = uintBitsToFloat(sh << (scale + (23 - CAST_STACK_DEPTH)));
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
-            parent_shift = octant_mask ^ ((sh.z & 2) | ((sh.y & 2) << 1) | ((sh.x & 2) << 2));
+            parent_shift = octant_mask ^ ((sh.z & 2) >> 1) | ((sh.y & 2)) | ((sh.x & 2) << 1);
+
 
             h = 0.0;
             parent_descriptor.children = 0;
