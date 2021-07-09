@@ -169,8 +169,11 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
     octree.write(&mut bufwriter).unwrap();
 
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);
-    bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
+    bundle.transform = Transform {
+        translation: Vec3::new(1.9435253, 1.2060931, 1.1657697),
+        rotation: Quat::from_xyzw(-0.14587268, 0.6770396, 0.13954939, 0.7077178),
+        scale: Vec3::new(1.0, 1.0, 1.0),
+    };
     commands.spawn().insert_bundle(bundle).insert(FlyCamera {
         accel: 0.2,
         max_speed: 0.005,
