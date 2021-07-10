@@ -338,8 +338,8 @@ fn select_device_memtype(
     let (device_heap_index, _device_heap) = memory_properties.memory_heaps
         [0..memory_properties.memory_heap_count as usize]
         .iter()
-        .filter(|&heap| heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
         .enumerate()
+        .filter(|(_, heap)| heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
         .max_by_key(|(_, heap)| heap.size)
         .unwrap();
     let device_heap_index = device_heap_index as u32;
@@ -348,12 +348,12 @@ fn select_device_memtype(
         [0..memory_properties.memory_type_count as usize]
         .iter()
         .enumerate()
-        .filter(|(_id, ty)| ty.heap_index == device_heap_index)
         .find(|(id, memory_type)| {
             device_buf_requirements.memory_type_bits & (1 << id) != 0
                 && memory_type
                     .property_flags
                     .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                && memory_type.heap_index == device_heap_index
         })
         .unwrap();
     id as u32
