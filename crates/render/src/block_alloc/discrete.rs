@@ -46,7 +46,7 @@ impl DiscreteBlockAllocator {
         let device = &context.device;
         let queue_family_indices = [graphics_queue_family, bind_transfer_queue_family];
         let mut buffer_create_info = vk::BufferCreateInfo::builder()
-            .size(max_storage_buffer_size)
+            .size((max_storage_buffer_size / block_size) * block_size)
             .usage(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST)
             .flags(vk::BufferCreateFlags::SPARSE_BINDING | vk::BufferCreateFlags::SPARSE_RESIDENCY);
 
