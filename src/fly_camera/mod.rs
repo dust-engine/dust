@@ -186,6 +186,7 @@ fn camera_movement_system(
             };
 
         transform.translation += options.velocity;
+        println!("{:?}", transform);
     }
 }
 
