@@ -64,7 +64,8 @@ fn setup_dbg(mut commands: Commands, mut octree: ResMut<Octree>) {
     let mut mutator = octree.get_random_mutator();
     mutator.set(0, 0, 0, 128, true);
     let mut bundle = RaytracerCameraBundle::default();
-    bundle.transform = Transform { translation: Vec3::new(1.020584, 1.0573443, 1.1485484), rotation: Quat::from_xyzw(-0.12752326, -0.19648989, -0.025783196, 0.97183573), scale: Vec3::new(1.0, 1.0, 1.0) };
+    bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);
+    bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
     commands.spawn().insert_bundle(bundle).insert(FlyCamera {
         accel: 0.2,
         max_speed: 0.005,
@@ -143,13 +144,6 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
                                     "minecraft:leaves2" => Voxel::colored(1, 0),
                                     _ => Voxel::with_id(1),
                                 };
-                                mutator.set(
-                                    x + chunk_x as u32 * 16 + region_x as u32 * 512,
-                                    511 - y,
-                                    z + chunk_z as u32 * 16 + region_y as u32 * 512,
-                                    512 * 2, // In order to have dummy root node.
-                                    true,
-                                );
                                 mutator.set(
                                     x + chunk_x as u32 * 16 + region_x as u32 * 512,
                                     y,

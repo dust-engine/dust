@@ -317,12 +317,6 @@ impl Renderer {
             .0 as u32;
 
         let extension_names = device_info.required_device_extensions();
-        let mut ext = extension_names
-            .into_iter()
-            .map(|str| str.as_ptr())
-            .collect::<Vec<_>>();
-        ext.push(b"VK_KHR_shader_non_semantic_info" as *const u8 as *const i8);
-
         let device = instance
             .create_device(
                 physical_device,
@@ -337,7 +331,12 @@ impl Renderer {
                             .queue_priorities(&[0.5])
                             .build(),
                     ])
-                    .enabled_extension_names(&ext)
+                    .enabled_extension_names(
+                        &extension_names
+                            .into_iter()
+                            .map(|str| str.as_ptr())
+                            .collect::<Vec<_>>(),
+                    )
                     .enabled_features(&vk::PhysicalDeviceFeatures {
                         sparse_binding: 1,
                         sparse_residency_buffer: 1,

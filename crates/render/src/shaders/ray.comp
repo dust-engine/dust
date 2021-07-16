@@ -92,17 +92,15 @@ struct ParentDescriptor {
 struct StackItem {
     uint parent;
     float t_max;
-    uint parent_shift;
 };
 
 #define CAST_STACK_DEPTH 22
-#define MAX_RAYCAST_ITERATIONS 200
+#define MAX_RAYCAST_ITERATIONS  200
 
 #define STACK_HEIGHT 8
 shared StackItem stack_data[GROUP_SIZE_X * GROUP_SIZE_Y][STACK_HEIGHT];
 
 void main() {
-    uint debugdata = 0;
     Ray ray = GenerateRay();
     ray.dir *= 100;
     uint stack_len = 0;
@@ -209,7 +207,6 @@ void main() {
                     StackItem item;
                     item.parent = parent;
                     item.t_max = t_max;
-                    item.parent_shift = parent_shift;
                     stack_data[gl_LocalInvocationIndex][scale % STACK_HEIGHT] = item;
                 }
                 h = tc_max;
@@ -283,27 +280,8 @@ void main() {
             uvec3 sh = floatBitsToUint(pos) >> (scale + (23 - CAST_STACK_DEPTH));
             pos = uintBitsToFloat(sh << (scale + (23 - CAST_STACK_DEPTH)));
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
-            #ifdef STACK_PARENT_SHIFT
-            parent_shift = stackVal.parent_shift;
-            #else
-            parent_shift = octant_mask ^ (((sh.z & 2) >> 1) | ((sh.y & 2)) | ((sh.x & 2) << 1));
-            if (parent_shift != stackVal.parent_shift && debugdata == 0) {
-                debugdata = (1 << 15) | (octant_mask) | (stackVal.parent_shift << 3) | (parent_shift << 6) | (backoff << 9);
-/*
-function decode(g, b) {
-    let num = g + (b << 8);
-    return {
-        octant_mask: num & ((1 << 3) - 1),
-        actual_shift: (num >> 3) & ((1 << 3) - 1),
-        calc_shift: (num >> 6) & ((1 << 3) - 1),
-        backoff: (num >> 9) & ((1 << 5) - 1),
-        raw: num.toString(2),
-    };
-}
-*/
-            }
-            // parent_shift = stackVal.parent_shift;
-            #endif
+            parent_shift = octant_mask ^ ((sh.z & 2) >> 1) | ((sh.y & 2)) | ((sh.x & 2) << 1);
+
 
             h = 0.0;
             parent_descriptor.children = 0;
@@ -348,14 +326,14 @@ function decode(g, b) {
     res.stackPtr = scale;
 */
 
-    vec4 color = vec4(0.0, 0.0, 0.0 ,1.0); // Set above for debugging.
+    vec4 color = vec4(0.0, 0.0, 0.0 ,1.0);
     if (t_min > 1.0) {
         // No hit
     } else {
         float v = float(iter) / MAX_RAYCAST_ITERATIONS;
         color.r = v;
-        color.g = float(debugdata & 255) / 255.;
-        color.b = float(debugdata >> 8) / 255.;
+        color.g = v;
+        color.b = v;
     }
     
     imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);
