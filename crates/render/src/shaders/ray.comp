@@ -280,7 +280,7 @@ void main() {
             uvec3 sh = floatBitsToUint(pos) >> (scale + (23 - CAST_STACK_DEPTH));
             pos = uintBitsToFloat(sh << (scale + (23 - CAST_STACK_DEPTH)));
             idx  = (sh.z & 1) | ((sh.y & 1) << 1) | ((sh.x & 1) << 2);
-            parent_shift = octant_mask ^ ((sh.z & 2) >> 1) | ((sh.y & 2)) | ((sh.x & 2) << 1);
+            parent_shift = octant_mask ^ (((sh.z & 2) >> 1) | ((sh.y & 2)) | ((sh.x & 2) << 1));
 
 
             h = 0.0;
