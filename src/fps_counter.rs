@@ -33,6 +33,6 @@ pub fn fps_counter(time: Res<Time>, mut counter: ResMut<FPSCounter>, mut windows
     let fps = counter.events.len();
 
     let window = windows.get_primary_mut().unwrap();
-    window.set_title(format!("Bevy Demo(fps: {})", fps));
+    window.set_title(format!("Raytracing Demo (fps: {})", fps));
     //println!("Bevy demo (fps: {})", fps);
 }
