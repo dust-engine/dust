@@ -94,7 +94,7 @@ struct StackItem {
     float t_max;
 };
 
-#define CAST_STACK_DEPTH 22
+#define CAST_STACK_DEPTH 23
 #define MAX_RAYCAST_ITERATIONS  200
 
 #define STACK_HEIGHT 8
