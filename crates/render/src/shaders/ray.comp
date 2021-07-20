@@ -24,6 +24,7 @@ layout(push_constant) uniform constants
 {
 	uvec2 extents;
     float aspectRatio;
+    float terminalPixelSize;
 } PushConstants;
 layout(set = 0, binding = 0) uniform u_Camera {
     mat3 rotation;
@@ -75,7 +76,8 @@ Ray GenerateRay() {
     vec3 pixelCameraWorld = Camera.rotation * vec3(pixelCamera, -1);
     Ray ray;
     ray.origin = Camera.position;
-    ray.dir = normalize(pixelCameraWorld);
+    ray.dir = pixelCameraWorld;
+    ray.dir *= 2;
     return ray;
 }
 
@@ -102,7 +104,6 @@ shared StackItem stack_data[GROUP_SIZE_X * GROUP_SIZE_Y][STACK_HEIGHT];
 
 void main() {
     Ray ray = GenerateRay();
-    ray.dir *= 100;
     uint stack_len = 0;
     //const float epsilon = exp2(-CAST_STACK_DEPTH);
     uint iter = 0;
@@ -182,7 +183,8 @@ void main() {
             (t_min <= t_max)
         ) {
             // Terminate if the voxel is small enough.
-            // TODO
+            if (tc_max * PushConstants.terminalPixelSize >= scale_exp2)
+                break; // at t_min
 
 
             // INTERSECT

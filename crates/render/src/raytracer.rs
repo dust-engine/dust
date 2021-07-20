@@ -16,6 +16,7 @@ struct PushConstants {
     width: u32,
     height: u32,
     aspect_ratio: f32,
+    terminal_pixel_size: f32,
 }
 
 pub struct RayTracer {
@@ -375,10 +376,12 @@ impl RayTracer {
                 extent: config.extent,
             }],
         );
+        let performance_factor = 4.0;
         let push_constants = PushConstants {
             width: config.extent.width,
             height: config.extent.height,
             aspect_ratio: (config.extent.width as f32) / (config.extent.height as f32),
+            terminal_pixel_size: (4.0 / (config.extent.width * config.extent.height) as f32).sqrt() * performance_factor,
         };
         device.cmd_push_constants(
             command_buffer,
