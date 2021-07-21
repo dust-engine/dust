@@ -258,7 +258,7 @@ impl<T: Voxel + Debug> MarchingCubeMeshBuilder<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(untested)]
 mod tests {
     use super::*;
     extern crate test;
