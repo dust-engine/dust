@@ -1,5 +1,5 @@
-use std::marker::PhantomData;
 use crate::alloc::ArenaAllocator;
+use std::marker::PhantomData;
 
 use crate::alloc::{ArenaAllocated, Handle};
 use crate::{Corner, Voxel};

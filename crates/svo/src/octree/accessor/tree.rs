@@ -1,7 +1,7 @@
-use std::marker::PhantomData;
 use crate::alloc::Handle;
 use crate::octree::Octree;
 use crate::{Bounds, Corner, Voxel};
+use std::marker::PhantomData;
 
 struct NodeInner<T: Voxel> {
     handle: Handle,

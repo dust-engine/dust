@@ -163,7 +163,7 @@ void main() {
             child_descriptor.children = Chunk_Nodes[parent].children;
         }
 
-        
+
 
         // Determine maximum t-value of the cube by evaluating
         // tx(), ty(), and tz() at its corner.
@@ -329,6 +329,6 @@ void main() {
         color.g = v;
         color.b = v;
     }
-    
+
     imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), color);
 }
