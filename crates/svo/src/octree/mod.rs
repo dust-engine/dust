@@ -7,41 +7,52 @@ use crate::{Corner, Voxel};
 pub mod accessor;
 mod io;
 
-#[derive(Default)]
 #[repr(C)]
-pub struct Node<T: Voxel> {
-    freemask: u8,
-    occupancy: u8,
-    _reserved2: u16,
-    children: Handle,
-    _marker: PhantomData<T>,
+pub union NodeInternal<T: Voxel> {
+    node: Node<T>,
     extended_occupancy: [u8; 8],
 }
 
-impl<T: Voxel> ArenaAllocated for Node<T> {}
+impl<T: Voxel> Default for NodeInternal<T> {
+    fn default() -> Self {
+        NodeInternal { node: Default::default() }
+    }
+}
+
+impl<T: Voxel> ArenaAllocated for NodeInternal<T> {}
+
+#[derive(Copy, Clone, Default)]
+#[repr(C)]
+pub struct Node<T: Voxel> {
+    _padding: u8,
+    occupancy: u8,
+    sizemask: u16, // Two bits per child, either 11 or 01 or 00 depending on whether child has eo or not. 
+    children: Handle,
+    _marker: PhantomData<T>,
+}
 
 impl<T: Voxel> Node<T> {
     pub fn child_handle(&self, corner: Corner) -> Handle {
         // Given a mask and a location, returns n where the given '1' on the location
         // is the nth '1' counting from the least significant bit.
-        fn mask_location_nth_one(mask: u8, location: u8) -> u8 {
+        fn mask_location_nth_one(mask: u16, location: u8) -> u8 {
             (mask & ((1 << location) - 1)).count_ones() as u8
         }
         self.children
-            .offset(mask_location_nth_one(self.freemask, corner as u8) as u32)
+            .offset(mask_location_nth_one(self.sizemask, 2 * corner as u8) as u32)
     }
 }
 
 pub struct Octree<T: Voxel> {
-    arena: ArenaAllocator<Node<T>>,
+    arena: ArenaAllocator<NodeInternal<T>>,
     pub(crate) root: Handle,
     root_occupancy: bool,
     _root_marker: PhantomData<T>,
 }
 
 impl<T: Voxel> Octree<T> {
-    pub fn new(mut arena: ArenaAllocator<Node<T>>) -> Self {
-        let root = arena.alloc(1);
+    pub fn new(mut arena: ArenaAllocator<NodeInternal<T>>) -> Self {
+        let root = arena.alloc(2);
         Octree {
             arena,
             root,
@@ -49,26 +60,22 @@ impl<T: Voxel> Octree<T> {
             _root_marker: Default::default(),
         }
     }
-    pub fn reshape(&mut self, node_handle: Handle, new_mask: u8) {
-        let node_ref = self.arena.get(node_handle);
-        let old_mask = node_ref.freemask;
+    pub fn reshape(&mut self, node_ref: &mut Node<T>, new_mask: u16) {
+        let old_mask = node_ref.sizemask;
         let old_child_handle = node_ref.children;
 
         if old_mask == 0 && new_mask == 0 {
             return;
         }
-        self.arena.changed(node_handle);
         let new_num_items = new_mask.count_ones();
         if old_mask == 0 {
             let new_child_handle = self.arena.alloc(new_num_items);
-            let node_ref = self.arena.get_mut(node_handle);
-            node_ref.freemask = new_mask;
+            node_ref.sizemask = new_mask;
             node_ref.children = new_child_handle;
             return;
         }
         if new_mask == 0 {
-            let node_ref = self.arena.get_mut(node_handle);
-            node_ref.freemask = 0;
+            node_ref.sizemask = 0;
             unsafe {
                 self.arena
                     .free(old_child_handle, old_mask.count_ones() as u8);
@@ -99,8 +106,7 @@ impl<T: Voxel> Octree<T> {
             }
         }
         self.arena.changed_block(new_child_handle, new_num_items);
-        let node_ref = self.arena.get_mut(node_handle);
-        node_ref.freemask = new_mask;
+        node_ref.sizemask = new_mask;
         node_ref.children = new_child_handle;
         unsafe {
             self.arena

@@ -64,7 +64,7 @@ pub trait ArenaAllocated: Sized + Default {}
 pub struct ArenaAllocator<T: ArenaAllocated> {
     block_allocator: Arc<ArenaBlockAllocator>,
     chunks: Vec<(NonNull<ArenaSlot<T>>, BlockAllocation)>,
-    freelist_heads: [Handle; 8],
+    freelist_heads: [Handle; 16],
     newspace_top: Handle,       // new space to be allocated
     pub(crate) size: u32,       // number of allocated slots
     pub(crate) num_blocks: u32, // number of allocated blocks
@@ -89,7 +89,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         Self {
             block_allocator,
             chunks: vec![],
-            freelist_heads: [Handle::none(); 8],
+            freelist_heads: [Handle::none(); 16],
             // Space pointed by this is guaranteed to have free space > 8
             newspace_top: Handle::none(),
             size: 0,
@@ -107,7 +107,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         Handle::from_index(chunk_index, 0)
     }
     pub fn alloc(&mut self, len: u32) -> Handle {
-        assert!(0 < len && len <= 8, "Only supports block size between 1-8!");
+        assert!(0 < len && len <= 16, "Only supports block size between 1-16!");
         self.size += len;
         self.num_blocks += 1;
 
@@ -129,7 +129,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
                 let remaining_space = NUM_SLOTS_IN_BLOCK - slot_index - len;
 
                 let new_handle = Handle::from_index(chunk_index, slot_index + len);
-                if remaining_space > 8 {
+                if remaining_space > 16 {
                     self.newspace_top = new_handle;
                 } else {
                     if remaining_space > 0 {
@@ -165,7 +165,7 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         self.num_blocks -= 1;
     }
     fn freelist_push(&mut self, n: u8, handle: Handle) {
-        debug_assert!(1 <= n && n <= 8);
+        debug_assert!(1 <= n && n <= 16);
         let index: usize = (n - 1) as usize;
         self.get_slot_mut(handle).free.next = self.freelist_heads[index];
         self.freelist_heads[index] = handle;
@@ -270,7 +270,7 @@ impl<T: ArenaAllocated> IndexMut<Handle> for ArenaAllocator<T>
     }
 }
 */
-#[cfg(test)]
+#[cfg(untested)]
 mod tests {
     use super::*;
 
