@@ -7,6 +7,10 @@ struct Node {
     // uint16_t data[8];
 };
 
+struct RawNode {
+    uint8_t raw_data[8];
+};
+
 struct Ray {
     vec3 origin;
     vec3 dir;

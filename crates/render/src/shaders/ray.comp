@@ -11,7 +11,7 @@ struct Sunlight {
     float padding2;
 };
 uint MaskLocationNthOne(uint mask, uint location) {
-    return bitCount(mask & ((1 << location) - 1));
+    return bitCount(mask & ((1 << (2 * location)) - 1));
 }
 
 #define GROUP_SIZE_X 8
@@ -34,7 +34,7 @@ layout(set = 0, binding = 1) uniform Lights {
     Sunlight Lights_Sunlight;
 };*/
 layout(set = 1, binding = 0) readonly buffer Chunk {
-    Node Chunk_Nodes[];
+    RawNode Chunk_Nodes[];
 };
 struct Material {
     float scale;
@@ -87,7 +87,7 @@ vec3 CubedNormalize(vec3 dir) {
 
 struct ParentDescriptor {
     uint children;
-    uint this_occupancy_freemask;
+    uint this_occupancy_sizemask;
 };
 struct StackItem {
     uint parent;
@@ -140,7 +140,7 @@ void main() {
     uint   parent           = 0;
     ParentDescriptor   parent_descriptor;
     parent_descriptor.children = 0;
-    parent_descriptor.this_occupancy_freemask = 0; // invalid until fetched
+    parent_descriptor.this_occupancy_sizemask = 0; // invalid until fetched
     uint parent_shift = 0;
     uint    idx              = 0;
     uint    scale            = CAST_STACK_DEPTH - 1;
@@ -160,8 +160,12 @@ void main() {
         iter++;
         // Fetch child descriptor unless it is already valid.
         if (parent_descriptor.children == 0) {
-            parent_descriptor.this_occupancy_freemask = uint(Chunk_Nodes[parent].freemask) | (uint(Chunk_Nodes[parent].extended_occupancy[parent_shift]) << 8);
-            parent_descriptor.children = Chunk_Nodes[parent].children;
+            parent_descriptor.this_occupancy_sizemask = uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8) | (uint(Chunk_Nodes[parent + 1].raw_data[parent_shift]) << 16);
+            parent_descriptor.children = 
+                uint(Chunk_Nodes[parent].raw_data[4])
+                | (uint(Chunk_Nodes[parent].raw_data[5]) << 8)
+                | (uint(Chunk_Nodes[parent].raw_data[6]) << 16)
+                | (uint(Chunk_Nodes[parent].raw_data[7]) << 24);
         }
 
         // Position of the child within the parent. (now within the child of the parent due to the extended occupancy)        
@@ -179,7 +183,7 @@ void main() {
             // This bit will be 1 if there exists anything inside this node, or if the node itself is a solid leaf.
             // This bit will be 0 if the node is a leaf, empty node.
             // That is to say, if this bit is 0, the corresponding bit in the freemask is guaranteed to be 0.
-            (((parent_descriptor.this_occupancy_freemask >> 8) & (1 << child_shift )) != 0) && // check occupancy.
+            (((parent_descriptor.this_occupancy_sizemask >> 16) & (1 << child_shift )) != 0) && // check occupancy.
             (t_min <= t_max)
         ) {
             // Terminate if the voxel is small enough.
@@ -212,7 +216,7 @@ void main() {
                 h = tc_max;
 
                 // Find child descriptor corresponding to the current voxel.
-                parent = parent_descriptor.children + MaskLocationNthOne(parent_descriptor.this_occupancy_freemask, parent_shift);
+                parent = parent_descriptor.children + MaskLocationNthOne(parent_descriptor.this_occupancy_sizemask, parent_shift);
                 parent_shift = child_shift;
 
                 // Select child voxel that the ray enters first.
@@ -233,7 +237,7 @@ void main() {
                 parent_descriptor.children = 0;
 
                 // TODO: MOVE THIS SOMEWHERE ELSE TO MAKE IT FASTER
-                if ((uint(Chunk_Nodes[parent].freemask) & (1 << parent_shift)) == 0)
+                if (((uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8)) & (1 << (2 * parent_shift))) == 0)
                     break;
                 continue;
             }
