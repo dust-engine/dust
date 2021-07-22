@@ -82,11 +82,11 @@ fn set_recursive<T: Voxel>(
 
 fn set_recursive<T: Voxel>(
     octree: &mut Octree<T>,
-    current: (Node<T>, Option<[u8; 8]>),
-    x: u32,
-    y: u32,
-    z: u32,
-    gridsize: u32,
+    mut current: (Node<T>, Option<[u8; 8]>),
+    mut x: u32,
+    mut y: u32,
+    mut z: u32,
+    mut gridsize: u32,
     value: bool,
 ) -> Result<(Node<T>, Option<[u8; 8]>), bool> {
     gridsize = gridsize / 2;
@@ -162,7 +162,6 @@ fn set_recursive<T: Voxel>(
                 } else {
                     current.0.occupancy |= 1 << corner;
                 }
-                // TODO: ACTUALLY ADD THE EXTENDED OCCUPANCY
                 current.1.unwrap()[corner as usize] = child.0.occupancy;
             },
             Err(value) => {
@@ -170,6 +169,11 @@ fn set_recursive<T: Voxel>(
                 
                 // remove child
                 octree.reshape(&mut current.0, sizemask & !(3 << (2 * corner)));
+                if value {
+                    current.0.occupancy |= 1 << corner;
+                } else {    
+                    current.0.occupancy &= !(1 << corner);
+                }
             },
         }
     }

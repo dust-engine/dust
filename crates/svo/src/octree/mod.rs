@@ -5,7 +5,7 @@ use crate::alloc::{ArenaAllocated, Handle};
 use crate::{Corner, Voxel};
 
 pub mod accessor;
-mod io;
+// mod io;
 
 #[repr(C)]
 pub union NodeInternal<T: Voxel> {
