@@ -33,7 +33,7 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup.system())
+        .add_startup_system(setup_dbg.system())
         .add_system(run.system())
         .add_system(fps_counter::fps_counter.system())
         .run();
@@ -41,8 +41,8 @@ fn main() {
 
 fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
     let file = std::fs::File::open("./test.oct").unwrap();
-    let mut reader = std::io::BufReader::new(file);
-    Octree::read(&mut octree, &mut reader, 10).unwrap();
+    // let mut reader = std::io::BufReader::new(file);
+    // Octree::read(&mut octree, &mut reader, 10).unwrap();
     //let mut accessor = octree.get_random_mutator();
     //accessor.set(1, 1, 1, 8, Voxel::with_id(1));
     //accessor.set(3, 1, 1, 8, Voxel::with_id(1));
@@ -63,6 +63,7 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
 fn setup_dbg(mut commands: Commands, mut octree: ResMut<Octree>) {
     let mut mutator = octree.get_random_mutator();
     mutator.set(0, 0, 0, 128, true);
+    println!("Value: {:?}", mutator.get(0, 0, 0, 128));
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);
     bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);
@@ -164,9 +165,9 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
             load_region(x, y);
         }
     }
-    let file = std::fs::File::create("./test.oct").unwrap();
-    let mut bufwriter = BufWriter::new(file);
-    octree.write(&mut bufwriter).unwrap();
+    // let file = std::fs::File::create("./test.oct").unwrap();
+    // let mut bufwriter = BufWriter::new(file);
+    // octree.write(&mut bufwriter).unwrap();
 
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);

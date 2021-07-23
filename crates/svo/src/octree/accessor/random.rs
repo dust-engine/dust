@@ -106,9 +106,9 @@ fn set_recursive<T: Voxel>(
     if gridsize <= 1 {
         // setting this node
         if value {
-            current.0.occupancy &= !(1 << corner);
-        } else {
             current.0.occupancy |= 1 << corner;
+        } else {
+            current.0.occupancy &= !(1 << corner);
         }
         // TODO: if have children cut them off
     } else {
@@ -143,7 +143,7 @@ fn set_recursive<T: Voxel>(
                 }
                 // has eo but doesn't want it, vice versa
                 if !child_has_extended_occupancy {
-                    if let Some(child_extended_occupancy) = child.1 {
+                    if let Some(_child_extended_occupancy) = child.1 {
                         octree.reshape(&mut current.0, sizemask | (2 << (2 * corner)));
                     }
                 }
@@ -162,7 +162,7 @@ fn set_recursive<T: Voxel>(
                 } else {
                     current.0.occupancy |= 1 << corner;
                 }
-                current.1.unwrap()[corner as usize] = child.0.occupancy;
+                current.1.as_mut().unwrap()[corner as usize] = child.0.occupancy;
             },
             Err(value) => {
                 // is leaf
@@ -192,7 +192,7 @@ fn set_recursive<T: Voxel>(
     Ok(current)
 }
 
-/*
+
 pub fn get<T: Voxel>(
     octree: &Octree<T>,
     mut x: u32,
@@ -216,8 +216,8 @@ pub fn get<T: Voxel>(
             corner |= 0b001;
             z -= gridsize;
         }
-        let node_ref = &octree.arena.get(handle);
-        if node_ref.freemask & (1 << corner) == 0 {
+        let node_ref = unsafe { &octree.arena.get(handle).node };
+        if node_ref.sizemask & (1 << (2 * corner)) == 0 {
             return node_ref.occupancy & (1 << corner) != 0;
         }
         handle = node_ref.child_handle(corner.into());
@@ -234,7 +234,7 @@ pub fn get<T: Voxel>(
     if z >= 1 {
         corner |= 0b001;
     }
-    octree.arena.get(handle).occupancy & (1 << corner) != 0
+    unsafe { octree.arena.get(handle).node }.occupancy & (1 << corner) != 0
 }
 
 pub struct RandomAccessor<'a, T: Voxel> {
@@ -246,15 +246,15 @@ impl<'a, T: Voxel> RandomAccessor<'a, T> {
         get(self.octree, x, y, z, gridsize)
     }
 }
-*/
+
 pub struct RandomMutator<'a, T: Voxel> {
     pub octree: &'a mut Octree<T>,
 }
 
 impl<'a, T: Voxel> RandomMutator<'a, T> {
-    // pub fn get(&self, x: u32, y: u32, z: u32, gridsize: u32) -> bool {
-    //     get(self.octree, x, y, z, gridsize)
-    // }
+    pub fn get(&self, x: u32, y: u32, z: u32, gridsize: u32) -> bool {
+        get(self.octree, x, y, z, gridsize)
+    }
     pub fn set(&mut self, x: u32, y: u32, z: u32, gridsize: u32, item: bool) {
         let root_node = unsafe { self.octree.arena.get(self.octree.root).node };
         let root_extended_occupancy = if root_node.sizemask != 0 {
@@ -281,9 +281,9 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
 }
 
 impl<T: Voxel> Octree<T> {
-    // pub fn get_random_accessor(&self) -> RandomAccessor<T> {
-    //     RandomAccessor { octree: self }
-    // }
+    pub fn get_random_accessor(&self) -> RandomAccessor<T> {
+        RandomAccessor { octree: self }
+    }
     pub fn get_random_mutator(&mut self) -> RandomMutator<T> {
         RandomMutator { octree: self }
     }

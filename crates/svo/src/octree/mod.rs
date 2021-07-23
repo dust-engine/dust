@@ -21,7 +21,7 @@ impl<T: Voxel> Default for NodeInternal<T> {
 
 impl<T: Voxel> ArenaAllocated for NodeInternal<T> {}
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 #[repr(C)]
 pub struct Node<T: Voxel> {
     _padding: u8,
