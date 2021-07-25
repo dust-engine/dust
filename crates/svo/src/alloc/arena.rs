@@ -111,6 +111,8 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
         self.size += len;
         self.num_blocks += 1;
 
+
+        // println!("Allocating");
         // Retrieve the head of the freelist
         let sized_head = self.freelist_pop(len as u8);
         let handle: Handle = if sized_head.is_none() {
@@ -143,6 +145,8 @@ impl<T: ArenaAllocated> ArenaAllocator<T> {
             // There's previously used blocks stored in the freelist. Use them first.
             sized_head
         };
+
+        // println!("Finished allocating");
 
         // initialize to zero
         let slot_index = handle.get_slot_num();

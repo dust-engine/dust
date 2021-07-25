@@ -85,7 +85,8 @@ impl<T: Voxel> Octree<T> {
         let new_child_handle = self.arena.alloc(new_num_items);
         let mut new_slot_num: u8 = 0;
         let mut old_slot_num: u8 = 0;
-        for i in 0..8 {
+        // println!("Reshaping: Old {:#b}, New {:#b}", old_mask, new_mask);
+        for i in 0..16 {
             let old_have_children_at_i = old_mask & (1 << i) != 0;
             let new_have_children_at_i = new_mask & (1 << i) != 0;
             if old_have_children_at_i && new_have_children_at_i {

@@ -62,8 +62,8 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
 
 fn setup_dbg(mut commands: Commands, mut octree: ResMut<Octree>) {
     let mut mutator = octree.get_random_mutator();
-    mutator.set(0, 0, 0, 128, true);
-    println!("Value: {:?}", mutator.get(0, 0, 0, 128));
+    mutator.set(63, 63, 63, 128, true);
+    println!("Value: {:?}", mutator.get(63, 63, 63, 128));
     let mut bundle = RaytracerCameraBundle::default();
     bundle.transform.translation = Vec3::new(1.0901, 1.3, 1.0894);
     bundle.transform.look_at(Vec3::new(2.0, 0.5, 2.0), Vec3::Y);

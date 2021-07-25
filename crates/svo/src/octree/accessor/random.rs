@@ -112,10 +112,9 @@ fn set_recursive<T: Voxel>(
         }
         // TODO: if have children cut them off
     } else {
-        let sizemask = current.0.sizemask;
-        let child_has_extended_occupancy = (sizemask & (3 << (2 * corner))) == 3; // 11
+        let child_has_extended_occupancy = (current.0.sizemask & (3 << (2 * corner))) == 3; // 11
         let result = {
-            let has_child = sizemask & (1 << (2 * corner)) != 0;
+            let has_child = current.0.sizemask & (1 << (2 * corner)) != 0;
             let child_handle = current.0.child_handle(corner.into());
             let child_node = if has_child {
                 unsafe { octree.arena.get(child_handle).node }
@@ -137,18 +136,24 @@ fn set_recursive<T: Voxel>(
                     current.1 = Some([0; 8]);
                 }
                 // is not leaf
-                if sizemask & (1 << (2 * corner)) == 0 {
+                if current.0.sizemask & (1 << (2 * corner)) == 0 {
                     // missing child
-                    octree.reshape(&mut current.0, sizemask | (1 << (2 * corner)));
+                    // println!("Missing child: Reshaping");
+                    let val = current.0.sizemask | (1 << (2 * corner));
+                    octree.reshape(&mut current.0, val);
                 }
                 // has eo but doesn't want it, vice versa
                 if !child_has_extended_occupancy {
                     if let Some(_child_extended_occupancy) = child.1 {
-                        octree.reshape(&mut current.0, sizemask | (2 << (2 * corner)));
+                        // println!("Missing occupancy: Reshaping");
+                        let val = current.0.sizemask | (2 << (2 * corner));
+                        octree.reshape(&mut current.0, val);
                     }
                 }
                 if child_has_extended_occupancy && child.1.is_none() {
-                    octree.reshape(&mut current.0, sizemask & !(2 << (2 * corner)));
+                    // println!("unncessary occupancy: reshaping");
+                    let val = current.0.sizemask & !(2 << (2 * corner));
+                    octree.reshape(&mut current.0, val);
                 }
                 let child_handle = current.0.child_handle(corner.into());
                 octree.arena.get_mut(child_handle).node = child.0;
@@ -168,7 +173,8 @@ fn set_recursive<T: Voxel>(
                 // is leaf
                 
                 // remove child
-                octree.reshape(&mut current.0, sizemask & !(3 << (2 * corner)));
+                let val = current.0.sizemask & !(3 << (2 * corner));
+                octree.reshape(&mut current.0, val);
                 if value {
                     current.0.occupancy |= 1 << corner;
                 } else {    
@@ -188,6 +194,8 @@ fn set_recursive<T: Voxel>(
             return Err(value);
         }
     }
+
+    // println!("Current: {:?}", current);
 
     Ok(current)
 }
@@ -216,10 +224,20 @@ pub fn get<T: Voxel>(
             corner |= 0b001;
             z -= gridsize;
         }
-        let node_ref = unsafe { &octree.arena.get(handle).node };
+        
+        let node_ref = unsafe { octree.arena.get(handle).node };
+        println!("Getting Node: {:?}", node_ref);
+        println!("Occupancy: {:#b}", node_ref.occupancy);
+        println!("Sizemask: {:#b}", node_ref.sizemask);
+        println!("Extended occupancy: {:?}", unsafe { octree.arena.get(handle.offset(1)).extended_occupancy });
+        println!("Child: {:?}", unsafe { octree.arena.get(node_ref.children).node });
         if node_ref.sizemask & (1 << (2 * corner)) == 0 {
             return node_ref.occupancy & (1 << corner) != 0;
         }
+        if node_ref.sizemask & (2 << (2 * corner)) != 0 {
+            println!("Next has extended occupancy");
+        }
+
         handle = node_ref.child_handle(corner.into());
     }
     // gridsize is now equal to 2
@@ -276,7 +294,9 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
                 panic!("Invalid state");
             }
         }
+        // println!("{:?}", self.octree.root);
         // self.octree.root_occupancy = data;
+        // println!("End setting");
     }
 }
 
