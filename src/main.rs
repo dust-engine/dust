@@ -76,7 +76,6 @@ fn setup_dbg(mut commands: Commands, mut octree: ResMut<Octree>) {
     });
 
     for i in 0..16 {
-        // unsafe { octree.arena.changed(std::mem::transmute(i)) };
         println!("Value: {:?}: {:?}", i, unsafe { octree.arena.get(std::mem::transmute(i)).node });
         println!("Occupancy: {:?}", unsafe { octree.arena.get(std::mem::transmute(i)).extended_occupancy });
     }
