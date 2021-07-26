@@ -178,6 +178,9 @@ void main() {
                 | (uint(Chunk_Nodes[parent].raw_data[5]) << 8)
                 | (uint(Chunk_Nodes[parent].raw_data[6]) << 16)
                 | (uint(Chunk_Nodes[parent].raw_data[7]) << 24);
+
+            // parent_descriptor.this_occupancy_sizemask = uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8);
+            // parent_descriptor.this_occupancy_sizemask |= (uint(Chunk_Nodes[MaskLocationNthOne(parent_descriptor.this_occupancy_sizemask, parent_shift) + parent_descriptor.children].raw_data[1]) << 16);
         }
 
         // Position of the child within the parent. (now within the child of the parent due to the extended occupancy)        

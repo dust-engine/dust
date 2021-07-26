@@ -112,7 +112,7 @@ fn set_recursive<T: Voxel>(
         }
         // TODO: if have children cut them off
     } else {
-        let child_has_extended_occupancy = (current.0.sizemask & (3 << (2 * corner))) == 3; // 11
+        let child_has_extended_occupancy = (current.0.sizemask & (3 << (2 * corner))) == (3 << (2 * corner)); // 11
         let result = {
             let has_child = current.0.sizemask & (1 << (2 * corner)) != 0;
             let child_handle = current.0.child_handle(corner.into());
