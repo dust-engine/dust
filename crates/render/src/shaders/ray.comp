@@ -161,7 +161,18 @@ void main() {
         iter++;
         // Fetch child descriptor unless it is already valid.
         if (parent_descriptor.children == 0) {
-            parent_descriptor.this_occupancy_sizemask = (1 << 16) | (3); // uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8) | (uint(Chunk_Nodes[parent + 1].raw_data[parent_shift]) << 16);
+            
+            // if ((1 << 16) != (uint(Chunk_Nodes[parent + 1].raw_data[parent_shift]) << 16)) {
+            //     imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), vec4(0.0, float(uint(Chunk_Nodes[parent + 1].raw_data[parent_shift])) / 255.0, 1.0, 1.0));
+            //     return;
+            // }
+
+            // if (3 != (uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8))) {
+            //     imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), vec4(1.0, 0.0, 0.0, 1.0));
+            //     return;
+            // }
+            parent_descriptor.this_occupancy_sizemask = uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8) | (uint(Chunk_Nodes[parent + 1].raw_data[parent_shift]) << 16);
+
             parent_descriptor.children = 
                 uint(Chunk_Nodes[parent].raw_data[4])
                 | (uint(Chunk_Nodes[parent].raw_data[5]) << 8)

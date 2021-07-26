@@ -160,7 +160,9 @@ fn set_recursive<T: Voxel>(
                 // set extended occupancy
                 if let Some(child_extended_occupancy) = child.1 {
                     octree.arena.get_mut(child_handle.offset(1)).extended_occupancy = child_extended_occupancy;
+                    octree.arena.changed(child_handle.offset(1));
                 }
+                octree.arena.changed(child_handle);
                 // Setting occupancy of parent
                 if child.0.occupancy == 0 {
                     current.0.occupancy &= !(1 << corner);
@@ -294,6 +296,7 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
                 panic!("Invalid state");
             }
         }
+        self.octree.arena.changed(self.octree.root);
         // println!("{:?}", self.octree.root);
         // self.octree.root_occupancy = data;
         // println!("End setting");
