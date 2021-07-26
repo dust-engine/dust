@@ -250,7 +250,7 @@ void main() {
 
                 // TODO: MOVE THIS SOMEWHERE ELSE TO MAKE IT FASTER
                 if (((uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8)) & (1 << (2 * parent_shift))) == 0)
-                    ; // break;
+                    break;
                 continue;
             }
         }

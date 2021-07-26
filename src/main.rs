@@ -33,7 +33,7 @@ fn main() {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(dust_render::DustPlugin::default())
         .add_plugin(fly_camera::FlyCameraPlugin)
-        .add_startup_system(setup_dbg.system())
+        .add_startup_system(setup.system())
         .add_system(run.system())
         .add_system(fps_counter::fps_counter.system())
         .run();
@@ -165,12 +165,59 @@ fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {
             })
             .unwrap();
         println!("Region loaded: {} {}", region_x, region_y);
+        println!("Verifying");
+        region
+            .for_each_chunk(|chunk_x, chunk_z, chunk_data| {
+                let mut mutator = octree.get_random_mutator();
+                let chunk: fastanvil::Chunk =
+                    fastnbt::de::from_bytes(chunk_data.as_slice()).unwrap();
+
+                if let Some(sections) = chunk.level.sections {
+                    for section in sections {
+                        if section.palette.is_none() {
+                            continue;
+                        }
+                        let palette = section.palette.unwrap();
+                        if let Some(block_states) = section.block_states {
+                            let bits_per_item = (block_states.0.len() * 8) / 4096;
+                            let mut buff: [u16; 4096] = [0; 4096];
+                            block_states.unpack_into(bits_per_item, &mut buff);
+                            for (i, indice) in buff.iter().enumerate() {
+                                let indice = *indice;
+                                let block = &palette[indice as usize];
+                                let x = (i & 0xF) as u32;
+                                let z = ((i >> 4) & 0xF) as u32;
+                                let y = (i >> 8) as u32;
+
+                                let y = y + section.y as u32 * 16;
+                                assert_eq!(i >> 12, 0);
+                                let voxel = match block.name {
+                                    "minecraft:air" => false,
+                                    "minecraft:cave_air" => false,
+                                    "minecraft:grass" => false,
+                                    "minecraft:tall_grass" => false,
+                                    _ => true,
+                                };
+                                assert_eq!(mutator.get(
+                                    x + chunk_x as u32 * 16 + region_x as u32 * 512,
+                                    y,
+                                    z + chunk_z as u32 * 16 + region_y as u32 * 512,
+                                    512 * 2, // In order to have dummy root node.
+                                ), voxel);
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
     };
     for x in 0..=0 {
         for y in 0..=0 {
             load_region(x, y);
         }
     }
+    octree.get_random_mutator().change_all();
     // let file = std::fs::File::create("./test.oct").unwrap();
     // let mut bufwriter = BufWriter::new(file);
     // octree.write(&mut bufwriter).unwrap();

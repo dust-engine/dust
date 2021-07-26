@@ -129,6 +129,10 @@ fn set_recursive<T: Voxel>(
             };
             set_recursive(octree, (child_node, child_extended_occupancy), x, y, z, gridsize, value)
         };
+        // octree.arena.changed(current.0.child_handle(corner.into()));
+        // if child_has_extended_occupancy {
+        //     octree.arena.changed(current.0.child_handle(corner.into()).offset(1));
+        // }
         match result {
             Ok(child) => {
                 if current.1.is_none() {
@@ -160,9 +164,9 @@ fn set_recursive<T: Voxel>(
                 // set extended occupancy
                 if let Some(child_extended_occupancy) = child.1 {
                     octree.arena.get_mut(child_handle.offset(1)).extended_occupancy = child_extended_occupancy;
-                    octree.arena.changed(child_handle.offset(1));
                 }
-                octree.arena.changed(child_handle);
+                // octree.arena.changed(child_handle);
+                // octree.arena.changed(child_handle.offset(1));
                 // Setting occupancy of parent
                 if child.0.occupancy == 0 {
                     current.0.occupancy &= !(1 << corner);
@@ -173,7 +177,7 @@ fn set_recursive<T: Voxel>(
             },
             Err(value) => {
                 // is leaf
-                
+                // octree.arena.changed(current.0.child_handle(corner.into()));
                 // remove child
                 let val = current.0.sizemask & !(3 << (2 * corner));
                 octree.reshape(&mut current.0, val);
@@ -228,16 +232,8 @@ pub fn get<T: Voxel>(
         }
         
         let node_ref = unsafe { octree.arena.get(handle).node };
-        println!("Getting Node: {:?}", node_ref);
-        println!("Occupancy: {:#b}", node_ref.occupancy);
-        println!("Sizemask: {:#b}", node_ref.sizemask);
-        println!("Extended occupancy: {:?}", unsafe { octree.arena.get(handle.offset(1)).extended_occupancy });
-        println!("Child: {:?}", unsafe { octree.arena.get(node_ref.children).node });
         if node_ref.sizemask & (1 << (2 * corner)) == 0 {
             return node_ref.occupancy & (1 << corner) != 0;
-        }
-        if node_ref.sizemask & (2 << (2 * corner)) != 0 {
-            println!("Next has extended occupancy");
         }
 
         handle = node_ref.child_handle(corner.into());
@@ -297,9 +293,15 @@ impl<'a, T: Voxel> RandomMutator<'a, T> {
             }
         }
         self.octree.arena.changed(self.octree.root);
+        self.octree.arena.changed(self.octree.root.offset(1));
         // println!("{:?}", self.octree.root);
         // self.octree.root_occupancy = data;
         // println!("End setting");
+    }
+
+
+    pub fn change_all(&mut self) {
+        change_all(self.octree, self.octree.root);
     }
 }
 
@@ -309,5 +311,20 @@ impl<T: Voxel> Octree<T> {
     }
     pub fn get_random_mutator(&mut self) -> RandomMutator<T> {
         RandomMutator { octree: self }
+    }
+}
+
+
+fn change_all<T: Voxel>(octree: &mut Octree<T>, handle: Handle) {
+    let node = unsafe { octree.arena.get(handle).node };
+    for corner in 0..8 {
+        if node.sizemask & (1 << (2 * corner)) != 0 {
+            let child_handle = node.child_handle(corner.into());
+            octree.arena.changed(child_handle);
+            if node.sizemask & (2 << (2 * corner)) != 0 {
+                octree.arena.changed(child_handle.offset(1));
+            }
+            change_all(octree, child_handle);
+        }
     }
 }
