@@ -58,6 +58,7 @@ fn setup_from_oct_file(mut commands: Commands, mut octree: ResMut<Octree>) {
         sensitivity: 10.0,
         ..Default::default()
     });
+
 }
 
 fn setup_dbg(mut commands: Commands, mut octree: ResMut<Octree>) {
@@ -73,6 +74,11 @@ fn setup_dbg(mut commands: Commands, mut octree: ResMut<Octree>) {
         sensitivity: 10.0,
         ..Default::default()
     });
+
+    for i in 0..16 {
+        println!("Value: {:?}: {:?}", i, unsafe { octree.arena.get(std::mem::transmute(i)).node });
+        println!("Occupancy: {:?}", unsafe { octree.arena.get(std::mem::transmute(i)).extended_occupancy });
+    }
 }
 
 fn setup(mut commands: Commands, mut octree: ResMut<Octree>) {

@@ -9,8 +9,8 @@ pub mod accessor;
 
 #[repr(C)]
 pub union NodeInternal<T: Voxel> {
-    node: Node<T>,
-    extended_occupancy: [u8; 8],
+    pub node: Node<T>,
+    pub extended_occupancy: [u8; 8],
 }
 
 impl<T: Voxel> Default for NodeInternal<T> {
@@ -44,7 +44,7 @@ impl<T: Voxel> Node<T> {
 }
 
 pub struct Octree<T: Voxel> {
-    arena: ArenaAllocator<NodeInternal<T>>,
+    pub arena: ArenaAllocator<NodeInternal<T>>,
     pub(crate) root: Handle,
     root_occupancy: bool,
     _root_marker: PhantomData<T>,

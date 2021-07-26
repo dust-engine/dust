@@ -140,6 +140,7 @@ void main() {
     uint   parent           = 0;
     ParentDescriptor   parent_descriptor;
     parent_descriptor.children = 0;
+    // sizemask is least 16 bits, occupancy the 8 bits after that.
     parent_descriptor.this_occupancy_sizemask = 0; // invalid until fetched
     uint parent_shift = 0;
     uint    idx              = 0;
@@ -160,7 +161,7 @@ void main() {
         iter++;
         // Fetch child descriptor unless it is already valid.
         if (parent_descriptor.children == 0) {
-            parent_descriptor.this_occupancy_sizemask = uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8) | (uint(Chunk_Nodes[parent + 1].raw_data[parent_shift]) << 16);
+            parent_descriptor.this_occupancy_sizemask = (1 << 16) | (3); // uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8) | (uint(Chunk_Nodes[parent + 1].raw_data[parent_shift]) << 16);
             parent_descriptor.children = 
                 uint(Chunk_Nodes[parent].raw_data[4])
                 | (uint(Chunk_Nodes[parent].raw_data[5]) << 8)
@@ -238,7 +239,7 @@ void main() {
 
                 // TODO: MOVE THIS SOMEWHERE ELSE TO MAKE IT FASTER
                 if (((uint(Chunk_Nodes[parent].raw_data[2]) | (uint(Chunk_Nodes[parent].raw_data[3]) << 8)) & (1 << (2 * parent_shift))) == 0)
-                    break;
+                    ; // break;
                 continue;
             }
         }
