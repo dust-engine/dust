@@ -141,32 +141,46 @@ fn select_integrated_memtype(
     memory_properties: &vk::PhysicalDeviceMemoryProperties,
     requirements: &vk::MemoryRequirements,
 ) -> u32 {
-    memory_properties.memory_types[0..memory_properties.memory_type_count as usize]
+    let heaps = &memory_properties.memory_heaps[0..memory_properties.memory_heap_count as usize];
+
+    // Select a heap.
+    // For AMD iGPUs, this selects the heap without DEVICE_LOCAL because DEVICE_LOCAL heaps are small and slow for CPU access.
+    // For Intel iGPUs, this selects the only heap.
+    let heap = heaps
+      .iter()
+      .enumerate()
+      .find(|(_, &heap)| !heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+      .map_or(0, |(i, _)| i) as u32;
+
+    let types = &memory_properties.memory_types[0..memory_properties.memory_type_count as usize];
+    let selected_index = types
         .iter()
         .enumerate()
         .position(|(id, memory_type)| {
             requirements.memory_type_bits & (1 << id) != 0
+                && memory_type.heap_index == heap
                 && memory_type.property_flags.contains(
-                    vk::MemoryPropertyFlags::DEVICE_LOCAL
-                        | vk::MemoryPropertyFlags::HOST_VISIBLE
-                        | vk::MemoryPropertyFlags::HOST_COHERENT
+                    vk::MemoryPropertyFlags::HOST_VISIBLE
                         | vk::MemoryPropertyFlags::HOST_CACHED,
                 )
         })
         .or_else(|| {
-            memory_properties.memory_types[0..memory_properties.memory_type_count as usize]
+            types
                 .iter()
                 .enumerate()
                 .position(|(id, memory_type)| {
                     requirements.memory_type_bits & (1 << id) != 0
+                        && memory_type.heap_index == heap
                         && memory_type.property_flags.contains(
                             vk::MemoryPropertyFlags::DEVICE_LOCAL
-                                | vk::MemoryPropertyFlags::HOST_VISIBLE
-                                | vk::MemoryPropertyFlags::HOST_COHERENT,
+                                | vk::MemoryPropertyFlags::HOST_VISIBLE,
                         )
                 })
         })
-        .unwrap() as u32
+        .unwrap() as u32;
+    let selected_index = 3_u32;
+    //println!("selected {:?}", types[selected_index as usize]);
+    selected_index
 }
 
 impl Drop for IntegratedBlockAllocator {
