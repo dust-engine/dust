@@ -9,7 +9,7 @@ mod fly_camera;
 mod fps_counter;
 
 fn main() {
-    App::build()
+    App::new()
         .insert_resource(bevy::log::LogSettings {
             filter: "wgpu=error".to_string(),
             level: bevy::utils::tracing::Level::DEBUG,
