@@ -1,0 +1,15 @@
+[package]
+name = "dust-render"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dustash = { path = "../../../dustash" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy" }
+bevy_app = { git = "https://github.com/bevyengine/bevy" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
+ash = { version = "0.36", features = ["linked"] }
