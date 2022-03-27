@@ -1,10 +1,13 @@
-use std::sync::Arc;
+#[cfg(feature = "swapchain")]
+pub mod swapchain;
 
 use ash::extensions::{ext, khr};
 use ash::vk;
 use bevy_app::{App, AppLabel, Plugin};
 use bevy_ecs::schedule::StageLabel;
 use bevy_ecs::world::World;
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 pub struct RaytracePlugin;
 
 #[derive(Default)]
@@ -27,9 +30,34 @@ pub enum RenderStage {
 // swapping out the Render World.
 #[derive(Default)]
 struct ScratchRenderWorld(World);
+impl Deref for ScratchRenderWorld {
+    type Target = World;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for ScratchRenderWorld {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// The Render App World. This is only available as a resource during the Extract step.
 #[derive(Default)]
 pub struct RenderWorld(World);
+impl Deref for RenderWorld {
+    type Target = World;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for RenderWorld {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 impl RenderPlugin {
     fn add_render_resources(&self, render_world: &mut World) {
@@ -98,6 +126,7 @@ impl Plugin for RenderPlugin {
 
         let mut render_app = App::empty();
         self.add_render_resources(&mut render_app.world);
+
         render_app
             .add_stage(RenderStage::Extract, SystemStage::parallel())
             .add_stage(RenderStage::Prepare, SystemStage::parallel())
@@ -107,6 +136,8 @@ impl Plugin for RenderPlugin {
             )
             .add_stage(RenderStage::Cleanup, SystemStage::parallel());
         app.add_sub_app(RenderApp, render_app, |app_world, render_app| {
+            // reserve all existing app entities for use in render_app
+            // they can only be spawned using `get_or_spawn()`
             let meta_len = app_world.entities().meta.len();
             render_app
                 .world

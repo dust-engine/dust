@@ -13,3 +13,10 @@ bevy_app = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 ash = { version = "0.36", features = ["linked"] }
+
+bevy_window = { git = "https://github.com/bevyengine/bevy", optional = true }
+bevy_winit = { git = "https://github.com/bevyengine/bevy", optional = true }
+
+[features]
+swapchain = ["bevy_window", "bevy_winit"]
+default = ["swapchain"]

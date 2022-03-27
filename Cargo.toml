@@ -10,3 +10,9 @@ members = ["crates/render"]
 
 [dependencies]
 dust-render = { path = "crates/render" }
+bevy_app = { git = "https://github.com/bevyengine/bevy" }
+bevy_window = { git = "https://github.com/bevyengine/bevy" }
+bevy_core = { git = "https://github.com/bevyengine/bevy" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy" }
+bevy_input = { git = "https://github.com/bevyengine/bevy" }
+bevy_winit = { git = "https://github.com/bevyengine/bevy" }
