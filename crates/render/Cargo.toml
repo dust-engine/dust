@@ -12,10 +12,14 @@ bevy_transform = { git = "https://github.com/bevyengine/bevy" }
 bevy_app = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
+bevy_utils = { git = "https://github.com/bevyengine/bevy" }
 ash = { version = "0.36", features = ["linked"] }
+glam = "0.20"
 
 bevy_window = { git = "https://github.com/bevyengine/bevy", optional = true }
 bevy_winit = { git = "https://github.com/bevyengine/bevy", optional = true }
+
+futures-lite = "^1.12"
 
 [features]
 swapchain = ["bevy_window", "bevy_winit"]

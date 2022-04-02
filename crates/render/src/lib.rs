@@ -1,5 +1,11 @@
+#![feature(box_into_pin)]
+
+pub mod geometry;
+pub mod sbt;
+pub mod shader;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
+pub mod accel_struct;
 
 use ash::extensions::{ext, khr};
 use ash::vk;
@@ -135,6 +141,7 @@ impl Plugin for RenderPlugin {
                 SystemStage::parallel(), //.with_system(render_system.exclusive_system().at_end()),
             )
             .add_stage(RenderStage::Cleanup, SystemStage::parallel());
+        // Subapp runs always get scheduled after main world runs
         app.add_sub_app(RenderApp, render_app, |app_world, render_app| {
             // reserve all existing app entities for use in render_app
             // they can only be spawned using `get_or_spawn()`
