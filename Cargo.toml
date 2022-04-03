@@ -24,3 +24,4 @@ bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 dustash = { path = "../dustash" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
+tracing-subscriber = "0.3"

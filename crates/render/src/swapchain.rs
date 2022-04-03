@@ -9,6 +9,7 @@ use bevy_ecs::{
     system::{Res, ResMut},
 };
 use bevy_window::WindowId;
+pub use command_buffer::SwapchainCmdBufferState;
 use dustash::{
     frames::AcquiredFrame,
     queue::Queues,
@@ -154,8 +155,20 @@ pub enum SwapchainSystem {
     FlushAndPresent,
 }
 
-#[derive(Default)]
-pub struct SwapchainPlugin;
+pub struct SwapchainPlugin {
+    /// When true, a `SwapchainCmdBufferState` will be available as a resource during RenderStage::Render.
+    /// The application is required to attach a system that calls `SwapchainCmdBufferState::record` during
+    /// RenderStage::Render. The callback function passed to `SwapchainCmdBufferState::record` will only be
+    /// invoked when a command buffer reset and re-record is necessary, usually due to a window resize.
+    managed_command_buffer: bool,
+}
+impl Default for SwapchainPlugin {
+    fn default() -> Self {
+        Self {
+            managed_command_buffer: true,
+        }
+    }
+}
 impl Plugin for SwapchainPlugin {
     fn build(&self, render_app: &mut App) {
         let device = render_app.world.resource::<Arc<Device>>().clone();
@@ -175,5 +188,168 @@ impl Plugin for SwapchainPlugin {
                 crate::RenderStage::Cleanup,
                 queue_flush_and_present.label(SwapchainSystem::FlushAndPresent),
             );
+
+        if self.managed_command_buffer {
+            render_app
+                .init_resource::<command_buffer::SwapchainCmdBufferState>()
+                .init_resource::<command_buffer::SwapchainCmdBuffers>()
+                .add_system_to_stage(
+                    crate::RenderStage::Prepare,
+                    command_buffer::swapchain_cmd_buffer_prepare.after(SwapchainSystem::Prepare),
+                )
+                .add_system_to_stage(
+                    crate::RenderStage::Cleanup,
+                    command_buffer::swapchain_cmd_buffer_submit
+                        .before(SwapchainSystem::FlushAndPresent),
+                );
+        }
+    }
+}
+
+pub mod command_buffer {
+    use std::sync::Arc;
+
+    use super::Windows;
+    use ash::vk;
+    use bevy_ecs::{
+        system::{Res, ResMut},
+        world::FromWorld,
+    };
+    use dustash::{
+        command::{
+            pool::{CommandBuffer, CommandPool},
+            recorder::{CommandExecutable, CommandRecorder},
+        },
+        queue::{QueueType, Queues, SemaphoreOp},
+        Device,
+    };
+
+    pub enum SwapchainCmdBufferState {
+        Recorded(Arc<CommandExecutable>),
+        Initial(CommandBuffer),
+        None,
+    }
+    impl Default for SwapchainCmdBufferState {
+        fn default() -> Self {
+            Self::None
+        }
+    }
+    impl SwapchainCmdBufferState {
+        /// Record into the command buffer if it's not already recorded.
+        pub fn record(
+            &mut self,
+            flags: vk::CommandBufferUsageFlags,
+            record: impl FnOnce(&mut CommandRecorder),
+        ) {
+            let exec = match std::mem::take(self) {
+                SwapchainCmdBufferState::Recorded(exec) => exec,
+                SwapchainCmdBufferState::Initial(buffer) => {
+                    buffer.record(flags, record).map(Arc::new).unwrap()
+                }
+                SwapchainCmdBufferState::None => return,
+            };
+            *self = SwapchainCmdBufferState::Recorded(exec);
+        }
+    }
+
+    /// The command buffers used exclusively for rendering to the swapchain images
+    pub(super) struct SwapchainCmdBuffers {
+        // The command pool used for rendering to the swapchain
+        command_pool: Arc<CommandPool>,
+        command_buffers: Vec<SwapchainCmdBufferState>,
+    }
+    impl FromWorld for SwapchainCmdBuffers {
+        fn from_world(world: &mut bevy_ecs::prelude::World) -> Self {
+            let device = world.get_resource::<Arc<Device>>().unwrap();
+            let queues = world.get_resource::<Queues>().unwrap();
+            let pool = CommandPool::new(
+                device.clone(),
+                vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+                queues
+                    .of_type(dustash::queue::QueueType::Graphics)
+                    .family_index(),
+            )
+            .unwrap();
+            let pool = Arc::new(pool);
+            Self {
+                command_pool: pool,
+                command_buffers: Vec::new(),
+            }
+        }
+    }
+    pub(super) fn swapchain_cmd_buffer_prepare(
+        windows: Res<Windows>,
+        mut state: ResMut<SwapchainCmdBuffers>,
+        mut swapchain_command_buffer: ResMut<SwapchainCmdBufferState>,
+    ) {
+        // TODO: make this work for multiple windows
+        let num_images = windows.primary().unwrap().frames().num_images();
+        let current_image = windows.primary().unwrap().current_image().unwrap();
+
+        if num_images != state.command_buffers.len() {
+            let buffers = state.command_pool.allocate_n(num_images as u32).unwrap();
+            state.command_buffers = buffers
+                .into_iter()
+                .map(|b| SwapchainCmdBufferState::Initial(b))
+                .collect()
+        }
+        let buffer_state =
+            std::mem::take(&mut state.command_buffers[current_image.image_index as usize]);
+
+        match (buffer_state, current_image.invalidate_images) {
+            (SwapchainCmdBufferState::Initial(buffer), _) => {
+                *swapchain_command_buffer = SwapchainCmdBufferState::Initial(buffer);
+            }
+            (SwapchainCmdBufferState::Recorded(exec), true) => {
+                // The Arc<CommandExecutable> was only cloned once to be referenced by the queue.
+                // At this point the queue should've completed execution, so the Arc should only have one reference.
+                let buffer = match Arc::try_unwrap(exec) {
+                    Ok(exec) => exec.reset(false),
+                    Err(exec) => {
+                        // Fallback to re-allocating command buffer, but throw a warning for the potential leak.
+                        drop(exec);
+                        println!("Re-allocating command buffer");
+                        state.command_pool.allocate_one().unwrap()
+                    }
+                };
+                *swapchain_command_buffer = SwapchainCmdBufferState::Initial(buffer);
+            }
+            (SwapchainCmdBufferState::Recorded(exec), false) => {
+                // Reuse the command buffer.
+                *swapchain_command_buffer = SwapchainCmdBufferState::Recorded(exec);
+            }
+            (SwapchainCmdBufferState::None, _) => panic!(),
+        };
+    }
+    pub(super) fn swapchain_cmd_buffer_submit(
+        queues: Res<Queues>,
+        windows: Res<Windows>,
+        mut state: ResMut<SwapchainCmdBuffers>,
+        mut swapchain_command_buffer: ResMut<SwapchainCmdBufferState>,
+    ) {
+        let exec = match std::mem::take(&mut *swapchain_command_buffer) {
+            SwapchainCmdBufferState::Recorded(exec) => exec,
+            _ => panic!("Expecting the swapchain command buffer to be recorded!"),
+        };
+        let current_image = windows.primary().unwrap().current_image().unwrap();
+        queues
+            .of_type(QueueType::Graphics)
+            .submit(
+                Box::new([SemaphoreOp {
+                    semaphore: current_image.acquire_ready_semaphore.clone(),
+                    stage_mask: vk::PipelineStageFlags2::CLEAR,
+                    value: 0,
+                }]),
+                Box::new([exec.clone()]),
+                Box::new([SemaphoreOp {
+                    semaphore: current_image.render_complete_semaphore.clone(),
+                    stage_mask: vk::PipelineStageFlags2::CLEAR,
+                    value: 0,
+                }]),
+            )
+            .fence(current_image.complete_fence.clone());
+
+        state.command_buffers[current_image.image_index as usize] =
+            SwapchainCmdBufferState::Recorded(exec);
     }
 }

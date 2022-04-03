@@ -4,7 +4,7 @@ use ash::vk;
 use bevy_asset::{AssetServer, Handle};
 use bevy_ecs::{
     prelude::FromWorld,
-    system::{Res, ResMut},
+    system::{IntoChainSystem, IntoSystem, Local, Res, ResMut},
 };
 use bevy_reflect::TypeUuid;
 use dust_render::{geometry::GeometryPrimitiveArray, RenderStage};
@@ -87,6 +87,7 @@ impl dust_render::geometry::Geometry for AABBGeometry {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let mut app = bevy_app::App::new();
 
     app.insert_resource(bevy_window::WindowDescriptor {
@@ -108,141 +109,60 @@ fn main() {
     {
         app.sub_app_mut(dust_render::RenderApp)
             .add_plugin(dust_render::swapchain::SwapchainPlugin::default())
-            .init_resource::<RenderState>()
-            .add_system_to_stage(RenderStage::Render, default_render_function);
+            .add_system_to_stage(RenderStage::Render, main_window_render_function);
     }
     app.run();
 }
 
-enum RenderCommandBufferState {
-    Recorded(Arc<CommandExecutable>),
-    Original(CommandBuffer),
-    None,
-}
-struct RenderState {
-    // The command pool used for rendering to the swapchain
-    command_pool: Arc<CommandPool>,
-    command_buffers: Vec<RenderCommandBufferState>,
-}
-impl FromWorld for RenderState {
-    fn from_world(world: &mut bevy_ecs::prelude::World) -> Self {
-        let device = world.get_resource::<Arc<Device>>().unwrap();
-        let queues = world.get_resource::<Queues>().unwrap();
-        let pool = CommandPool::new(
-            device.clone(),
-            vk::CommandPoolCreateFlags::empty(),
-            queues
-                .of_type(dustash::queue::QueueType::Graphics)
-                .family_index(),
-        )
-        .unwrap();
-        let pool = Arc::new(pool);
-        Self {
-            command_pool: pool,
-            command_buffers: Vec::new(),
-        }
-    }
-}
-
-fn default_render_function(
+fn main_window_render_function(
+    mut buffer: ResMut<dust_render::swapchain::SwapchainCmdBufferState>,
     windows: Res<dust_render::swapchain::Windows>,
-    queues: Res<Queues>,
-    mut state: ResMut<RenderState>,
 ) {
-    let num_images = windows.primary().unwrap().frames().num_images();
-    let current_image = windows.primary().unwrap().current_image().unwrap();
+    let current_frame = windows.primary().unwrap().current_image().unwrap();
+    buffer.record(vk::CommandBufferUsageFlags::empty(), |recorder| {
+        println!("Recorded render func");
+        let color_value = vk::ClearColorValue {
+            float32: [1.0, 0.0, 0.0, 1.0],
+        };
+        recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
+            None,
+            &[],
+            &[dustash::command::sync2::ImageBarrier {
+                memory_barrier: dustash::command::sync2::MemoryBarrier {
+                    prev_accesses: &[],
+                    next_accesses: &[dustash::command::sync2::AccessType::ClearWrite],
+                },
+                discard_contents: true,
+                image: current_frame.image,
+                ..Default::default()
+            }],
+            vk::DependencyFlags::BY_REGION,
+        ));
+        recorder.clear_color_image(
+            current_frame.image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &color_value,
+            &[vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            }],
+        );
 
-    if num_images != state.command_buffers.len() {
-        let buffers = state.command_pool.allocate_n(num_images as u32).unwrap();
-        state.command_buffers = buffers
-            .into_iter()
-            .map(|b| RenderCommandBufferState::Original(b))
-            .collect()
-    }
-    let buffer_state = std::mem::replace(
-        &mut state.command_buffers[current_image.image_index as usize],
-        RenderCommandBufferState::None,
-    );
-    let f = |cr: &mut CommandRecorder| default_render_function_record(cr, current_image);
-    let exec = match (buffer_state, current_image.invalidate_images) {
-        (RenderCommandBufferState::Original(buffer), _) => buffer
-            .record(vk::CommandBufferUsageFlags::empty(), f)
-            .map(Arc::new)
-            .unwrap(),
-        (RenderCommandBufferState::Recorded(exec), true) => {
-            drop(exec);
-            let buffer = state.command_pool.allocate_one().unwrap();
-            buffer
-                .record(vk::CommandBufferUsageFlags::empty(), f)
-                .map(Arc::new)
-                .unwrap()
-        }
-        (RenderCommandBufferState::Recorded(exec), false) => exec,
-        (RenderCommandBufferState::None, _) => panic!(),
-    };
-    state.command_buffers[current_image.image_index as usize] =
-        RenderCommandBufferState::Recorded(exec.clone());
-    queues
-        .of_type(QueueType::Graphics)
-        .submit(
-            Box::new([SemaphoreOp {
-                semaphore: current_image.acquire_ready_semaphore.clone(),
-                stage_mask: vk::PipelineStageFlags2::CLEAR,
-                value: 0,
-            }]),
-            Box::new([exec]),
-            Box::new([SemaphoreOp {
-                semaphore: current_image.render_complete_semaphore.clone(),
-                stage_mask: vk::PipelineStageFlags2::CLEAR,
-                value: 0,
-            }]),
-        )
-        .fence(current_image.complete_fence.clone());
-}
-
-fn default_render_function_record(recorder: &mut CommandRecorder, current_frame: &AcquiredFrame) {
-    println!("Recorded render func");
-    let color_value = vk::ClearColorValue {
-        float32: [1.0, 0.0, 0.0, 1.0],
-    };
-    recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
-        None,
-        &[],
-        &[dustash::command::sync2::ImageBarrier {
-            memory_barrier: dustash::command::sync2::MemoryBarrier {
-                prev_accesses: &[],
-                next_accesses: &[dustash::command::sync2::AccessType::ClearWrite],
-            },
-            discard_contents: true,
-            image: current_frame.image,
-            ..Default::default()
-        }],
-        vk::DependencyFlags::BY_REGION,
-    ));
-    recorder.clear_color_image(
-        current_frame.image,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        &color_value,
-        &[vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        }],
-    );
-
-    recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
-        None,
-        &[],
-        &[dustash::command::sync2::ImageBarrier {
-            memory_barrier: dustash::command::sync2::MemoryBarrier {
-                prev_accesses: &[dustash::command::sync2::AccessType::ClearWrite],
-                next_accesses: &[dustash::command::sync2::AccessType::Present],
-            },
-            image: current_frame.image,
-            ..Default::default()
-        }],
-        vk::DependencyFlags::BY_REGION,
-    ));
+        recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
+            None,
+            &[],
+            &[dustash::command::sync2::ImageBarrier {
+                memory_barrier: dustash::command::sync2::MemoryBarrier {
+                    prev_accesses: &[dustash::command::sync2::AccessType::ClearWrite],
+                    next_accesses: &[dustash::command::sync2::AccessType::Present],
+                },
+                image: current_frame.image,
+                ..Default::default()
+            }],
+            vk::DependencyFlags::BY_REGION,
+        ));
+    });
 }
