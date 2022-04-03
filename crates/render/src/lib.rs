@@ -1,11 +1,11 @@
 #![feature(box_into_pin)]
 
+pub mod accel_struct;
 pub mod geometry;
 pub mod sbt;
 pub mod shader;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
-pub mod accel_struct;
 
 use ash::extensions::{ext, khr};
 use ash::vk;
@@ -14,7 +14,6 @@ use bevy_ecs::schedule::StageLabel;
 use bevy_ecs::world::World;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-pub struct RaytracePlugin;
 
 #[derive(Default)]
 pub struct RenderPlugin;
@@ -141,6 +140,10 @@ impl Plugin for RenderPlugin {
                 SystemStage::parallel(), //.with_system(render_system.exclusive_system().at_end()),
             )
             .add_stage(RenderStage::Cleanup, SystemStage::parallel());
+
+        // Add default plugins
+        render_app.add_plugin(accel_struct::AccelerationStructurePlugin::default());
+
         // Subapp runs always get scheduled after main world runs
         app.add_sub_app(RenderApp, render_app, |app_world, render_app| {
             // reserve all existing app entities for use in render_app

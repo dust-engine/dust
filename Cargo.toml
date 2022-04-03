@@ -16,3 +16,11 @@ bevy_core = { git = "https://github.com/bevyengine/bevy" }
 bevy_transform = { git = "https://github.com/bevyengine/bevy" }
 bevy_input = { git = "https://github.com/bevyengine/bevy" }
 bevy_winit = { git = "https://github.com/bevyengine/bevy" }
+
+
+[dev-dependencies]
+ash = { version = "0.36", features = ["linked"] }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
+dustash = { path = "../dustash" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy" }

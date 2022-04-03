@@ -17,11 +17,19 @@ use dustash::{
     Device,
 };
 
-struct Window {
+pub struct Window {
     frames: dustash::frames::FrameManager,
 
     // This is guaranteed to be Some in the Queue stage only.
     current_image: Option<AcquiredFrame>,
+}
+impl Window {
+    pub fn current_image(&self) -> Option<&AcquiredFrame> {
+        self.current_image.as_ref()
+    }
+    pub fn frames(&self) -> &dustash::frames::FrameManager {
+        &self.frames
+    }
 }
 
 struct ExtractedWindow {
@@ -32,9 +40,15 @@ struct ExtractedWindow {
 }
 
 #[derive(Default)]
-struct Windows {
+pub struct Windows {
     extracted_windows: Vec<ExtractedWindow>,
     windows: HashMap<bevy_window::WindowId, Window>,
+}
+
+impl Windows {
+    pub fn primary(&self) -> Option<&Window> {
+        self.windows.get(&bevy_window::WindowId::primary())
+    }
 }
 
 /// Extract WindowCreated and WindowResized events into Windows.extracted_windows
@@ -88,18 +102,17 @@ fn prepare_windows(
                 &extracted_window.handle.get_handle()
             })
             .unwrap();
-            let surface = Arc::new(surface);
             let frames = dustash::frames::FrameManager::new(
                 swapchain_loader.clone(),
-                surface,
+                Arc::new(surface),
                 dustash::frames::Options {
                     frames_in_flight: 3,
                     format_preference: vec![vk::SurfaceFormatKHR {
-                        format: vk::Format::R16G16B16A16_SFLOAT,
-                        color_space: vk::ColorSpaceKHR::BT2020_LINEAR_EXT,
+                        format: vk::Format::B8G8R8A8_SRGB,
+                        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
                     }],
                     present_mode_preference: vec![vk::PresentModeKHR::FIFO],
-                    usage: vk::ImageUsageFlags::STORAGE,
+                    usage: vk::ImageUsageFlags::TRANSFER_DST,
                     ..Default::default()
                 },
                 vk::Extent2D {
@@ -127,7 +140,6 @@ fn prepare_windows(
 
 // Flush and present
 fn queue_flush_and_present(mut windows: ResMut<Windows>, mut queues: ResMut<Queues>) {
-    println!("Flush & Present");
     queues.flush().unwrap();
     for window in windows.windows.values_mut() {
         let frame = window.current_image.take().unwrap();
