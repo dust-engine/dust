@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "formats/*"]
 
 [dependencies]
-dust-render = { path = "crates/render" }
+dust_render = { path = "crates/render" }
 bevy_app = { git = "https://github.com/bevyengine/bevy" }
 bevy_window = { git = "https://github.com/bevyengine/bevy" }
 bevy_core = { git = "https://github.com/bevyengine/bevy" }
@@ -25,3 +25,4 @@ dustash = { path = "../dustash" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 tracing-subscriber = "0.3"
+dust_format_explicit_primitives = { path = "formats/explicit_primitives" }

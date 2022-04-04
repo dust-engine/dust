@@ -1,90 +1,10 @@
-use std::sync::Arc;
-
 use ash::vk;
 use bevy_asset::{AssetServer, Handle};
-use bevy_ecs::{
-    prelude::FromWorld,
-    system::{IntoChainSystem, IntoSystem, Local, Res, ResMut},
-};
+use bevy_ecs::system::{Res, ResMut};
 use bevy_reflect::TypeUuid;
-use dust_render::{geometry::GeometryPrimitiveArray, RenderStage};
-use dustash::{
-    command::{
-        pool::{CommandBuffer, CommandPool},
-        recorder::{CommandExecutable, CommandRecorder},
-    },
-    frames::AcquiredFrame,
-    queue::{QueueType, Queues, SemaphoreOp},
-    ray_tracing::sbt::SpecializationInfo,
-    Device,
-};
+use dust_render::RenderStage;
+use dustash::{command::recorder::CommandRecorder, ray_tracing::sbt::SpecializationInfo};
 // First, define our geometry
-
-#[derive(TypeUuid)]
-#[uuid = "75a9a733-04d7-4abb-8600-9a7d24ff0597"]
-struct AABBGeometry {
-    primitives: Box<[ash::vk::AabbPositionsKHR]>,
-}
-
-struct AABBGeometryGPUAsset {}
-impl dust_render::geometry::GeometryPrimitiveArray for AABBGeometryGPUAsset {
-    fn rebuild_blas(
-        &self,
-        command_recorder: &mut CommandRecorder,
-    ) -> dustash::accel_struct::AccelerationStructure {
-        todo!()
-    }
-}
-
-enum AABBGeometryChangeSet {
-    Rebuild(Box<[ash::vk::AabbPositionsKHR]>),
-    None,
-}
-impl dust_render::geometry::GeometryChangeSet<AABBGeometryGPUAsset> for AABBGeometryChangeSet {
-    type Param = ();
-
-    fn into_primitives(
-        self,
-        command_recorder: &mut CommandRecorder,
-        params: &mut bevy_ecs::system::SystemParamItem<Self::Param>,
-    ) -> (
-        AABBGeometryGPUAsset,
-        Vec<dust_render::geometry::GeometryBLASBuildDependency>,
-    ) {
-        todo!()
-    }
-
-    fn apply_on(
-        self,
-        primitives: &mut AABBGeometryGPUAsset,
-        command_recorder: &mut CommandRecorder,
-        params: &mut bevy_ecs::system::SystemParamItem<Self::Param>,
-    ) -> Option<Vec<dust_render::geometry::GeometryBLASBuildDependency>> {
-        todo!()
-    }
-}
-
-impl dust_render::geometry::Geometry for AABBGeometry {
-    type Primitives = AABBGeometryGPUAsset;
-
-    type ChangeSet = AABBGeometryChangeSet;
-
-    fn aabb(&self) -> dust_render::geometry::GeometryAABB {
-        todo!()
-    }
-
-    fn intersection_shader(asset_server: &AssetServer) -> Handle<dust_render::shader::Shader> {
-        todo!()
-    }
-
-    fn specialization() -> SpecializationInfo {
-        todo!()
-    }
-
-    fn generate_changes(&self) -> Self::ChangeSet {
-        todo!()
-    }
-}
 
 fn main() {
     tracing_subscriber::fmt::init();
@@ -104,7 +24,9 @@ fn main() {
     .add_plugin(bevy_window::WindowPlugin::default())
     .add_plugin(bevy_winit::WinitPlugin::default())
     .add_plugin(dust_render::RenderPlugin::default())
-    .add_plugin(dust_render::geometry::GeometryPlugin::<AABBGeometry>::default());
+    .add_plugin(dust_render::geometry::GeometryPlugin::<
+        dust_format_explicit_primitives::AABBGeometry,
+    >::default());
 
     {
         app.sub_app_mut(dust_render::RenderApp)
@@ -120,7 +42,6 @@ fn main_window_render_function(
 ) {
     let current_frame = windows.primary().unwrap().current_image().unwrap();
     buffer.record(vk::CommandBufferUsageFlags::empty(), |recorder| {
-        println!("Recorded render func");
         let color_value = vk::ClearColorValue {
             float32: [1.0, 0.0, 0.0, 1.0],
         };

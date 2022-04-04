@@ -1,5 +1,5 @@
 [package]
-name = "dust-render"
+name = "dust_render"
 version = "0.1.0"
 edition = "2021"
 
