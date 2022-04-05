@@ -25,4 +25,4 @@ dustash = { path = "../dustash" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 tracing-subscriber = "0.3"
-dust_format_explicit_primitives = { path = "formats/explicit_primitives" }
+dust_format_explicit_aabbs = { path = "formats/explicit_aabbs" }

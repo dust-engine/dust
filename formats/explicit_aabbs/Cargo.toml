@@ -1,5 +1,5 @@
 [package]
-name = "dust_format_explicit_primitives"
+name = "dust_format_explicit_aabbs"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,8 +7,10 @@ edition = "2021"
 
 [dependencies]
 dust_render = { path = "../../crates/render" }
+bevy_app = { git = "https://github.com/bevyengine/bevy" }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 dustash = { path = "../../../dustash" }
 ash = "0.36"
+anyhow = "1.0"
