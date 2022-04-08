@@ -39,8 +39,9 @@ pub trait Geometry: Asset {
     fn intersection_shader(asset_server: &AssetServer) -> Handle<Shader>;
     fn specialization() -> SpecializationInfo;
 
+    fn has_changes(&self) -> bool;
     /// This gets called in the render world. the produced ChangeSet will be saved as a component in the main world.
-    fn generate_changes(&self) -> Self::ChangeSet;
+    fn generate_changes(&mut self) -> Self::ChangeSet;
 }
 
 // The representation of the geometry in the render world
@@ -126,7 +127,7 @@ impl<T: Geometry> Default for ChangeSetStore<T> {
 fn generate_changes<A: Geometry>(
     mut commands: Commands,
     mut events: EventReader<AssetEvent<A>>,
-    geometries: Res<Assets<A>>,
+    mut geometries: ResMut<Assets<A>>,
 ) {
     let mut changed_assets = HashSet::default();
     let mut removed = Vec::new();
@@ -148,8 +149,14 @@ fn generate_changes<A: Geometry>(
     let mut changsets = Vec::new();
     for handle in changed_assets.drain() {
         if let Some(geometry) = geometries.get(handle) {
-            changsets.push((handle.clone_weak(), geometry.generate_changes()));
+            if !geometry.has_changes() {
+                continue;
+            }
+        } else {
+            continue;
         }
+        let geometry = geometries.get_mut(handle).unwrap();
+        changsets.push((handle.clone_weak(), geometry.generate_changes()));
     }
 
     commands.insert_resource(Some(ChangeSetStore {

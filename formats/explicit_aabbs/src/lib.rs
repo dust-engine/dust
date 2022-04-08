@@ -8,6 +8,7 @@ use loader::ExplicitAABBPrimitivesLoader;
 #[uuid = "75a9a733-04d7-4abb-8600-9a7d24ff0597"]
 pub struct AABBGeometry {
     primitives: Box<[ash::vk::AabbPositionsKHR]>,
+    new: bool,
 }
 
 pub struct AABBGeometryGPUAsset {}
@@ -22,7 +23,6 @@ impl dust_render::geometry::GeometryPrimitiveArray for AABBGeometryGPUAsset {
 
 pub enum AABBGeometryChangeSet {
     Rebuild(Box<[ash::vk::AabbPositionsKHR]>),
-    None,
 }
 impl dust_render::geometry::GeometryChangeSet<AABBGeometryGPUAsset> for AABBGeometryChangeSet {
     type Param = ();
@@ -65,8 +65,14 @@ impl dust_render::geometry::Geometry for AABBGeometry {
         todo!()
     }
 
-    fn generate_changes(&self) -> Self::ChangeSet {
-        todo!()
+    fn generate_changes(&mut self) -> Self::ChangeSet {
+
+        self.new = false;
+        return Self::ChangeSet::Rebuild(self.primitives.clone());
+    }
+
+    fn has_changes(&self) -> bool {
+        self.new
     }
 }
 
