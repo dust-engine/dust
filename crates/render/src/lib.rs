@@ -133,7 +133,14 @@ impl Plugin for RenderPlugin {
         self.add_render_resources(&mut render_app.world);
 
         render_app
-            .add_stage(RenderStage::Extract, SystemStage::parallel())
+            .add_stage(RenderStage::Extract, {
+                let mut stage = SystemStage::parallel();
+                // For the Extract stage, the system params are coming from the main world while operations wrote to Commands
+                // are written to the render world. By default we automatically apply buffers after each run. We disable this
+                // behavior here so that we can apply the buffer to the render world manually at a later time.
+                stage.set_apply_buffers(false);
+                stage
+            })
             .add_stage(RenderStage::Prepare, SystemStage::parallel())
             .add_stage(
                 RenderStage::Render,

@@ -94,8 +94,7 @@ impl<T: Geometry> Default for GeometryPlugin<T> {
 
 impl<T: Geometry> Plugin for GeometryPlugin<T> {
     fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<ChangeSetStore<T>>()
-            .add_asset::<T>()
+        app.add_asset::<T>()
             .add_system_to_stage(CoreStage::PostUpdate, generate_changes::<T>);
 
         let render_app = app.sub_app_mut(crate::RenderApp);
@@ -170,7 +169,7 @@ fn move_change_set_store_to_render_world<T: Geometry>(
     mut change_set_store: ResMut<Option<ChangeSetStore<T>>>,
 ) {
     if let Some(change_set_store) = change_set_store.take() {
-        commands.insert_resource(change_set_store)
+        commands.insert_resource(change_set_store);
     }
 }
 
