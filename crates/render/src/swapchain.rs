@@ -27,6 +27,9 @@ impl Window {
     pub fn current_image(&self) -> Option<&AcquiredFrame> {
         self.current_image.as_ref()
     }
+    pub fn current_image_mut(&mut self) -> Option<&mut AcquiredFrame> {
+        self.current_image.as_mut()
+    }
     pub fn frames(&self) -> &dustash::frames::FrameManager {
         &self.frames
     }
@@ -48,6 +51,10 @@ pub struct Windows {
 impl Windows {
     pub fn primary(&self) -> Option<&Window> {
         self.windows.get(&bevy_window::WindowId::primary())
+    }
+
+    pub fn primary_mut(&mut self) -> Option<&mut Window> {
+        self.windows.get_mut(&bevy_window::WindowId::primary())
     }
 }
 

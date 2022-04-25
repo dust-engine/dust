@@ -1,5 +1,5 @@
 pub mod loader;
-use bevy_asset::{AssetServer, Handle, AddAsset};
+use bevy_asset::{AddAsset, AssetServer, Handle};
 use bevy_reflect::TypeUuid;
 use dustash::{command::recorder::CommandRecorder, ray_tracing::sbt::SpecializationInfo};
 use loader::ExplicitAABBPrimitivesLoader;
@@ -66,7 +66,6 @@ impl dust_render::geometry::Geometry for AABBGeometry {
     }
 
     fn generate_changes(&mut self) -> Self::ChangeSet {
-
         self.new = false;
         return Self::ChangeSet::Rebuild(self.primitives.clone());
     }

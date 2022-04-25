@@ -1,6 +1,6 @@
 use ash::vk;
 use bevy_asset::{AssetServer, Handle};
-use bevy_ecs::system::{Res, ResMut, Commands};
+use bevy_ecs::system::{Commands, Res, ResMut};
 use bevy_reflect::TypeUuid;
 use dust_render::RenderStage;
 use dustash::{command::recorder::CommandRecorder, ray_tracing::sbt::SpecializationInfo};
@@ -35,12 +35,9 @@ fn main() {
     app.run();
 }
 
-
-fn startup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>
-) {
-    let handle: Handle<dust_format_explicit_aabbs::AABBGeometry> = asset_server.load("../assets/out.aabb");
+fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let handle: Handle<dust_format_explicit_aabbs::AABBGeometry> =
+        asset_server.load("../assets/out.aabb");
     commands.spawn().insert(handle);
 }
 

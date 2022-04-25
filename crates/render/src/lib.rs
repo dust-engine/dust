@@ -111,6 +111,7 @@ impl RenderPlugin {
                     })
                     .push_next(&mut vk::PhysicalDeviceVulkan12Features {
                         buffer_device_address: vk::TRUE,
+                        timeline_semaphore: vk::TRUE,
                         ..Default::default()
                     })
                     .push_next(&mut vk::PhysicalDeviceVulkan13Features {

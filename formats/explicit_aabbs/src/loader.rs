@@ -12,7 +12,10 @@ impl AssetLoader for ExplicitAABBPrimitivesLoader {
         Box::pin(async {
             let num_primitives = bytes.len() / std::mem::size_of::<ash::vk::AabbPositionsKHR>();
             let aabbs = unsafe {
-                std::slice::from_raw_parts(bytes.as_ptr() as *const ash::vk::AabbPositionsKHR, num_primitives)
+                std::slice::from_raw_parts(
+                    bytes.as_ptr() as *const ash::vk::AabbPositionsKHR,
+                    num_primitives,
+                )
             };
             let geometry = super::AABBGeometry {
                 primitives: aabbs.to_owned().into_boxed_slice(),
@@ -27,4 +30,3 @@ impl AssetLoader for ExplicitAABBPrimitivesLoader {
         &["aabb"]
     }
 }
-
