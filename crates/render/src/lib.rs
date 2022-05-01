@@ -1,9 +1,11 @@
 #![feature(box_into_pin)]
 
 //pub mod accel_struct;
-//pub mod geometry;
+pub mod geometry;
 //pub mod sbt;
 pub mod shader;
+//pub mod ecs;
+//pub mod blas;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
 

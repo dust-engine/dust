@@ -19,7 +19,6 @@ impl AssetLoader for ExplicitAABBPrimitivesLoader {
             };
             let geometry = super::AABBGeometry {
                 primitives: aabbs.to_owned().into_boxed_slice(),
-                new: true,
             };
             load_context.set_default_asset(LoadedAsset::new(geometry));
             Ok(())

@@ -26,3 +26,15 @@ bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 tracing-subscriber = "0.3"
 dust_format_explicit_aabbs = { path = "formats/explicit_aabbs" }
+
+[patch."https://github.com/bevyengine/bevy"]
+bevy_app = { path = "../bevy/crates/bevy_app" }
+bevy_window = { path = "../bevy/crates/bevy_window" }
+bevy_core = { path = "../bevy/crates/bevy_core" }
+bevy_transform = { path = "../bevy/crates/bevy_transform" }
+bevy_input = { path = "../bevy/crates/bevy_input" }
+bevy_winit = { path = "../bevy/crates/bevy_winit" }
+bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
+bevy_asset = { path = "../bevy/crates/bevy_asset" }
+bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
+bevy_utils = { path = "../bevy/crates/bevy_utils" }

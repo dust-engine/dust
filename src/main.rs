@@ -139,12 +139,9 @@ fn render(
 
     current_frame
         .then(
-            CommandsFuture::new(
-                &queues,
-                queues.index_of_type(QueueType::Graphics),
-                vec![cmd_exec],
-            )
-            .stage(vk::PipelineStageFlags2::CLEAR),
+            CommandsFuture::new(&queues, queues.index_of_type(QueueType::Graphics))
+                .then_command_exec(cmd_exec)
+                .stage(vk::PipelineStageFlags2::CLEAR),
         )
         .then_present(current_frame);
 }
