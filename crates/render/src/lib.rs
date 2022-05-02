@@ -1,4 +1,5 @@
 #![feature(box_into_pin)]
+#![feature(into_future)]
 
 //pub mod accel_struct;
 pub mod geometry;
@@ -14,6 +15,7 @@ use ash::vk;
 use bevy_app::{App, AppLabel, Plugin};
 use bevy_ecs::schedule::StageLabel;
 use bevy_ecs::world::World;
+use dustash::resources::alloc::Allocator;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -122,9 +124,11 @@ impl RenderPlugin {
                     }),
             )
             .unwrap();
+        let allocator = Allocator::new(device.clone());
         render_world.insert_resource(device);
         render_world.insert_resource(instance);
         render_world.insert_resource(queues);
+        render_world.insert_resource(Arc::new(allocator));
     }
 }
 impl Plugin for RenderPlugin {
@@ -134,6 +138,14 @@ impl Plugin for RenderPlugin {
 
         let mut render_app = App::empty();
         self.add_render_resources(&mut render_app.world);
+
+        app.world.insert_resource(
+            render_app
+                .world
+                .get_resource::<Arc<Allocator>>()
+                .unwrap()
+                .clone(),
+        );
 
         render_app
             .add_stage(RenderStage::Extract, {
