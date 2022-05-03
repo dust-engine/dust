@@ -2,13 +2,15 @@ pub mod loader;
 use ash::vk;
 use bevy_app::Plugin;
 use bevy_asset::{AddAsset, AssetServer, Handle};
-use bevy_ecs::system::lifetimeless::SRes;
+use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use bevy_reflect::TypeUuid;
 use dust_render::geometry::{GPUGeometry, Geometry};
 use dustash::{
     command::recorder::CommandRecorder,
     ray_tracing::sbt::SpecializationInfo,
-    resources::alloc::{Allocator, BufferRequest, MemBuffer, MemoryUsageFlags},
+    resources::alloc::{
+        Allocator, BufferRequest, MemBuffer, MemoryPropertyFlags, MemoryUsageFlags,
+    },
 };
 use loader::ExplicitAABBPrimitivesLoader;
 use std::sync::Arc;
@@ -20,7 +22,7 @@ pub struct AABBGeometry {
 }
 
 pub struct AABBGPUGeometry {
-    primitives_buffer: MemBuffer,
+    primitives_buffer: Arc<MemBuffer>,
 }
 
 impl Geometry for AABBGeometry {
@@ -53,7 +55,8 @@ impl Geometry for AABBGeometry {
             .allocate_buffer(BufferRequest {
                 size: size as u64,
                 alignment: 0,
-                usage: vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+                // TODO: also make this ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR for integrated GPUs.
+                usage: vk::BufferUsageFlags::TRANSFER_SRC,
                 memory_usage: MemoryUsageFlags::UPLOAD,
                 ..Default::default()
             })
@@ -75,17 +78,57 @@ impl Geometry for AABBGeometry {
 }
 
 impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
-    fn build(build_set: MemBuffer, commands_future: &mut dustash::sync::CommandsFuture) -> Self {
-        // TODO: transfer to device-only
-        Self {
-            primitives_buffer: build_set,
+    type BuildParam = SRes<Arc<Allocator>>;
+    fn build(
+        build_set: MemBuffer,
+        commands_future: &mut dustash::sync::CommandsFuture,
+        allocator: &mut SystemParamItem<Self::BuildParam>,
+    ) -> Self {
+        if build_set
+            .memory()
+            .props()
+            .contains(MemoryPropertyFlags::DEVICE_LOCAL)
+        {
+            Self {
+                primitives_buffer: Arc::new(build_set),
+            }
+        } else {
+            let size = build_set.size();
+            // TODO: transfer to device-local
+            let device_local_buffer = allocator
+                .allocate_buffer(BufferRequest {
+                    size,
+                    alignment: build_set.alignment(),
+                    usage: vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                        | vk::BufferUsageFlags::TRANSFER_DST,
+                    memory_usage: MemoryUsageFlags::FAST_DEVICE_ACCESS,
+                    ..Default::default()
+                })
+                .unwrap();
+            let device_local_buffer = Arc::new(device_local_buffer);
+            commands_future.then_commands(|mut recorder| {
+                recorder.copy_buffer(
+                    build_set,
+                    device_local_buffer.clone(),
+                    &[vk::BufferCopy {
+                        src_offset: 0,
+                        dst_offset: 0,
+                        size,
+                    }],
+                );
+            });
+            Self {
+                primitives_buffer: device_local_buffer,
+            }
         }
     }
 
+    type ApplyChangeParam = ();
     fn apply_change_set(
         &mut self,
         change_set: <AABBGeometry as Geometry>::ChangeSet,
         commands_future: &mut dustash::sync::CommandsFuture,
+        params: &mut SystemParamItem<Self::ApplyChangeParam>,
     ) {
         todo!()
     }

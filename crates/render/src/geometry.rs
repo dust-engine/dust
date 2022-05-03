@@ -60,8 +60,20 @@ pub trait Geometry: Asset + Sized {
 
 /// RenderWorld Assets.
 pub trait GPUGeometry<T: Geometry>: Send + Sync {
-    fn build(build_set: T::BuildSet, commands_future: &mut CommandsFuture) -> Self;
-    fn apply_change_set(&mut self, change_set: T::ChangeSet, commands_future: &mut CommandsFuture);
+    type BuildParam: SystemParam;
+    fn build(
+        build_set: T::BuildSet,
+        commands_future: &mut CommandsFuture,
+        params: &mut SystemParamItem<Self::BuildParam>,
+    ) -> Self;
+
+    type ApplyChangeParam: SystemParam;
+    fn apply_change_set(
+        &mut self,
+        change_set: T::ChangeSet,
+        commands_future: &mut CommandsFuture,
+        params: &mut SystemParamItem<Self::ApplyChangeParam>,
+    );
 }
 
 enum GPUGeometryUpdate<T: Geometry> {
@@ -170,6 +182,10 @@ fn prepare_geometries<T: Geometry>(
     mut geometery_carrier: ResMut<Option<GeometryCarrier<T>>>,
     mut geometry_store: ResMut<GPUGeometryStore<T>>,
     queues: Res<Queues>,
+    mut build_params: StaticSystemParam<<T::GPUGeometry as GPUGeometry<T>>::BuildParam>,
+    mut apply_change_params: StaticSystemParam<
+        <T::GPUGeometry as GPUGeometry<T>>::ApplyChangeParam,
+    >,
 ) {
     // Merge the new changes into the buffer. Incoming -> Buffered
     if let Some(buffered_builds) = geometry_store.buffered_builds.as_mut() {
@@ -186,6 +202,7 @@ fn prepare_geometries<T: Geometry>(
         if signal.finished().unwrap() {
             // Finished, put it into the store.
             for (handle, geometry) in carrier.drain(..) {
+                println!("Gotta rebuild for {:?}", handle);
                 if let Some(geometry) = geometry {
                     geometry_store.gpu_geometries.insert(handle, geometry);
                 }
@@ -211,8 +228,11 @@ fn prepare_geometries<T: Geometry>(
         for (handle, update) in buffered_builds.updates.drain() {
             match update {
                 GPUGeometryUpdate::Rebuild(build_set) => {
-                    let geometry =
-                        <T::GPUGeometry as GPUGeometry<T>>::build(build_set, &mut future);
+                    let geometry = <T::GPUGeometry as GPUGeometry<T>>::build(
+                        build_set,
+                        &mut future,
+                        &mut build_params,
+                    );
                     pending_builds.push((handle, Some(geometry)));
                 }
                 GPUGeometryUpdate::Update(change_set) => {
@@ -220,7 +240,7 @@ fn prepare_geometries<T: Geometry>(
                         .gpu_geometries
                         .get_mut(&handle)
                         .unwrap()
-                        .apply_change_set(change_set, &mut future);
+                        .apply_change_set(change_set, &mut future, &mut apply_change_params);
                     pending_builds.push((handle, None));
                 }
             }
