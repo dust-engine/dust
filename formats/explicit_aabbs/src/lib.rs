@@ -94,14 +94,15 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
             }
         } else {
             let size = build_set.size();
-            // TODO: transfer to device-local
             let device_local_buffer = allocator
                 .allocate_buffer(BufferRequest {
                     size,
                     alignment: build_set.alignment(),
                     usage: vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                        | vk::BufferUsageFlags::TRANSFER_DST,
-                    memory_usage: MemoryUsageFlags::FAST_DEVICE_ACCESS,
+                        | vk::BufferUsageFlags::TRANSFER_DST
+                        | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    memory_usage: MemoryUsageFlags::FAST_DEVICE_ACCESS
+                        | MemoryUsageFlags::DEVICE_ADDRESS,
                     ..Default::default()
                 })
                 .unwrap();
@@ -131,6 +132,10 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
         params: &mut SystemParamItem<Self::ApplyChangeParam>,
     ) {
         todo!()
+    }
+
+    fn blas_input_buffer(&self) -> &Arc<MemBuffer> {
+        &self.primitives_buffer
     }
 }
 

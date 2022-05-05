@@ -1,6 +1,7 @@
-use bitflags::bitflags;
 use ash::vk;
 use bevy_asset::Handle;
+use bevy_ecs::component::Component;
+use bitflags::bitflags;
 
 /// Everything defined in this should be in the app world.
 
@@ -19,16 +20,21 @@ bitflags! {
         /// Causes all geometries contained in this renderable to act as opaque, and the any hit shader will not be executed.
         /// This behavior can be overridden by the SPIR-V NoOpaqueKHR ray flag.
         const FORCE_OPAQUE = vk::GeometryInstanceFlagsKHR::FORCE_OPAQUE.as_raw() as u8;
-        
+
         /// Causes all geometries contained in this renderable to act as non-opaqued.
         /// This behavior can be overridden by the SPIR-V OpaqueKHR ray flag.
         const FORCE_NO_OPAQUE = vk::GeometryInstanceFlagsKHR::FORCE_OPAQUE.as_raw() as u8;
     }
 }
+impl Default for RenderableFlags {
+    fn default() -> Self {
+        RenderableFlags::empty()
+    }
+}
 
 /// Marker component for instances in the scene.
+#[derive(Component, Clone, Default)]
 pub struct Renderable {
     /// Index into the BLASStore
     pub flags: RenderableFlags,
 }
-

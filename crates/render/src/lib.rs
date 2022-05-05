@@ -4,9 +4,9 @@
 //pub mod accel_struct;
 pub mod geometry;
 //pub mod sbt;
+pub mod blas;
+pub mod renderable;
 pub mod shader;
-//pub mod ecs;
-//pub mod blas;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
 
@@ -15,6 +15,7 @@ use ash::vk;
 use bevy_app::{App, AppLabel, Plugin};
 use bevy_ecs::schedule::StageLabel;
 use bevy_ecs::world::World;
+use dustash::accel_struct::AccelerationStructureLoader;
 use dustash::resources::alloc::Allocator;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub enum RenderStage {
     /// Syncronize between app world and render world, write world data into GPU readable memory
     Extract,
     Prepare,
+    Build,
     /// Application need to register render graph runner here.
     Render,
     Cleanup,
@@ -125,9 +127,12 @@ impl RenderPlugin {
             )
             .unwrap();
         let allocator = Allocator::new(device.clone());
+
+        let acceleration_structure_loader = AccelerationStructureLoader::new(device.clone());
         render_world.insert_resource(device);
         render_world.insert_resource(instance);
         render_world.insert_resource(queues);
+        render_world.insert_resource(Arc::new(acceleration_structure_loader));
         render_world.insert_resource(Arc::new(allocator));
     }
 }
@@ -161,10 +166,14 @@ impl Plugin for RenderPlugin {
                 RenderStage::Render,
                 SystemStage::parallel(), //.with_system(render_system.exclusive_system().at_end()),
             )
+            .add_stage(
+                RenderStage::Build,
+                SystemStage::parallel(), //.with_system(render_system.exclusive_system().at_end()),
+            )
             .add_stage(RenderStage::Cleanup, SystemStage::parallel());
 
-        // Add default plugins
-        //render_app.add_plugin(accel_struct::AccelerationStructurePlugin::default());
+        // Add render plugins
+        render_app.add_plugin(blas::BlasPlugin::default());
 
         // Subapp runs always get scheduled after main world runs
         app.add_sub_app(RenderApp, render_app, |app_world, render_app| {
@@ -204,6 +213,13 @@ impl Plugin for RenderPlugin {
                 let render = render_app
                     .schedule
                     .get_stage_mut::<SystemStage>(&RenderStage::Prepare)
+                    .unwrap();
+                render.run(&mut render_app.world);
+            }
+            {
+                let render = render_app
+                    .schedule
+                    .get_stage_mut::<SystemStage>(&RenderStage::Build)
                     .unwrap();
                 render.run(&mut render_app.world);
             }

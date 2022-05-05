@@ -24,6 +24,7 @@ ash = { version = "0.36", features = ["linked"] }
 [dev-dependencies]
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy" }
 tracing-subscriber = "0.3"
 dust_format_explicit_aabbs = { path = "formats/explicit_aabbs" }
 
@@ -38,3 +39,4 @@ bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
 bevy_asset = { path = "../bevy/crates/bevy_asset" }
 bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
 bevy_utils = { path = "../bevy/crates/bevy_utils" }
+bevy_hierarchy = { path = "../bevy/crates/bevy_hierarchy" }

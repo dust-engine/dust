@@ -6,7 +6,8 @@ use bevy_ecs::{
     prelude::{FromWorld, World},
     system::{Commands, Local, Res, ResMut},
 };
-use dust_render::{swapchain::Windows, RenderStage};
+use bevy_hierarchy::BuildChildren;
+use dust_render::{renderable::Renderable, swapchain::Windows, RenderStage};
 use dustash::sync::GPUFuture;
 use dustash::{
     command::{pool::CommandPool, recorder::CommandExecutable},
@@ -51,7 +52,12 @@ fn main() {
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let handle: Handle<dust_format_explicit_aabbs::AABBGeometry> =
         asset_server.load("../assets/out.aabb");
-    commands.spawn().insert(handle);
+    commands
+        .spawn()
+        .insert(Renderable::default())
+        .with_children(|parent| {
+            parent.spawn().insert(handle);
+        });
 }
 
 struct RenderPerImageState {
