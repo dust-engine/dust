@@ -47,6 +47,7 @@ fn extract_renderable(
 
 #[derive(Default)]
 struct BlasStore {
+    /// Mapping from a list of GeometryIds to the acceleration structure
     blas: HashMap<Vec<HandleId>, Arc<AccelerationStructure>>,
 }
 
@@ -100,6 +101,9 @@ fn build_blas(
     );
     let mut pending_builds: Vec<Vec<HandleId>> = Vec::new();
     let mut pending_builds_set: HashSet<Vec<HandleId>> = HashSet::new();
+
+    // BLASs that are still needed next frame
+    let mut retained_blas: HashMap<Vec<HandleId>, Arc<AccelerationStructure>> = HashMap::new();
     // For all root elements
     for (entity, renderable, children, primitives) in query.iter() {
         let mut primitive_ids: Vec<HandleId> = Vec::new();
@@ -123,6 +127,7 @@ fn build_blas(
         }
         primitive_ids.sort();
         if let Some(blas) = blas_store.blas.get(&primitive_ids) {
+            retained_blas.insert(primitive_ids.clone(), blas.clone());
             commands
                 .get_or_spawn(entity)
                 .insert(BlasComponent { blas: blas.clone() });
@@ -153,21 +158,23 @@ fn build_blas(
             pending_builds_set.insert(primitive_ids);
         }
     }
-    if pending_builds.len() == 0 {
-        return;
-    }
-    let mut commands_future =
-        CommandsFuture::new(&queues, queues.of_type(QueueType::Compute).index());
+    if pending_builds.len() > 0 {
+        let mut commands_future =
+            CommandsFuture::new(&queues, queues.of_type(QueueType::Compute).index());
 
-    let acceleration_structures = blas_builder.build(&mut commands_future);
-    assert_eq!(acceleration_structures.len(), pending_builds.len());
-    for (id, blas) in pending_builds
-        .into_iter()
-        .zip(acceleration_structures.into_iter())
-    {
-        let original = blas_store.blas.insert(id, blas);
-        assert!(original.is_none());
+        let acceleration_structures = blas_builder.build(&mut commands_future);
+        assert_eq!(acceleration_structures.len(), pending_builds.len());
+        for (id, blas) in pending_builds
+            .into_iter()
+            .zip(acceleration_structures.into_iter())
+        {
+            let original = retained_blas.insert(id, blas);
+            assert!(original.is_none());
+        }
     }
+
+    // Drop BLAS HashMap from previous frame and drop any unused BLASs
+    blas_store.blas = retained_blas;
 }
 // 1. Renderable -> BLAS
 // 2. GeometryID -> BLAS

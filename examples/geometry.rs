@@ -2,11 +2,14 @@ use std::sync::Arc;
 
 use ash::vk;
 use bevy_asset::{AssetServer, Handle};
+use bevy_ecs::prelude::*;
 use bevy_ecs::{
     prelude::{FromWorld, World},
     system::{Commands, Local, Res, ResMut},
 };
 use bevy_hierarchy::BuildChildren;
+use bevy_input::keyboard::KeyboardInput;
+use bevy_input::ButtonState;
 use dust_render::{renderable::Renderable, swapchain::Windows, RenderStage};
 use dustash::sync::GPUFuture;
 use dustash::{
@@ -39,7 +42,8 @@ fn main() {
     //.add_plugin(fps_counter::FPSCounterPlugin)
     .add_plugin(dust_render::RenderPlugin::default())
     .add_plugin(dust_format_explicit_aabbs::ExplicitAABBPlugin::default())
-    .add_startup_system(setup);
+    .add_startup_system(setup)
+    .add_system(print_keyboard_event_system);
 
     {
         app.sub_app_mut(dust_render::RenderApp)
@@ -55,9 +59,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands
         .spawn()
         .insert(Renderable::default())
-        .with_children(|parent| {
-            parent.spawn().insert(handle);
-        });
+        .insert(handle);
 }
 
 struct RenderPerImageState {
@@ -159,4 +161,30 @@ fn render(
                 .stage(vk::PipelineStageFlags2::CLEAR),
         )
         .then_present(current_frame);
+}
+
+fn print_keyboard_event_system(
+    mut commands: Commands,
+    mut keyboard_input_events: EventReader<KeyboardInput>,
+    query: Query<(
+        Entity,
+        &Renderable,
+        &Handle<dust_format_explicit_aabbs::AABBGeometry>,
+    )>,
+) {
+    for event in keyboard_input_events.iter() {
+        match event {
+            KeyboardInput {
+                state: ButtonState::Pressed,
+                ..
+            } => {
+                let (entity, _, _) = query.iter().next().unwrap();
+                commands
+                    .entity(entity)
+                    .remove::<Handle<dust_format_explicit_aabbs::AABBGeometry>>();
+                println!("{:?}", event);
+            }
+            _ => {}
+        }
+    }
 }
