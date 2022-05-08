@@ -2,9 +2,8 @@
 #![feature(into_future)]
 
 //pub mod accel_struct;
+pub mod accel_struct;
 pub mod geometry;
-//pub mod sbt;
-pub mod blas;
 pub mod renderable;
 pub mod shader;
 #[cfg(feature = "swapchain")]
@@ -173,7 +172,9 @@ impl Plugin for RenderPlugin {
             .add_stage(RenderStage::Cleanup, SystemStage::parallel());
 
         // Add render plugins
-        render_app.add_plugin(blas::BlasPlugin::default());
+        render_app
+            .add_plugin(accel_struct::blas::BlasPlugin::default())
+            .add_plugin(accel_struct::tlas::TlasPlugin::default());
 
         // Subapp runs always get scheduled after main world runs
         app.add_sub_app(RenderApp, render_app, |app_world, render_app| {

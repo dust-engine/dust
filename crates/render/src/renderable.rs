@@ -3,8 +3,6 @@ use bevy_asset::Handle;
 use bevy_ecs::component::Component;
 use bitflags::bitflags;
 
-/// Everything defined in this should be in the app world.
-
 bitflags! {
     /// Defines the flags for a [`Renderable`]
     /// Corresponds to VkAccelerationStructureInstanceKHR::flags

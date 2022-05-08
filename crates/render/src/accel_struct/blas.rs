@@ -7,6 +7,7 @@ use bevy_ecs::{
     entity::Entity,
     system::{Commands, Query, Res, ResMut},
 };
+use bevy_transform::prelude::GlobalTransform;
 use bevy_utils::{HashMap, HashSet};
 use dustash::{
     accel_struct::{build::AabbBlasBuilder, AccelerationStructure, AccelerationStructureLoader},
@@ -34,11 +35,11 @@ impl Plugin for BlasPlugin {
 /// Copy the root element and their children to the render world.
 fn extract_renderable(
     mut commands: Commands,
-    query: Query<(Entity, &Renderable, Option<&Children>)>,
+    query: Query<(Entity, &Renderable, &GlobalTransform, Option<&Children>)>,
 ) {
-    for (entity, renderable, children) in query.iter() {
+    for (entity, renderable, transform, children) in query.iter() {
         let mut item = commands.get_or_spawn(entity);
-        item.insert(renderable.clone());
+        item.insert(renderable.clone()).insert(transform.clone());
         if let Some(children) = children {
             item.insert(children.clone());
         }
@@ -52,8 +53,9 @@ struct BlasStore {
 }
 
 #[derive(Component)]
-struct BlasComponent {
-    blas: Arc<AccelerationStructure>,
+pub struct BlasComponent {
+    pub geometries: Vec<HandleId>,
+    pub blas: Arc<AccelerationStructure>,
 }
 
 /// Collect the list of active geometries for each root.
@@ -128,9 +130,10 @@ fn build_blas(
         primitive_ids.sort();
         if let Some(blas) = blas_store.blas.get(&primitive_ids) {
             retained_blas.insert(primitive_ids.clone(), blas.clone());
-            commands
-                .get_or_spawn(entity)
-                .insert(BlasComponent { blas: blas.clone() });
+            commands.get_or_spawn(entity).insert(BlasComponent {
+                geometries: primitive_ids.clone(),
+                blas: blas.clone(),
+            });
             // TODO: if the BLAS was invalidated, still rebuild the BLAS.
             // The BLAS is invalidated when the geometry was updated.
         } else {
@@ -174,7 +177,6 @@ fn build_blas(
     }
 
     // Drop BLAS HashMap from previous frame and drop any unused BLASs
+    // BLASs in blas_store.blas MIGHT be still pending.
     blas_store.blas = retained_blas;
 }
-// 1. Renderable -> BLAS
-// 2. GeometryID -> BLAS

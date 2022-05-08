@@ -7,9 +7,10 @@ use bevy_ecs::{
     prelude::{FromWorld, World},
     system::{Commands, Local, Res, ResMut},
 };
-use bevy_hierarchy::BuildChildren;
+
 use bevy_input::keyboard::KeyboardInput;
 use bevy_input::ButtonState;
+use bevy_transform::prelude::{GlobalTransform, Transform};
 use dust_render::{renderable::Renderable, swapchain::Windows, RenderStage};
 use dustash::sync::GPUFuture;
 use dustash::{
@@ -59,6 +60,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands
         .spawn()
         .insert(Renderable::default())
+        .insert(Transform::default())
+        .insert(GlobalTransform::default())
         .insert(handle);
 }
 
