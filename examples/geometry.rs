@@ -11,6 +11,7 @@ use bevy_ecs::{
 use bevy_input::keyboard::KeyboardInput;
 use bevy_input::ButtonState;
 use bevy_transform::prelude::{GlobalTransform, Transform};
+use dust_render::pipeline::{PipelineIndex, RayTracingPipelineBuildJob};
 use dust_render::{renderable::Renderable, swapchain::Windows, RenderStage};
 use dustash::sync::GPUFuture;
 use dustash::{
@@ -20,6 +21,22 @@ use dustash::{
     sync::CommandsFuture,
     Device,
 };
+
+#[derive(Default)]
+struct DefaultRenderer;
+impl dust_render::pipeline::RayTracingRenderer for DefaultRenderer {
+    fn build(
+        &self,
+        index: PipelineIndex,
+        asset_server: &AssetServer,
+    ) -> RayTracingPipelineBuildJob {
+        todo!()
+    }
+
+    fn all_pipelines(&self) -> Vec<dust_render::pipeline::PipelineIndex> {
+        todo!()
+    }
+}
 
 fn main() {
     let mut app = bevy_app::App::new();
@@ -43,6 +60,9 @@ fn main() {
     //.add_plugin(fps_counter::FPSCounterPlugin)
     .add_plugin(dust_render::RenderPlugin::default())
     .add_plugin(dust_format_explicit_aabbs::ExplicitAABBPlugin::default())
+    .add_plugin(dust_render::pipeline::RayTracingRendererPlugin::<
+        DefaultRenderer,
+    >::default())
     .add_startup_system(setup)
     .add_system(print_keyboard_event_system);
 

@@ -18,7 +18,7 @@ bevy_input = { git = "https://github.com/bevyengine/bevy" }
 bevy_winit = { git = "https://github.com/bevyengine/bevy" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
 dustash = { path = "../dustash" }
-ash = { version = "0.36", features = ["linked"] }
+ash = { version = "0.37", features = ["linked"] }
 
 
 [dev-dependencies]

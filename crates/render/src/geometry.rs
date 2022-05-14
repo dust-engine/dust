@@ -1,6 +1,9 @@
 use std::{borrow::Borrow, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
 
-use crate::{shader::Shader, RenderStage, RenderWorld};
+use crate::{
+    shader::{Shader, SpecializedShader},
+    RenderStage, RenderWorld,
+};
 use ash::{prelude::VkResult, vk};
 use bevy_app::{CoreStage, Plugin};
 use bevy_asset::{
@@ -21,8 +24,8 @@ use dustash::{
     accel_struct::AccelerationStructure,
     command::{pool::CommandPool, recorder::CommandRecorder},
     queue::{semaphore::TimelineSemaphoreOp, Queue, QueueType, Queues},
-    ray_tracing::sbt::SpecializationInfo,
     resources::alloc::MemBuffer,
+    shader::SpecializationInfo,
     sync::{CommandsFuture, GPUFuture, HostFuture},
     Device,
 };
@@ -48,8 +51,7 @@ pub trait Geometry: Asset + Sized {
     type BuildSet: Send + Sync;
 
     fn aabb(&self) -> GeometryAABB;
-    fn intersection_shader(asset_server: &AssetServer) -> Handle<Shader>;
-    fn specialization() -> SpecializationInfo;
+    fn intersection_shader(asset_server: &AssetServer) -> SpecializedShader;
 
     type GenerateBuildsParam: SystemParam;
     fn generate_builds(

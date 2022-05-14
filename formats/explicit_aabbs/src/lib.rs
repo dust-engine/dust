@@ -4,13 +4,17 @@ use bevy_app::Plugin;
 use bevy_asset::{AddAsset, AssetServer, Handle};
 use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use bevy_reflect::TypeUuid;
-use dust_render::geometry::{GPUGeometry, Geometry};
+use dust_render::{
+    geometry::{GPUGeometry, Geometry},
+    shader::SpecializedShader,
+};
 use dustash::{
     command::recorder::CommandRecorder,
-    ray_tracing::sbt::SpecializationInfo,
     resources::alloc::{
-        Allocator, BufferRequest, MemBuffer, MemoryPropertyFlags, MemoryUsageFlags,
+        AllocationCreateFlags, Allocator, BufferRequest, MemBuffer, MemoryAllocScenario,
     },
+    shader::SpecializationInfo,
+    HasDevice,
 };
 use loader::ExplicitAABBPrimitivesLoader;
 use std::sync::Arc;
@@ -36,11 +40,7 @@ impl Geometry for AABBGeometry {
         todo!()
     }
 
-    fn intersection_shader(asset_server: &AssetServer) -> Handle<dust_render::shader::Shader> {
-        todo!()
-    }
-
-    fn specialization() -> SpecializationInfo {
+    fn intersection_shader(asset_server: &AssetServer) -> SpecializedShader {
         todo!()
     }
 
@@ -52,17 +52,18 @@ impl Geometry for AABBGeometry {
     ) -> Self::BuildSet {
         let size = std::mem::size_of_val(&self.primitives as &[ash::vk::AabbPositionsKHR]);
         let mut buffer = allocator
-            .allocate_buffer(BufferRequest {
+            .allocate_buffer(&BufferRequest {
                 size: size as u64,
-                alignment: 0,
                 // TODO: also make this ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR for integrated GPUs.
                 usage: vk::BufferUsageFlags::TRANSFER_SRC,
-                memory_usage: MemoryUsageFlags::UPLOAD,
+                scenario: MemoryAllocScenario::StagingBuffer,
                 ..Default::default()
             })
             .unwrap();
-        buffer.write_bytes(0, unsafe {
-            std::slice::from_raw_parts(self.primitives.as_ptr() as *const u8, size)
+        let data =
+            unsafe { std::slice::from_raw_parts(self.primitives.as_ptr() as *const u8, size) };
+        buffer.map_scoped(|slice| {
+            slice.copy_from_slice(data);
         });
         buffer
     }
@@ -85,9 +86,8 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
         allocator: &mut SystemParamItem<Self::BuildParam>,
     ) -> Self {
         if build_set
-            .memory()
-            .props()
-            .contains(MemoryPropertyFlags::DEVICE_LOCAL)
+            .memory_properties()
+            .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         {
             Self {
                 primitives_buffer: Arc::new(build_set),
@@ -95,14 +95,12 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
         } else {
             let size = build_set.size();
             let device_local_buffer = allocator
-                .allocate_buffer(BufferRequest {
+                .allocate_buffer(&BufferRequest {
                     size,
                     alignment: build_set.alignment(),
                     usage: vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                         | vk::BufferUsageFlags::TRANSFER_DST
                         | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                    memory_usage: MemoryUsageFlags::FAST_DEVICE_ACCESS
-                        | MemoryUsageFlags::DEVICE_ADDRESS,
                     ..Default::default()
                 })
                 .unwrap();

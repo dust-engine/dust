@@ -4,6 +4,8 @@
 //pub mod accel_struct;
 pub mod accel_struct;
 pub mod geometry;
+pub mod material;
+pub mod pipeline;
 pub mod renderable;
 pub mod shader;
 #[cfg(feature = "swapchain")]
@@ -12,12 +14,16 @@ pub mod swapchain;
 use ash::extensions::{ext, khr};
 use ash::vk;
 use bevy_app::{App, AppLabel, Plugin};
+use bevy_asset::AddAsset;
 use bevy_ecs::schedule::StageLabel;
 use bevy_ecs::world::World;
 use dustash::accel_struct::AccelerationStructureLoader;
+use dustash::ray_tracing::pipeline::RayTracingLoader;
 use dustash::resources::alloc::Allocator;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+
+use crate::shader::{Shader, ShaderLoader};
 
 #[derive(Default)]
 pub struct RenderPlugin;
@@ -128,25 +134,37 @@ impl RenderPlugin {
         let allocator = Allocator::new(device.clone());
 
         let acceleration_structure_loader = AccelerationStructureLoader::new(device.clone());
+        render_world.insert_resource(Arc::new(acceleration_structure_loader));
+        let ray_tracing_loader = RayTracingLoader::new(device.clone());
+        render_world.insert_resource(Arc::new(ray_tracing_loader));
         render_world.insert_resource(device);
         render_world.insert_resource(instance);
         render_world.insert_resource(queues);
-        render_world.insert_resource(Arc::new(acceleration_structure_loader));
         render_world.insert_resource(Arc::new(allocator));
     }
 }
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         use bevy_ecs::schedule::{Stage, SystemStage};
-        app.init_resource::<ScratchRenderWorld>();
+        app.init_resource::<ScratchRenderWorld>()
+            .add_asset::<Shader>()
+            .add_asset_loader(ShaderLoader::default());
 
         let mut render_app = App::empty();
         self.add_render_resources(&mut render_app.world);
 
+        // Let's put certain render resources into the main world as well, since they're Arc
         app.world.insert_resource(
             render_app
                 .world
                 .get_resource::<Arc<Allocator>>()
+                .unwrap()
+                .clone(),
+        );
+        app.world.insert_resource(
+            render_app
+                .world
+                .get_resource::<Arc<dustash::Device>>()
                 .unwrap()
                 .clone(),
         );
@@ -241,5 +259,9 @@ impl Plugin for RenderPlugin {
                 render_app.world.clear_entities();
             }
         });
+    }
+
+    fn name(&self) -> &str {
+        std::any::type_name::<Self>()
     }
 }

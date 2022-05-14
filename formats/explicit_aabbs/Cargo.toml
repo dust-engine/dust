@@ -12,5 +12,5 @@ bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 dustash = { path = "../../../dustash" }
-ash = "0.36"
+ash = "0.37"
 anyhow = "1.0"

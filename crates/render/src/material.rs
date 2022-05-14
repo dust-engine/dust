@@ -1,0 +1,34 @@
+use std::marker::PhantomData;
+
+use crate::geometry::Geometry;
+use crate::pipeline::{HitGroup, HitGroupType};
+use crate::shader::{Shader, SpecializedShader};
+use bevy_app::{App, Plugin};
+use bevy_asset::{Asset, AssetServer, Handle};
+
+trait Material: Asset {
+    type Geometry: Geometry;
+
+    fn anyhit_shader(asset_server: &AssetServer) -> Option<SpecializedShader>;
+    fn closest_hit_shader(asset_server: &AssetServer) -> Option<SpecializedShader>;
+}
+
+struct MaterialPlugin<T: Material> {
+    _marker: PhantomData<T>,
+}
+
+impl<T: Material> Plugin for MaterialPlugin<T> {
+    fn build(&self, app: &mut App) {
+        let asset_server = app.world.get_resource::<AssetServer>().unwrap();
+        let hitgroup = HitGroup {
+            intersection_shader: Some(T::Geometry::intersection_shader(asset_server)),
+            anyhit_shader: T::anyhit_shader(asset_server),
+            closest_hit_shader: T::closest_hit_shader(asset_server),
+            ty: HitGroupType::Procedural,
+        };
+        app.world
+            .get_resource_mut::<Vec<HitGroup>>()
+            .expect("MaterialPlugin must be registered after PipelinePlugin")
+            .push(hitgroup);
+    }
+}
