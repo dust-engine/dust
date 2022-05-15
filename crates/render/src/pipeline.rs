@@ -63,11 +63,11 @@ impl HitGroup {
 }
 
 pub struct RayTracingPipelineBuildJob {
-    pipeline_layout: Arc<PipelineLayout>,
-    raygen_shader: SpecializedShader,
-    miss_shaders: Vec<SpecializedShader>,
-    callable_shaders: Vec<SpecializedShader>,
-    max_recursion_depth: u32,
+    pub pipeline_layout: Arc<PipelineLayout>,
+    pub raygen_shader: SpecializedShader,
+    pub miss_shaders: Vec<SpecializedShader>,
+    pub callable_shaders: Vec<SpecializedShader>,
+    pub max_recursion_depth: u32,
 }
 impl RayTracingPipelineBuildJob {
     pub fn try_create_sbt_layout(
@@ -112,15 +112,20 @@ pub trait RayTracingPipeline {
     }
 }
 
-pub trait RayTracingRenderer: Send + Sync + Default + 'static {
+pub trait RayTracingRenderer: Send + Sync + FromWorld + 'static {
     // Build the pipeline by calling self.add_pipeline()
     fn build(&self, index: PipelineIndex, asset_server: &AssetServer)
         -> RayTracingPipelineBuildJob;
-    fn all_pipelines(&self) -> Vec<PipelineIndex>;
+    fn all_pipelines(&self) -> &[PipelineIndex];
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub struct PipelineIndex(usize);
+impl PipelineIndex {
+    pub const fn new(index: usize) -> Self {
+        PipelineIndex(index)
+    }
+}
 
 pub struct RayTracingRendererPlugin<T: RayTracingRenderer> {
     _marker: PhantomData<T>,
@@ -171,13 +176,16 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
     hit_groups: Res<Vec<HitGroup>>,
     renderer: Res<T>,
 ) {
+    // TODO: Preferably renderer and device resources should live in the render world,
+    // since renderer contains PipelineLayout which is a render resource.
+    // This would be blocked on bevy's asset rework.
     if renderer.is_changed() {
         pipeline_shaders.queued_pipelines = renderer
             .all_pipelines()
-            .into_iter()
+            .iter()
             .map(|index| {
-                let job = renderer.build(index, &asset_server);
-                (index, job)
+                let job = renderer.build(*index, &asset_server);
+                (*index, job)
             })
             .collect();
         let mut ray_shaders: HashMap<Handle<Shader>, HashSet<PipelineIndex>> = HashMap::new();
@@ -220,7 +228,7 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
                 if let Some(ids) = pipeline_shaders.ray_shaders.get(handle) {
                     potentially_ready_pipelines.extend(ids);
                 } else if pipeline_shaders.hitgroup_shaders.contains(handle) {
-                    potentially_ready_pipelines.extend(renderer.all_pipelines())
+                    potentially_ready_pipelines.extend(renderer.all_pipelines().iter())
                 }
             }
             AssetEvent::Removed { handle } => {}

@@ -12,29 +12,60 @@ use bevy_input::keyboard::KeyboardInput;
 use bevy_input::ButtonState;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use dust_render::pipeline::{PipelineIndex, RayTracingPipelineBuildJob};
+use dust_render::shader::SpecializedShader;
 use dust_render::{renderable::Renderable, swapchain::Windows, RenderStage};
 use dustash::sync::GPUFuture;
 use dustash::{
     command::{pool::CommandPool, recorder::CommandExecutable},
     frames::{PerFrame, PerFrameResource},
     queue::{QueueType, Queues},
+    ray_tracing::pipeline::PipelineLayout,
     sync::CommandsFuture,
     Device,
 };
 
-#[derive(Default)]
-struct DefaultRenderer;
+struct DefaultRenderer {
+    pipeline_layout: Arc<PipelineLayout>,
+}
+impl FromWorld for DefaultRenderer {
+    fn from_world(world: &mut World) -> Self {
+        let device = world.get_resource::<Arc<Device>>().unwrap().clone();
+        let pipeline_layout = PipelineLayout::new(
+            device,
+            &vk::PipelineLayoutCreateInfo::builder()
+                .set_layouts(&[])
+                .build(),
+        )
+        .unwrap();
+        DefaultRenderer {
+            pipeline_layout: Arc::new(pipeline_layout),
+        }
+    }
+}
+const PRIMARY_RAY_PIPELINE: PipelineIndex = PipelineIndex::new(0);
 impl dust_render::pipeline::RayTracingRenderer for DefaultRenderer {
     fn build(
         &self,
         index: PipelineIndex,
         asset_server: &AssetServer,
     ) -> RayTracingPipelineBuildJob {
-        todo!()
+        match index {
+            PRIMARY_RAY_PIPELINE => RayTracingPipelineBuildJob {
+                pipeline_layout: self.pipeline_layout.clone(),
+                raygen_shader: SpecializedShader {
+                    shader: asset_server.load("primary.rgen.spv"),
+                    specialization: None,
+                },
+                miss_shaders: vec![],
+                callable_shaders: vec![],
+                max_recursion_depth: 1,
+            },
+            _ => unreachable!(),
+        }
     }
 
-    fn all_pipelines(&self) -> Vec<dust_render::pipeline::PipelineIndex> {
-        todo!()
+    fn all_pipelines(&self) -> &[PipelineIndex] {
+        &[PRIMARY_RAY_PIPELINE]
     }
 }
 
