@@ -42,6 +42,7 @@ fn build_tlas(
     query: Query<(&GlobalTransform, &BlasComponent, &Renderable)>,
 ) {
     // TODO: skip recreating TLAS when there's no change.
+    // TODO: View frustrum culling
     let instances: Vec<_> = query
         .iter()
         .map(|(global_transform, blas, renderable)| {
@@ -82,7 +83,7 @@ fn build_tlas(
                 // In fact we can have more than 1 entry for the same BLAS, becauce different instance can have same geometry but different textures.
                 // What geometry this instance is, what material and geometry id this is.
                 instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
-                    sbt_offset,
+                    sbt_offset, // actually this is wrong. sbt offset also needs to consider geometry indices from previous instances
                     renderable.flags.bits(),
                 ),
                 acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {

@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
     shader::{Shader, SpecializedShader},
-    RenderApp, RenderStage,
+    RenderApp, RenderStage, accel_struct::blas::BlasComponent,
 };
 use bevy_app::Plugin;
 use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
@@ -144,7 +144,8 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
         app.sub_app_mut(RenderApp)
             .init_resource::<Option<Vec<ExtractedRayTracingPipelineLayout>>>()
             .add_system_to_stage(RenderStage::Extract, extract_pipeline_system::<T>)
-            .add_system_to_stage(RenderStage::Prepare, prepare_pipeline_system::<T>);
+            .add_system_to_stage(RenderStage::Prepare, prepare_pipeline_system::<T>.label(PreparePipelineSystem))
+            .add_system_to_stage(RenderStage::Prepare, prepare_sbt_system.after(PreparePipelineSystem));
         // First, get the SBT layout
         // Then, create_many raytracing pipeilnes
         // Finally, use those pipelines to create SBTs
@@ -304,6 +305,10 @@ struct PipelineCache {
     pipelines: Vec<Option<dustash::ray_tracing::pipeline::RayTracingPipeline>>,
 }
 
+
+#[derive(Clone, Hash, Debug, Eq, PartialEq, SystemLabel)]
+struct PreparePipelineSystem;
+
 fn prepare_pipeline_system<T: RayTracingRenderer>(
     mut layouts: ResMut<Option<Vec<ExtractedRayTracingPipelineLayout>>>,
     mut pipeline_cache: Local<PipelineCache>,
@@ -353,6 +358,13 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
                 pipeline_cache.pipelines.len()
             );
         });
+    
+    // Create SBT here?
 }
 
-// TODO: do this separately. One system for Extracting pipelines, one system for extracfting hit groups. one system for prepare
+fn prepare_sbt_system(
+    
+    query: Query<(&BlasComponent)>,
+) {
+    println!("Prepare sbt");
+}

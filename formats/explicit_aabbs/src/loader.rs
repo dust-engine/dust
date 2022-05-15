@@ -8,7 +8,7 @@ impl AssetLoader for ExplicitAABBPrimitivesLoader {
         bytes: &'a [u8],
         load_context: &'a mut bevy_asset::LoadContext,
     ) -> bevy_asset::BoxedFuture<'a, Result<(), anyhow::Error>> {
-        println!("Loaded");
+        println!("Loaded AABB File");
         Box::pin(async {
             let num_primitives = bytes.len() / std::mem::size_of::<ash::vk::AabbPositionsKHR>();
             let aabbs = unsafe {

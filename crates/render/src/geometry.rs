@@ -119,7 +119,7 @@ fn generate_changes<A: Geometry>(
     for event in events.iter() {
         match event {
             AssetEvent::Created { handle } => {
-                println!("Created");
+                println!("Created a geometry asset");
                 // Always rebuild this asset.
                 if let Some(entry) = changed_assets.get_mut(handle) {
                     *entry = true;

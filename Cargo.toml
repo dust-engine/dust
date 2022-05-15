@@ -23,7 +23,7 @@ ash = { version = "0.37", features = ["linked"] }
 
 [dev-dependencies]
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
-bevy_asset = { git = "https://github.com/bevyengine/bevy" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy", features=["filesystem_watcher"] }
 bevy_hierarchy = { git = "https://github.com/bevyengine/bevy" }
 tracing-subscriber = "0.3"
 dust_format_explicit_aabbs = { path = "formats/explicit_aabbs" }
