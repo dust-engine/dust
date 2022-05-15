@@ -142,7 +142,9 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
     fn build(&self, app: &mut bevy_app::App) {
         app.init_resource::<T>().init_resource::<Vec<HitGroup>>();
         app.sub_app_mut(RenderApp)
-            .add_system_to_stage(RenderStage::Extract, extract_pipeline_system::<T>);
+            .init_resource::<Option<Vec<ExtractedRayTracingPipelineLayout>>>()
+            .add_system_to_stage(RenderStage::Extract, extract_pipeline_system::<T>)
+            .add_system_to_stage(RenderStage::Prepare, prepare_pipeline_system::<T>);
         // First, get the SBT layout
         // Then, create_many raytracing pipeilnes
         // Finally, use those pipelines to create SBTs
@@ -163,6 +165,9 @@ pub struct PipelineShaders {
     /// HitGroup Shaders are always used by all pipelines
     hitgroup_shaders: HashSet<Handle<Shader>>,
 
+    /// Pipelines waiting to be built.
+    /// We keep a list of RayTracingPipelineBuildJob here to retain a reference to the shaders,
+    /// so that they don't get unloaded in unexpected ways
     queued_pipelines: HashMap<PipelineIndex, RayTracingPipelineBuildJob>,
 }
 
@@ -176,6 +181,7 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
     hit_groups: Res<Vec<HitGroup>>,
     renderer: Res<T>,
 ) {
+    let pipeline_shaders = &mut *pipeline_shaders;
     // TODO: Preferably renderer and device resources should live in the render world,
     // since renderer contains PipelineLayout which is a render resource.
     // This would be blocked on bevy's asset rework.
@@ -227,8 +233,24 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
             AssetEvent::Created { handle } | AssetEvent::Modified { handle } => {
                 if let Some(ids) = pipeline_shaders.ray_shaders.get(handle) {
                     potentially_ready_pipelines.extend(ids);
+                    // Rebuild impacted pipelines
+                    pipeline_shaders
+                        .queued_pipelines
+                        .extend(ids.iter().map(|index| {
+                            let job = renderer.build(*index, &asset_server);
+                            (*index, job)
+                        }));
                 } else if pipeline_shaders.hitgroup_shaders.contains(handle) {
-                    potentially_ready_pipelines.extend(renderer.all_pipelines().iter())
+                    potentially_ready_pipelines.extend(renderer.all_pipelines().iter());
+                    // Rebuild all pipelines
+                    pipeline_shaders.queued_pipelines = renderer
+                        .all_pipelines()
+                        .iter()
+                        .map(|index| {
+                            let job = renderer.build(*index, &asset_server);
+                            (*index, job)
+                        })
+                        .collect();
                 }
             }
             AssetEvent::Removed { handle } => {}
@@ -311,12 +333,25 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
     }
     .unwrap();
 
+    let num_pipelines = layouts.iter().map(|layout| layout.index.0).max().unwrap() + 1;
+    if num_pipelines > pipeline_cache.pipelines.len() {
+        let len = pipeline_cache.pipelines.len();
+        // Ensure that pipeline_cache.pipelines is large enough
+        pipeline_cache
+            .pipelines
+            .extend(std::iter::repeat_with(|| None).take(num_pipelines - len));
+    }
+
     layouts
         .iter()
         .zip(pipelines.into_iter())
         .for_each(|(layout, pipeline)| {
             // Record the render pipeline.
             pipeline_cache.pipelines[layout.index.0] = Some(pipeline);
+            println!(
+                "Created a render pipeline {}",
+                pipeline_cache.pipelines.len()
+            );
         });
 }
 
