@@ -146,7 +146,9 @@ fn prepare_windows(
 }
 
 // Flush and present
-fn queue_flush_and_present(mut windows: ResMut<Windows>, mut queues: ResMut<Queues>) {
+fn queue_flush_and_present(mut windows: ResMut<Windows>, mut queues: ResMut<Arc<Queues>>) {
+    let queues: &mut Queues = Arc::get_mut(&mut queues)
+        .expect("All references to Queues should be dropped by the end of the frame.");
     queues.flush().unwrap();
     for window in windows.windows.values_mut() {
         let frame = window.current_image.take().unwrap();

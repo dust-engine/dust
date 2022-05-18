@@ -67,7 +67,7 @@ fn build_blas(
     mut blas_store: ResMut<BlasStore>,
     loader: Res<Arc<AccelerationStructureLoader>>,
     allocator: Res<Arc<Allocator>>,
-    queues: Res<Queues>,
+    queues: Res<Arc<Queues>>,
     query: Query<(
         Entity,
         &Renderable,
@@ -174,7 +174,7 @@ fn build_blas(
     }
     if pending_builds.len() > 0 {
         let mut commands_future =
-            CommandsFuture::new(&queues, queues.of_type(QueueType::Compute).index());
+            CommandsFuture::new(queues.clone(), queues.of_type(QueueType::Compute).index());
 
         let acceleration_structures = blas_builder.build(&mut commands_future);
         assert_eq!(acceleration_structures.len(), pending_builds.len());

@@ -8,7 +8,10 @@ use crate::{
 };
 use bevy_app::Plugin;
 use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
-use bevy_ecs::prelude::*;
+use bevy_ecs::{
+    prelude::*,
+    system::{StaticSystemParam, SystemParam, SystemParamItem},
+};
 use bevy_utils::{HashMap, HashSet};
 use dustash::{
     queue::{QueueType, Queues},
@@ -117,11 +120,14 @@ pub trait RayTracingPipeline {
     }
 }
 
-pub trait RayTracingRenderer: Send + Sync + FromWorld + 'static {
+pub trait RayTracingRenderer: Clone + Send + Sync + FromWorld + 'static {
     // Build the pipeline by calling self.add_pipeline()
     fn build(&self, index: PipelineIndex, asset_server: &AssetServer)
         -> RayTracingPipelineBuildJob;
     fn all_pipelines(&self) -> &[PipelineIndex];
+
+    type RenderParam: SystemParam;
+    fn render(&self, param: &mut SystemParamItem<Self::RenderParam>);
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -157,7 +163,8 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
             .add_system_to_stage(
                 RenderStage::Prepare,
                 prepare_sbt_system.after(PreparePipelineSystem),
-            );
+            )
+            .add_system_to_stage(RenderStage::Render, render_system::<T>.label(RenderSystem));
         // First, get the SBT layout
         // Then, create_many raytracing pipeilnes
         // Finally, use those pipelines to create SBTs
@@ -194,6 +201,7 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
     hit_groups: Res<Vec<HitGroup>>,
     renderer: Res<T>,
 ) {
+    commands.insert_resource(renderer.clone());
     let pipeline_shaders = &mut *pipeline_shaders;
     // TODO: Preferably renderer and device resources should live in the render world,
     // since renderer contains PipelineLayout which is a render resource.
@@ -313,9 +321,10 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
 }
 
 #[derive(Default)]
-struct PipelineCache {
-    pipelines: Vec<Option<Arc<dustash::ray_tracing::pipeline::RayTracingPipeline>>>,
-    sbts: Vec<Option<Sbt>>,
+pub struct PipelineCache {
+    pub pipelines: Vec<Option<Arc<dustash::ray_tracing::pipeline::RayTracingPipeline>>>,
+    pub sbts: Vec<Option<Sbt>>,
+    pub sbt_upload_future: Option<CommandsFuture>,
 }
 
 #[derive(Clone, Hash, Debug, Eq, PartialEq, SystemLabel)]
@@ -372,12 +381,10 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
         });
 }
 
-pub struct SbtCache {}
-
 fn prepare_sbt_system(
     mut pipeline_cache: ResMut<PipelineCache>,
     allocator: Res<Arc<dustash::resources::alloc::Allocator>>,
-    queues: Res<Queues>,
+    queues: Res<Arc<Queues>>,
     query: Query<(&BlasComponent)>,
 ) {
     // TODO: skip creating the SBT when there's no change
@@ -390,7 +397,7 @@ fn prepare_sbt_system(
         .sbts
         .extend(std::iter::repeat_with(|| None).take(pipeline_cache.pipelines.len()));
     let mut commands_future =
-        CommandsFuture::new(&queues, queues.of_type(QueueType::Transfer).index());
+        CommandsFuture::new(queues.clone(), queues.of_type(QueueType::Transfer).index());
     for (index, pipeline) in
         pipeline_cache
             .pipelines
@@ -423,4 +430,14 @@ fn prepare_sbt_system(
         );
         pipeline_cache.sbts[index] = Some(sbt);
     }
+    pipeline_cache.sbt_upload_future = Some(commands_future);
+}
+
+#[derive(SystemLabel, Hash, Clone, PartialEq, Eq, Debug)]
+pub struct RenderSystem;
+fn render_system<T: RayTracingRenderer>(
+    renderer: Res<T>,
+    mut param: StaticSystemParam<T::RenderParam>,
+) {
+    renderer.render(&mut param);
 }

@@ -199,7 +199,7 @@ impl<T: Geometry> Default for GPUGeometryStore<T> {
 fn prepare_geometries<T: Geometry>(
     mut geometery_carrier: ResMut<Option<GeometryCarrier<T>>>,
     mut geometry_store: ResMut<GPUGeometryStore<T>>,
-    queues: Res<Queues>,
+    queues: Res<Arc<Queues>>,
     mut build_params: StaticSystemParam<<T::GPUGeometry as GPUGeometry<T>>::BuildParam>,
     mut apply_change_params: StaticSystemParam<
         <T::GPUGeometry as GPUGeometry<T>>::ApplyChangeParam,
@@ -238,7 +238,7 @@ fn prepare_geometries<T: Geometry>(
     // Buffered -> Pending
     if let Some(mut buffered_builds) = geometry_store.buffered_builds.take() {
         let mut future = dustash::sync::CommandsFuture::new(
-            &queues,
+            queues.clone(),
             queues.of_type(QueueType::Transfer).index(),
         );
         let mut pending_builds: Vec<(Handle<T>, Option<T::GPUGeometry>)> = Vec::new();

@@ -3,6 +3,8 @@ use std::sync::Arc;
 use ash::vk;
 use bevy_asset::{AssetServer, Handle};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::lifetimeless::{SRes, SResMut};
+use bevy_ecs::system::SystemParamItem;
 use bevy_ecs::{
     prelude::{FromWorld, World},
     system::{Commands, Local, Res, ResMut},
@@ -24,6 +26,7 @@ use dustash::{
     Device,
 };
 
+#[derive(Clone)]
 struct DefaultRenderer {
     pipeline_layout: Arc<PipelineLayout>,
 }
@@ -67,6 +70,91 @@ impl dust_render::pipeline::RayTracingRenderer for DefaultRenderer {
     fn all_pipelines(&self) -> &[PipelineIndex] {
         &[PRIMARY_RAY_PIPELINE]
     }
+
+    type RenderParam = (
+        SResMut<Windows>,
+        Local<'static, RenderState>,
+        SRes<Arc<Queues>>,
+        Local<'static, PerFrame<RenderPerImageState>>,
+        SResMut<dust_render::pipeline::PipelineCache>,
+    );
+    fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {
+        let (windows, state, queues, per_image_state, pipeline_cache) = params;
+        let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
+        let sbt_upload_future = pipeline_cache.sbt_upload_future.take().unwrap();
+        let cmd_exec = per_image_state
+            .get_or_else(current_frame, || {
+                let buf = state.command_pool.allocate_one().unwrap();
+                let mut builder = buf.start(vk::CommandBufferUsageFlags::empty()).unwrap();
+                builder.record(|mut recorder| {
+                    let color_value = vk::ClearColorValue {
+                        float32: [1.0, 0.0, 0.0, 1.0],
+                    };
+                    recorder.simple_pipeline_barrier2(
+                        &dustash::command::sync2::PipelineBarrier::new(
+                            None,
+                            &[],
+                            &[dustash::command::sync2::ImageBarrier {
+                                memory_barrier: dustash::command::sync2::MemoryBarrier {
+                                    prev_accesses: &[],
+                                    next_accesses: &[
+                                        dustash::command::sync2::AccessType::ClearWrite,
+                                    ],
+                                },
+                                discard_contents: true,
+                                image: current_frame.image,
+                                ..Default::default()
+                            }],
+                            vk::DependencyFlags::BY_REGION,
+                        ),
+                    );
+                    recorder.clear_color_image(
+                        current_frame.image,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        &color_value,
+                        &[vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        }],
+                    );
+
+                    recorder.simple_pipeline_barrier2(
+                        &dustash::command::sync2::PipelineBarrier::new(
+                            None,
+                            &[],
+                            &[dustash::command::sync2::ImageBarrier {
+                                memory_barrier: dustash::command::sync2::MemoryBarrier {
+                                    prev_accesses: &[
+                                        dustash::command::sync2::AccessType::ClearWrite,
+                                    ],
+                                    next_accesses: &[dustash::command::sync2::AccessType::Present],
+                                },
+                                image: current_frame.image,
+                                ..Default::default()
+                            }],
+                            vk::DependencyFlags::BY_REGION,
+                        ),
+                    );
+                });
+                let cmd_exec = builder.end().unwrap();
+                RenderPerImageState {
+                    cmd_exec: Arc::new(cmd_exec),
+                }
+            })
+            .cmd_exec
+            .clone();
+
+        current_frame
+            .then(
+                CommandsFuture::new(queues.clone(), queues.index_of_type(QueueType::Graphics))
+                    .then_command_exec(cmd_exec)
+                    .stage(vk::PipelineStageFlags2::CLEAR),
+            )
+            .then_present(current_frame);
+    }
 }
 
 fn main() {
@@ -99,8 +187,7 @@ fn main() {
 
     {
         app.sub_app_mut(dust_render::RenderApp)
-            .add_plugin(dust_render::swapchain::SwapchainPlugin::default())
-            .add_system_to_stage(RenderStage::Render, render);
+            .add_plugin(dust_render::swapchain::SwapchainPlugin::default());
     }
     app.run();
 }
@@ -127,7 +214,7 @@ struct RenderState {
 impl FromWorld for RenderState {
     fn from_world(world: &mut World) -> Self {
         let device: &Arc<Device> = world.resource();
-        let queues: &Queues = world.resource();
+        let queues: &Arc<Queues> = world.resource();
         let pool = CommandPool::new(
             device.clone(),
             vk::CommandPoolCreateFlags::empty(),
@@ -142,79 +229,6 @@ impl FromWorld for RenderState {
 
 impl PerFrameResource for RenderPerImageState {
     const PER_IMAGE: bool = true;
-}
-
-fn render(
-    mut windows: ResMut<Windows>,
-    state: Local<RenderState>,
-    queues: Res<Queues>,
-    mut per_image_state: Local<PerFrame<RenderPerImageState>>,
-) {
-    let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
-    let cmd_exec = per_image_state
-        .get_or_else(current_frame, || {
-            let buf = state.command_pool.allocate_one().unwrap();
-            let mut builder = buf.start(vk::CommandBufferUsageFlags::empty()).unwrap();
-            builder.record(|mut recorder| {
-                let color_value = vk::ClearColorValue {
-                    float32: [1.0, 0.0, 0.0, 1.0],
-                };
-                recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
-                    None,
-                    &[],
-                    &[dustash::command::sync2::ImageBarrier {
-                        memory_barrier: dustash::command::sync2::MemoryBarrier {
-                            prev_accesses: &[],
-                            next_accesses: &[dustash::command::sync2::AccessType::ClearWrite],
-                        },
-                        discard_contents: true,
-                        image: current_frame.image,
-                        ..Default::default()
-                    }],
-                    vk::DependencyFlags::BY_REGION,
-                ));
-                recorder.clear_color_image(
-                    current_frame.image,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    &color_value,
-                    &[vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    }],
-                );
-
-                recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
-                    None,
-                    &[],
-                    &[dustash::command::sync2::ImageBarrier {
-                        memory_barrier: dustash::command::sync2::MemoryBarrier {
-                            prev_accesses: &[dustash::command::sync2::AccessType::ClearWrite],
-                            next_accesses: &[dustash::command::sync2::AccessType::Present],
-                        },
-                        image: current_frame.image,
-                        ..Default::default()
-                    }],
-                    vk::DependencyFlags::BY_REGION,
-                ));
-            });
-            let cmd_exec = builder.end().unwrap();
-            RenderPerImageState {
-                cmd_exec: Arc::new(cmd_exec),
-            }
-        })
-        .cmd_exec
-        .clone();
-
-    current_frame
-        .then(
-            CommandsFuture::new(&queues, queues.index_of_type(QueueType::Graphics))
-                .then_command_exec(cmd_exec)
-                .stage(vk::PipelineStageFlags2::CLEAR),
-        )
-        .then_present(current_frame);
 }
 
 fn print_keyboard_event_system(

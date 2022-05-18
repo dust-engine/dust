@@ -1,3 +1,4 @@
+use crate::pipeline::RenderSystem;
 use crate::RenderStage;
 use crate::{accel_struct::blas::BlasComponent, renderable::Renderable};
 use ash::vk;
@@ -16,7 +17,7 @@ pub struct TlasPlugin;
 impl bevy_app::Plugin for TlasPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.init_resource::<TLASStore>()
-            .add_system_to_stage(RenderStage::Render, build_tlas);
+            .add_system_to_stage(RenderStage::Render, build_tlas.before(RenderSystem));
     }
 }
 
@@ -36,7 +37,7 @@ fn build_tlas(
     mut store: ResMut<TLASStore>,
     allocator: Res<Arc<Allocator>>,
     accel_struct_loader: Res<Arc<AccelerationStructureLoader>>,
-    queues: Res<Queues>,
+    queues: Res<Arc<Queues>>,
     query: Query<(&GlobalTransform, &BlasComponent, &Renderable)>,
 ) {
     let mut map: HashMap<InstanceEntry, u32> = Default::default();
@@ -103,7 +104,7 @@ fn build_tlas(
     }
 
     let mut commands_future =
-        CommandsFuture::new(&queues, queues.of_type(QueueType::Graphics).index());
+        CommandsFuture::new(queues.clone(), queues.of_type(QueueType::Graphics).index());
 
     let tlas = AccelerationStructure::make_tlas(
         accel_struct_loader.clone(),

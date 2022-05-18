@@ -76,7 +76,7 @@ impl PerFrameResource for RenderPerImageState {
 fn render(
     mut windows: ResMut<Windows>,
     state: Local<RenderState>,
-    queues: Res<Queues>,
+    queues: Res<Arc<Queues>>,
     mut per_image_state: Local<PerFrame<RenderPerImageState>>,
 ) {
     let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
@@ -139,7 +139,7 @@ fn render(
 
     current_frame
         .then(
-            CommandsFuture::new(&queues, queues.index_of_type(QueueType::Graphics))
+            CommandsFuture::new(queues.clone(), queues.index_of_type(QueueType::Graphics))
                 .then_command_exec(cmd_exec)
                 .stage(vk::PipelineStageFlags2::CLEAR),
         )

@@ -139,7 +139,7 @@ impl RenderPlugin {
         render_world.insert_resource(Arc::new(ray_tracing_loader));
         render_world.insert_resource(device);
         render_world.insert_resource(instance);
-        render_world.insert_resource(queues);
+        render_world.insert_resource(Arc::new(queues));
         render_world.insert_resource(Arc::new(allocator));
     }
 }
