@@ -1,18 +1,23 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
+    accel_struct::blas::BlasComponent,
+    material::ExtractedMaterial,
     shader::{Shader, SpecializedShader},
-    RenderApp, RenderStage, accel_struct::blas::BlasComponent,
+    RenderApp, RenderStage,
 };
 use bevy_app::Plugin;
 use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_utils::{HashMap, HashSet};
 use dustash::{
+    queue::{QueueType, Queues},
     ray_tracing::{
         pipeline::{PipelineLayout, RayTracingLoader, RayTracingPipelineLayout},
-        sbt::SbtLayout,
+        sbt::{Sbt, SbtLayout},
     },
+    resources::alloc::BufferRequest,
+    sync::CommandsFuture,
     Device,
 };
 struct RtxPipelinePlugin;
@@ -143,9 +148,16 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
         app.init_resource::<T>().init_resource::<Vec<HitGroup>>();
         app.sub_app_mut(RenderApp)
             .init_resource::<Option<Vec<ExtractedRayTracingPipelineLayout>>>()
+            .init_resource::<PipelineCache>()
             .add_system_to_stage(RenderStage::Extract, extract_pipeline_system::<T>)
-            .add_system_to_stage(RenderStage::Prepare, prepare_pipeline_system::<T>.label(PreparePipelineSystem))
-            .add_system_to_stage(RenderStage::Prepare, prepare_sbt_system.after(PreparePipelineSystem));
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                prepare_pipeline_system::<T>.label(PreparePipelineSystem),
+            )
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                prepare_sbt_system.after(PreparePipelineSystem),
+            );
         // First, get the SBT layout
         // Then, create_many raytracing pipeilnes
         // Finally, use those pipelines to create SBTs
@@ -302,16 +314,16 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
 
 #[derive(Default)]
 struct PipelineCache {
-    pipelines: Vec<Option<dustash::ray_tracing::pipeline::RayTracingPipeline>>,
+    pipelines: Vec<Option<Arc<dustash::ray_tracing::pipeline::RayTracingPipeline>>>,
+    sbts: Vec<Option<Sbt>>,
 }
-
 
 #[derive(Clone, Hash, Debug, Eq, PartialEq, SystemLabel)]
 struct PreparePipelineSystem;
 
 fn prepare_pipeline_system<T: RayTracingRenderer>(
     mut layouts: ResMut<Option<Vec<ExtractedRayTracingPipelineLayout>>>,
-    mut pipeline_cache: Local<PipelineCache>,
+    mut pipeline_cache: ResMut<PipelineCache>,
     rtx_loader: Res<Arc<RayTracingLoader>>,
 ) {
     if layouts.is_none() {
@@ -352,19 +364,63 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
         .zip(pipelines.into_iter())
         .for_each(|(layout, pipeline)| {
             // Record the render pipeline.
-            pipeline_cache.pipelines[layout.index.0] = Some(pipeline);
+            pipeline_cache.pipelines[layout.index.0] = Some(Arc::new(pipeline));
             println!(
                 "Created a render pipeline {}",
                 pipeline_cache.pipelines.len()
             );
         });
-    
-    // Create SBT here?
 }
 
+pub struct SbtCache {}
+
 fn prepare_sbt_system(
-    
+    mut pipeline_cache: ResMut<PipelineCache>,
+    allocator: Res<Arc<dustash::resources::alloc::Allocator>>,
+    queues: Res<Queues>,
     query: Query<(&BlasComponent)>,
 ) {
+    // TODO: skip creating the SBT when there's no change
+    // We always create a new SBT when there's a change. This is to avoid mutation while the SBT was being
+    // read by GPU.
     println!("Prepare sbt");
+    let pipeline_cache = &mut *pipeline_cache;
+    pipeline_cache.sbts = Vec::with_capacity(pipeline_cache.pipelines.len());
+    pipeline_cache
+        .sbts
+        .extend(std::iter::repeat_with(|| None).take(pipeline_cache.pipelines.len()));
+    let mut commands_future =
+        CommandsFuture::new(&queues, queues.of_type(QueueType::Transfer).index());
+    for (index, pipeline) in
+        pipeline_cache
+            .pipelines
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| {
+                if let Some(pipeline) = value {
+                    Some((index, pipeline))
+                } else {
+                    None
+                }
+            })
+    {
+        let rhit_data: Vec<_> = query
+            .iter()
+            .flat_map(|blas| {
+                blas.geometry_material.iter().map(|(geometry, material)| {
+                    (material.hitgroup_index as usize, material.material_id)
+                })
+            })
+            .collect();
+        let sbt = Sbt::new(
+            pipeline.clone(),
+            (),
+            std::iter::once(()),
+            std::iter::once(()),
+            rhit_data,
+            &allocator,
+            &mut commands_future,
+        );
+        pipeline_cache.sbts[index] = Some(sbt);
+    }
 }

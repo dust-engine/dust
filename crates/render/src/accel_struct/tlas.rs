@@ -22,8 +22,6 @@ impl bevy_app::Plugin for TlasPlugin {
 
 #[derive(Default)]
 struct TLASStore {
-    entries: Vec<InstanceEntry>,
-    map: HashMap<InstanceEntry, usize>,
     tlas: Option<Arc<AccelerationStructure>>,
 }
 
@@ -41,6 +39,8 @@ fn build_tlas(
     queues: Res<Queues>,
     query: Query<(&GlobalTransform, &BlasComponent, &Renderable)>,
 ) {
+    let mut map: HashMap<InstanceEntry, u32> = Default::default();
+    let mut current_sbt_offset: u32 = 0;
     // TODO: skip recreating TLAS when there's no change.
     // TODO: View frustrum culling
     let instances: Vec<_> = query
@@ -54,20 +54,26 @@ fn build_tlas(
                     .to_cols_array()[0..12],
             );
 
+            // Deduplicate by geometry and material
             let entry = InstanceEntry {
-                geometries: blas.geometries.clone(),
+                geometries: blas
+                    .geometry_material
+                    .iter()
+                    .map(|(geometry, material)| *geometry)
+                    .collect(),
+                // TODO: Material
             };
-            let sbt_offset = if let Some(index) = store.map.get(&entry) {
-                *index
+            let sbt_offset = if let Some(sbt_offset) = map.get(&entry) {
+                *sbt_offset
             } else {
-                let index = store.entries.len();
-                store.entries.push(entry.clone());
-                store.map.insert(entry, index);
-                index
+                let sbt_offset = current_sbt_offset;
+                current_sbt_offset += blas.geometry_material.len() as u32;
+
+                map.insert(entry, sbt_offset);
+                sbt_offset
             };
             // We only have 24 bits for the SBT offset.
             assert!(sbt_offset < 1 << 24);
-            let sbt_offset = sbt_offset as u32;
 
             vk::AccelerationStructureInstanceKHR {
                 // a 3x4 row-major affine transformation matrix.

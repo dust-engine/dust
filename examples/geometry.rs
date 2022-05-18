@@ -79,10 +79,6 @@ fn main() {
         scale_factor_override: Some(1.0),
         ..Default::default()
     })
-    .insert_resource(bevy_asset::AssetServerSettings {
-        watch_for_changes: true,
-        ..Default::default()
-    })
     .add_plugin(bevy_core::CorePlugin::default())
     .add_plugin(bevy_transform::TransformPlugin::default())
     .add_plugin(bevy_input::InputPlugin::default())
