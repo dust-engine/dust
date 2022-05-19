@@ -120,7 +120,8 @@ pub trait RayTracingPipeline {
     }
 }
 
-pub trait RayTracingRenderer: Clone + Send + Sync + FromWorld + 'static {
+pub trait RayTracingRenderer: Clone + Send + Sync + 'static {
+    fn new(app: &mut bevy_app::App) -> Self;
     // Build the pipeline by calling self.add_pipeline()
     fn build(&self, index: PipelineIndex, asset_server: &AssetServer)
         -> RayTracingPipelineBuildJob;
@@ -151,7 +152,9 @@ impl<T: RayTracingRenderer> Default for RayTracingRendererPlugin<T> {
 
 impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
     fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<T>().init_resource::<Vec<HitGroup>>();
+        let renderer = T::new(app);
+        app.insert_resource(renderer)
+            .init_resource::<Vec<HitGroup>>();
         app.sub_app_mut(RenderApp)
             .init_resource::<Option<Vec<ExtractedRayTracingPipelineLayout>>>()
             .init_resource::<PipelineCache>()
@@ -322,6 +325,7 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
 
 #[derive(Default)]
 pub struct PipelineCache {
+    pub pipelines_updated: bool,
     pub pipelines: Vec<Option<Arc<dustash::ray_tracing::pipeline::RayTracingPipeline>>>,
     pub sbts: Vec<Option<Sbt>>,
     pub sbt_upload_future: Option<CommandsFuture>,
@@ -335,6 +339,7 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
     mut pipeline_cache: ResMut<PipelineCache>,
     rtx_loader: Res<Arc<RayTracingLoader>>,
 ) {
+    pipeline_cache.pipelines_updated = false;
     if layouts.is_none() {
         return;
     }
@@ -374,6 +379,7 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
         .for_each(|(layout, pipeline)| {
             // Record the render pipeline.
             pipeline_cache.pipelines[layout.index.0] = Some(Arc::new(pipeline));
+            pipeline_cache.pipelines_updated = true;
             println!(
                 "Created a render pipeline {}",
                 pipeline_cache.pipelines.len()

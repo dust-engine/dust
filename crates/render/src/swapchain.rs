@@ -119,7 +119,7 @@ fn prepare_windows(
                         color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
                     }],
                     present_mode_preference: vec![vk::PresentModeKHR::FIFO],
-                    usage: vk::ImageUsageFlags::TRANSFER_DST,
+                    usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
                     ..Default::default()
                 },
                 vk::Extent2D {

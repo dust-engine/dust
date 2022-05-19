@@ -22,8 +22,9 @@ impl bevy_app::Plugin for TlasPlugin {
 }
 
 #[derive(Default)]
-struct TLASStore {
-    tlas: Option<Arc<AccelerationStructure>>,
+pub struct TLASStore {
+    pub tlas: Option<Arc<AccelerationStructure>>,
+    pub tlas_build_future: Option<CommandsFuture>,
 }
 
 #[derive(Eq, Hash, PartialEq, Clone)]
@@ -113,4 +114,5 @@ fn build_tlas(
         &mut commands_future,
     );
     store.tlas = Some(tlas);
+    store.tlas_build_future = Some(commands_future);
 }
