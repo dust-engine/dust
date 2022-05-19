@@ -325,7 +325,7 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
 
 #[derive(Default)]
 pub struct PipelineCache {
-    pub pipelines_updated: bool,
+    pub generation: u64,
     pub pipelines: Vec<Option<Arc<dustash::ray_tracing::pipeline::RayTracingPipeline>>>,
     pub sbts: Vec<Option<Sbt>>,
     pub sbt_upload_future: Option<CommandsFuture>,
@@ -339,7 +339,6 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
     mut pipeline_cache: ResMut<PipelineCache>,
     rtx_loader: Res<Arc<RayTracingLoader>>,
 ) {
-    pipeline_cache.pipelines_updated = false;
     if layouts.is_none() {
         return;
     }
@@ -373,18 +372,22 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
             .extend(std::iter::repeat_with(|| None).take(num_pipelines - len));
     }
 
+    let mut pipelines_updated: bool = false;
     layouts
         .iter()
         .zip(pipelines.into_iter())
         .for_each(|(layout, pipeline)| {
             // Record the render pipeline.
             pipeline_cache.pipelines[layout.index.0] = Some(Arc::new(pipeline));
-            pipeline_cache.pipelines_updated = true;
+            pipelines_updated = true;
             println!(
                 "Created a render pipeline {}",
                 pipeline_cache.pipelines.len()
             );
         });
+    if pipelines_updated {
+        pipeline_cache.generation += 1;
+    }
 }
 
 fn prepare_sbt_system(
@@ -396,7 +399,6 @@ fn prepare_sbt_system(
     // TODO: skip creating the SBT when there's no change
     // We always create a new SBT when there's a change. This is to avoid mutation while the SBT was being
     // read by GPU.
-    println!("Prepare sbt");
     let pipeline_cache = &mut *pipeline_cache;
     pipeline_cache.sbts = Vec::with_capacity(pipeline_cache.pipelines.len());
     pipeline_cache

@@ -85,64 +85,36 @@ impl dust_render::pipeline::RayTracingRenderer for DefaultRenderer {
         SResMut<RenderState>,
         SRes<Arc<Queues>>,
         Local<'static, PerFrame<RenderPerImageState>>,
-        Local<'static, PerFrame<RenderPerFrameState>>,
         SResMut<dust_render::pipeline::PipelineCache>,
         SResMut<TLASStore>,
     );
     fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {
-        let (
-            windows,
-            device,
-            state,
-            queues,
-            per_image_state,
-            per_frame_state,
-            pipeline_cache,
-            tlas_store,
-        ) = params;
+        let (windows, device, state, queues, per_image_state, pipeline_cache, tlas_store) = params;
         let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
-
-        let per_frame_state = per_frame_state.get_or_else(current_frame, false, || {
-            let desc_set = state
-                .desc_pool
-                .allocate(std::iter::once(&state.desc_layout))
-                .unwrap()
-                .into_iter()
-                .next()
-                .unwrap();
-            RenderPerFrameState { desc_set }
-        });
-        if let Some(tlas) = tlas_store.tlas.as_ref() {
-            unsafe {
-                let as_write = vk::WriteDescriptorSetAccelerationStructureKHR {
-                    acceleration_structure_count: 1,
-                    p_acceleration_structures: &tlas.raw(),
-                    ..Default::default()
-                };
-                device.update_descriptor_sets(
-                    &[vk::WriteDescriptorSet {
-                        dst_set: per_frame_state.desc_set.raw(),
-                        dst_binding: 1,
-                        dst_array_element: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                        p_next: &as_write as *const _ as *const c_void,
-                        ..Default::default()
-                    }],
-                    &[],
-                );
-            }
-        }
 
         let mut sbt_upload_future = pipeline_cache.sbt_upload_future.take().unwrap();
         let tlas_updated_future = tlas_store.tlas_build_future.take();
 
-        let cmd_exec = per_image_state
-            .get_or_else(current_frame, pipeline_cache.pipelines_updated, || {
+        let per_image_state = per_image_state.get_or_else(
+            current_frame,
+            |original| pipeline_cache.generation != original.pipeline_generation,
+            |original| {
+                let desc_set = original.map_or_else(
+                    || {
+                        state
+                            .desc_pool
+                            .allocate(std::iter::once(&state.desc_layout))
+                            .unwrap()
+                            .into_iter()
+                            .next()
+                            .unwrap()
+                    },
+                    |a| a.desc_set,
+                );
                 unsafe {
                     device.update_descriptor_sets(
                         &[vk::WriteDescriptorSet::builder()
-                            .dst_set(per_frame_state.desc_set.raw())
+                            .dst_set(desc_set.raw())
                             .dst_binding(0)
                             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                             .image_info(&[vk::DescriptorImageInfo {
@@ -152,6 +124,12 @@ impl dust_render::pipeline::RayTracingRenderer for DefaultRenderer {
                             }])
                             .build()],
                         &[],
+                    );
+                    println!(
+                        "{:?} -> {:?} {:?}",
+                        desc_set.raw(),
+                        current_frame.image_view,
+                        current_frame.image
                     );
                 }
                 let buf = state.command_pool.allocate_one().unwrap();
@@ -179,7 +157,7 @@ impl dust_render::pipeline::RayTracingRenderer for DefaultRenderer {
                         vk::PipelineBindPoint::RAY_TRACING_KHR,
                         &self.pipeline_layout,
                         0,
-                        &[per_frame_state.desc_set.raw()],
+                        &[desc_set.raw()],
                         &[],
                     );
                     if let Some(sbt) = pipeline_cache.sbts.get(0).unwrap_or(&None) {
@@ -216,11 +194,33 @@ impl dust_render::pipeline::RayTracingRenderer for DefaultRenderer {
                 let cmd_exec = builder.end().unwrap();
                 RenderPerImageState {
                     cmd_exec: Arc::new(cmd_exec),
+                    desc_set,
+                    pipeline_generation: pipeline_cache.generation,
                 }
-            })
-            .cmd_exec
-            .clone();
-
+            },
+        );
+        let cmd_exec = per_image_state.cmd_exec.clone();
+        if let Some(tlas) = tlas_store.tlas.as_ref() {
+            unsafe {
+                let as_write = vk::WriteDescriptorSetAccelerationStructureKHR {
+                    acceleration_structure_count: 1,
+                    p_acceleration_structures: &tlas.raw(),
+                    ..Default::default()
+                };
+                device.update_descriptor_sets(
+                    &[vk::WriteDescriptorSet {
+                        dst_set: per_image_state.desc_set.raw(),
+                        dst_binding: 1,
+                        dst_array_element: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+                        p_next: &as_write as *const _ as *const c_void,
+                        ..Default::default()
+                    }],
+                    &[],
+                );
+            }
+        }
         let mut ray_tracing_future =
             CommandsFuture::new(queues.clone(), queues.index_of_type(QueueType::Graphics));
         ray_tracing_future.then_command_exec(cmd_exec);
@@ -246,6 +246,10 @@ fn main() {
         width: 1280.,
         height: 800.,
         scale_factor_override: Some(1.0),
+        ..Default::default()
+    })
+    .insert_resource(bevy_asset::AssetServerSettings {
+        watch_for_changes: true,
         ..Default::default()
     })
     .add_plugin(bevy_core::CorePlugin::default())
@@ -286,6 +290,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 struct RenderPerImageState {
     cmd_exec: Arc<CommandExecutable>,
+    desc_set: DescriptorSet,
+    pipeline_generation: u64,
 }
 
 struct RenderState {
@@ -360,14 +366,6 @@ impl PerFrameResource for RenderPerImageState {
     const PER_IMAGE: bool = true;
 }
 
-struct RenderPerFrameState {
-    desc_set: DescriptorSet,
-}
-
-impl PerFrameResource for RenderPerFrameState {
-    const PER_IMAGE: bool = false;
-}
-
 fn print_keyboard_event_system(
     mut commands: Commands,
     mut keyboard_input_events: EventReader<KeyboardInput>,
@@ -387,7 +385,6 @@ fn print_keyboard_event_system(
                 commands
                     .entity(entity)
                     .remove::<Handle<dust_format_explicit_aabbs::AABBGeometry>>();
-                println!("{:?}", event);
             }
             _ => {}
         }
