@@ -7,6 +7,7 @@ pub mod geometry;
 pub mod material;
 pub mod pipeline;
 pub mod renderable;
+pub mod renderer;
 pub mod shader;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;

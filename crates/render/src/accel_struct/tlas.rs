@@ -77,6 +77,7 @@ fn build_tlas(
             // We only have 24 bits for the SBT offset.
             assert!(sbt_offset < 1 << 24);
 
+            println!("Instance to build");
             vk::AccelerationStructureInstanceKHR {
                 // a 3x4 row-major affine transformation matrix.
                 transform,
