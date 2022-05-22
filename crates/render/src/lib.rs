@@ -9,6 +9,7 @@ pub mod pipeline;
 pub mod renderable;
 pub mod renderer;
 pub mod shader;
+pub mod camera;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
 
@@ -194,7 +195,8 @@ impl Plugin for RenderPlugin {
         render_app
             .add_plugin(accel_struct::blas::BlasPlugin::default())
             .add_plugin(accel_struct::tlas::TlasPlugin::default())
-            .add_plugin(swapchain::SwapchainPlugin::default());
+            .add_plugin(swapchain::SwapchainPlugin::default())
+            .add_system_to_stage(RenderStage::Extract, camera::extract_camera_system);
 
         // Subapp runs always get scheduled after main world runs
         app.add_sub_app(RenderApp, render_app, |app_world, render_app| {
