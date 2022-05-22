@@ -33,6 +33,8 @@ fn main() {
     //.add_plugin(dust_raytrace::DustPlugin::default())
     //add_plugin(bevy::scene::ScenePlugin::default())
     .add_plugin(bevy_winit::WinitPlugin::default())
+
+
     //.add_plugin(flycamera::FlyCameraPlugin)
     //.add_plugin(fps_counter::FPSCounterPlugin)
     .add_plugin(dust_render::RenderPlugin::default())
@@ -42,11 +44,6 @@ fn main() {
     >::default())
     .add_startup_system(setup)
     .add_system(print_keyboard_event_system);
-
-    {
-        app.sub_app_mut(dust_render::RenderApp)
-            .add_plugin(dust_render::swapchain::SwapchainPlugin::default());
-    }
     app.run();
 }
 

@@ -193,7 +193,8 @@ impl Plugin for RenderPlugin {
         // Add render plugins
         render_app
             .add_plugin(accel_struct::blas::BlasPlugin::default())
-            .add_plugin(accel_struct::tlas::TlasPlugin::default());
+            .add_plugin(accel_struct::tlas::TlasPlugin::default())
+            .add_plugin(swapchain::SwapchainPlugin::default());
 
         // Subapp runs always get scheduled after main world runs
         app.add_sub_app(RenderApp, render_app, |app_world, render_app| {

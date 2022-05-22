@@ -11,7 +11,7 @@ use bevy_ecs::{
 use dustash::{
     command::{pool::CommandPool, recorder::CommandExecutable},
     descriptor::{DescriptorPool, DescriptorSet, DescriptorSetLayout},
-    frames::{PerFrame, PerFrameResource},
+    frames::PerFrame,
     queue::{QueueType, Queues},
     ray_tracing::pipeline::PipelineLayout,
     sync::{CommandsFuture, GPUFuture},
@@ -22,7 +22,7 @@ use crate::{
     accel_struct::tlas::TLASStore,
     pipeline::{PipelineIndex, RayTracingPipelineBuildJob},
     shader::SpecializedShader,
-    swapchain::Windows,
+    swapchain::{Windows, Window},
 };
 use ash::vk;
 
@@ -32,13 +32,10 @@ pub struct RenderPerImageState {
     pipeline_generation: u64,
 }
 
-impl PerFrameResource for RenderPerImageState {
-    const PER_IMAGE: bool = true;
-}
-
 pub struct RenderState {
     command_pool: Arc<CommandPool>,
-    desc_pool: Arc<DescriptorPool>,
+    desc_pool: Option<Arc<DescriptorPool>>,
+    desc_pool_num_frames: u32,
     desc_layout: DescriptorSetLayout,
 }
 
@@ -53,27 +50,6 @@ impl FromWorld for RenderState {
         )
         .unwrap();
 
-        let desc_pool = {
-            let num_frame_in_flight = 3;
-            DescriptorPool::new(
-                device.clone(),
-                &vk::DescriptorPoolCreateInfo::builder()
-                    .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-                    .max_sets(num_frame_in_flight)
-                    .pool_sizes(&[
-                        vk::DescriptorPoolSize {
-                            ty: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                            descriptor_count: num_frame_in_flight,
-                        },
-                        vk::DescriptorPoolSize {
-                            ty: vk::DescriptorType::STORAGE_IMAGE,
-                            descriptor_count: num_frame_in_flight,
-                        },
-                    ])
-                    .build(),
-            )
-        }
-        .unwrap();
         let desc_layout = DescriptorSetLayout::new(
             device.clone(),
             &vk::DescriptorSetLayoutCreateInfo::builder()
@@ -98,7 +74,8 @@ impl FromWorld for RenderState {
         .unwrap();
         RenderState {
             command_pool: Arc::new(pool),
-            desc_pool: Arc::new(desc_pool),
+            desc_pool: None,
+            desc_pool_num_frames: 0,
             desc_layout,
         }
     }
@@ -159,12 +136,36 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         SRes<Arc<Device>>,
         SResMut<RenderState>,
         SRes<Arc<Queues>>,
-        Local<'static, PerFrame<RenderPerImageState>>,
+        Local<'static, PerFrame<RenderPerImageState, true>>,
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
     );
     fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {
         let (windows, device, state, queues, per_image_state, pipeline_cache, tlas_store) = params;
+        {
+            let num_swapchain_images = windows.primary().unwrap().frames().num_images() as u32;
+            if state.desc_pool.is_none() || state.desc_pool_num_frames != num_swapchain_images {
+                // Update descriptor pool
+                // We need one descriptor for each image.
+                state.desc_pool = Some(Arc::new(DescriptorPool::new(
+                    device.clone(),
+                    &vk::DescriptorPoolCreateInfo::builder()
+                        .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+                        .max_sets(num_swapchain_images)
+                        .pool_sizes(&[
+                            vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+                                descriptor_count: num_swapchain_images,
+                            },
+                            vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::STORAGE_IMAGE,
+                                descriptor_count: num_swapchain_images,
+                            },
+                        ])
+                        .build(),
+                ).unwrap()));
+            }
+        };
         let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
 
         let mut sbt_upload_future = pipeline_cache.sbt_upload_future.take().unwrap();
@@ -178,6 +179,8 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                     || {
                         state
                             .desc_pool
+                            .as_ref()
+                            .unwrap()
                             .allocate(std::iter::once(&state.desc_layout))
                             .unwrap()
                             .into_iter()
@@ -276,6 +279,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         );
         let cmd_exec = per_image_state.cmd_exec.clone();
         if let Some(tlas) = tlas_store.tlas.as_ref() {
+            // Update Acceleration Structure descriptor set
             unsafe {
                 let as_write = vk::WriteDescriptorSetAccelerationStructureKHR {
                     acceleration_structure_count: 1,
@@ -303,10 +307,12 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         // rtx depends on acquired swapchain image
         current_frame
             .then(ray_tracing_future.stage(vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR));
+        // rtx depends on sbt upload
         sbt_upload_future
             .stage(vk::PipelineStageFlags2::COPY)
             .then(ray_tracing_future.stage(vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR));
 
+        // After rtx completes, swapchain present.
         ray_tracing_future
             .stage(vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR)
             .then_present(current_frame);
