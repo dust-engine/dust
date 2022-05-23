@@ -4,7 +4,7 @@ use crate::geometry::Geometry;
 use crate::pipeline::{HitGroup, HitGroupType};
 use crate::shader::{Shader, SpecializedShader};
 use bevy_app::{App, Plugin};
-use bevy_asset::{Asset, AssetServer, Handle};
+use bevy_asset::{AddAsset, Asset, AssetServer, Handle};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::system::{Commands, Query};
@@ -30,6 +30,7 @@ impl<T: Material> Default for MaterialPlugin<T> {
 
 impl<T: Material> Plugin for MaterialPlugin<T> {
     fn build(&self, app: &mut App) {
+        app.add_asset::<T>();
         let asset_server = app.world.get_resource::<AssetServer>().unwrap();
         let hitgroup = HitGroup {
             intersection_shader: Some(T::Geometry::intersection_shader(asset_server)),

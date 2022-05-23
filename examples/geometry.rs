@@ -1,4 +1,4 @@
-use bevy_asset::{AssetServer, Handle};
+use bevy_asset::{AssetServer, Assets, Handle};
 use bevy_ecs::prelude::*;
 
 use bevy_ecs::system::{Commands, Res};
@@ -67,15 +67,21 @@ impl Material for EmptyMaterial {
     }
 }
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut materials: ResMut<Assets<EmptyMaterial>>,
+) {
     let handle: Handle<dust_format_explicit_aabbs::AABBGeometry> =
         asset_server.load("../assets/out.aabb");
+    let material_handle: Handle<EmptyMaterial> = materials.add(EmptyMaterial {});
     commands
         .spawn()
         .insert(Renderable::default())
         .insert(Transform::default())
         .insert(GlobalTransform::default())
-        .insert(handle);
+        .insert(handle)
+        .insert(material_handle);
 
     commands
         .spawn()
