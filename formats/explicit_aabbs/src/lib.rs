@@ -41,7 +41,11 @@ impl Geometry for AABBGeometry {
     }
 
     fn intersection_shader(asset_server: &AssetServer) -> SpecializedShader {
-        todo!()
+        let handle = asset_server.load("dda.rint.spv");
+        SpecializedShader {
+            shader: handle,
+            specialization: Default::default(),
+        }
     }
 
     type GenerateBuildsParam = SRes<Arc<Allocator>>;

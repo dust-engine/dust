@@ -3,13 +3,13 @@
 
 //pub mod accel_struct;
 pub mod accel_struct;
+pub mod camera;
 pub mod geometry;
 pub mod material;
 pub mod pipeline;
 pub mod renderable;
 pub mod renderer;
 pub mod shader;
-pub mod camera;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
 

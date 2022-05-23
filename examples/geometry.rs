@@ -7,6 +7,9 @@ use bevy_input::keyboard::KeyboardInput;
 use bevy_input::ButtonState;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
+use dust_format_explicit_aabbs::ExplicitAABBPlugin;
+use dust_render::camera::PerspectiveCamera;
+use dust_render::material::Material;
 use dust_render::renderable::Renderable;
 
 use dust_render::renderer::Renderer as DefaultRenderer;
@@ -33,8 +36,6 @@ fn main() {
     //.add_plugin(dust_raytrace::DustPlugin::default())
     //add_plugin(bevy::scene::ScenePlugin::default())
     .add_plugin(bevy_winit::WinitPlugin::default())
-
-
     //.add_plugin(flycamera::FlyCameraPlugin)
     //.add_plugin(fps_counter::FPSCounterPlugin)
     .add_plugin(dust_render::RenderPlugin::default())
@@ -42,9 +43,28 @@ fn main() {
     .add_plugin(dust_render::pipeline::RayTracingRendererPlugin::<
         DefaultRenderer,
     >::default())
+    .add_plugin(dust_render::material::MaterialPlugin::<EmptyMaterial>::default())
     .add_startup_system(setup)
     .add_system(print_keyboard_event_system);
     app.run();
+}
+
+#[derive(bevy_reflect::TypeUuid)]
+#[uuid = "75a9a733-04d7-4abb-8600-9a7d24ff0598"]
+pub struct EmptyMaterial {}
+
+impl Material for EmptyMaterial {
+    type Geometry = dust_format_explicit_aabbs::AABBGeometry;
+
+    fn anyhit_shader(asset_server: &AssetServer) -> Option<dust_render::shader::SpecializedShader> {
+        None
+    }
+
+    fn closest_hit_shader(
+        asset_server: &AssetServer,
+    ) -> Option<dust_render::shader::SpecializedShader> {
+        None
+    }
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -56,6 +76,12 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         .insert(Transform::default())
         .insert(GlobalTransform::default())
         .insert(handle);
+
+    commands
+        .spawn()
+        .insert(PerspectiveCamera::default())
+        .insert(Transform::default())
+        .insert(GlobalTransform::default());
 }
 
 fn print_keyboard_event_system(

@@ -1,17 +1,33 @@
-use bevy_ecs::{component::Component, system::{Query, Commands}, entity::Entity};
+use bevy_ecs::{
+    component::Component,
+    entity::Entity,
+    system::{Commands, Query},
+};
 use bevy_transform::prelude::GlobalTransform;
 use bevy_window::WindowId;
-use glam::{Vec3, Mat3};
+use glam::{Mat3, Vec3};
 
 #[derive(Component)]
 pub struct PerspectiveCamera {
     fov: f32,
     near: f32,
     far: f32,
-    target: WindowId
+    target: WindowId,
+}
+
+impl Default for PerspectiveCamera {
+    fn default() -> Self {
+        Self {
+            fov: std::f32::consts::FRAC_PI_2,
+            near: 0.1,
+            far: 10000.0,
+            target: WindowId::primary(),
+        }
+    }
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct PerspectiveCameraParameters {
     pub camera_view_col0: [f32; 3],
     pub near: f32,
@@ -24,18 +40,20 @@ pub struct PerspectiveCameraParameters {
     pub tan_half_fov: f32,
 }
 
-
 #[derive(Component)]
 pub struct ExtractedCamera {
-    target: WindowId,
-    params: PerspectiveCameraParameters
+    pub target: WindowId,
+    pub params: PerspectiveCameraParameters,
 }
 
 pub(crate) fn extract_camera_system(
     mut commands: Commands,
     query: Query<(Entity, &PerspectiveCamera, &GlobalTransform)>,
 ) {
-    debug_assert_eq!(std::mem::size_of::<PerspectiveCameraParameters>(), std::mem::size_of::<f32>() * 16);
+    debug_assert_eq!(
+        std::mem::size_of::<PerspectiveCameraParameters>(),
+        std::mem::size_of::<f32>() * 16
+    );
     for (entity, camera, transform) in query.iter() {
         let rotation_matrix = Mat3::from_quat(transform.rotation).to_cols_array_2d();
         let params = PerspectiveCameraParameters {

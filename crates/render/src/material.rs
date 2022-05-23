@@ -9,15 +9,23 @@ use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::system::{Commands, Query};
 
-trait Material: Asset {
+pub trait Material: Asset {
     type Geometry: Geometry;
 
     fn anyhit_shader(asset_server: &AssetServer) -> Option<SpecializedShader>;
     fn closest_hit_shader(asset_server: &AssetServer) -> Option<SpecializedShader>;
 }
 
-struct MaterialPlugin<T: Material> {
+pub struct MaterialPlugin<T: Material> {
     _marker: PhantomData<T>,
+}
+
+impl<T: Material> Default for MaterialPlugin<T> {
+    fn default() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<T: Material> Plugin for MaterialPlugin<T> {
@@ -32,7 +40,7 @@ impl<T: Material> Plugin for MaterialPlugin<T> {
         let mut hitgroups = app
             .world
             .get_resource_mut::<Vec<HitGroup>>()
-            .expect("MaterialPlugin must be registered after PipelinePlugin");
+            .expect("MaterialPlugin must be registered after RenderPlugin");
         let hitgroup_index = hitgroups.len() as u32;
         hitgroups.push(hitgroup);
 

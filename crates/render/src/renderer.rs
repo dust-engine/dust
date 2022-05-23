@@ -4,7 +4,7 @@ use bevy_asset::AssetServer;
 use bevy_ecs::{
     prelude::*,
     system::{
-        lifetimeless::{SRes, SResMut},
+        lifetimeless::{SQuery, SRes, SResMut},
         SystemParamItem,
     },
 };
@@ -14,17 +14,21 @@ use dustash::{
     frames::PerFrame,
     queue::{QueueType, Queues},
     ray_tracing::pipeline::PipelineLayout,
+    resources::alloc::Allocator,
     sync::{CommandsFuture, GPUFuture},
     Device,
 };
 
 use crate::{
     accel_struct::tlas::TLASStore,
+    camera::{ExtractedCamera, PerspectiveCameraParameters},
     pipeline::{PipelineIndex, RayTracingPipelineBuildJob},
     shader::SpecializedShader,
-    swapchain::{Windows, Window},
+    swapchain::{Window, Windows},
 };
 use ash::vk;
+use dustash::frames::PerFrameUniform;
+use dustash::resources::buffer::HasBuffer;
 
 pub struct RenderPerImageState {
     cmd_exec: Arc<CommandExecutable>,
@@ -37,6 +41,10 @@ pub struct RenderState {
     desc_pool: Option<Arc<DescriptorPool>>,
     desc_pool_num_frames: u32,
     desc_layout: DescriptorSetLayout,
+}
+
+pub struct Uniform {
+    camera_params: PerspectiveCameraParameters,
 }
 
 impl FromWorld for RenderState {
@@ -134,42 +142,94 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
     type RenderParam = (
         SResMut<Windows>,
         SRes<Arc<Device>>,
+        SRes<Arc<Allocator>>,
         SResMut<RenderState>,
         SRes<Arc<Queues>>,
         Local<'static, PerFrame<RenderPerImageState, true>>,
+        Local<'static, Option<PerFrameUniform<Uniform>>>,
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
+        SQuery<bevy_ecs::system::lifetimeless::Read<ExtractedCamera>>,
     );
     fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {
-        let (windows, device, state, queues, per_image_state, pipeline_cache, tlas_store) = params;
+        let (
+            windows,
+            device,
+            allocator,
+            state,
+            queues,
+            per_image_state,
+            per_frame_uniform,
+            pipeline_cache,
+            tlas_store,
+            cameras,
+        ) = params;
+
         {
+            // Update descriptor pool
             let num_swapchain_images = windows.primary().unwrap().frames().num_images() as u32;
             if state.desc_pool.is_none() || state.desc_pool_num_frames != num_swapchain_images {
                 // Update descriptor pool
                 // We need one descriptor for each image.
-                state.desc_pool = Some(Arc::new(DescriptorPool::new(
-                    device.clone(),
-                    &vk::DescriptorPoolCreateInfo::builder()
-                        .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-                        .max_sets(num_swapchain_images)
-                        .pool_sizes(&[
-                            vk::DescriptorPoolSize {
-                                ty: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                                descriptor_count: num_swapchain_images,
-                            },
-                            vk::DescriptorPoolSize {
-                                ty: vk::DescriptorType::STORAGE_IMAGE,
-                                descriptor_count: num_swapchain_images,
-                            },
-                        ])
-                        .build(),
-                ).unwrap()));
+                state.desc_pool = Some(Arc::new(
+                    DescriptorPool::new(
+                        device.clone(),
+                        &vk::DescriptorPoolCreateInfo::builder()
+                            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+                            .max_sets(num_swapchain_images)
+                            .pool_sizes(&[
+                                vk::DescriptorPoolSize {
+                                    ty: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+                                    descriptor_count: num_swapchain_images,
+                                },
+                                vk::DescriptorPoolSize {
+                                    ty: vk::DescriptorType::STORAGE_IMAGE,
+                                    descriptor_count: num_swapchain_images,
+                                },
+                            ])
+                            .build(),
+                    )
+                    .unwrap(),
+                ));
             }
         };
-        let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
 
         let mut sbt_upload_future = pipeline_cache.sbt_upload_future.take().unwrap();
         let tlas_updated_future = tlas_store.tlas_build_future.take();
+
+        let camera = {
+            let mut camera_iter = cameras.iter();
+            let camera = camera_iter.next();
+            assert!(
+                camera_iter.next().is_none(),
+                "Only supports one camera for now"
+            );
+            camera
+        };
+
+        let (uniform_buf, uniform_offset) = {
+            // Update per frame uniform
+            let frame_manager = windows.primary().unwrap().frames();
+            if per_frame_uniform.is_none()
+                || per_frame_uniform
+                    .as_ref()
+                    .unwrap()
+                    .needs_rebuild(frame_manager)
+            {
+                let uniform = PerFrameUniform::<Uniform>::new(frame_manager, allocator);
+                **per_frame_uniform = Some(uniform);
+            }
+            let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
+            let per_frame_uniform = per_frame_uniform.as_mut().unwrap();
+            per_frame_uniform.write(
+                Uniform {
+                    camera_params: camera.unwrap().params.clone(),
+                },
+                &current_frame,
+                &mut sbt_upload_future,
+            )
+        };
+        let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
 
         let per_image_state = per_image_state.get_or_else(
             current_frame,
@@ -286,16 +346,30 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                     p_acceleration_structures: &tlas.raw(),
                     ..Default::default()
                 };
+                println!("Update dsc set");
                 device.update_descriptor_sets(
-                    &[vk::WriteDescriptorSet {
-                        dst_set: per_image_state.desc_set.raw(),
-                        dst_binding: 1,
-                        dst_array_element: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                        p_next: &as_write as *const _ as *const c_void,
-                        ..Default::default()
-                    }],
+                    &[
+                        vk::WriteDescriptorSet {
+                            dst_set: per_image_state.desc_set.raw(),
+                            dst_binding: 1,
+                            dst_array_element: 0,
+                            descriptor_count: 1,
+                            descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+                            p_next: &as_write as *const _ as *const c_void,
+                            ..Default::default()
+                        },
+                        vk::WriteDescriptorSet::builder()
+                            .dst_set(per_image_state.desc_set.raw())
+                            .dst_binding(2)
+                            .dst_array_element(0)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .buffer_info(&[vk::DescriptorBufferInfo {
+                                buffer: uniform_buf.raw_buffer(),
+                                offset: uniform_offset,
+                                range: std::mem::size_of::<Uniform>() as u64,
+                            }])
+                            .build(),
+                    ],
                     &[],
                 );
             }
