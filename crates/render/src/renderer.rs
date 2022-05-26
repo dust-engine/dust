@@ -30,8 +30,8 @@ use ash::vk;
 use dustash::frames::PerFrameUniform;
 use dustash::resources::buffer::HasBuffer;
 
-pub struct RenderPerImageState {
-    cmd_exec: Arc<CommandExecutable>,
+pub struct RenderPerFrameState {
+    cmd_exec: Option<Arc<CommandExecutable>>,
     desc_set: DescriptorSet,
     pipeline_generation: u64,
 }
@@ -53,7 +53,7 @@ impl FromWorld for RenderState {
         let queues: &Arc<Queues> = world.resource();
         let pool = CommandPool::new(
             device.clone(),
-            vk::CommandPoolCreateFlags::empty(),
+            vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
             queues.of_type(QueueType::Graphics).family_index(),
         )
         .unwrap();
@@ -72,6 +72,13 @@ impl FromWorld for RenderState {
                     vk::DescriptorSetLayoutBinding {
                         binding: 1,
                         descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+                        descriptor_count: 1,
+                        stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
+                        ..Default::default()
+                    },
+                    vk::DescriptorSetLayoutBinding {
+                        binding: 2,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                         descriptor_count: 1,
                         stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
                         ..Default::default()
@@ -145,7 +152,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         SRes<Arc<Allocator>>,
         SResMut<RenderState>,
         SRes<Arc<Queues>>,
-        Local<'static, PerFrame<RenderPerImageState, true>>,
+        Local<'static, PerFrame<RenderPerFrameState>>,
         Local<'static, Option<PerFrameUniform<Uniform>>>,
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
@@ -158,7 +165,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             allocator,
             state,
             queues,
-            per_image_state,
+            per_frame_state,
             per_frame_uniform,
             pipeline_cache,
             tlas_store,
@@ -195,7 +202,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         };
 
         let mut sbt_upload_future = pipeline_cache.sbt_upload_future.take().unwrap();
-        let tlas_updated_future = tlas_store.tlas_build_future.take();
+        let mut tlas_updated_future = tlas_store.tlas_build_future.take();
 
         let camera = {
             let mut camera_iter = cameras.iter();
@@ -231,9 +238,10 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         };
         let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
 
-        let per_image_state = per_image_state.get_or_else(
+        // Allocate descriptor set and bind swapchain image
+        let per_frame_state = per_frame_state.get_or_else(
             current_frame,
-            |original| pipeline_cache.generation != original.pipeline_generation,
+            |original| false,
             |original| {
                 let desc_set = original.map_or_else(
                     || {
@@ -270,87 +278,28 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                         current_frame.image
                     );
                 }
-                let buf = state.command_pool.allocate_one().unwrap();
-                let mut builder = buf.start(vk::CommandBufferUsageFlags::empty()).unwrap();
-                builder.record(|mut recorder| {
-                    recorder.simple_pipeline_barrier2(
-                        &dustash::command::sync2::PipelineBarrier::new(
-                            None,
-                            &[],
-                            &[dustash::command::sync2::ImageBarrier {
-                                memory_barrier: dustash::command::sync2::MemoryBarrier {
-                                    prev_accesses: &[],
-                                    next_accesses: &[
-                                        dustash::command::sync2::AccessType::RayTracingShaderWrite,
-                                    ],
-                                },
-                                discard_contents: true,
-                                image: current_frame.image,
-                                ..Default::default()
-                            }],
-                            vk::DependencyFlags::BY_REGION,
-                        ),
-                    );
-                    recorder.bind_descriptor_set(
-                        vk::PipelineBindPoint::RAY_TRACING_KHR,
-                        &self.pipeline_layout,
-                        0,
-                        &[desc_set.raw()],
-                        &[],
-                    );
-                    if let Some(sbt) = pipeline_cache.sbts.get(0).unwrap_or(&None) {
-                        // We must have already created the pipeline before we're able to create an SBT.
-                        recorder.bind_raytracing_pipeline(
-                            pipeline_cache.pipelines[0].as_ref().unwrap(),
-                        );
-                        recorder.trace_rays(
-                            sbt,
-                            current_frame.image_extent.width,
-                            current_frame.image_extent.height,
-                            1,
-                        );
-                    }
-
-                    recorder.simple_pipeline_barrier2(
-                        &dustash::command::sync2::PipelineBarrier::new(
-                            None,
-                            &[],
-                            &[dustash::command::sync2::ImageBarrier {
-                                memory_barrier: dustash::command::sync2::MemoryBarrier {
-                                    prev_accesses: &[
-                                        dustash::command::sync2::AccessType::RayTracingShaderWrite,
-                                    ],
-                                    next_accesses: &[dustash::command::sync2::AccessType::Present],
-                                },
-                                image: current_frame.image,
-                                ..Default::default()
-                            }],
-                            vk::DependencyFlags::BY_REGION,
-                        ),
-                    );
-                });
-                let cmd_exec = builder.end().unwrap();
-                RenderPerImageState {
-                    cmd_exec: Arc::new(cmd_exec),
+                RenderPerFrameState {
+                    cmd_exec: None,
                     desc_set,
                     pipeline_generation: pipeline_cache.generation,
                 }
             },
         );
-        let cmd_exec = per_image_state.cmd_exec.clone();
+
+        // Update descriptor sets
         if let Some(tlas) = tlas_store.tlas.as_ref() {
             // Update Acceleration Structure descriptor set
             unsafe {
+                let raw = tlas.raw();
                 let as_write = vk::WriteDescriptorSetAccelerationStructureKHR {
                     acceleration_structure_count: 1,
-                    p_acceleration_structures: &tlas.raw(),
+                    p_acceleration_structures: &raw,
                     ..Default::default()
                 };
-                println!("Update dsc set");
                 device.update_descriptor_sets(
                     &[
                         vk::WriteDescriptorSet {
-                            dst_set: per_image_state.desc_set.raw(),
+                            dst_set: per_frame_state.desc_set.raw(),
                             dst_binding: 1,
                             dst_array_element: 0,
                             descriptor_count: 1,
@@ -359,7 +308,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                             ..Default::default()
                         },
                         vk::WriteDescriptorSet::builder()
-                            .dst_set(per_image_state.desc_set.raw())
+                            .dst_set(per_frame_state.desc_set.raw())
                             .dst_binding(2)
                             .dst_array_element(0)
                             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
@@ -374,6 +323,67 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                 );
             }
         }
+
+        // Record command buffer
+        let buf = per_frame_state.cmd_exec.take().map_or_else(
+            || state.command_pool.allocate_one().unwrap(),
+            |exec| Arc::try_unwrap(exec).unwrap().reset(false),
+        );
+        let mut builder = buf.start(vk::CommandBufferUsageFlags::empty()).unwrap();
+        builder.record(|mut recorder| {
+            recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
+                None,
+                &[],
+                &[dustash::command::sync2::ImageBarrier {
+                    memory_barrier: dustash::command::sync2::MemoryBarrier {
+                        prev_accesses: &[],
+                        next_accesses: &[
+                            dustash::command::sync2::AccessType::RayTracingShaderWrite,
+                        ],
+                    },
+                    discard_contents: true,
+                    image: current_frame.image,
+                    ..Default::default()
+                }],
+                vk::DependencyFlags::BY_REGION,
+            ));
+            recorder.bind_descriptor_set(
+                vk::PipelineBindPoint::RAY_TRACING_KHR,
+                &self.pipeline_layout,
+                0,
+                &[per_frame_state.desc_set.raw()],
+                &[],
+            );
+            if let Some(sbt) = pipeline_cache.sbts.get(0).unwrap_or(&None) {
+                // We must have already created the pipeline before we're able to create an SBT.
+                recorder.bind_raytracing_pipeline(pipeline_cache.pipelines[0].as_ref().unwrap());
+                recorder.trace_rays(
+                    sbt,
+                    current_frame.image_extent.width,
+                    current_frame.image_extent.height,
+                    1,
+                );
+            }
+
+            recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
+                None,
+                &[],
+                &[dustash::command::sync2::ImageBarrier {
+                    memory_barrier: dustash::command::sync2::MemoryBarrier {
+                        prev_accesses: &[
+                            dustash::command::sync2::AccessType::RayTracingShaderWrite,
+                        ],
+                        next_accesses: &[dustash::command::sync2::AccessType::Present],
+                    },
+                    image: current_frame.image,
+                    ..Default::default()
+                }],
+                vk::DependencyFlags::BY_REGION,
+            ));
+        });
+        let cmd_exec = Arc::new(builder.end().unwrap());
+        per_frame_state.cmd_exec = Some(cmd_exec.clone());
+
         let mut ray_tracing_future =
             CommandsFuture::new(queues.clone(), queues.index_of_type(QueueType::Graphics));
         ray_tracing_future.then_command_exec(cmd_exec);
@@ -385,6 +395,12 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         sbt_upload_future
             .stage(vk::PipelineStageFlags2::COPY)
             .then(ray_tracing_future.stage(vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR));
+
+        if let Some(mut future) = tlas_updated_future {
+            future
+                .stage(vk::PipelineStageFlags2::ACCELERATION_STRUCTURE_BUILD_KHR)
+                .then(ray_tracing_future.stage(vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR));
+        }
 
         // After rtx completes, swapchain present.
         ray_tracing_future
