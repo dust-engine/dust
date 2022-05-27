@@ -164,10 +164,10 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
                 prepare_pipeline_system::<T>.label(PreparePipelineSystem),
             )
             .add_system_to_stage(
-                RenderStage::Prepare,
-                prepare_sbt_system.after(PreparePipelineSystem),
+                RenderStage::Render,
+                prepare_sbt_system.label(PrepareSbtSystem),
             )
-            .add_system_to_stage(RenderStage::Render, render_system::<T>.label(RenderSystem));
+            .add_system_to_stage(RenderStage::Render, render_system::<T>.label(RenderSystem).after(PrepareSbtSystem));
         // First, get the SBT layout
         // Then, create_many raytracing pipeilnes
         // Finally, use those pipelines to create SBTs
@@ -389,6 +389,9 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
         pipeline_cache.generation += 1;
     }
 }
+
+#[derive(Clone, Hash, Debug, Eq, PartialEq, SystemLabel)]
+struct PrepareSbtSystem;
 
 fn prepare_sbt_system(
     mut pipeline_cache: ResMut<PipelineCache>,

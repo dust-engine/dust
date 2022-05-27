@@ -96,7 +96,7 @@ fn setup(
         .insert(GlobalTransform::default())
         .insert_bundle(smooth_bevy_cameras::controllers::fps::FpsCameraBundle::new(
             smooth_bevy_cameras::controllers::fps::FpsCameraController::default(),
-            Vec3::new(10.0,10.0, 0.0),
+            Vec3::new(0.0, 0.0, 10.0),
             Vec3::new(0.0, 0.0, 0.0),
         ));
 }
