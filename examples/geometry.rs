@@ -11,6 +11,8 @@ use dust_format_explicit_aabbs::ExplicitAABBPlugin;
 use dust_render::camera::PerspectiveCamera;
 use dust_render::material::Material;
 use dust_render::renderable::Renderable;
+use dust_render::shader::SpecializedShader;
+use glam::Vec3;
 
 use dust_render::renderer::Renderer as DefaultRenderer;
 
@@ -44,8 +46,9 @@ fn main() {
         DefaultRenderer,
     >::default())
     .add_plugin(dust_render::material::MaterialPlugin::<EmptyMaterial>::default())
-    .add_startup_system(setup)
-    .add_system(print_keyboard_event_system);
+    .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
+    .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
+    .add_startup_system(setup);
     app.run();
 }
 
@@ -63,7 +66,10 @@ impl Material for EmptyMaterial {
     fn closest_hit_shader(
         asset_server: &AssetServer,
     ) -> Option<dust_render::shader::SpecializedShader> {
-        None
+        Some(SpecializedShader {
+            shader: asset_server.load("plain.rchit.spv"),
+            specialization: None,
+        })
     }
 }
 
@@ -87,30 +93,11 @@ fn setup(
         .spawn()
         .insert(PerspectiveCamera::default())
         .insert(Transform::default())
-        .insert(GlobalTransform::default());
+        .insert(GlobalTransform::default())
+        .insert_bundle(smooth_bevy_cameras::controllers::fps::FpsCameraBundle::new(
+            smooth_bevy_cameras::controllers::fps::FpsCameraController::default(),
+            Vec3::new(10.0,10.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+        ));
 }
 
-fn print_keyboard_event_system(
-    mut commands: Commands,
-    mut keyboard_input_events: EventReader<KeyboardInput>,
-    query: Query<(
-        Entity,
-        &Renderable,
-        &Handle<dust_format_explicit_aabbs::AABBGeometry>,
-    )>,
-) {
-    for event in keyboard_input_events.iter() {
-        match event {
-            KeyboardInput {
-                state: ButtonState::Pressed,
-                ..
-            } => {
-                let (entity, _, _) = query.iter().next().unwrap();
-                commands
-                    .entity(entity)
-                    .remove::<Handle<dust_format_explicit_aabbs::AABBGeometry>>();
-            }
-            _ => {}
-        }
-    }
-}

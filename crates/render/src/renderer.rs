@@ -27,8 +27,6 @@ use crate::{
     swapchain::{Window, Windows},
 };
 use ash::vk;
-use dustash::frames::PerFrameUniform;
-use dustash::resources::buffer::HasBuffer;
 
 pub struct RenderPerFrameState {
     cmd_exec: Option<Arc<CommandExecutable>>,
@@ -43,7 +41,7 @@ pub struct RenderState {
     desc_layout: DescriptorSetLayout,
 }
 
-pub struct Uniform {
+pub struct PushConstants {
     camera_params: PerspectiveCameraParameters,
 }
 
@@ -72,13 +70,6 @@ impl FromWorld for RenderState {
                     vk::DescriptorSetLayoutBinding {
                         binding: 1,
                         descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                        descriptor_count: 1,
-                        stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
-                        ..Default::default()
-                    },
-                    vk::DescriptorSetLayoutBinding {
-                        binding: 2,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                         descriptor_count: 1,
                         stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
                         ..Default::default()
@@ -115,6 +106,13 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             device,
             &vk::PipelineLayoutCreateInfo::builder()
                 .set_layouts(&[render_state.desc_layout.raw()])
+                .push_constant_ranges(&[
+                    vk::PushConstantRange {
+                        stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
+                        offset: 0,
+                        size: std::mem::size_of::<PushConstants>() as u32,
+                    }
+                ])
                 .build(),
         )
         .unwrap();
@@ -134,7 +132,10 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                     shader: asset_server.load("primary.rgen.spv"),
                     specialization: None,
                 },
-                miss_shaders: vec![],
+                miss_shaders: vec![SpecializedShader {
+                    shader: asset_server.load("sky.rmiss.spv"),
+                    specialization: None,
+                }],
                 callable_shaders: vec![],
                 max_recursion_depth: 1,
             },
@@ -153,7 +154,6 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         SResMut<RenderState>,
         SRes<Arc<Queues>>,
         Local<'static, PerFrame<RenderPerFrameState>>,
-        Local<'static, Option<PerFrameUniform<Uniform>>>,
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
         SQuery<bevy_ecs::system::lifetimeless::Read<ExtractedCamera>>,
@@ -166,7 +166,6 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             state,
             queues,
             per_frame_state,
-            per_frame_uniform,
             pipeline_cache,
             tlas_store,
             cameras,
@@ -214,27 +213,8 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             camera
         };
 
-        let (uniform_buf, uniform_offset) = {
-            // Update per frame uniform
-            let frame_manager = windows.primary().unwrap().frames();
-            if per_frame_uniform.is_none()
-                || per_frame_uniform
-                    .as_ref()
-                    .unwrap()
-                    .needs_rebuild(frame_manager)
-            {
-                let uniform = PerFrameUniform::<Uniform>::new(frame_manager, allocator);
-                **per_frame_uniform = Some(uniform);
-            }
-            let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
-            let per_frame_uniform = per_frame_uniform.as_mut().unwrap();
-            per_frame_uniform.write(
-                Uniform {
-                    camera_params: camera.unwrap().params.clone(),
-                },
-                &current_frame,
-                &mut sbt_upload_future,
-            )
+        let push_constants = PushConstants {
+            camera_params: camera.unwrap().params.clone(),
         };
         let current_frame = windows.primary_mut().unwrap().current_image_mut().unwrap();
 
@@ -307,17 +287,6 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                             p_next: &as_write as *const _ as *const c_void,
                             ..Default::default()
                         },
-                        vk::WriteDescriptorSet::builder()
-                            .dst_set(per_frame_state.desc_set.raw())
-                            .dst_binding(2)
-                            .dst_array_element(0)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                            .buffer_info(&[vk::DescriptorBufferInfo {
-                                buffer: uniform_buf.raw_buffer(),
-                                offset: uniform_offset,
-                                range: std::mem::size_of::<Uniform>() as u64,
-                            }])
-                            .build(),
                     ],
                     &[],
                 );
@@ -354,15 +323,20 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                 &[per_frame_state.desc_set.raw()],
                 &[],
             );
+            recorder.push_constants(&self.pipeline_layout, vk::ShaderStageFlags::RAYGEN_KHR, 0, unsafe {
+               std::slice::from_raw_parts(&push_constants as *const _ as *const u8, std::mem::size_of::<PushConstants>()) 
+            });
             if let Some(sbt) = pipeline_cache.sbts.get(0).unwrap_or(&None) {
-                // We must have already created the pipeline before we're able to create an SBT.
-                recorder.bind_raytracing_pipeline(pipeline_cache.pipelines[0].as_ref().unwrap());
-                recorder.trace_rays(
-                    sbt,
-                    current_frame.image_extent.width,
-                    current_frame.image_extent.height,
-                    1,
-                );
+                if tlas_store.tlas.is_some() {
+                    // We must have already created the pipeline before we're able to create an SBT.
+                    recorder.bind_raytracing_pipeline(pipeline_cache.pipelines[0].as_ref().unwrap());
+                    recorder.trace_rays(
+                        sbt,
+                        current_frame.image_extent.width,
+                        current_frame.image_extent.height,
+                        1,
+                    );
+                }
             }
 
             recorder.simple_pipeline_barrier2(&dustash::command::sync2::PipelineBarrier::new(
