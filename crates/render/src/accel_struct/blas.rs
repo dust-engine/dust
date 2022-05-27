@@ -57,7 +57,7 @@ struct BlasStore {
 
 #[derive(Component)]
 pub struct BlasComponent {
-    pub geometry_material: Vec<(HandleId, ExtractedMaterial)>,
+    pub geometry_material: Vec<(HandleId, ExtractedMaterial, u64)>,
     pub blas: Arc<AccelerationStructure>,
 }
 
@@ -79,14 +79,14 @@ fn build_blas(
 ) {
     fn collect_primitive_ids(
         children: &Children,
-        primitive_ids: &mut Vec<(HandleId, ExtractedMaterial)>,
+        primitive_ids: &mut Vec<(HandleId, ExtractedMaterial, u64)>,
         buffers: &mut Vec<Arc<MemBuffer>>,
         children_query: &Query<(Entity, &GPUGeometryPrimitives, &ExtractedMaterial)>,
     ) {
         for child in children.iter() {
             let (child_entity, primitives, material) = children_query.get(*child).unwrap();
             if let Some(blas_input_primitives) = primitives.blas_input_primitives.as_ref() {
-                primitive_ids.push((primitives.handle, material.clone()));
+                primitive_ids.push((primitives.handle, material.clone(), primitives.geometry_info));
                 buffers.push(blas_input_primitives.clone());
             } else {
                 // Skip if the geometry hasn't been fully loaded
@@ -107,13 +107,13 @@ fn build_blas(
     let mut retained_blas: HashMap<Vec<HandleId>, Arc<AccelerationStructure>> = HashMap::new();
     // For all root elements
     for (entity, renderable, children, primitives, material) in query.iter() {
-        let mut geometry_material: Vec<(HandleId, ExtractedMaterial)> = Vec::new();
+        let mut geometry_material: Vec<(HandleId, ExtractedMaterial, u64)> = Vec::new();
         let mut buffers: Vec<Arc<MemBuffer>> = Vec::new();
         if let Some(primitives) = primitives {
             if let Some(material) = material {
                 // Get the GPUGeometryPrimitives on the root
                 if let Some(blas_input_primitives) = primitives.blas_input_primitives.as_ref() {
-                    geometry_material.push((primitives.handle, material.clone()));
+                    geometry_material.push((primitives.handle, material.clone(), primitives.geometry_info));
                     buffers.push(blas_input_primitives.clone());
                 } else {
                     // Skip if the geometry hasn't been fully loaded
@@ -133,10 +133,10 @@ fn build_blas(
         if geometry_material.len() == 0 {
             continue;
         }
-        geometry_material.sort_by_key(|(geometry, material)| *geometry);
+        geometry_material.sort_by_key(|(geometry, material, _)| *geometry);
         let primitive_ids: Vec<_> = geometry_material
             .iter()
-            .map(|(geometry, material)| *geometry)
+            .map(|(geometry, material, _)| *geometry)
             .collect();
         if let Some(blas) = blas_store.blas.get(&primitive_ids) {
             retained_blas.insert(primitive_ids.clone(), blas.clone());

@@ -425,8 +425,9 @@ fn prepare_sbt_system(
         let rhit_data: Vec<_> = query
             .iter()
             .flat_map(|blas| {
-                blas.geometry_material.iter().map(|(geometry, material)| {
-                    (material.hitgroup_index as usize, material.material_id)
+                blas.geometry_material.iter().map(|(geometry, material, geometry_info)| {
+                    let sbtData = *geometry_info;
+                    (material.hitgroup_index as usize, sbtData)
                 })
             })
             .collect();

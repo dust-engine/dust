@@ -61,7 +61,7 @@ fn build_tlas(
                 geometries: blas
                     .geometry_material
                     .iter()
-                    .map(|(geometry, material)| *geometry)
+                    .map(|(geometry, material, _)| *geometry)
                     .collect(),
                 // TODO: Material
             };

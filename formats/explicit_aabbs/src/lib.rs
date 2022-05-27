@@ -139,6 +139,9 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer> {
         &self.primitives_buffer
     }
+    fn geometry_info(&self) -> u64 {
+        self.primitives_buffer.get_device_address()
+    }
 }
 
 #[derive(Default)]

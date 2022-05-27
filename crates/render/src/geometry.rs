@@ -84,6 +84,7 @@ pub trait GPUGeometry<T: Geometry>: Send + Sync {
     );
 
     fn blas_input_buffer(&self) -> &Arc<MemBuffer>;
+    fn geometry_info(&self) -> u64;
 }
 
 enum GPUGeometryUpdate<T: Geometry> {
@@ -289,6 +290,7 @@ fn prepare_geometries<T: Geometry>(
 pub struct GPUGeometryPrimitives {
     pub handle: HandleId,
     pub blas_input_primitives: Option<Arc<MemBuffer>>, // None if the geometry hasn't been loaded yet.
+    pub geometry_info: u64,
 }
 fn extract_primitives<T: Geometry>(mut commands: Commands, query: Query<(Entity, &Handle<T>)>) {
     for (entity, geometry_handle) in query.iter() {
@@ -309,11 +311,13 @@ fn prepare_primitives<T: Geometry>(
             commands.entity(entity).insert(GPUGeometryPrimitives {
                 handle: geometry_handle.id,
                 blas_input_primitives: Some(buf),
+                geometry_info: geometry.geometry_info(),
             });
         } else {
             commands.entity(entity).insert(GPUGeometryPrimitives {
                 handle: geometry_handle.id,
                 blas_input_primitives: None,
+                geometry_info: 0,
             });
         }
     }
