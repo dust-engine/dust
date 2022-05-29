@@ -27,7 +27,7 @@ bevy_asset = { git = "https://github.com/bevyengine/bevy", features=["filesystem
 bevy_hierarchy = { git = "https://github.com/bevyengine/bevy" }
 tracing-subscriber = "0.3"
 dust_format_explicit_aabbs = { path = "formats/explicit_aabbs" }
-smooth-bevy-cameras = { path = "../smooth-bevy-cameras" }
+smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras" }
 glam = "0.20"
 
 [patch."https://github.com/bevyengine/bevy"]
