@@ -167,7 +167,12 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
                 RenderStage::Render,
                 prepare_sbt_system.label(PrepareSbtSystem),
             )
-            .add_system_to_stage(RenderStage::Render, render_system::<T>.label(RenderSystem).after(PrepareSbtSystem));
+            .add_system_to_stage(
+                RenderStage::Render,
+                render_system::<T>
+                    .label(RenderSystem)
+                    .after(PrepareSbtSystem),
+            );
         // First, get the SBT layout
         // Then, create_many raytracing pipeilnes
         // Finally, use those pipelines to create SBTs
@@ -425,10 +430,12 @@ fn prepare_sbt_system(
         let rhit_data: Vec<_> = query
             .iter()
             .flat_map(|blas| {
-                blas.geometry_material.iter().map(|(geometry, material, geometry_info)| {
-                    let sbtData = *geometry_info;
-                    (material.hitgroup_index as usize, sbtData)
-                })
+                blas.geometry_material
+                    .iter()
+                    .map(|(geometry, material, geometry_info)| {
+                        let sbtData = *geometry_info;
+                        (material.hitgroup_index as usize, sbtData)
+                    })
             })
             .collect();
         let sbt = Sbt::new(

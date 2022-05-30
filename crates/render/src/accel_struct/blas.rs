@@ -86,7 +86,11 @@ fn build_blas(
         for child in children.iter() {
             let (child_entity, primitives, material) = children_query.get(*child).unwrap();
             if let Some(blas_input_primitives) = primitives.blas_input_primitives.as_ref() {
-                primitive_ids.push((primitives.handle, material.clone(), primitives.geometry_info));
+                primitive_ids.push((
+                    primitives.handle,
+                    material.clone(),
+                    primitives.geometry_info,
+                ));
                 buffers.push(blas_input_primitives.clone());
             } else {
                 // Skip if the geometry hasn't been fully loaded
@@ -113,7 +117,11 @@ fn build_blas(
             if let Some(material) = material {
                 // Get the GPUGeometryPrimitives on the root
                 if let Some(blas_input_primitives) = primitives.blas_input_primitives.as_ref() {
-                    geometry_material.push((primitives.handle, material.clone(), primitives.geometry_info));
+                    geometry_material.push((
+                        primitives.handle,
+                        material.clone(),
+                        primitives.geometry_info,
+                    ));
                     buffers.push(blas_input_primitives.clone());
                 } else {
                     // Skip if the geometry hasn't been fully loaded

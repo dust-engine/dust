@@ -7,6 +7,7 @@ use bevy_input::keyboard::KeyboardInput;
 use bevy_input::ButtonState;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
+use dust_format_explicit_aabbs::material::DensityMaterial;
 use dust_format_explicit_aabbs::ExplicitAABBPlugin;
 use dust_render::camera::PerspectiveCamera;
 use dust_render::material::Material;
@@ -45,42 +46,21 @@ fn main() {
     .add_plugin(dust_render::pipeline::RayTracingRendererPlugin::<
         DefaultRenderer,
     >::default())
-    .add_plugin(dust_render::material::MaterialPlugin::<EmptyMaterial>::default())
+    .add_plugin(dust_render::material::MaterialPlugin::<DensityMaterial>::default())
     .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
     .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
     .add_startup_system(setup);
     app.run();
 }
 
-#[derive(bevy_reflect::TypeUuid)]
-#[uuid = "75a9a733-04d7-4abb-8600-9a7d24ff0598"]
-pub struct EmptyMaterial {}
-
-impl Material for EmptyMaterial {
-    type Geometry = dust_format_explicit_aabbs::AABBGeometry;
-
-    fn anyhit_shader(asset_server: &AssetServer) -> Option<dust_render::shader::SpecializedShader> {
-        None
-    }
-
-    fn closest_hit_shader(
-        asset_server: &AssetServer,
-    ) -> Option<dust_render::shader::SpecializedShader> {
-        Some(SpecializedShader {
-            shader: asset_server.load("plain.rchit.spv"),
-            specialization: None,
-        })
-    }
-}
-
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut materials: ResMut<Assets<EmptyMaterial>>,
+    mut materials: ResMut<Assets<DensityMaterial>>,
 ) {
     let handle: Handle<dust_format_explicit_aabbs::AABBGeometry> =
         asset_server.load("../assets/out.aabb");
-    let material_handle: Handle<EmptyMaterial> = materials.add(EmptyMaterial {});
+    let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
     commands
         .spawn()
         .insert(Renderable::default())
@@ -100,4 +80,3 @@ fn setup(
             Vec3::new(0.0, 0.0, 0.0),
         ));
 }
-

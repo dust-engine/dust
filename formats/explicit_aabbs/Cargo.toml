@@ -14,3 +14,4 @@ bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 dustash = { path = "../../../dustash" }
 ash = "0.37"
 anyhow = "1.0"
+image = "0.24"

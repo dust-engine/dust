@@ -351,5 +351,6 @@ impl<T: Geometry> Plugin for GeometryPlugin<T> {
             .add_system_to_stage(RenderStage::Extract, extract_primitives::<T>)
             .add_system_to_stage(RenderStage::Prepare, prepare_primitives::<T>)
             .add_system_to_stage(RenderStage::Prepare, prepare_geometries::<T>);
+        // TODO: maybe run prepare_primitives after prepare_geometries to decrease frame delay?
     }
 }

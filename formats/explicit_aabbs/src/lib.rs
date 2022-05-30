@@ -1,4 +1,5 @@
 pub mod loader;
+pub mod material;
 use ash::vk;
 use bevy_app::Plugin;
 use bevy_asset::{AddAsset, AssetServer, Handle};
@@ -140,7 +141,7 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
         &self.primitives_buffer
     }
     fn geometry_info(&self) -> u64 {
-        self.primitives_buffer.get_device_address()
+        self.primitives_buffer.device_address()
     }
 }
 
@@ -149,6 +150,7 @@ pub struct ExplicitAABBPlugin;
 impl Plugin for ExplicitAABBPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.add_plugin(dust_render::geometry::GeometryPlugin::<AABBGeometry>::default())
-            .add_asset_loader(ExplicitAABBPrimitivesLoader::default());
+            .add_asset_loader(ExplicitAABBPrimitivesLoader::default())
+            .add_asset_loader(material::DensityMaterialLoader::default());
     }
 }
