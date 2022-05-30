@@ -4,6 +4,8 @@ use bevy_asset::AssetServer;
 use bevy_ecs::system::lifetimeless::SRes;
 use dust_render::material::{GPUMaterial, Material};
 use dust_render::shader::SpecializedShader;
+use dustash::queue::QueueType;
+use dustash::queue::Queues;
 use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer, MemoryAllocScenario};
 use dustash::resources::Image;
 use dustash::Device;
@@ -77,7 +79,7 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
         0
     }
 
-    type BuildParam = (SRes<Arc<Device>>, SRes<Arc<Allocator>>);
+    type BuildParam = (SRes<Arc<Device>>, SRes<Arc<Allocator>>, SRes<Arc<Queues>>);
 
     fn build(
         build_set: <DensityMaterial as Material>::BuildSet,
@@ -85,7 +87,7 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
         params: &mut bevy_ecs::system::SystemParamItem<Self::BuildParam>,
     ) -> Self {
         let (image_srcbuffer, extent) = build_set;
-        let (device, allocator) = params;
+        let (device, allocator, queues) = params;
         let image = allocator
             .allocate_image(&dustash::resources::image::ImageRequest {
                 format: vk::Format::R8_UINT,
@@ -115,8 +117,8 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
                     dst_access_mask: vk::AccessFlags::TRANSFER_WRITE,
                     old_layout: vk::ImageLayout::UNDEFINED,
                     new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    src_queue_family_index: queue_family_index,
-                    dst_queue_family_index: queue_family_index,
+                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                     image: image.raw_image(),
                     subresource_range: vk::ImageSubresourceRange {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -148,6 +150,38 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
                         width: extent.width,
                         depth: 1,
                     },
+                }],
+            );
+
+            let dst_queue_family_index = queues.of_type(QueueType::Compute).family_index();
+
+            // Queue family transfer
+            recorder.pipeline_barrier(
+                vk::PipelineStageFlags::TRANSFER,
+                if dst_queue_family_index == queue_family_index {
+                    vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR
+                } else {
+                    vk::PipelineStageFlags::empty()
+                },
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier {
+                    src_access_mask: vk::AccessFlags::TRANSFER_WRITE,
+                    dst_access_mask: vk::AccessFlags::SHADER_READ,
+                    old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    new_layout: vk::ImageLayout::READ_ONLY_OPTIMAL,
+                    src_queue_family_index: queue_family_index,
+                    dst_queue_family_index,
+                    image: image.raw_image(),
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
                 }],
             );
         });

@@ -10,15 +10,17 @@ use bevy_ecs::{
 };
 use bevy_window::WindowId;
 use dustash::{
-    frames::AcquiredFrame,
+    frames::{AcquiredFrame, PerFrame},
     queue::Queues,
     surface::{Surface, SurfaceLoader},
     swapchain::SwapchainLoader,
-    Device,
+    Device, Task,
 };
+use futures_util::FutureExt;
 
 pub struct Window {
     frames: dustash::frames::FrameManager,
+    tasks: PerFrame<futures_util::future::Shared<Task<()>>>,
 
     // This is guaranteed to be Some in the Queue stage only.
     current_image: Option<AcquiredFrame>,
@@ -132,6 +134,7 @@ fn prepare_windows(
                 extracted_window.id,
                 Window {
                     frames,
+                    tasks: PerFrame::default(),
                     current_image: None,
                 },
             );
@@ -141,17 +144,23 @@ fn prepare_windows(
 
     for window in windows.windows.values_mut() {
         let next_frame = window.frames.acquire(!0).unwrap();
+        if let Some(task) = window.tasks.get_mut(&next_frame) {
+            futures_lite::future::block_on(task);
+        }
         window.current_image = Some(next_frame);
     }
 }
 
 // Flush and present
 fn queue_flush_and_present(mut windows: ResMut<Windows>, mut queues: ResMut<Arc<Queues>>) {
+    use futures_util::FutureExt;
     let queues: &mut Queues = Arc::get_mut(&mut queues)
         .expect("All references to Queues should be dropped by the end of the frame.");
-    queues.flush().unwrap();
+    let task = queues.flush().unwrap().shared();
+
     for window in windows.windows.values_mut() {
         let frame = window.current_image.take().unwrap();
+        window.tasks.set(&frame, task.clone());
         queues.present(&mut window.frames, frame).unwrap();
     }
 }

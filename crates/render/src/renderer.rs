@@ -52,7 +52,7 @@ impl FromWorld for RenderState {
         let pool = CommandPool::new(
             device.clone(),
             vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-            queues.of_type(QueueType::Graphics).family_index(),
+            queues.of_type(QueueType::Compute).family_index(),
         )
         .unwrap();
 
@@ -364,7 +364,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         per_frame_state.cmd_exec = Some(cmd_exec.clone());
 
         let mut ray_tracing_future =
-            CommandsFuture::new(queues.clone(), queues.index_of_type(QueueType::Graphics));
+            CommandsFuture::new(queues.clone(), queues.index_of_type(QueueType::Compute));
         ray_tracing_future.then_command_exec(cmd_exec);
 
         // rtx depends on acquired swapchain image

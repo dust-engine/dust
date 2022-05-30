@@ -29,7 +29,6 @@ use dustash::{
     sync::{CommandsFuture, GPUFuture, HostFuture},
     Device,
 };
-use futures_lite::future;
 use std::future::IntoFuture;
 
 pub type GeometryAABB = ash::vk::AabbPositionsKHR;

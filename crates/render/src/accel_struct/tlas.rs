@@ -105,7 +105,7 @@ fn build_tlas(
     }
 
     let mut commands_future =
-        CommandsFuture::new(queues.clone(), queues.of_type(QueueType::Graphics).index());
+        CommandsFuture::new(queues.clone(), queues.of_type(QueueType::Compute).index());
 
     let tlas = AccelerationStructure::make_tlas(
         accel_struct_loader.clone(),

@@ -24,6 +24,7 @@ vk-mem = { git = "https://github.com/dust-engine/vk-mem-rs" }
 bevy_window = { git = "https://github.com/bevyengine/bevy", optional = true }
 bevy_winit = { git = "https://github.com/bevyengine/bevy", optional = true }
 
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 futures-lite = "^1.12"
 
 [features]
