@@ -102,10 +102,14 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             .clone();
         render_app.world.init_resource::<RenderState>();
         let render_state = render_app.world.get_resource::<RenderState>().unwrap();
+        let material_descriptor_vec = render_app.world.get_resource::<crate::material::GPUMaterialDescriptorVec>().unwrap();
         let pipeline_layout = PipelineLayout::new(
             device,
             &vk::PipelineLayoutCreateInfo::builder()
-                .set_layouts(&[render_state.desc_layout.raw()])
+                .set_layouts(&[
+                    render_state.desc_layout.raw(),
+                    material_descriptor_vec.descriptor_vec.raw_layout()
+                ])
                 .push_constant_ranges(&[vk::PushConstantRange {
                     stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
                     offset: 0,
@@ -154,6 +158,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         Local<'static, PerFrame<RenderPerFrameState>>,
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
+        SRes<crate::material::GPUMaterialDescriptorVec>,
         SQuery<bevy_ecs::system::lifetimeless::Read<ExtractedCamera>>,
     );
     fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {
@@ -166,6 +171,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             per_frame_state,
             pipeline_cache,
             tlas_store,
+            material_descriptor_vec,
             cameras,
         ) = params;
 
@@ -264,7 +270,10 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             },
         );
 
-        // Update descriptor sets
+        // Update per-frame descriptor sets
+        // We have one descriptor set per frame to ensure that by the time we get to this point,
+        // the GPU is already done using `per_frame_state.desc_set`. We'd have to use UPDATE_AFTER_BIND
+        // if we just have one global descriptor set for all frames.
         if let Some(tlas) = tlas_store.tlas.as_ref() {
             // Update Acceleration Structure descriptor set
             unsafe {
@@ -316,7 +325,10 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                 vk::PipelineBindPoint::RAY_TRACING_KHR,
                 &self.pipeline_layout,
                 0,
-                &[per_frame_state.desc_set.raw()],
+                &[
+                    per_frame_state.desc_set.raw(),
+                    material_descriptor_vec.descriptor_vec.raw(),
+                ],
                 &[],
             );
             recorder.push_constants(

@@ -1,9 +1,18 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_nonuniform_qualifier : require
 
 struct RayPayload {
     vec3 color;
 };
+
+
+layout(shaderRecordEXT) buffer sbt {
+    uint64_t geometryInfo;
+    uint32_t materialInfo;
+};
+layout(set = 1, binding = 1, r8ui) uniform readonly image2D bindless_StorageImage[];
 
 vec3 randomColorList[5] = {
     vec3(0.976, 0.906, 0.906),
@@ -16,5 +25,11 @@ vec3 randomColorList[5] = {
 layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
 
 void main() {
-    primaryRayPayload.color = randomColorList[gl_PrimitiveID % 5];
+    uint width = imageSize(bindless_StorageImage[materialInfo]).x;
+    ivec2 sampleLocation = ivec2(
+        gl_PrimitiveID & width,
+        gl_PrimitiveID / width.x
+    );
+    float v = imageLoad(bindless_StorageImage[materialInfo], sampleLocation).x;
+    primaryRayPayload.color = vec3(v,v,v);
 }

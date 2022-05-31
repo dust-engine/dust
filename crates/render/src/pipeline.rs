@@ -152,12 +152,11 @@ impl<T: RayTracingRenderer> Default for RayTracingRendererPlugin<T> {
 
 impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
     fn build(&self, app: &mut bevy_app::App) {
-        let renderer = T::new(app);
-        app.insert_resource(renderer)
-            .init_resource::<Vec<HitGroup>>();
+        app.init_resource::<Vec<HitGroup>>();
         app.sub_app_mut(RenderApp)
             .init_resource::<Option<Vec<ExtractedRayTracingPipelineLayout>>>()
             .init_resource::<PipelineCache>()
+            .init_resource::<crate::material::GPUMaterialDescriptorVec>()
             .add_system_to_stage(RenderStage::Extract, extract_pipeline_system::<T>)
             .add_system_to_stage(
                 RenderStage::Prepare,
@@ -173,6 +172,8 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
                     .label(RenderSystem)
                     .after(PrepareSbtSystem),
             );
+        let renderer = T::new(app);
+        app.insert_resource(renderer);
         // First, get the SBT layout
         // Then, create_many raytracing pipeilnes
         // Finally, use those pipelines to create SBTs
@@ -395,6 +396,14 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
     }
 }
 
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct HitGroupSBTData {
+    geometry_info: u64,
+    material_info: u32,
+}
+
 #[derive(Clone, Hash, Debug, Eq, PartialEq, SystemLabel)]
 struct PrepareSbtSystem;
 
@@ -433,7 +442,10 @@ fn prepare_sbt_system(
                 blas.geometry_material
                     .iter()
                     .map(|(geometry, material, geometry_info)| {
-                        let sbtData = *geometry_info;
+                        let sbtData = HitGroupSBTData {
+                            geometry_info: *geometry_info,
+                            material_info: material.material_info,
+                        };
                         (material.hitgroup_index as usize, sbtData)
                     })
             })

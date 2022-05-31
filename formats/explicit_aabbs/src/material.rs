@@ -72,13 +72,10 @@ impl Material for DensityMaterial {
 
 pub struct GPUDensityMaterial {
     density_map: Arc<dustash::resources::image::MemImage>,
+    density_map_view: dustash::resources::image::ImageView<Arc<dustash::resources::image::MemImage>>,
 }
 
 impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
-    fn material_info(&self) -> u64 {
-        0
-    }
-
     type BuildParam = (SRes<Arc<Device>>, SRes<Arc<Allocator>>, SRes<Arc<Queues>>);
 
     fn build(
@@ -170,7 +167,7 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
                     src_access_mask: vk::AccessFlags::TRANSFER_WRITE,
                     dst_access_mask: vk::AccessFlags::SHADER_READ,
                     old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    new_layout: vk::ImageLayout::READ_ONLY_OPTIMAL,
+                    new_layout: vk::ImageLayout::GENERAL,
                     src_queue_family_index: queue_family_index,
                     dst_queue_family_index,
                     image: image.raw_image(),
@@ -185,7 +182,25 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
                 }],
             );
         });
-        Self { density_map: image }
+        let view = dustash::resources::image::ImageView::new(
+            device.clone(),
+            image.clone(),
+            vk::ImageViewType::TYPE_2D,
+            vk::Format::R8_UINT,
+            vk::ComponentMapping {
+                r: vk::ComponentSwizzle::R,
+                g: vk::ComponentSwizzle::G,
+                b: vk::ComponentSwizzle::B,
+                a: vk::ComponentSwizzle::A,
+            },
+            vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            }).unwrap();
+        Self { density_map: image, density_map_view: view }
     }
 
     type ApplyChangeParam = ();
@@ -197,6 +212,14 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
         params: &mut bevy_ecs::system::SystemParamItem<Self::ApplyChangeParam>,
     ) {
         todo!()
+    }
+
+    fn material_binding(&self) -> dustash::descriptor::DescriptorVecBinding {
+        dustash::descriptor::DescriptorVecBinding::StorageImage(vk::DescriptorImageInfo {
+            sampler: vk::Sampler::null(),
+            image_view: self.density_map_view.raw_image_view(),
+            image_layout: vk::ImageLayout::GENERAL,
+        })
     }
 }
 

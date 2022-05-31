@@ -114,6 +114,10 @@ impl RenderPlugin {
                     khr::RayTracingPipeline::name().as_ptr(),
                 ],
                 &vk::PhysicalDeviceFeatures2::builder()
+                    .features(vk::PhysicalDeviceFeatures {
+                        shader_int64: vk::TRUE,
+                        ..Default::default()
+                    })
                     .push_next(&mut vk::PhysicalDeviceAccelerationStructureFeaturesKHR {
                         acceleration_structure: vk::TRUE,
                         ..Default::default()
@@ -125,6 +129,12 @@ impl RenderPlugin {
                     .push_next(&mut vk::PhysicalDeviceVulkan12Features {
                         buffer_device_address: vk::TRUE,
                         timeline_semaphore: vk::TRUE,
+                        descriptor_binding_sampled_image_update_after_bind: vk::TRUE,
+                        descriptor_binding_storage_image_update_after_bind: vk::TRUE,
+                        descriptor_binding_uniform_buffer_update_after_bind: vk::TRUE,
+                        descriptor_binding_storage_buffer_update_after_bind: vk::TRUE,
+                        descriptor_binding_partially_bound: vk::TRUE,
+                        runtime_descriptor_array: vk::TRUE,
                         ..Default::default()
                     })
                     .push_next(&mut vk::PhysicalDeviceVulkan13Features {

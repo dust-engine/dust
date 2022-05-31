@@ -10,10 +10,12 @@ use bevy_asset::{AddAsset, Asset, AssetEvent, AssetServer, Assets, Handle};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::event::EventReader;
+use bevy_ecs::prelude::FromWorld;
 use bevy_ecs::system::{
     Commands, Query, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem,
 };
 use bevy_utils::HashMap;
+use dustash::Device;
 use dustash::queue::semaphore::TimelineSemaphoreOp;
 use dustash::queue::{QueueType, Queues};
 use dustash::sync::{CommandsFuture, GPUFuture};
@@ -62,7 +64,7 @@ pub trait GPUMaterial<T: Material>: Send + Sync {
         commands_future: &mut CommandsFuture,
         params: &mut SystemParamItem<Self::ApplyChangeParam>,
     );
-    fn material_info(&self) -> u64;
+    fn material_binding(&self) -> dustash::descriptor::DescriptorVecBinding;
 }
 
 struct MaterialCarrier<T: Material> {
@@ -143,13 +145,21 @@ fn move_change_set_store_to_render_world<T: Material>(
         commands.insert_resource(Some(carrier));
     }
 }
+
+struct IndexedGPUMaterial<T: Material> {
+    material: T::GPUMaterial,
+    descriptor_index: u32,
+}
 struct GPUMaterialStore<T: Material> {
-    gpu_materials: HashMap<Handle<T>, T::GPUMaterial>,
+    gpu_materials: HashMap<Handle<T>, IndexedGPUMaterial<T>>,
     pending_builds: Option<(
         Vec<(Handle<T>, Option<T::GPUMaterial>)>,
         TimelineSemaphoreOp,
     )>,
     buffered_builds: Option<MaterialCarrier<T>>,
+}
+pub struct GPUMaterialDescriptorVec {
+    pub descriptor_vec: dustash::descriptor::DescriptorVec,
 }
 impl<T: Material> Default for GPUMaterialStore<T> {
     fn default() -> Self {
@@ -161,12 +171,22 @@ impl<T: Material> Default for GPUMaterialStore<T> {
     }
 }
 
+impl FromWorld for GPUMaterialDescriptorVec {
+    fn from_world(world: &mut bevy_ecs::prelude::World) -> Self {
+        let device: &Arc<Device> = world.resource();
+        Self { 
+            descriptor_vec: dustash::descriptor::DescriptorVec::new(device.clone(), vk::ShaderStageFlags::CLOSEST_HIT_KHR).unwrap()
+        }
+    }
+}
+
 /// This runs in the Prepare stage of the Render world.
 /// It takes the extracted BuildSet and ChangeSet and apply them to the Material
 /// in the render world.
 fn prepare_materials<T: Material>(
     mut material_carrier: ResMut<Option<MaterialCarrier<T>>>,
     mut material_store: ResMut<GPUMaterialStore<T>>,
+    mut material_descriptor_vec: ResMut<GPUMaterialDescriptorVec>,
     queues: Res<Arc<Queues>>,
     mut build_params: StaticSystemParam<<T::GPUMaterial as GPUMaterial<T>>::BuildParam>,
     mut apply_change_params: StaticSystemParam<
@@ -190,7 +210,9 @@ fn prepare_materials<T: Material>(
             for (handle, material) in carrier.drain(..) {
                 println!("Gotta rebuild BLAS for {:?}", handle);
                 if let Some(material) = material {
-                    material_store.gpu_materials.insert(handle, material);
+                    // TODO: Batch this work.
+                    let indices = material_descriptor_vec.descriptor_vec.extend(std::iter::once(material.material_binding())).unwrap();
+                    material_store.gpu_materials.insert(handle, IndexedGPUMaterial { material, descriptor_index: indices[0] });
                 }
                 // TODO: send rebuild BLAS signal.
             }
@@ -228,6 +250,7 @@ fn prepare_materials<T: Material>(
                         .gpu_materials
                         .get_mut(&handle)
                         .unwrap()
+                        .material
                         .apply_change_set(change_set, &mut future, &mut apply_change_params);
                     pending_builds.push((handle, None));
                 }
@@ -237,7 +260,9 @@ fn prepare_materials<T: Material>(
             // If the future is empty, no commands were recorded. Transition to existing state directly.
             for (handle, material) in pending_builds.drain(..) {
                 if let Some(material) = material {
-                    material_store.gpu_materials.insert(handle, material);
+                    // TODO: Batch this work.
+                    let indices = material_descriptor_vec.descriptor_vec.extend(std::iter::once(material.material_binding())).unwrap();
+                    material_store.gpu_materials.insert(handle, IndexedGPUMaterial { material, descriptor_index: indices[0] });
                 }
             }
         } else {
@@ -257,10 +282,8 @@ fn prepare_material_info<T: Material>(
 ) {
     for (entity, material_handle, mut extracted_material) in query.iter_mut() {
         if let Some(material) = material_store.gpu_materials.get(material_handle) {
-            println!("Added material info");
-            extracted_material.material_info = material.material_info();
+            extracted_material.material_info = material.descriptor_index;
         } else {
-            println!("removed material info");
             commands
                 .entity(entity)
                 .remove::<ExtractedMaterial>()
@@ -332,5 +355,5 @@ impl<T: Material> Plugin for MaterialPlugin<T> {
 pub struct ExtractedMaterial {
     pub hitgroup_index: u32,
     /// The material_info in the SBT
-    pub material_info: u64,
+    pub material_info: u32,
 }
