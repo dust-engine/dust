@@ -7,6 +7,7 @@ use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use bevy_reflect::TypeUuid;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
+    render_asset::{GPURenderAsset, RenderAsset},
     shader::SpecializedShader,
 };
 use dustash::{
@@ -29,32 +30,17 @@ pub struct AABBGeometry {
 pub struct AABBGPUGeometry {
     primitives_buffer: Arc<MemBuffer>,
 }
+impl RenderAsset for AABBGeometry {
+    type GPUAsset = AABBGPUGeometry;
 
-impl Geometry for AABBGeometry {
-    type GPUGeometry = AABBGPUGeometry;
+    type BuildData = MemBuffer;
 
-    type ChangeSet = ();
+    type CreateBuildDataParam = SRes<Arc<Allocator>>;
 
-    type BuildSet = MemBuffer;
-
-    fn aabb(&self) -> dust_render::geometry::GeometryAABB {
-        todo!()
-    }
-
-    fn intersection_shader(asset_server: &AssetServer) -> SpecializedShader {
-        let handle = asset_server.load("dda.rint.spv");
-        SpecializedShader {
-            shader: handle,
-            specialization: Default::default(),
-        }
-    }
-
-    type GenerateBuildsParam = SRes<Arc<Allocator>>;
-
-    fn generate_builds(
+    fn create_build_data(
         &mut self,
-        allocator: &mut bevy_ecs::system::SystemParamItem<Self::GenerateBuildsParam>,
-    ) -> Self::BuildSet {
+        allocator: &mut bevy_ecs::system::SystemParamItem<Self::CreateBuildDataParam>,
+    ) -> Self::BuildData {
         let size = std::mem::size_of_val(&self.primitives as &[ash::vk::AabbPositionsKHR]);
         let mut buffer = allocator
             .allocate_buffer(&BufferRequest {
@@ -72,18 +58,22 @@ impl Geometry for AABBGeometry {
         });
         buffer
     }
-
-    type EmitChangesParam = ();
-
-    fn emit_changes(
-        &mut self,
-        param: &mut bevy_ecs::system::SystemParamItem<Self::EmitChangesParam>,
-    ) -> Self::ChangeSet {
+}
+impl Geometry for AABBGeometry {
+    fn aabb(&self) -> dust_render::geometry::GeometryAABB {
         todo!()
+    }
+
+    fn intersection_shader(asset_server: &AssetServer) -> SpecializedShader {
+        let handle = asset_server.load("dda.rint.spv");
+        SpecializedShader {
+            shader: handle,
+            specialization: Default::default(),
+        }
     }
 }
 
-impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
+impl GPURenderAsset<AABBGeometry> for AABBGPUGeometry {
     type BuildParam = SRes<Arc<Allocator>>;
     fn build(
         build_set: MemBuffer,
@@ -126,17 +116,9 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
             }
         }
     }
+}
 
-    type ApplyChangeParam = ();
-    fn apply_change_set(
-        &mut self,
-        change_set: <AABBGeometry as Geometry>::ChangeSet,
-        commands_future: &mut dustash::sync::CommandsFuture,
-        params: &mut SystemParamItem<Self::ApplyChangeParam>,
-    ) {
-        todo!()
-    }
-
+impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer> {
         &self.primitives_buffer
     }

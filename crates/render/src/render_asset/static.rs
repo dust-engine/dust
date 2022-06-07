@@ -113,10 +113,18 @@ fn move_extracted_assets<A: RenderAsset>(
     }
 }
 
-struct RenderAssetStore<A: RenderAsset> {
+pub struct RenderAssetStore<A: RenderAsset> {
     assets: HashMap<Handle<A>, A::GPUAsset>,
     pending_builds: Option<(Vec<(Handle<A>, Option<A::GPUAsset>)>, TimelineSemaphoreOp)>,
     buffered_builds: Option<ExtractedAssets<A>>,
+}
+impl<A: RenderAsset> RenderAssetStore<A> {
+    pub fn get(&self, handle: &Handle<A>) -> Option<&A::GPUAsset> {
+        self.assets.get(handle)
+    }
+    pub fn get_mut(&mut self, handle: &Handle<A>) -> Option<&mut A::GPUAsset> {
+        self.assets.get_mut(handle)
+    }
 }
 
 impl<A: RenderAsset> Default for RenderAssetStore<A> {
@@ -198,9 +206,15 @@ fn prepare_render_assets<T: RenderAsset>(
     }
 }
 
-#[derive(Default)]
 pub struct RenderAssetPlugin<T: RenderAsset> {
     _marker: PhantomData<T>,
+}
+impl<T: RenderAsset> Default for RenderAssetPlugin<T> {
+    fn default() -> Self {
+        Self {
+            _marker: Default::default(),
+        }
+    }
 }
 
 /// Plugin should be added to the main world.

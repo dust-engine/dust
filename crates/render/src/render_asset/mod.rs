@@ -1,4 +1,4 @@
 mod bindless;
 mod r#static;
 
-pub use r#static::{GPURenderAsset, RenderAsset};
+pub use r#static::*;
