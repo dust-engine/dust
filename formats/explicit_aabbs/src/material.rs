@@ -72,7 +72,8 @@ impl Material for DensityMaterial {
 
 pub struct GPUDensityMaterial {
     density_map: Arc<dustash::resources::image::MemImage>,
-    density_map_view: dustash::resources::image::ImageView<Arc<dustash::resources::image::MemImage>>,
+    density_map_view:
+        dustash::resources::image::ImageView<Arc<dustash::resources::image::MemImage>>,
 }
 
 impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
@@ -199,8 +200,13 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
                 level_count: 1,
                 base_array_layer: 0,
                 layer_count: 1,
-            }).unwrap();
-        Self { density_map: image, density_map_view: view }
+            },
+        )
+        .unwrap();
+        Self {
+            density_map: image,
+            density_map_view: view,
+        }
     }
 
     type ApplyChangeParam = ();

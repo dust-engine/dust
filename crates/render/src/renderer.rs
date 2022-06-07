@@ -102,13 +102,16 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             .clone();
         render_app.world.init_resource::<RenderState>();
         let render_state = render_app.world.get_resource::<RenderState>().unwrap();
-        let material_descriptor_vec = render_app.world.get_resource::<crate::material::GPUMaterialDescriptorVec>().unwrap();
+        let material_descriptor_vec = render_app
+            .world
+            .get_resource::<crate::material::GPUMaterialDescriptorVec>()
+            .unwrap();
         let pipeline_layout = PipelineLayout::new(
             device,
             &vk::PipelineLayoutCreateInfo::builder()
                 .set_layouts(&[
                     render_state.desc_layout.raw(),
-                    material_descriptor_vec.descriptor_vec.raw_layout()
+                    material_descriptor_vec.descriptor_vec.raw_layout(),
                 ])
                 .push_constant_ranges(&[vk::PushConstantRange {
                     stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,

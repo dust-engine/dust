@@ -15,10 +15,10 @@ use bevy_ecs::system::{
     Commands, Query, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem,
 };
 use bevy_utils::HashMap;
-use dustash::Device;
 use dustash::queue::semaphore::TimelineSemaphoreOp;
 use dustash::queue::{QueueType, Queues};
 use dustash::sync::{CommandsFuture, GPUFuture};
+use dustash::Device;
 
 pub trait Material: Asset + Sized {
     type Geometry: Geometry;
@@ -174,8 +174,12 @@ impl<T: Material> Default for GPUMaterialStore<T> {
 impl FromWorld for GPUMaterialDescriptorVec {
     fn from_world(world: &mut bevy_ecs::prelude::World) -> Self {
         let device: &Arc<Device> = world.resource();
-        Self { 
-            descriptor_vec: dustash::descriptor::DescriptorVec::new(device.clone(), vk::ShaderStageFlags::CLOSEST_HIT_KHR).unwrap()
+        Self {
+            descriptor_vec: dustash::descriptor::DescriptorVec::new(
+                device.clone(),
+                vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+            )
+            .unwrap(),
         }
     }
 }
@@ -211,8 +215,17 @@ fn prepare_materials<T: Material>(
                 println!("Gotta rebuild BLAS for {:?}", handle);
                 if let Some(material) = material {
                     // TODO: Batch this work.
-                    let indices = material_descriptor_vec.descriptor_vec.extend(std::iter::once(material.material_binding())).unwrap();
-                    material_store.gpu_materials.insert(handle, IndexedGPUMaterial { material, descriptor_index: indices[0] });
+                    let indices = material_descriptor_vec
+                        .descriptor_vec
+                        .extend(std::iter::once(material.material_binding()))
+                        .unwrap();
+                    material_store.gpu_materials.insert(
+                        handle,
+                        IndexedGPUMaterial {
+                            material,
+                            descriptor_index: indices[0],
+                        },
+                    );
                 }
                 // TODO: send rebuild BLAS signal.
             }
@@ -261,8 +274,17 @@ fn prepare_materials<T: Material>(
             for (handle, material) in pending_builds.drain(..) {
                 if let Some(material) = material {
                     // TODO: Batch this work.
-                    let indices = material_descriptor_vec.descriptor_vec.extend(std::iter::once(material.material_binding())).unwrap();
-                    material_store.gpu_materials.insert(handle, IndexedGPUMaterial { material, descriptor_index: indices[0] });
+                    let indices = material_descriptor_vec
+                        .descriptor_vec
+                        .extend(std::iter::once(material.material_binding()))
+                        .unwrap();
+                    material_store.gpu_materials.insert(
+                        handle,
+                        IndexedGPUMaterial {
+                            material,
+                            descriptor_index: indices[0],
+                        },
+                    );
                 }
             }
         } else {

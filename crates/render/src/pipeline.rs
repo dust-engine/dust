@@ -396,7 +396,6 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
     }
 }
 
-
 #[repr(C)]
 #[derive(Copy, Clone)]
 struct HitGroupSBTData {
