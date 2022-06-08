@@ -53,13 +53,15 @@ pub trait GPUGeometry<T: Geometry>: GPURenderAsset<T> {
     fn geometry_info(&self) -> u64;
 }
 
-/// Insert Handle<T> in the render world for all entities with Handle<T>
+/// Normalized component for Handle<Geometry>.
 #[derive(Component)]
 pub struct GPUGeometryPrimitives {
     pub handle: HandleId,
     pub blas_input_primitives: Option<Arc<MemBuffer>>, // None if the geometry hasn't been loaded yet.
     pub geometry_info: u64,
 }
+
+/// Insert Handle<T> in the render world for all entities with Handle<T>
 fn extract_primitives<T: Geometry>(mut commands: Commands, query: Query<(Entity, &Handle<T>)>) {
     for (entity, geometry_handle) in query.iter() {
         commands
@@ -67,7 +69,8 @@ fn extract_primitives<T: Geometry>(mut commands: Commands, query: Query<(Entity,
             .insert(geometry_handle.clone());
     }
 }
-/// Insert GPUGeometryPrimitives for all entities with Handle<T>
+
+/// Insert normalized component [`GPUGeometryPrimitives`] for all entities with Handle<T>.
 fn prepare_primitives<T: Geometry>(
     mut commands: Commands,
     geometry_store: Res<RenderAssetStore<T>>,
@@ -116,5 +119,6 @@ where
             .add_system_to_stage(RenderStage::Extract, extract_primitives::<T>)
             .add_system_to_stage(RenderStage::Prepare, prepare_primitives::<T>);
         // TODO: maybe run prepare_primitives after prepare_geometries to decrease frame delay?
+        // Right now there's a one-frame delay between geometry change and the BLAS systems see it.
     }
 }
