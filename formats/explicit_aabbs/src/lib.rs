@@ -125,6 +125,8 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
     fn geometry_info(&self) -> u64 {
         self.primitives_buffer.device_address()
     }
+
+    type SbtInfo = u64;
 }
 
 #[derive(Default)]

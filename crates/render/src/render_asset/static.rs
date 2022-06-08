@@ -9,7 +9,7 @@ use bevy_app::{App, Plugin};
 use bevy_asset::{AddAsset, Asset, AssetEvent, AssetServer, Assets, Handle};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
-use bevy_ecs::event::EventReader;
+use bevy_ecs::event::{EventReader, EventWriter};
 use bevy_ecs::prelude::FromWorld;
 use bevy_ecs::system::{
     Commands, Query, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem,
@@ -144,6 +144,7 @@ fn prepare_render_assets<T: RenderAsset>(
     mut extracted_assets: ResMut<Option<ExtractedAssets<T>>>,
     mut render_asset_store: ResMut<RenderAssetStore<T>>,
     queues: Res<Arc<Queues>>,
+    mut event_writer: EventWriter<RenderAssetEvent<T>>,
     mut build_params: StaticSystemParam<<T::GPUAsset as GPURenderAsset<T>>::BuildParam>,
 ) {
     // Merge the new changes into the buffer. Incoming -> Buffered
@@ -160,6 +161,7 @@ fn prepare_render_assets<T: RenderAsset>(
         if signal.finished().unwrap() {
             // Finished, put it into the store.
             for (handle, geometry) in carrier.drain(..) {
+                event_writer.send(RenderAssetEvent::Created(handle.clone_weak()));
                 if let Some(geometry) = geometry {
                     render_asset_store.assets.insert(handle, geometry);
                 }
@@ -192,10 +194,10 @@ fn prepare_render_assets<T: RenderAsset>(
         if future.is_empty() {
             // If the future is empty, no commands were recorded. Transition to existing state directly.
             for (handle, geometry) in pending_builds.drain(..) {
+                event_writer.send(RenderAssetEvent::Created(handle.clone_weak()));
                 if let Some(geometry) = geometry {
                     render_asset_store.assets.insert(handle, geometry);
                 }
-                // TODO: send rebuild BLAS signal.
             }
         } else {
             let signal = future
@@ -225,7 +227,12 @@ impl<T: RenderAsset> Plugin for RenderAssetPlugin<T> {
         let render_app = app.sub_app_mut(crate::RenderApp);
         render_app
             .init_resource::<RenderAssetStore<T>>()
+            .add_event::<RenderAssetEvent<T>>()
             .add_system_to_stage(crate::RenderStage::Extract, move_extracted_assets::<T>)
             .add_system_to_stage(crate::RenderStage::Prepare, prepare_render_assets::<T>);
     }
+}
+
+pub enum RenderAssetEvent<T: RenderAsset> {
+    Created(Handle<T>),
 }

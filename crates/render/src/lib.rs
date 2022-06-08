@@ -16,7 +16,7 @@ pub mod swapchain;
 
 use ash::extensions::{ext, khr};
 use ash::vk;
-use bevy_app::{App, AppLabel, Plugin};
+use bevy_app::{App, AppLabel, CoreStage, Plugin};
 use bevy_asset::AddAsset;
 use bevy_ecs::schedule::StageLabel;
 use bevy_ecs::world::World;
@@ -183,6 +183,7 @@ impl Plugin for RenderPlugin {
         );
 
         render_app
+            .add_stage(CoreStage::First, SystemStage::parallel()) // For events
             .add_stage(RenderStage::Extract, {
                 let mut stage = SystemStage::parallel();
                 // For the Extract stage, the system params are coming from the main world while operations wrote to Commands
@@ -223,6 +224,13 @@ impl Plugin for RenderPlugin {
             // these entities cannot be accessed without spawning directly onto them
             // this _only_ works as expected because clear_entities() is called at the end of every frame.
             unsafe { render_app.world.entities_mut() }.flush_as_invalid();
+            {
+                let render = render_app
+                    .schedule
+                    .get_stage_mut::<SystemStage>(&CoreStage::First)
+                    .unwrap();
+                render.run(&mut render_app.world);
+            }
             {
                 let extract = render_app
                     .schedule

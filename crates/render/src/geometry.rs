@@ -50,7 +50,9 @@ pub trait Geometry: RenderAsset {
 /// RenderWorld Assets.
 pub trait GPUGeometry<T: Geometry>: GPURenderAsset<T> {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer>;
-    fn geometry_info(&self) -> u64;
+
+    type SbtInfo: Copy;
+    fn geometry_info(&self) -> Self::SbtInfo;
 }
 
 /// Normalized component for Handle<Geometry>.
@@ -67,32 +69,6 @@ fn extract_primitives<T: Geometry>(mut commands: Commands, query: Query<(Entity,
         commands
             .get_or_spawn(entity)
             .insert(geometry_handle.clone());
-    }
-}
-
-/// Insert normalized component [`GPUGeometryPrimitives`] for all entities with Handle<T>.
-fn prepare_primitives<T: Geometry>(
-    mut commands: Commands,
-    geometry_store: Res<RenderAssetStore<T>>,
-    query: Query<(Entity, &Handle<T>)>,
-) where
-    T::GPUAsset: GPUGeometry<T>,
-{
-    for (entity, geometry_handle) in query.iter() {
-        if let Some(geometry) = geometry_store.get(geometry_handle) {
-            let buf = geometry.blas_input_buffer().clone();
-            commands.entity(entity).insert(GPUGeometryPrimitives {
-                handle: geometry_handle.id,
-                blas_input_primitives: Some(buf),
-                geometry_info: geometry.geometry_info(),
-            });
-        } else {
-            commands.entity(entity).insert(GPUGeometryPrimitives {
-                handle: geometry_handle.id,
-                blas_input_primitives: None,
-                geometry_info: 0,
-            });
-        }
     }
 }
 
@@ -115,9 +91,7 @@ where
         app.add_plugin(RenderAssetPlugin::<T>::default());
 
         let render_app = app.sub_app_mut(crate::RenderApp);
-        render_app
-            .add_system_to_stage(RenderStage::Extract, extract_primitives::<T>)
-            .add_system_to_stage(RenderStage::Prepare, prepare_primitives::<T>);
+        render_app.add_system_to_stage(RenderStage::Extract, extract_primitives::<T>);
         // TODO: maybe run prepare_primitives after prepare_geometries to decrease frame delay?
         // Right now there's a one-frame delay between geometry change and the BLAS systems see it.
     }

@@ -104,7 +104,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         let render_state = render_app.world.get_resource::<RenderState>().unwrap();
         let material_descriptor_vec = render_app
             .world
-            .get_resource::<crate::material::GPUMaterialDescriptorVec>()
+            .get_resource::<crate::render_asset::BindlessGPUAssetDescriptors>()
             .unwrap();
         let pipeline_layout = PipelineLayout::new(
             device,
@@ -161,7 +161,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         Local<'static, PerFrame<RenderPerFrameState>>,
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
-        SRes<crate::material::GPUMaterialDescriptorVec>,
+        SRes<crate::render_asset::BindlessGPUAssetDescriptors>,
         SQuery<bevy_ecs::system::lifetimeless::Read<ExtractedCamera>>,
     );
     fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {

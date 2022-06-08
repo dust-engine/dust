@@ -3,6 +3,8 @@ use bevy_asset::AssetLoader;
 use bevy_asset::AssetServer;
 use bevy_ecs::system::lifetimeless::SRes;
 use dust_render::material::{GPUMaterial, Material};
+use dust_render::render_asset::GPURenderAsset;
+use dust_render::render_asset::RenderAsset;
 use dust_render::shader::SpecializedShader;
 use dustash::queue::QueueType;
 use dustash::queue::Queues;
@@ -16,6 +18,29 @@ use std::sync::Arc;
 pub struct DensityMaterial {
     rawdata: Box<[u8]>,
     extent: vk::Extent2D,
+}
+
+impl RenderAsset for DensityMaterial {
+    type GPUAsset = GPUDensityMaterial;
+    type CreateBuildDataParam = SRes<Arc<Allocator>>;
+    type BuildData = (MemBuffer, vk::Extent2D);
+    fn create_build_data(
+        &mut self,
+        allocator: &mut bevy_ecs::system::SystemParamItem<Self::CreateBuildDataParam>,
+    ) -> Self::BuildData {
+        let mut buffer = allocator
+            .allocate_buffer(&BufferRequest {
+                size: self.rawdata.len() as u64,
+                usage: vk::BufferUsageFlags::TRANSFER_SRC,
+                scenario: MemoryAllocScenario::StagingBuffer,
+                ..Default::default()
+            })
+            .unwrap();
+        buffer.map_scoped(|slice| {
+            slice.copy_from_slice(&self.rawdata);
+        });
+        (buffer, self.extent)
+    }
 }
 
 impl Material for DensityMaterial {
@@ -33,41 +58,6 @@ impl Material for DensityMaterial {
             specialization: None,
         })
     }
-
-    type GPUMaterial = GPUDensityMaterial;
-
-    type ChangeSet = ();
-
-    type BuildSet = (MemBuffer, vk::Extent2D);
-
-    type GenerateBuildsParam = SRes<Arc<Allocator>>;
-
-    fn generate_builds(
-        &mut self,
-        allocator: &mut bevy_ecs::system::SystemParamItem<Self::GenerateBuildsParam>,
-    ) -> Self::BuildSet {
-        let mut buffer = allocator
-            .allocate_buffer(&BufferRequest {
-                size: self.rawdata.len() as u64,
-                usage: vk::BufferUsageFlags::TRANSFER_SRC,
-                scenario: MemoryAllocScenario::StagingBuffer,
-                ..Default::default()
-            })
-            .unwrap();
-        buffer.map_scoped(|slice| {
-            slice.copy_from_slice(&self.rawdata);
-        });
-        (buffer, self.extent)
-    }
-
-    type EmitChangesParam = ();
-
-    fn emit_changes(
-        &mut self,
-        param: &mut bevy_ecs::system::SystemParamItem<Self::EmitChangesParam>,
-    ) -> Self::ChangeSet {
-        todo!()
-    }
 }
 
 pub struct GPUDensityMaterial {
@@ -76,11 +66,11 @@ pub struct GPUDensityMaterial {
         dustash::resources::image::ImageView<Arc<dustash::resources::image::MemImage>>,
 }
 
-impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
+impl GPURenderAsset<DensityMaterial> for GPUDensityMaterial {
     type BuildParam = (SRes<Arc<Device>>, SRes<Arc<Allocator>>, SRes<Arc<Queues>>);
 
     fn build(
-        build_set: <DensityMaterial as Material>::BuildSet,
+        build_set: <DensityMaterial as RenderAsset>::BuildData,
         commands_future: &mut dustash::sync::CommandsFuture,
         params: &mut bevy_ecs::system::SystemParamItem<Self::BuildParam>,
     ) -> Self {
@@ -208,24 +198,25 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
             density_map_view: view,
         }
     }
+}
 
-    type ApplyChangeParam = ();
-
-    fn apply_change_set(
-        &mut self,
-        change_set: <DensityMaterial as Material>::ChangeSet,
-        commands_future: &mut dustash::sync::CommandsFuture,
-        params: &mut bevy_ecs::system::SystemParamItem<Self::ApplyChangeParam>,
-    ) {
-        todo!()
-    }
-
+impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
     fn material_binding(&self) -> dustash::descriptor::DescriptorVecBinding {
         dustash::descriptor::DescriptorVecBinding::StorageImage(vk::DescriptorImageInfo {
             sampler: vk::Sampler::null(),
             image_view: self.density_map_view.raw_image_view(),
             image_layout: vk::ImageLayout::GENERAL,
         })
+    }
+
+    type SbtData = u32;
+
+    fn material_info(
+        &self,
+        bindless_store: &dust_render::render_asset::BindlessGPUAssetDescriptors,
+    ) -> Self::SbtData {
+        // TODO: ???
+        0
     }
 }
 

@@ -2,7 +2,6 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
     accel_struct::blas::BlasComponent,
-    material::ExtractedMaterial,
     shader::{Shader, SpecializedShader},
     RenderApp, RenderStage,
 };
@@ -156,7 +155,7 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
         app.sub_app_mut(RenderApp)
             .init_resource::<Option<Vec<ExtractedRayTracingPipelineLayout>>>()
             .init_resource::<PipelineCache>()
-            .init_resource::<crate::material::GPUMaterialDescriptorVec>()
+            .init_resource::<crate::render_asset::BindlessGPUAssetDescriptors>()
             .add_system_to_stage(RenderStage::Extract, extract_pipeline_system::<T>)
             .add_system_to_stage(
                 RenderStage::Prepare,
@@ -438,15 +437,12 @@ fn prepare_sbt_system(
         let rhit_data: Vec<_> = query
             .iter()
             .flat_map(|blas| {
-                blas.geometry_material
-                    .iter()
-                    .map(|(geometry, material, geometry_info)| {
-                        let sbtData = HitGroupSBTData {
-                            geometry_info: *geometry_info,
-                            material_info: material.material_info,
-                        };
-                        (material.hitgroup_index as usize, sbtData)
-                    })
+                blas.geometry_materials.iter().map(|geometry_material| {
+                    (
+                        geometry_material.hitgroup_index as usize,
+                        geometry_material.sbt_data.unwrap(),
+                    )
+                })
             })
             .collect();
         let sbt = Sbt::new(

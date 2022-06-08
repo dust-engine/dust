@@ -17,7 +17,7 @@ use dustash::{
 };
 
 use crate::{
-    geometry::GPUGeometryPrimitives, material::ExtractedMaterial, renderable::Renderable,
+    geometry::GPUGeometryPrimitives, material::GPUGeometryMaterial, renderable::Renderable,
     RenderStage,
 };
 use ash::vk;
@@ -57,7 +57,8 @@ struct BlasStore {
 
 #[derive(Component)]
 pub struct BlasComponent {
-    pub geometry_material: Vec<(HandleId, ExtractedMaterial, u64)>,
+    // Things in here are guaranteed to be non-null.
+    pub geometry_materials: Vec<GPUGeometryMaterial>,
     pub blas: Arc<AccelerationStructure>,
 }
 
@@ -72,32 +73,18 @@ fn build_blas(
         Entity,
         &Renderable,
         Option<&Children>,
-        Option<&GPUGeometryPrimitives>,
-        Option<&ExtractedMaterial>,
+        Option<&GPUGeometryMaterial>,
     )>,
-    children_query: Query<(Entity, &GPUGeometryPrimitives, &ExtractedMaterial)>,
+    children_query: Query<(Entity, &GPUGeometryMaterial)>,
 ) {
-    fn collect_primitive_ids(
+    fn collect_geometry_material(
         children: &Children,
-        primitive_ids: &mut Vec<(HandleId, ExtractedMaterial, u64)>,
-        buffers: &mut Vec<Arc<MemBuffer>>,
-        children_query: &Query<(Entity, &GPUGeometryPrimitives, &ExtractedMaterial)>,
+        geometry_materials: &mut Vec<GPUGeometryMaterial>,
+        children_query: &Query<(Entity, &GPUGeometryMaterial)>,
     ) {
         for child in children.iter() {
-            let (child_entity, primitives, material) = children_query.get(*child).unwrap();
-            if let Some(blas_input_primitives) = primitives.blas_input_primitives.as_ref() {
-                primitive_ids.push((
-                    primitives.handle,
-                    material.clone(),
-                    primitives.geometry_info,
-                ));
-                buffers.push(blas_input_primitives.clone());
-            } else {
-                // Skip if the geometry hasn't been fully loaded
-                primitive_ids.clear();
-                buffers.clear();
-                return;
-            }
+            let (child_entity, geometry_material) = children_query.get(*child).unwrap();
+            geometry_materials.push(geometry_material.clone())
         }
     }
     let mut blas_builder = dustash::accel_struct::build::AccelerationStructureBuilder::new(
@@ -110,46 +97,43 @@ fn build_blas(
     // BLASs that are still needed next frame
     let mut retained_blas: HashMap<Vec<HandleId>, Arc<AccelerationStructure>> = HashMap::new();
     // For all root elements
-    for (entity, renderable, children, primitives, material) in query.iter() {
-        let mut geometry_material: Vec<(HandleId, ExtractedMaterial, u64)> = Vec::new();
-        let mut buffers: Vec<Arc<MemBuffer>> = Vec::new();
-        if let Some(primitives) = primitives {
-            if let Some(material) = material {
-                // Get the GPUGeometryPrimitives on the root
-                if let Some(blas_input_primitives) = primitives.blas_input_primitives.as_ref() {
-                    geometry_material.push((
-                        primitives.handle,
-                        material.clone(),
-                        primitives.geometry_info,
-                    ));
-                    buffers.push(blas_input_primitives.clone());
-                } else {
-                    // Skip if the geometry hasn't been fully loaded
-                    continue;
-                }
-            }
+    'outer: for (entity, renderable, children, geometry_material_on_root) in query.iter() {
+        let mut geometry_materials: Vec<GPUGeometryMaterial> = Vec::new();
+        if let Some(geometry_material) = geometry_material_on_root {
+            // Get the GPUGeometryPrimitives on the root
+            geometry_materials.push(geometry_material.clone());
         }
         // Collect the GPUGeometryPrimitives on the childrens recursively
         if let Some(children) = children {
-            collect_primitive_ids(
-                children,
-                &mut geometry_material,
-                &mut buffers,
-                &children_query,
-            );
+            collect_geometry_material(children, &mut geometry_materials, &children_query);
         }
-        if geometry_material.len() == 0 {
+        if geometry_materials.len() == 0 {
             continue;
         }
-        geometry_material.sort_by_key(|(geometry, material, _)| *geometry);
-        let primitive_ids: Vec<_> = geometry_material
+
+        let mut buffers: Vec<Arc<MemBuffer>> = Vec::with_capacity(geometry_materials.len());
+        for geometry_material in geometry_materials.iter() {
+            if let Some(buffer) = geometry_material.blas_input_primitives.as_ref() {
+                buffers.push(buffer.clone())
+            } else {
+                // Instance is not ready yet because of missing geometry data.
+                continue 'outer;
+            }
+
+            if geometry_material.sbt_data.is_none() {
+                continue 'outer;
+            }
+        }
+
+        geometry_materials.sort_by_key(|geometry_material| geometry_material.geometry_handle);
+        let primitive_ids: Vec<_> = geometry_materials
             .iter()
-            .map(|(geometry, material, _)| *geometry)
+            .map(|geometry_material| geometry_material.geometry_handle)
             .collect();
         if let Some(blas) = blas_store.blas.get(&primitive_ids) {
             retained_blas.insert(primitive_ids.clone(), blas.clone());
             commands.get_or_spawn(entity).insert(BlasComponent {
-                geometry_material,
+                geometry_materials,
                 blas: blas.clone(),
             });
             // TODO: if the BLAS was invalidated, still rebuild the BLAS.

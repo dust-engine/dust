@@ -29,7 +29,7 @@ pub struct TLASStore {
 
 #[derive(Eq, Hash, PartialEq, Clone)]
 struct InstanceEntry {
-    geometries: Vec<HandleId>,
+    geometries: Vec<(HandleId, HandleId)>,
 }
 
 /// Build a TLAS.
@@ -59,17 +59,21 @@ fn build_tlas(
             // Deduplicate by geometry and material
             let entry = InstanceEntry {
                 geometries: blas
-                    .geometry_material
+                    .geometry_materials
                     .iter()
-                    .map(|(geometry, material, _)| *geometry)
+                    .map(|geometry_material| {
+                        (
+                            geometry_material.geometry_handle,
+                            geometry_material.material_handle,
+                        )
+                    })
                     .collect(),
-                // TODO: Material
             };
             let sbt_offset = if let Some(sbt_offset) = map.get(&entry) {
                 *sbt_offset
             } else {
                 let sbt_offset = current_sbt_offset;
-                current_sbt_offset += blas.geometry_material.len() as u32;
+                current_sbt_offset += blas.geometry_materials.len() as u32;
 
                 map.insert(entry, sbt_offset);
                 sbt_offset
