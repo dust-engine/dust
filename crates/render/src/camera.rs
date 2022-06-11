@@ -5,7 +5,7 @@ use bevy_ecs::{
 };
 use bevy_transform::prelude::GlobalTransform;
 use bevy_window::WindowId;
-use glam::{Mat3, Vec3};
+use glam::Mat3;
 
 #[derive(Component)]
 pub struct PerspectiveCamera {

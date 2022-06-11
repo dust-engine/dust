@@ -3,16 +3,14 @@ use bevy_ecs::prelude::*;
 
 use bevy_ecs::system::{Commands, Res};
 
-use bevy_input::keyboard::KeyboardInput;
-use bevy_input::ButtonState;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
 use dust_format_explicit_aabbs::material::DensityMaterial;
-use dust_format_explicit_aabbs::ExplicitAABBPlugin;
+
 use dust_render::camera::PerspectiveCamera;
-use dust_render::material::Material;
+
 use dust_render::renderable::Renderable;
-use dust_render::shader::SpecializedShader;
+
 use glam::Vec3;
 
 use dust_render::renderer::Renderer as DefaultRenderer;
@@ -59,7 +57,7 @@ fn main() {
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut materials: ResMut<Assets<DensityMaterial>>,
+    _materials: ResMut<Assets<DensityMaterial>>,
 ) {
     let handle: Handle<dust_format_explicit_aabbs::AABBGeometry> =
         asset_server.load("../assets/out.aabb");

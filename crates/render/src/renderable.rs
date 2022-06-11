@@ -1,5 +1,5 @@
 use ash::vk;
-use bevy_asset::Handle;
+
 use bevy_ecs::component::Component;
 use bitflags::bitflags;
 

@@ -14,7 +14,6 @@ use dustash::{
     frames::PerFrame,
     queue::{QueueType, Queues},
     ray_tracing::pipeline::PipelineLayout,
-    resources::alloc::Allocator,
     sync::{CommandsFuture, GPUFuture},
     Device,
 };
@@ -24,7 +23,7 @@ use crate::{
     camera::{ExtractedCamera, PerspectiveCameraParameters},
     pipeline::{PipelineIndex, RayTracingPipelineBuildJob},
     shader::SpecializedShader,
-    swapchain::{Window, Windows},
+    swapchain::Windows,
 };
 use ash::vk;
 
@@ -155,7 +154,6 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
     type RenderParam = (
         SResMut<Windows>,
         SRes<Arc<Device>>,
-        SRes<Arc<Allocator>>,
         SResMut<RenderState>,
         SRes<Arc<Queues>>,
         Local<'static, PerFrame<RenderPerFrameState>>,
@@ -168,7 +166,6 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         let (
             windows,
             device,
-            allocator,
             state,
             queues,
             per_frame_state,
@@ -208,7 +205,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         };
 
         let mut sbt_upload_future = pipeline_cache.sbt_upload_future.take().unwrap();
-        let mut tlas_updated_future = tlas_store.tlas_build_future.take();
+        let tlas_updated_future = tlas_store.tlas_build_future.take();
 
         let camera = {
             let mut camera_iter = cameras.iter();
@@ -228,7 +225,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         // Allocate descriptor set and bind swapchain image
         let per_frame_state = per_frame_state.get_or_else(
             current_frame,
-            |original| false,
+            |_original| false,
             |original| {
                 let desc_set = original.map_or_else(
                     || {

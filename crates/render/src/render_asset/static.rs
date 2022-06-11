@@ -2,26 +2,19 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use crate::geometry::Geometry;
-use crate::pipeline::{HitGroup, HitGroupType};
-use crate::shader::{Shader, SpecializedShader};
 use ash::vk;
 use bevy_app::{App, Plugin};
-use bevy_asset::{AddAsset, Asset, AssetEvent, AssetServer, Assets, Handle};
-use bevy_ecs::component::Component;
-use bevy_ecs::entity::Entity;
+use bevy_asset::{AddAsset, Asset, AssetEvent, Assets, Handle};
+
 use bevy_ecs::event::{EventReader, EventWriter};
-use bevy_ecs::prelude::FromWorld;
-use bevy_ecs::system::{
-    Commands, Query, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem,
-};
+
+use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
+use bevy_ecs::schedule::SystemLabel;
+use bevy_ecs::system::{Commands, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem};
 use bevy_utils::{HashMap, HashSet};
 use dustash::queue::semaphore::TimelineSemaphoreOp;
 use dustash::queue::{QueueType, Queues};
 use dustash::sync::{CommandsFuture, GPUFuture};
-use dustash::Device;
-use bevy_ecs::schedule::SystemLabel;
-use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 
 /// Asset that can be send to the GPU.
 pub trait RenderAsset: Asset + Sized + 'static {
@@ -140,29 +133,30 @@ impl<A: RenderAsset> Default for RenderAssetStore<A> {
     }
 }
 
-
-
 #[derive(SystemLabel)] // TODO: Simplify this
 pub struct PrepareRenderAssetsSystem<T: RenderAsset> {
-    _marker: PhantomData<T>
+    _marker: PhantomData<T>,
 }
 impl<T: RenderAsset> Default for PrepareRenderAssetsSystem<T> {
     fn default() -> Self {
-        Self { _marker: PhantomData }
+        Self {
+            _marker: PhantomData,
+        }
     }
 }
 impl<T: RenderAsset> Clone for PrepareRenderAssetsSystem<T> {
     fn clone(&self) -> Self {
-        Self { _marker: PhantomData }
+        Self {
+            _marker: PhantomData,
+        }
     }
 }
 impl<T: RenderAsset> PartialEq for PrepareRenderAssetsSystem<T> {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         true
     }
 }
-impl<T: RenderAsset> Eq for PrepareRenderAssetsSystem<T> {
-}
+impl<T: RenderAsset> Eq for PrepareRenderAssetsSystem<T> {}
 impl<T: RenderAsset> std::hash::Hash for PrepareRenderAssetsSystem<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let ty = std::any::TypeId::of::<PrepareRenderAssetsSystem<T>>();
@@ -267,7 +261,10 @@ impl<T: RenderAsset> Plugin for RenderAssetPlugin<T> {
             .init_resource::<RenderAssetStore<T>>()
             .add_event::<RenderAssetEvent<T>>()
             .add_system_to_stage(crate::RenderStage::Extract, move_extracted_assets::<T>)
-            .add_system_to_stage(crate::RenderStage::Prepare, prepare_render_assets::<T>.label(PrepareRenderAssetsSystem::<T>::default()));
+            .add_system_to_stage(
+                crate::RenderStage::Prepare,
+                prepare_render_assets::<T>.label(PrepareRenderAssetsSystem::<T>::default()),
+            );
     }
 }
 

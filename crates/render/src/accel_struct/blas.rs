@@ -1,4 +1,4 @@
-use std::{process::Child, sync::Arc};
+use std::sync::Arc;
 
 use bevy_app::Plugin;
 use bevy_asset::HandleId;
@@ -16,12 +16,9 @@ use dustash::{
     sync::CommandsFuture,
 };
 
-use crate::{
-    geometry::GPUGeometryPrimitives, material::GPUGeometryMaterial, renderable::Renderable,
-    RenderStage,
-};
+use crate::{material::GPUGeometryMaterial, renderable::Renderable, RenderStage};
 use ash::vk;
-use bevy_hierarchy::{Children, Parent};
+use bevy_hierarchy::Children;
 
 /// This plugin generates a BLAS for each unique combination of geometries.
 #[derive(Default)]
@@ -83,7 +80,7 @@ fn build_blas(
         children_query: &Query<(Entity, &GPUGeometryMaterial)>,
     ) {
         for child in children.iter() {
-            let (child_entity, geometry_material) = children_query.get(*child).unwrap();
+            let (_child_entity, geometry_material) = children_query.get(*child).unwrap();
             geometry_materials.push(geometry_material.clone())
         }
     }
@@ -97,7 +94,7 @@ fn build_blas(
     // BLASs that are still needed next frame
     let mut retained_blas: HashMap<Vec<HandleId>, Arc<AccelerationStructure>> = HashMap::new();
     // For all root elements
-    'outer: for (entity, renderable, children, geometry_material_on_root) in query.iter() {
+    'outer: for (entity, _renderable, children, geometry_material_on_root) in query.iter() {
         let mut geometry_materials: Vec<GPUGeometryMaterial> = Vec::new();
         if let Some(geometry_material) = geometry_material_on_root {
             // Get the GPUGeometryPrimitives on the root

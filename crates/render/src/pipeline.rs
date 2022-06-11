@@ -18,12 +18,9 @@ use dustash::{
         pipeline::{PipelineLayout, RayTracingLoader, RayTracingPipelineLayout},
         sbt::{Sbt, SbtLayout},
     },
-    resources::alloc::BufferRequest,
     sync::CommandsFuture,
     Device,
 };
-struct RtxPipelinePlugin;
-use ash::vk;
 
 pub use dustash::ray_tracing::sbt::HitGroupType;
 pub struct HitGroup {
@@ -282,7 +279,7 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
                         .collect();
                 }
             }
-            AssetEvent::Removed { handle } => {}
+            AssetEvent::Removed { handle: _ } => {}
         }
     }
 
@@ -402,7 +399,7 @@ fn prepare_sbt_system(
     mut pipeline_cache: ResMut<PipelineCache>,
     allocator: Res<Arc<dustash::resources::alloc::Allocator>>,
     queues: Res<Arc<Queues>>,
-    query: Query<(&BlasComponent)>,
+    query: Query<&BlasComponent>,
 ) {
     // TODO: skip creating the SBT when there's no change
     // We always create a new SBT when there's a change. This is to avoid mutation while the SBT was being

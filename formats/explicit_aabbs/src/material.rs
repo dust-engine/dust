@@ -246,7 +246,7 @@ impl AssetLoader for DensityMaterialLoader {
                 vk::Extent2D { width, height }
             };
             let mut rawdata: Vec<u8> = vec![0; decoder.total_bytes() as usize];
-            decoder.read_image(&mut rawdata);
+            decoder.read_image(&mut rawdata).unwrap();
             let material = DensityMaterial {
                 extent,
                 rawdata: rawdata.into_boxed_slice(),

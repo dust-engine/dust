@@ -1,4 +1,3 @@
-#![feature(box_into_pin)]
 #![feature(into_future)]
 
 //pub mod accel_struct;

@@ -4,26 +4,19 @@ use std::sync::Arc;
 use crate::geometry::{GPUGeometry, Geometry};
 use crate::pipeline::{HitGroup, HitGroupType};
 use crate::render_asset::{
-    BindlessGPUAssetDescriptors, GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore, BindlessAssetsSystem,
+    BindlessAssetsSystem, GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore,
 };
-use crate::shader::{Shader, SpecializedShader};
-use ash::vk;
+use crate::shader::SpecializedShader;
+
 use bevy_app::{App, Plugin};
-use bevy_asset::{AddAsset, Asset, AssetEvent, AssetServer, Assets, Handle, HandleId};
+use bevy_asset::{AssetServer, Handle, HandleId};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
-use bevy_ecs::event::EventReader;
-use bevy_ecs::prelude::FromWorld;
-use bevy_ecs::system::{
-    Commands, Query, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem,
-};
+
 use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
-use bevy_utils::HashMap;
-use dustash::queue::semaphore::TimelineSemaphoreOp;
-use dustash::queue::{QueueType, Queues};
+use bevy_ecs::system::{Commands, Query, Res, StaticSystemParam, SystemParam, SystemParamItem};
+
 use dustash::resources::alloc::MemBuffer;
-use dustash::sync::{CommandsFuture, GPUFuture};
-use dustash::Device;
 
 pub trait Material: RenderAsset {
     type Geometry: Geometry;
@@ -148,7 +141,10 @@ where
         // On each frame, Handle<Material> -> ExtractedMaterial
         app.sub_app_mut(crate::RenderApp)
             .add_system_to_stage(crate::RenderStage::Extract, extract_primitives::<T>)
-            .add_system_to_stage(crate::RenderStage::Prepare, prepare_primitives.after(BindlessAssetsSystem::<T>::default()));
+            .add_system_to_stage(
+                crate::RenderStage::Prepare,
+                prepare_primitives.after(BindlessAssetsSystem::<T>::default()),
+            );
         // TODO: maybe run prepare_material_info after prepare_materials to decrease frame delay?
     }
 }

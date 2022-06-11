@@ -1,36 +1,20 @@
-use std::{borrow::Borrow, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
-    render_asset::{GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore},
-    shader::{Shader, SpecializedShader},
-    RenderStage, RenderWorld,
+    render_asset::{GPURenderAsset, RenderAsset, RenderAssetPlugin},
+    shader::SpecializedShader,
+    RenderStage,
 };
-use ash::{prelude::VkResult, vk};
-use bevy_app::{CoreStage, Plugin};
-use bevy_asset::{
-    AddAsset, Asset, AssetEvent, AssetServer, Assets, Handle, HandleId, HandleUntyped,
-};
+
+use bevy_app::Plugin;
+use bevy_asset::{AssetServer, Handle, HandleId};
 use bevy_ecs::{
     component::Component,
     entity::Entity,
-    event::EventReader,
-    system::{
-        Commands, IntoExclusiveSystem, Query, Res, ResMut, StaticSystemParam, SystemParam,
-        SystemParamItem,
-    },
-    world::World,
+    system::{Commands, Query, SystemParam, SystemParamItem},
 };
-use bevy_utils::{HashMap, HashSet};
-use dustash::{
-    accel_struct::AccelerationStructure,
-    command::{pool::CommandPool, recorder::CommandRecorder},
-    queue::{semaphore::TimelineSemaphoreOp, Queue, QueueType, Queues},
-    resources::alloc::MemBuffer,
-    shader::SpecializationInfo,
-    sync::{CommandsFuture, GPUFuture, HostFuture},
-    Device,
-};
-use std::future::IntoFuture;
+
+use dustash::resources::alloc::MemBuffer;
 
 pub type GeometryAABB = ash::vk::AabbPositionsKHR;
 

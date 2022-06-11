@@ -16,7 +16,6 @@ use dustash::{
     swapchain::SwapchainLoader,
     Device, Task,
 };
-use futures_util::FutureExt;
 
 pub struct Window {
     frames: dustash::frames::FrameManager,
