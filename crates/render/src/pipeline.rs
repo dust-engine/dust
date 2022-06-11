@@ -395,13 +395,6 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
     }
 }
 
-#[repr(C)]
-#[derive(Copy, Clone)]
-struct HitGroupSBTData {
-    geometry_info: u64,
-    material_info: u32,
-}
-
 #[derive(Clone, Hash, Debug, Eq, PartialEq, SystemLabel)]
 struct PrepareSbtSystem;
 

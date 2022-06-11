@@ -1,8 +1,11 @@
 use ash::vk;
 use bevy_asset::AssetLoader;
 use bevy_asset::AssetServer;
+use bevy_asset::Handle;
 use bevy_ecs::system::lifetimeless::SRes;
+use bevy_ecs::system::SystemParamItem;
 use dust_render::material::{GPUMaterial, Material};
+use dust_render::render_asset::BindlessGPUAssetDescriptors;
 use dust_render::render_asset::GPURenderAsset;
 use dust_render::render_asset::RenderAsset;
 use dust_render::shader::SpecializedShader;
@@ -211,11 +214,12 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
 
     type SbtData = u32;
 
+    type MaterialInfoParams = (SRes<BindlessGPUAssetDescriptors>);
     fn material_info(
         &self,
-        bindless_store: &dust_render::render_asset::BindlessGPUAssetDescriptors,
+        handle: &Handle<DensityMaterial>,
+        bindless_store: &mut SystemParamItem<Self::MaterialInfoParams>,
     ) -> Self::SbtData {
-        // TODO: ???
         0
     }
 }

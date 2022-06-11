@@ -33,7 +33,13 @@ pub trait Material: RenderAsset {
 
 pub trait GPUMaterial<T: Material>: GPURenderAsset<T> {
     type SbtData: Copy;
-    fn material_info(&self, bindless_store: &BindlessGPUAssetDescriptors) -> Self::SbtData;
+
+    type MaterialInfoParams: SystemParam;
+    fn material_info(
+        &self,
+        handle: &Handle<T>,
+        params: &mut SystemParamItem<Self::MaterialInfoParams>,
+    ) -> Self::SbtData;
     fn material_binding(&self) -> dustash::descriptor::DescriptorVecBinding;
 }
 
@@ -94,7 +100,9 @@ where
             move |mut commands: Commands,
                   geometry_store: Res<RenderAssetStore<T::Geometry>>,
                   material_store: Res<RenderAssetStore<T>>,
-                  bindless_store: Res<BindlessGPUAssetDescriptors>,
+                  mut params: StaticSystemParam<
+                <T::GPUAsset as GPUMaterial<T>>::MaterialInfoParams,
+            >,
                   query: Query<(Entity, &Handle<T::Geometry>, &Handle<T>)>| {
                 for (entity, geometry_handle, material_handle) in query.iter() {
                     if let Some(geometry) = geometry_store.get(geometry_handle) {
@@ -102,7 +110,7 @@ where
                             let buf = geometry.blas_input_buffer().clone();
                             let sbt_data = (
                                 geometry.geometry_info(),
-                                material.material_info(&bindless_store),
+                                material.material_info(&material_handle, &mut params),
                             );
                             let sbt_data = unsafe {
                                 let mut sbt_data_raw: [u8; 32] = [0; 32];
