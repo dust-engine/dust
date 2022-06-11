@@ -47,6 +47,9 @@ fn main() {
         DefaultRenderer,
     >::default())
     .add_plugin(dust_render::material::MaterialPlugin::<DensityMaterial>::default())
+    .add_plugin(dust_render::render_asset::BindlessGPUAssetPlugin::<
+        DensityMaterial,
+    >::default())
     .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
     .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
     .add_startup_system(setup);

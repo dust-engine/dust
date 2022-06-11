@@ -3,11 +3,18 @@ use std::{marker::PhantomData, sync::Arc};
 use ash::vk;
 use bevy_app::Plugin;
 use bevy_asset::HandleId;
-use bevy_ecs::{event::EventReader, prelude::FromWorld, system::ResMut};
+use bevy_ecs::{
+    event::EventReader,
+    prelude::FromWorld,
+    system::{Res, ResMut},
+};
 use bevy_utils::HashMap;
 use dustash::{descriptor::DescriptorVecBinding, Device};
 
-use super::{GPURenderAsset, RenderAsset, RenderAssetStore};
+use crate::{RenderApp, RenderStage};
+
+use super::{GPURenderAsset, RenderAsset, RenderAssetStore, PrepareRenderAssetsSystem};
+use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 
 /// GPU Asset that, upon creation, will be written to the corresponding bindless heap.
 pub trait BindlessGPUAsset<T: RenderAsset>: GPURenderAsset<T> {
@@ -39,11 +46,22 @@ impl BindlessGPUAssetDescriptors {
     }
 }
 
-pub struct BindlessGPUAssetPlugin<R: RenderAsset, T: BindlessGPUAsset<R>> {
-    _marker: PhantomData<(R, T)>,
+pub struct BindlessGPUAssetPlugin<R: RenderAsset> {
+    _marker: PhantomData<R>,
 }
 
-impl<R: RenderAsset, T: BindlessGPUAsset<R>> Plugin for BindlessGPUAssetPlugin<R, T> {
+impl<R: RenderAsset> Default for BindlessGPUAssetPlugin<R> {
+    fn default() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<R: RenderAsset> Plugin for BindlessGPUAssetPlugin<R>
+where
+    R::GPUAsset: BindlessGPUAsset<R>,
+{
     fn build(&self, app: &mut bevy_app::App) {
         if app
             .world
@@ -52,12 +70,14 @@ impl<R: RenderAsset, T: BindlessGPUAsset<R>> Plugin for BindlessGPUAssetPlugin<R
         {
             app.world.init_resource::<BindlessGPUAssetDescriptors>();
         }
+        app.sub_app_mut(RenderApp)
+            .add_system_to_stage(RenderStage::Prepare, asset_binding_system::<R>.after(PrepareRenderAssetsSystem::<R>::default()));
     }
 }
 
-fn asset_binding_system<A: RenderAsset, T: BindlessGPUAsset<A>>(
+fn asset_binding_system<A: RenderAsset>(
     mut reader: EventReader<super::RenderAssetEvent<A>>,
-    render_asset_store: RenderAssetStore<A>,
+    render_asset_store: Res<RenderAssetStore<A>>,
     mut store: ResMut<BindlessGPUAssetDescriptors>,
 ) where
     A::GPUAsset: BindlessGPUAsset<A>,
@@ -73,8 +93,12 @@ fn asset_binding_system<A: RenderAsset, T: BindlessGPUAsset<A>>(
             }
         }
     }
+    if bindings.len() == 0 {
+        return;
+    }
 
     let descriptor_ids = store.descriptor_vec.extend(bindings).unwrap();
+    println!("Bindless returned descreiptor ids {:?}", descriptor_ids);
 
     assert_eq!(descriptor_ids.len(), handle_ids.len());
     store

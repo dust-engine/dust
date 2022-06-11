@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -19,6 +20,8 @@ use dustash::queue::semaphore::TimelineSemaphoreOp;
 use dustash::queue::{QueueType, Queues};
 use dustash::sync::{CommandsFuture, GPUFuture};
 use dustash::Device;
+use bevy_ecs::schedule::SystemLabel;
+use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 
 /// Asset that can be send to the GPU.
 pub trait RenderAsset: Asset + Sized + 'static {
@@ -137,6 +140,41 @@ impl<A: RenderAsset> Default for RenderAssetStore<A> {
     }
 }
 
+
+
+#[derive(SystemLabel)]
+pub struct PrepareRenderAssetsSystem<T: RenderAsset> {
+    _marker: PhantomData<T>
+}
+impl<T: RenderAsset> Default for PrepareRenderAssetsSystem<T> {
+    fn default() -> Self {
+        Self { _marker: PhantomData }
+    }
+}
+impl<T: RenderAsset> Clone for PrepareRenderAssetsSystem<T> {
+    fn clone(&self) -> Self {
+        Self { _marker: PhantomData }
+    }
+}
+impl<T: RenderAsset> PartialEq for PrepareRenderAssetsSystem<T> {
+    fn eq(&self, other: &Self) -> bool {
+        true
+    }
+}
+impl<T: RenderAsset> Eq for PrepareRenderAssetsSystem<T> {
+}
+impl<T: RenderAsset> std::hash::Hash for PrepareRenderAssetsSystem<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ty = std::any::TypeId::of::<PrepareRenderAssetsSystem<T>>();
+        ty.hash(state);
+    }
+}
+impl<T: RenderAsset> Debug for PrepareRenderAssetsSystem<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PrepareRenderAssetsSystem")
+    }
+}
+
 /// This runs in the Prepare stage of the Render world.
 /// It takes the extracted BuildSet and ChangeSet and apply them to the Geometry
 /// in the render world.
@@ -229,7 +267,7 @@ impl<T: RenderAsset> Plugin for RenderAssetPlugin<T> {
             .init_resource::<RenderAssetStore<T>>()
             .add_event::<RenderAssetEvent<T>>()
             .add_system_to_stage(crate::RenderStage::Extract, move_extracted_assets::<T>)
-            .add_system_to_stage(crate::RenderStage::Prepare, prepare_render_assets::<T>);
+            .add_system_to_stage(crate::RenderStage::Prepare, prepare_render_assets::<T>.label(PrepareRenderAssetsSystem::<T>::default()));
     }
 }
 

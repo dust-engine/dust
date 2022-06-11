@@ -5,6 +5,7 @@ use bevy_asset::Handle;
 use bevy_ecs::system::lifetimeless::SRes;
 use bevy_ecs::system::SystemParamItem;
 use dust_render::material::{GPUMaterial, Material};
+use dust_render::render_asset::BindlessGPUAsset;
 use dust_render::render_asset::BindlessGPUAssetDescriptors;
 use dust_render::render_asset::GPURenderAsset;
 use dust_render::render_asset::RenderAsset;
@@ -204,14 +205,6 @@ impl GPURenderAsset<DensityMaterial> for GPUDensityMaterial {
 }
 
 impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
-    fn material_binding(&self) -> dustash::descriptor::DescriptorVecBinding {
-        dustash::descriptor::DescriptorVecBinding::StorageImage(vk::DescriptorImageInfo {
-            sampler: vk::Sampler::null(),
-            image_view: self.density_map_view.raw_image_view(),
-            image_layout: vk::ImageLayout::GENERAL,
-        })
-    }
-
     type SbtData = u32;
 
     type MaterialInfoParams = (SRes<BindlessGPUAssetDescriptors>);
@@ -220,7 +213,17 @@ impl GPUMaterial<DensityMaterial> for GPUDensityMaterial {
         handle: &Handle<DensityMaterial>,
         bindless_store: &mut SystemParamItem<Self::MaterialInfoParams>,
     ) -> Self::SbtData {
-        0
+        bindless_store.get_index_for_handle(handle).unwrap()
+    }
+}
+
+impl BindlessGPUAsset<DensityMaterial> for GPUDensityMaterial {
+    fn binding(&self) -> dustash::descriptor::DescriptorVecBinding {
+        dustash::descriptor::DescriptorVecBinding::StorageImage(vk::DescriptorImageInfo {
+            sampler: vk::Sampler::null(),
+            image_view: self.density_map_view.raw_image_view(),
+            image_layout: vk::ImageLayout::GENERAL,
+        })
     }
 }
 

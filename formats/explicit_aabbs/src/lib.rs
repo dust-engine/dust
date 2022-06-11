@@ -3,7 +3,7 @@ pub mod material;
 use ash::vk;
 use bevy_app::Plugin;
 use bevy_asset::{AddAsset, AssetServer, Handle};
-use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
+use bevy_ecs::system::{lifetimeless::SRes, StaticSystemParam, SystemParamItem};
 use bevy_reflect::TypeUuid;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
@@ -122,11 +122,11 @@ impl GPUGeometry<AABBGeometry> for AABBGPUGeometry {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer> {
         &self.primitives_buffer
     }
-    fn geometry_info(&self) -> u64 {
+    type GeometryInfoParams = ();
+    type SbtInfo = u64;
+    fn geometry_info(&self, _handle: &Handle<AABBGeometry>, params: &mut ()) -> u64 {
         self.primitives_buffer.device_address()
     }
-
-    type SbtInfo = u64;
 }
 
 #[derive(Default)]

@@ -12,7 +12,7 @@ layout(shaderRecordEXT) buffer sbt {
     uint64_t geometryInfo;
     uint32_t materialInfo;
 };
-layout(set = 1, binding = 1, r8ui) uniform readonly image2D bindless_StorageImage[];
+layout(set = 1, binding = 1, r8ui) uniform readonly uimage2D bindless_StorageImage[];
 
 vec3 randomColorList[5] = {
     vec3(0.976, 0.906, 0.906),
@@ -30,6 +30,6 @@ void main() {
         gl_PrimitiveID & width,
         gl_PrimitiveID / width.x
     );
-    float v = imageLoad(bindless_StorageImage[materialInfo], sampleLocation).x;
+    float v = imageLoad(bindless_StorageImage[materialInfo], sampleLocation).x / 255.0;
     primaryRayPayload.color = vec3(v,v,v);
 }

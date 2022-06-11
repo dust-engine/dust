@@ -52,7 +52,12 @@ pub trait GPUGeometry<T: Geometry>: GPURenderAsset<T> {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer>;
 
     type SbtInfo: Copy;
-    fn geometry_info(&self) -> Self::SbtInfo;
+    type GeometryInfoParams: SystemParam;
+    fn geometry_info(
+        &self,
+        handle: &Handle<T>,
+        params: &mut SystemParamItem<Self::GeometryInfoParams>,
+    ) -> Self::SbtInfo;
 }
 
 /// Normalized component for Handle<Geometry>.
