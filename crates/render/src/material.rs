@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::geometry::{GPUGeometry, Geometry};
 use crate::pipeline::{HitGroup, HitGroupType};
 use crate::render_asset::{
-    BindlessGPUAssetDescriptors, GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore,
+    BindlessGPUAssetDescriptors, GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore, BindlessAssetsSystem,
 };
 use crate::shader::{Shader, SpecializedShader};
 use ash::vk;
@@ -17,6 +17,7 @@ use bevy_ecs::prelude::FromWorld;
 use bevy_ecs::system::{
     Commands, Query, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem,
 };
+use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 use bevy_utils::HashMap;
 use dustash::queue::semaphore::TimelineSemaphoreOp;
 use dustash::queue::{QueueType, Queues};
@@ -147,7 +148,7 @@ where
         // On each frame, Handle<Material> -> ExtractedMaterial
         app.sub_app_mut(crate::RenderApp)
             .add_system_to_stage(crate::RenderStage::Extract, extract_primitives::<T>)
-            .add_system_to_stage(crate::RenderStage::Prepare, prepare_primitives);
+            .add_system_to_stage(crate::RenderStage::Prepare, prepare_primitives.after(BindlessAssetsSystem::<T>::default()));
         // TODO: maybe run prepare_material_info after prepare_materials to decrease frame delay?
     }
 }

@@ -71,7 +71,7 @@ where
             app.world.init_resource::<BindlessGPUAssetDescriptors>();
         }
         app.sub_app_mut(RenderApp)
-            .add_system_to_stage(RenderStage::Prepare, asset_binding_system::<R>.after(PrepareRenderAssetsSystem::<R>::default()));
+            .add_system_to_stage(RenderStage::Prepare, asset_binding_system::<R>.after(PrepareRenderAssetsSystem::<R>::default()).label(BindlessAssetsSystem::<R>::default()));
     }
 }
 
@@ -104,4 +104,39 @@ fn asset_binding_system<A: RenderAsset>(
     store
         .asset_handle_to_index
         .extend(handle_ids.into_iter().zip(descriptor_ids.into_iter()));
+}
+
+
+
+#[derive(bevy_ecs::schedule::SystemLabel)] // TODO: Simplify this
+pub struct BindlessAssetsSystem<T: RenderAsset> {
+    _marker: PhantomData<T>
+}
+impl<T: RenderAsset> Default for BindlessAssetsSystem<T> {
+    fn default() -> Self {
+        Self { _marker: PhantomData }
+    }
+}
+impl<T: RenderAsset> Clone for BindlessAssetsSystem<T> {
+    fn clone(&self) -> Self {
+        Self { _marker: PhantomData }
+    }
+}
+impl<T: RenderAsset> PartialEq for BindlessAssetsSystem<T> {
+    fn eq(&self, other: &Self) -> bool {
+        true
+    }
+}
+impl<T: RenderAsset> Eq for BindlessAssetsSystem<T> {
+}
+impl<T: RenderAsset> std::hash::Hash for BindlessAssetsSystem<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ty = std::any::TypeId::of::<BindlessAssetsSystem<T>>();
+        ty.hash(state);
+    }
+}
+impl<T: RenderAsset> std::fmt::Debug for BindlessAssetsSystem<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BindlessAssetsSystem")
+    }
 }

@@ -142,7 +142,7 @@ impl<A: RenderAsset> Default for RenderAssetStore<A> {
 
 
 
-#[derive(SystemLabel)]
+#[derive(SystemLabel)] // TODO: Simplify this
 pub struct PrepareRenderAssetsSystem<T: RenderAsset> {
     _marker: PhantomData<T>
 }
