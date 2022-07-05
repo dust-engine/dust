@@ -1,6 +1,4 @@
-use std::{alloc::Layout, ptr::NonNull};
-
-use crate::Node;
+use std::alloc::Layout;
 
 pub struct Pool {
     /// Size of one individual allocation
@@ -14,7 +12,7 @@ pub struct Pool {
     /// Number of items to request when we run out of space.
     /// When running out of space, request (1 << chunk_size_log2) * size bytes.
     chunk_size_log2: usize,
-    chunks: Vec<NonNull<u8>>,
+    chunks: Vec<*mut u8>,
 }
 
 /// ```
@@ -54,9 +52,12 @@ impl Pool {
             if chunk_index >= self.chunks.len() {
                 // allocate new block
                 unsafe {
-                    let block =
-                        std::alloc::alloc(Layout::from_size_align_unchecked(self.size, self.align));
-                    self.chunks.push(NonNull::new_unchecked(block));
+                    let (layout, _) = Layout::from_size_align_unchecked(self.size, self.align)
+                        .repeat(1 << self.chunk_size_log2)
+                        .unwrap();
+                    let block = std::alloc::alloc(layout);
+                    println!("Allocated {:?}", block);
+                    self.chunks.push(block);
                 }
             }
             self.top += 1;
@@ -89,13 +90,25 @@ impl Pool {
     pub unsafe fn get(&self, ptr: u32) -> *const u8 {
         let chunk_index = (ptr as usize) >> self.chunk_size_log2;
         let item_index = (ptr as usize) & ((1 << self.chunk_size_log2) - 1);
-        return self.chunks[chunk_index]
-            .as_ptr()
-            .add(item_index * self.size);
+        return self.chunks[chunk_index].add(item_index * self.size);
     }
     #[inline]
     pub unsafe fn get_mut(&mut self, ptr: u32) -> *mut u8 {
         let ptr = self.get(ptr);
         ptr as *mut u8
+    }
+}
+
+impl Drop for Pool {
+    fn drop(&mut self) {
+        unsafe {
+            let (layout, _) = Layout::from_size_align_unchecked(self.size, self.align)
+                .repeat(1 << self.chunk_size_log2)
+                .unwrap();
+            for chunk in self.chunks.iter() {
+                let chunk = *chunk;
+                std::alloc::dealloc(chunk, layout);
+            }
+        }
     }
 }
