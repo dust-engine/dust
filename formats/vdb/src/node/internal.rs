@@ -22,7 +22,7 @@ pub union InternalNodeEntry {
 #[repr(C)]
 pub struct InternalNode<CHILD: Node, const FANOUT_LOG2: UVec3>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>()]: Sized,
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 0 if that tile is completely air, and 1 otherwise.
     pub child_mask: BitMask<{ size_of_grid(FANOUT_LOG2) }>,
@@ -32,7 +32,7 @@ where
 }
 impl<CHILD: Node, const FANOUT_LOG2: UVec3> Default for InternalNode<CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>()]: Sized,
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
     fn default() -> Self {
         Self {
@@ -44,7 +44,7 @@ where
 }
 impl<CHILD: Node, const FANOUT_LOG2: UVec3> Node for InternalNode<CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>()]: Sized,
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
     const SIZE: usize = size_of_grid(FANOUT_LOG2);
     const EXTENT_LOG2: UVec3 = UVec3 {

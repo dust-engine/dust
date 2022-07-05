@@ -13,7 +13,7 @@ use std::{
 #[derive(Default)]
 pub struct LeafNode<const LOG2: UVec3>
 where
-    [(); size_of_grid(LOG2) / size_of::<usize>()]: Sized,
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 1 for occupied voxels and 0 for unoccupied voxels
     pub occupancy: BitMask<{ size_of_grid(LOG2) }>,
@@ -25,7 +25,7 @@ where
 
 impl<const LOG2: UVec3> Node for LeafNode<LOG2>
 where
-    [(); size_of_grid(LOG2) / size_of::<usize>()]: Sized,
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// Total number of voxels contained within the leaf node.
     const SIZE: usize = size_of_grid(LOG2);
@@ -85,4 +85,30 @@ where
             sizes[Self::LEVEL as usize].write(layout);
         }
     }
+/* 
+    type Iterator = LeafIterator<LOG2>;
+    fn iter_active<ROOT: Node>(tree: &Tree<ROOT>, ptr: u32) -> Self::Iterator
+        where
+            [(); ROOT::LEVEL as usize]: Sized {
+        
+    }
+    */
 }
+
+
+pub struct LeafIterator<const LOG2: UVec3>
+where
+    [(); size_of_grid(LOG2) / size_of::<usize>()]: Sized {
+    location_offset: UVec3,
+}
+/*
+impl<const LOG2: UVec3> Iterator for LeafIterator<LOG2> 
+where
+    [(); size_of_grid(LOG2) / size_of::<usize>()]: Sized {
+    type Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        
+    }
+}
+*/
