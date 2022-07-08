@@ -1,5 +1,5 @@
-use super::{size_of_grid};
-use crate::{BitMask, Node, Tree, bitmask::SetBitIterator, Pool};
+use super::size_of_grid;
+use crate::{bitmask::SetBitIterator, BitMask, Node, Pool};
 use glam::UVec3;
 use std::{
     alloc::Layout,
@@ -45,12 +45,12 @@ where
     }
 
     type Voxel = bool;
-    
+
     #[inline]
     fn get(&self, _: &[Pool], coords: UVec3) -> Option<Self::Voxel> {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
-        | ((coords.y as usize) << LOG2.z)
-        | (coords.z as usize);
+            | ((coords.y as usize) << LOG2.z)
+            | (coords.z as usize);
         let occupied = self.occupancy.get(index);
         if !occupied {
             return None;
@@ -61,8 +61,8 @@ where
     #[inline]
     fn set(&mut self, _: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>) {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
-        | ((coords.y as usize) << LOG2.z)
-        | (coords.z as usize);
+            | ((coords.y as usize) << LOG2.z)
+            | (coords.z as usize);
         if let Some(voxel) = value {
             self.occupancy.set(index, true);
             self.active.set(index, voxel);
@@ -71,15 +71,13 @@ where
         }
     }
     #[inline]
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel>
-    {
+    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel> {
         let leaf_node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
         leaf_node.get(&[], coords)
     }
 
     #[inline]
-    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>)
-    {
+    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>) {
         let leaf_node = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(ptr) };
         leaf_node.set(&mut [], coords, value)
     }
@@ -89,35 +87,38 @@ where
         sizes[0].write(layout);
     }
 
-    /* 
     type Iterator<'a> = LeafNodeIterator<'a, LOG2>;
-    fn iter<'a>(tree: &'a Tree<ROOT>, ptr: u32, offset: UVec3) -> Self::Iterator<'a> {
-        let node = unsafe {
-            tree.get_node::<Self>(ptr)
-        };
+    fn iter<'a>(&'a self, _pool: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
         LeafNodeIterator {
             location_offset: offset,
-            bits_iterator: node.occupancy.iter_set_bits()
+            bits_iterator: self.occupancy.iter_set_bits(),
         }
     }
-    */
+    fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a> {
+        let node = unsafe { pools[0].get_item::<Self>(ptr) };
+        LeafNodeIterator {
+            location_offset: offset,
+            bits_iterator: node.occupancy.iter_set_bits(),
+        }
+    }
 }
 
-/*
 pub struct LeafNodeIterator<'a, const LOG2: UVec3>
 where
-    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized {
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
+{
     location_offset: UVec3,
-    bits_iterator: SetBitIterator<'a, {size_of_grid(LOG2)}>,
+    bits_iterator: SetBitIterator<'a, { size_of_grid(LOG2) }>,
 }
-impl<'a, const LOG2: UVec3> Iterator for LeafNodeIterator<'a, LOG2> 
+impl<'a, const LOG2: UVec3> Iterator for LeafNodeIterator<'a, LOG2>
 where
-    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized {
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
+{
     type Item = UVec3;
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.bits_iterator.next()?;
-        
+
         let z = index & ((1 << LOG2.z) - 1);
         let y = (index >> LOG2.z) & ((1 << LOG2.y) - 1);
         let x = index >> (LOG2.z + LOG2.y);
@@ -125,4 +126,3 @@ where
         Some(location + self.location_offset)
     }
 }
-*/

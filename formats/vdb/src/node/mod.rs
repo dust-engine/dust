@@ -10,7 +10,7 @@ pub use internal::*;
 pub use leaf::*;
 pub use root::*;
 
-use crate::{Tree, Pool};
+use crate::Pool;
 
 pub trait Node: 'static + Default {
     /// span of the node.
@@ -36,16 +36,15 @@ pub trait Node: 'static + Default {
     fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel>;
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
-    fn set_in_pools(pool: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>);
+    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>);
 
     fn write_layout(sizes: &mut [MaybeUninit<Layout>]);
 
-    /*
-    
     type Iterator<'a>: Iterator<Item = UVec3>;
-    fn iter<'a>(tree: &'a Tree<ROOT>, ptr: u32, offset: UVec3) -> Self::Iterator<'a>
-        where [(); ROOT::LEVEL as usize]: Sized;
-        */
+    /// This is called when the node was owned as the root node in the tree.
+    fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a>;
+    /// This is called when the node was located in a node pool.
+    fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a>;
 }
 
 /// Macro that simplifies tree type construction.

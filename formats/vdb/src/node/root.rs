@@ -2,7 +2,7 @@ use std::{alloc::Layout, marker::PhantomData, mem::MaybeUninit};
 
 use glam::UVec3;
 
-use crate::{Node, Tree, Pool};
+use crate::{Node, Pool};
 
 pub enum RootNodeEntry {
     Occupied(u32),
@@ -41,13 +41,15 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     const LEVEL: usize = CHILD::LEVEL + 1;
 
     fn new() -> Self {
-        Self { map: Default::default(), _marker: PhantomData }
+        Self {
+            map: Default::default(),
+            _marker: PhantomData,
+        }
     }
 
     type Voxel = CHILD::Voxel;
     #[inline]
-    fn get(&self, pools: &[Pool], coords: UVec3) -> Option<Self::Voxel>
-    {
+    fn get(&self, pools: &[Pool], coords: UVec3) -> Option<Self::Voxel> {
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let entry = self.map.get(&RootKey(root_offset));
         if let Some(entry) = entry {
@@ -68,8 +70,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         }
     }
 
-    fn set(&mut self, pools: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>)
-    {
+    fn set(&mut self, pools: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>) {
         // ptr is meaningless and always 0 for root nodes.
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let key = RootKey(root_offset);
@@ -99,44 +100,59 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         CHILD::write_layout(sizes);
     }
 
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel> {
+    fn get_in_pools(_pools: &[Pool], _coords: UVec3, _ptr: u32) -> Option<Self::Voxel> {
         unreachable!("Root Node is never kept in a pool!")
     }
 
-    fn set_in_pools(pool: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>) {
+    fn set_in_pools(_pools: &mut [Pool], _coords: UVec3, _ptr: u32, _value: Option<Self::Voxel>) {
         unreachable!("Root Node is never kept in a pool!")
     }
-/*
-    type Iterator<'a> = RootIterator<'a, ROOT, CHILD>;
-
-    fn iter<'a>(tree: &'a Tree<ROOT>, ptr: u32, offset: UVec3) -> Self::Iterator<'a>
-        where [(); ROOT::LEVEL as usize]: Sized {
-        todo!()
+    type Iterator<'a> = RootIterator<'a, CHILD>;
+    fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
+        RootIterator {
+            pools,
+            map_iterator: self.map.iter(),
+            child_iterator: None,
+            location_offset: offset,
+        }
     }
-    */
+    fn iter_in_pool<'a>(_pools: &'a [Pool], _ptr: u32, _offset: UVec3) -> Self::Iterator<'a> {
+        unreachable!("Root Node is never kept in a pool!")
+    }
 }
 
-/*
-pub struct RootIterator<'a, ROOT: Node<ROOT>, CHILD: Node<ROOT>>  where [(); ROOT::LEVEL as usize]: Sized {
-    tree: &'a Tree<ROOT>,
+pub struct RootIterator<'a, CHILD: Node> {
+    pools: &'a [Pool],
     map_iterator: std::collections::hash_map::Iter<'a, RootKey, RootNodeEntry>,
     child_iterator: Option<CHILD::Iterator<'a>>,
+    location_offset: UVec3,
 }
 
-impl<'a, ROOT: Node<ROOT>, CHILD: Node<ROOT>> Iterator for RootIterator<'a, ROOT, CHILD>  where [(); ROOT::LEVEL as usize]: Sized {
+impl<'a, CHILD: Node> Iterator for RootIterator<'a, CHILD> {
     type Item = UVec3;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
-    }
-}
-
-impl<ROOT: Node<ROOT>, CHILD: Node<ROOT>> RootNode<ROOT, CHILD> {
-    pub fn new() -> Self {
-        Self {
-            map: std::collections::HashMap::with_hasher(nohash::BuildNoHashHasher::<u64>::default()),
-            _marker: PhantomData,
+        loop {
+            // Try taking it out from the current child
+            if let Some(item) = self.child_iterator.as_mut().and_then(|a| a.next()) {
+                return Some(item);
+            }
+            // self.child_iterator is None or ran out. Grab the next child.
+            if let Some((_, root_node)) = self.map_iterator.next() {
+                match root_node {
+                    RootNodeEntry::Occupied(ptr) => {
+                        self.child_iterator =
+                            Some(CHILD::iter_in_pool(self.pools, *ptr, self.location_offset));
+                        continue;
+                    }
+                    _ => {
+                        return None;
+                    }
+                }
+            } else {
+                // Also ran out. We have nothing left.
+                return None;
+            }
         }
     }
 }
-*/

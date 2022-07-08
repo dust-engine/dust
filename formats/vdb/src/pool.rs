@@ -1,4 +1,4 @@
-use std::{alloc::Layout, mem::size_of};
+use std::alloc::Layout;
 
 pub struct Pool {
     /// Size of one individual allocation
@@ -100,12 +100,18 @@ impl Pool {
 
     #[inline]
     pub unsafe fn get_item<T>(&self, ptr: u32) -> &T {
-        debug_assert_eq!(Layout::new::<T>().pad_to_align(), Layout::from_size_align_unchecked(self.size, self.align));
+        debug_assert_eq!(
+            Layout::new::<T>().pad_to_align(),
+            Layout::from_size_align_unchecked(self.size, self.align)
+        );
         &*(self.get(ptr) as *const T)
     }
     #[inline]
     pub unsafe fn get_item_mut<T>(&mut self, ptr: u32) -> &mut T {
-        debug_assert_eq!(Layout::new::<T>().pad_to_align(), Layout::from_size_align_unchecked(self.size, self.align));
+        debug_assert_eq!(
+            Layout::new::<T>().pad_to_align(),
+            Layout::from_size_align_unchecked(self.size, self.align)
+        );
         &mut *(self.get_mut(ptr) as *mut T)
     }
 }

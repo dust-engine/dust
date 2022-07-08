@@ -69,22 +69,22 @@ where
 
 pub struct SetBitIterator<'a, const SIZE: usize>
 where
-    [(); SIZE / size_of::<usize>() / 8]: Sized {
+    [(); SIZE / size_of::<usize>() / 8]: Sized,
+{
     bitmask: &'a BitMask<SIZE>,
     i: usize,
     state: usize,
 }
 
-impl<'a, const SIZE: usize> Iterator for SetBitIterator<'a, SIZE> 
+impl<'a, const SIZE: usize> Iterator for SetBitIterator<'a, SIZE>
 where
-    [(); SIZE / size_of::<usize>() / 8]: Sized {
+    [(); SIZE / size_of::<usize>() / 8]: Sized,
+{
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         const NUM_BITS: usize = std::mem::size_of::<usize>() * 8;
-        println!("Start");
         if self.state == 0 {
-            println!("State is 0");
             if self.i == self.bitmask.data.len() - 1 {
                 return None;
             }
@@ -93,9 +93,7 @@ where
         }
 
         let t = self.state & (!self.state + 1);
-        println!("t = {}", t);
         let r = self.state.trailing_zeros() as usize;
-        println!("r = {}", r);
         let result = self.i * NUM_BITS + r;
         self.state ^= t;
         Some(result)

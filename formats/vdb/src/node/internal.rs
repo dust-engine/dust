@@ -1,5 +1,5 @@
-use super::{size_of_grid};
-use crate::{BitMask, Node, Tree, bitmask::SetBitIterator, Pool};
+use super::size_of_grid;
+use crate::{bitmask::SetBitIterator, BitMask, Node, Pool};
 use glam::UVec3;
 use std::{
     alloc::Layout,
@@ -62,6 +62,7 @@ where
     }
 
     type Voxel = CHILD::Voxel;
+    #[inline]
     fn get(&self, pools: &[Pool], coords: UVec3) -> Option<Self::Voxel> {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
@@ -81,6 +82,7 @@ where
             <CHILD as Node>::get_in_pools(pools, new_coords, child_ptr)
         }
     }
+    #[inline]
     fn set(&mut self, pools: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>) {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
@@ -114,64 +116,17 @@ where
         }
     }
     #[inline]
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel>
-    {
-        let internal_offset = coords >> CHILD::EXTENT_LOG2;
-        let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
-            | ((internal_offset.y as usize) << FANOUT_LOG2.z)
-            | (internal_offset.z as usize);
+    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel> {
         let node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
-        let has_child = node.child_mask.get(index);
-        if !has_child {
-            return None;
-        }
-        unsafe {
-            let child_ptr = node.child_ptrs[index].occupied;
-            let new_coords = UVec3 {
-                x: coords.x & ((1_u32 << CHILD::EXTENT_LOG2.x) - 1),
-                y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
-                z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
-            };
-            <CHILD as Node>::get_in_pools(pools, new_coords, child_ptr)
-        }
+        node.get(pools, coords)
     }
 
     #[inline]
-    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>)
-    {
-        let internal_offset = coords >> CHILD::EXTENT_LOG2;
-        let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
-            | ((internal_offset.y as usize) << FANOUT_LOG2.z)
-            | (internal_offset.z as usize);
-        let node = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(ptr) };
-
-        if value.is_some() {
-            // set
-            let has_child = node.child_mask.get(index);
-            if !has_child {
-                // ensure have children
-                node.child_mask.set(index, true);
-                unsafe {
-                    // allocate a child node
-                    let allocated_ptr = pools[CHILD::LEVEL].alloc();
-                    let node = pools[Self::LEVEL].get_item_mut::<Self>(ptr);
-                    node.child_ptrs[index].occupied = allocated_ptr;
-                }
-            }
-            // TODO: propagate when filled.
-        } else {
-            // clear
-            todo!() // TODO: clear recursively, propagate if completely cleared
-        }
-        let node = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(ptr) };
+    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>) {
+        // Safety: r was taken from pools[Self::LEVEL] and we know that self.set only access pools[CHILD::LEVEL].
         unsafe {
-            let new_coords = UVec3 {
-                x: coords.x & ((1_u32 << CHILD::EXTENT_LOG2.x) - 1),
-                y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
-                z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
-            };
-            let child_ptr = node.child_ptrs[index].occupied;
-            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value)
+            let r = pools[Self::LEVEL].get_item_mut::<Self>(ptr) as *mut Self;
+            (*r).set(pools, coords, value)
         }
     }
 
@@ -183,39 +138,43 @@ where
         CHILD::write_layout(sizes);
     }
 
-    /*
-    type Iterator<'a> = InternalNodeIterator<'a, ROOT, CHILD, FANOUT_LOG2>;
-    fn iter<'a>(tree: &'a Tree<ROOT>, ptr: u32, offset: UVec3) -> Self::Iterator<'a> {
-        let node = unsafe {
-            tree.get_node::<Self>(ptr)
-        };
+    type Iterator<'a> = InternalNodeIterator<'a, CHILD, FANOUT_LOG2>;
+    fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
         InternalNodeIterator {
-            tree,
+            pools,
+            location_offset: offset,
+            child_mask_iterator: self.child_mask.iter_set_bits(),
+            child_ptrs: &self.child_ptrs,
+            child_iterator: None,
+        }
+    }
+    fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a> {
+        let node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
+        InternalNodeIterator {
+            pools,
             location_offset: offset,
             child_mask_iterator: node.child_mask.iter_set_bits(),
             child_ptrs: &node.child_ptrs,
-            child_iterator: None
+            child_iterator: None,
         }
     }
-    */
 }
 
-/*
-pub struct InternalNodeIterator<'a, ROOT: Node<ROOT>, CHILD: Node<ROOT>, const FANOUT_LOG2: UVec3>
+pub struct InternalNodeIterator<'a, CHILD: Node, const FANOUT_LOG2: UVec3>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
-    [(); ROOT::LEVEL as usize]: Sized {
-    tree: &'a Tree<ROOT>,
+{
+    pools: &'a [Pool],
     location_offset: UVec3,
-    child_mask_iterator: SetBitIterator<'a, {size_of_grid(FANOUT_LOG2)}>,
+    child_mask_iterator: SetBitIterator<'a, { size_of_grid(FANOUT_LOG2) }>,
     child_iterator: Option<CHILD::Iterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
 }
-impl<'a, ROOT: Node<ROOT>, CHILD: Node<ROOT>, const FANOUT_LOG2: UVec3> Iterator for InternalNodeIterator<'a, ROOT, CHILD, FANOUT_LOG2> 
+impl<'a, CHILD: Node, const FANOUT_LOG2: UVec3> Iterator
+    for InternalNodeIterator<'a, CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
-    
-    [(); ROOT::LEVEL as usize]: Sized {
+{
     type Item = UVec3;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -227,7 +186,11 @@ where
             // self.child_iterator is None or ran out. Grab the next child.
             if let Some(next_child_index) = self.child_mask_iterator.next() {
                 let child_ptr = unsafe { self.child_ptrs[next_child_index].occupied };
-                self.child_iterator = Some(CHILD::iter(self.tree, child_ptr, self.location_offset));
+                self.child_iterator = Some(CHILD::iter_in_pool(
+                    self.pools,
+                    child_ptr,
+                    self.location_offset,
+                ));
                 continue;
             } else {
                 // Also ran out. We have nothing left.
@@ -236,4 +199,3 @@ where
         }
     }
 }
-*/
