@@ -29,7 +29,7 @@ where
 {
     pub fn new() -> Self {
         let mut layouts: [MaybeUninit<Layout>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
-        ROOT::write_layout::<ROOT>(&mut layouts);
+        ROOT::write_layout(&mut layouts);
         let layouts: [Layout; ROOT::LEVEL as usize] = unsafe {
             // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504
             (&*(&MaybeUninit::new(layouts) as *const _ as *const MaybeUninit<_>)).assume_init_read()
@@ -73,11 +73,11 @@ where
 
     #[inline]
     pub fn get_value(&self, coords: UVec3) -> Option<ROOT::Voxel> {
-        ROOT::get(self, coords, 123)
+        self.root.get(&self.pool, coords)
     }
 
     #[inline]
     pub fn set_value(&mut self, coords: UVec3, value: Option<ROOT::Voxel>) {
-        ROOT::set(self, coords, 123, value)
+        self.root.set(&mut self.pool, coords, value)
     }
 }

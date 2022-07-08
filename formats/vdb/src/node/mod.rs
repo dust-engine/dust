@@ -10,7 +10,7 @@ pub use internal::*;
 pub use leaf::*;
 pub use root::*;
 
-use crate::Tree;
+use crate::{Tree, Pool};
 
 pub trait Node: 'static + Default {
     /// span of the node.
@@ -19,23 +19,32 @@ pub trait Node: 'static + Default {
     const SIZE: usize;
 
     /// This is 0 for leaf nodes and +1 for each layer of nodes above leaves.
-    const LEVEL: u8;
+    const LEVEL: usize;
     fn new() -> Self;
 
     type Voxel;
-    fn get<ROOT: Node>(tree: &Tree<ROOT>, coords: UVec3, ptr: u32) -> Option<Self::Voxel>
-    where
-        [(); ROOT::LEVEL as usize]: Sized;
-    fn set<ROOT: Node>(tree: &mut Tree<ROOT>, coords: UVec3, ptr: u32, value: Option<Self::Voxel>)
-    where
-        [(); ROOT::LEVEL as usize]: Sized;
 
-    fn write_layout<ROOT: Node>(sizes: &mut [MaybeUninit<Layout>]);
+    /// Get the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was owned.
+    fn get(&self, pools: &[Pool], coords: UVec3) -> Option<Self::Voxel>;
+    /// Set the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was owned.
+    fn set(&mut self, pools: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>);
+
+    /// Get the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was located in a node pool.
+    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel>;
+    /// Set the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was located in a node pool.
+    fn set_in_pools(pool: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>);
+
+    fn write_layout(sizes: &mut [MaybeUninit<Layout>]);
+
     /*
-    type Iterator: Iterator<Item = Self::Voxel>;
-    fn iter_active<ROOT: Node>(tree: &Tree<ROOT>, ptr: u32) -> Self::Iterator
-    where
-        [(); ROOT::LEVEL as usize]: Sized;
+    
+    type Iterator<'a>: Iterator<Item = UVec3>;
+    fn iter<'a>(tree: &'a Tree<ROOT>, ptr: u32, offset: UVec3) -> Self::Iterator<'a>
+        where [(); ROOT::LEVEL as usize]: Sized;
         */
 }
 

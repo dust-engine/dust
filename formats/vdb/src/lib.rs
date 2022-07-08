@@ -4,6 +4,7 @@
 #![feature(adt_const_params)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(alloc_layout_extra)]
+#![feature(generic_associated_types)]
 
 mod bitmask;
 mod node;
@@ -14,4 +15,4 @@ pub use bitmask::BitMask;
 pub use pool::Pool;
 pub use tree::Tree;
 
-pub use node::{InternalNode, LeafNode, Node, RootNode};
+pub use node::*;
