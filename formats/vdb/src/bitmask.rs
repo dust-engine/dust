@@ -1,4 +1,4 @@
-use std::mem::size_of;
+use std::{mem::size_of, fmt::Debug};
 
 pub struct BitMask<const SIZE: usize>
 where
@@ -15,6 +15,16 @@ where
         Self {
             data: [0; SIZE / size_of::<usize>() / 8],
         }
+    }
+}
+
+
+impl<const SIZE: usize> std::fmt::Debug for BitMask<SIZE>
+where
+    [(); SIZE / size_of::<usize>() / 8]: Sized,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.data).finish()
     }
 }
 
@@ -42,22 +52,12 @@ where
         let j = index - i * size_of::<usize>() * 8;
         let entry = &mut self.data[i];
         if val {
-            println!("Set on {}, {}", i, j);
             *entry |= 1 << j;
         } else {
             *entry &= !(1 << j);
         }
     }
 
-    /// ```
-    /// #![feature(generic_const_exprs)]
-    /// let mut bitmask = dust_vdb::BitMask::<128>::new();
-    /// bitmask.set(12, true);
-    /// bitmask.set(101, true);
-    /// let mut iter = bitmask.iter_set_bits();
-    /// assert_eq!(iter.next(), Some(12));
-    /// assert_eq!(iter.next(), Some(101));
-    /// ```
     pub fn iter_set_bits(&self) -> SetBitIterator<SIZE> {
         SetBitIterator {
             bitmask: self,
@@ -67,6 +67,15 @@ where
     }
 }
 
+/// ```
+/// #![feature(generic_const_exprs)]
+/// let mut bitmask = dust_vdb::BitMask::<128>::new();
+/// bitmask.set(12, true);
+/// bitmask.set(101, true);
+/// let mut iter = bitmask.iter_set_bits();
+/// assert_eq!(iter.next(), Some(12));
+/// assert_eq!(iter.next(), Some(101));
+/// ```
 pub struct SetBitIterator<'a, const SIZE: usize>
 where
     [(); SIZE / size_of::<usize>() / 8]: Sized,

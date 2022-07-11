@@ -3,6 +3,7 @@ mod leaf;
 mod root;
 
 use std::alloc::Layout;
+use std::fmt::Debug;
 use std::mem::MaybeUninit;
 
 use glam::UVec3;
@@ -12,7 +13,7 @@ pub use root::*;
 
 use crate::Pool;
 
-pub trait Node: 'static + Default {
+pub trait Node: 'static + Default + Debug {
     /// span of the node.
     const EXTENT_LOG2: UVec3;
     /// Max number of child nodes.

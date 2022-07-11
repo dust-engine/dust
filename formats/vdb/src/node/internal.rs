@@ -96,7 +96,7 @@ where
                 self.child_mask.set(index, true);
                 unsafe {
                     // allocate a child node
-                    let allocated_ptr = pools[CHILD::LEVEL].alloc();
+                    let allocated_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
                     self.child_ptrs[index].occupied = allocated_ptr;
                 }
             }
@@ -160,6 +160,18 @@ where
     }
 }
 
+/// When the alternate flag was specified, also print the child pointers.
+impl<CHILD: Node, const FANOUT_LOG2: UVec3> std::fmt::Debug for InternalNode<CHILD, FANOUT_LOG2>
+where
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Internal Node\n")?;
+        self.child_mask.fmt(f)?;
+        Ok(())
+    }
+}
+
 pub struct InternalNodeIterator<'a, CHILD: Node, const FANOUT_LOG2: UVec3>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
@@ -186,10 +198,15 @@ where
             // self.child_iterator is None or ran out. Grab the next child.
             if let Some(next_child_index) = self.child_mask_iterator.next() {
                 let child_ptr = unsafe { self.child_ptrs[next_child_index].occupied };
+                let offset = UVec3 {
+                    x: next_child_index as u32 >> (FANOUT_LOG2.z + FANOUT_LOG2.y),
+                    y: (next_child_index as u32 >> FANOUT_LOG2.z) & ((1 << FANOUT_LOG2.y) - 1),
+                    z: next_child_index as u32 & (1 << FANOUT_LOG2.z - 1)
+                };
                 self.child_iterator = Some(CHILD::iter_in_pool(
                     self.pools,
                     child_ptr,
-                    self.location_offset,
+                    self.location_offset + offset,
                 ));
                 continue;
             } else {

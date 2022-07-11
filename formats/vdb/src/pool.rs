@@ -2,8 +2,7 @@ use std::alloc::Layout;
 
 pub struct Pool {
     /// Size of one individual allocation
-    size: usize,
-    align: usize,
+    layout: Layout,
     /// Head of freelist
     head: u32,
 
@@ -15,6 +14,7 @@ pub struct Pool {
     chunks: Vec<*mut u8>,
 }
 
+/// A memory pool for objects of the same layout.
 /// ```
 /// use std::alloc::Layout;
 /// use dust_vdb::Pool;
@@ -36,15 +36,21 @@ pub struct Pool {
 impl Pool {
     pub fn new(layout: Layout, chunk_size_log2: usize) -> Self {
         Self {
-            size: layout.pad_to_align().size(),
-            align: layout.align(),
+            layout: layout.pad_to_align(),
             head: u32::MAX,
             top: 0,
             chunk_size_log2,
             chunks: Vec::new(),
         }
     }
-    pub fn alloc(&mut self) -> u32 {
+    pub unsafe fn alloc<T: Default>(&mut self) -> u32 {
+        debug_assert_eq!(Layout::new::<T>(), self.layout);
+        let ptr = self.alloc_uninitialized();
+        let item = self.get_item_mut::<T>(ptr);
+        *item = T::default();
+        ptr
+    }
+    pub unsafe fn alloc_uninitialized(&mut self) -> u32 {
         if self.head == u32::MAX {
             // allocate new
             let top = self.top;
@@ -52,11 +58,10 @@ impl Pool {
             if chunk_index >= self.chunks.len() {
                 // allocate new block
                 unsafe {
-                    let (layout, _) = Layout::from_size_align_unchecked(self.size, self.align)
+                    let (layout, _) = self.layout
                         .repeat(1 << self.chunk_size_log2)
                         .unwrap();
                     let block = std::alloc::alloc(layout);
-                    println!("Allocated {:?}", block);
                     self.chunks.push(block);
                 }
             }
@@ -90,7 +95,7 @@ impl Pool {
     pub unsafe fn get(&self, ptr: u32) -> *const u8 {
         let chunk_index = (ptr as usize) >> self.chunk_size_log2;
         let item_index = (ptr as usize) & ((1 << self.chunk_size_log2) - 1);
-        return self.chunks[chunk_index].add(item_index * self.size);
+        return self.chunks[chunk_index].add(item_index * self.layout.size());
     }
     #[inline]
     pub unsafe fn get_mut(&mut self, ptr: u32) -> *mut u8 {
@@ -102,7 +107,7 @@ impl Pool {
     pub unsafe fn get_item<T>(&self, ptr: u32) -> &T {
         debug_assert_eq!(
             Layout::new::<T>().pad_to_align(),
-            Layout::from_size_align_unchecked(self.size, self.align)
+            self.layout
         );
         &*(self.get(ptr) as *const T)
     }
@@ -110,7 +115,7 @@ impl Pool {
     pub unsafe fn get_item_mut<T>(&mut self, ptr: u32) -> &mut T {
         debug_assert_eq!(
             Layout::new::<T>().pad_to_align(),
-            Layout::from_size_align_unchecked(self.size, self.align)
+            self.layout
         );
         &mut *(self.get_mut(ptr) as *mut T)
     }
@@ -119,7 +124,7 @@ impl Pool {
 impl Drop for Pool {
     fn drop(&mut self) {
         unsafe {
-            let (layout, _) = Layout::from_size_align_unchecked(self.size, self.align)
+            let (layout, _) = self.layout
                 .repeat(1 << self.chunk_size_log2)
                 .unwrap();
             for chunk in self.chunks.iter() {

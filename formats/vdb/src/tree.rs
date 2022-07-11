@@ -45,10 +45,7 @@ where
             panic!("Can not allocate root node");
         }
         let pool = &mut self.pool[CHILD::LEVEL as usize];
-        let ptr = pool.alloc();
-        let new_node = self.get_node_mut::<CHILD>(ptr);
-        *new_node = Default::default();
-        ptr
+        pool.alloc::<CHILD>()
     }
 
     /// Safety: ptr must point to a valid region of memory in the pool of CHILD.
@@ -79,5 +76,19 @@ where
     #[inline]
     pub fn set_value(&mut self, coords: UVec3, value: Option<ROOT::Voxel>) {
         self.root.set(&mut self.pool, coords, value)
+    }
+
+    /// ```
+    /// #![feature(generic_const_exprs)]
+    /// use dust_vdb::{Tree, hierarchy};
+    /// use glam::UVec3;
+    /// let mut tree = Tree::<hierarchy!(4, 2)>::new();
+    /// tree.set_value(UVec3::new(0, 1, 2), Some(true));
+    /// let mut iter = tree.iter();
+    /// assert_eq!(iter.next().unwrap(), UVec3::new(0, 1, 2));
+    /// 
+    /// ```
+    pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
+        self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
 }

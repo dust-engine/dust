@@ -78,7 +78,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         if value.is_some() {
             // Ensure that the node contains stuff on ptr
             if !self.map.contains_key(&key) {
-                let new_node_ptr = unsafe { pools[CHILD::LEVEL].alloc() };
+                let new_node_ptr = unsafe { pools[CHILD::LEVEL].alloc::<CHILD>() };
                 self.map
                     .insert(key.clone(), RootNodeEntry::Occupied(new_node_ptr));
             }
@@ -118,6 +118,13 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     }
     fn iter_in_pool<'a>(_pools: &'a [Pool], _ptr: u32, _offset: UVec3) -> Self::Iterator<'a> {
         unreachable!("Root Node is never kept in a pool!")
+    }
+}
+
+
+impl<CHILD: Node> std::fmt::Debug for RootNode<CHILD> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RootNode")
     }
 }
 

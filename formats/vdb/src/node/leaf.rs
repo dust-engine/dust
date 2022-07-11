@@ -3,7 +3,7 @@ use crate::{bitmask::SetBitIterator, BitMask, Node, Pool};
 use glam::UVec3;
 use std::{
     alloc::Layout,
-    mem::{size_of, MaybeUninit},
+    mem::{size_of, MaybeUninit}, fmt::Debug,
 };
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
@@ -103,6 +103,18 @@ where
     }
 }
 
+
+impl<const LOG2: UVec3> std::fmt::Debug for LeafNode<LOG2>
+where
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LeafNode\n")?;
+        self.occupancy.fmt(f)?;
+        Ok(())
+    }
+}
+
 pub struct LeafNodeIterator<'a, const LOG2: UVec3>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
@@ -118,6 +130,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.bits_iterator.next()?;
+
 
         let z = index & ((1 << LOG2.z) - 1);
         let y = (index >> LOG2.z) & ((1 << LOG2.y) - 1);
