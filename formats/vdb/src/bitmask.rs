@@ -1,4 +1,4 @@
-use std::{mem::size_of, fmt::Debug};
+use std::mem::size_of;
 
 pub struct BitMask<const SIZE: usize>
 where
@@ -18,13 +18,15 @@ where
     }
 }
 
-
 impl<const SIZE: usize> std::fmt::Debug for BitMask<SIZE>
 where
     [(); SIZE / size_of::<usize>() / 8]: Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.data).finish()
+        for item in self.data.iter() {
+            f.write_fmt(format_args!("{:#064b}\n", item))?;
+        }
+        Ok(())
     }
 }
 
@@ -75,6 +77,7 @@ where
 /// let mut iter = bitmask.iter_set_bits();
 /// assert_eq!(iter.next(), Some(12));
 /// assert_eq!(iter.next(), Some(101));
+/// assert!(iter.next().is_none());
 /// ```
 pub struct SetBitIterator<'a, const SIZE: usize>
 where
@@ -93,18 +96,21 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         const NUM_BITS: usize = std::mem::size_of::<usize>() * 8;
-        if self.state == 0 {
-            if self.i == self.bitmask.data.len() - 1 {
-                return None;
+        loop {
+            if self.state == 0 {
+                if self.i == self.bitmask.data.len() - 1 {
+                    return None;
+                }
+                self.i += 1;
+                self.state = self.bitmask.data[self.i];
+                continue;
             }
-            self.i += 1;
-            self.state = self.bitmask.data[self.i];
-        }
 
-        let t = self.state & (!self.state + 1);
-        let r = self.state.trailing_zeros() as usize;
-        let result = self.i * NUM_BITS + r;
-        self.state ^= t;
-        Some(result)
+            let t = self.state & (!self.state).wrapping_add(1);
+            let r = self.state.trailing_zeros() as usize;
+            let result = self.i * NUM_BITS + r;
+            self.state ^= t;
+            return Some(result);
+        }
     }
 }

@@ -16,6 +16,7 @@ use crate::Pool;
 pub trait Node: 'static + Default + Debug {
     /// span of the node.
     const EXTENT_LOG2: UVec3;
+    const EXTENT: UVec3;
     /// Max number of child nodes.
     const SIZE: usize;
 

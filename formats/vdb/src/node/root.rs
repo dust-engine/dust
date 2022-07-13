@@ -35,6 +35,11 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         y: 32,
         z: 32,
     };
+    const EXTENT: UVec3 = UVec3 {
+        x: u32::MAX,
+        y: u32::MAX,
+        z: u32::MAX,
+    };
 
     const SIZE: usize = usize::MAX;
 
@@ -120,7 +125,6 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         unreachable!("Root Node is never kept in a pool!")
     }
 }
-
 
 impl<CHILD: Node> std::fmt::Debug for RootNode<CHILD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

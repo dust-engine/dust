@@ -84,9 +84,14 @@ where
     /// use glam::UVec3;
     /// let mut tree = Tree::<hierarchy!(4, 2)>::new();
     /// tree.set_value(UVec3::new(0, 1, 2), Some(true));
+    /// tree.set_value(UVec3::new(63, 1, 3), Some(true));
+    /// tree.set_value(UVec3::new(63, 63, 63), Some(true));
     /// let mut iter = tree.iter();
     /// assert_eq!(iter.next().unwrap(), UVec3::new(0, 1, 2));
-    /// 
+    /// assert_eq!(iter.next().unwrap(), UVec3::new(63, 1, 3));
+    /// assert_eq!(iter.next().unwrap(), UVec3::new(63, 63, 63));
+    /// assert!(iter.next().is_none());
+    ///
     /// ```
     pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })

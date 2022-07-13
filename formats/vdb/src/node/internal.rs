@@ -52,6 +52,11 @@ where
         y: FANOUT_LOG2.y + CHILD::EXTENT_LOG2.y,
         z: FANOUT_LOG2.z + CHILD::EXTENT_LOG2.z,
     };
+    const EXTENT: UVec3 = UVec3 {
+        x: 1 << Self::EXTENT_LOG2.x,
+        y: 1 << Self::EXTENT_LOG2.y,
+        z: 1 << Self::EXTENT_LOG2.z,
+    };
     const LEVEL: usize = CHILD::LEVEL + 1;
     fn new() -> Self {
         Self {
@@ -201,8 +206,9 @@ where
                 let offset = UVec3 {
                     x: next_child_index as u32 >> (FANOUT_LOG2.z + FANOUT_LOG2.y),
                     y: (next_child_index as u32 >> FANOUT_LOG2.z) & ((1 << FANOUT_LOG2.y) - 1),
-                    z: next_child_index as u32 & (1 << FANOUT_LOG2.z - 1)
+                    z: next_child_index as u32 & ((1 << FANOUT_LOG2.z) - 1),
                 };
+                let offset = offset * CHILD::EXTENT;
                 self.child_iterator = Some(CHILD::iter_in_pool(
                     self.pools,
                     child_ptr,

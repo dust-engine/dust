@@ -57,25 +57,19 @@ impl Pool {
             let chunk_index = top as usize >> self.chunk_size_log2;
             if chunk_index >= self.chunks.len() {
                 // allocate new block
-                unsafe {
-                    let (layout, _) = self.layout
-                        .repeat(1 << self.chunk_size_log2)
-                        .unwrap();
-                    let block = std::alloc::alloc(layout);
-                    self.chunks.push(block);
-                }
+                let (layout, _) = self.layout.repeat(1 << self.chunk_size_log2).unwrap();
+                let block = std::alloc::alloc(layout);
+                self.chunks.push(block);
             }
             self.top += 1;
             top
         } else {
             // take from freelist
-            unsafe {
-                let item_location = self.get_mut(self.head);
-                let next_available_location = *(item_location as *const u32);
-                let head = self.head;
-                self.head = next_available_location;
-                return head;
-            }
+            let item_location = self.get_mut(self.head);
+            let next_available_location = *(item_location as *const u32);
+            let head = self.head;
+            self.head = next_available_location;
+            return head;
         }
     }
     pub fn free(&mut self, index: u32) {
@@ -105,18 +99,12 @@ impl Pool {
 
     #[inline]
     pub unsafe fn get_item<T>(&self, ptr: u32) -> &T {
-        debug_assert_eq!(
-            Layout::new::<T>().pad_to_align(),
-            self.layout
-        );
+        debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
         &*(self.get(ptr) as *const T)
     }
     #[inline]
     pub unsafe fn get_item_mut<T>(&mut self, ptr: u32) -> &mut T {
-        debug_assert_eq!(
-            Layout::new::<T>().pad_to_align(),
-            self.layout
-        );
+        debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
         &mut *(self.get_mut(ptr) as *mut T)
     }
 }
@@ -124,9 +112,7 @@ impl Pool {
 impl Drop for Pool {
     fn drop(&mut self) {
         unsafe {
-            let (layout, _) = self.layout
-                .repeat(1 << self.chunk_size_log2)
-                .unwrap();
+            let (layout, _) = self.layout.repeat(1 << self.chunk_size_log2).unwrap();
             for chunk in self.chunks.iter() {
                 let chunk = *chunk;
                 std::alloc::dealloc(chunk, layout);
