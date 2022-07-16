@@ -1,5 +1,5 @@
-use super::size_of_grid;
-use crate::{bitmask::SetBitIterator, BitMask, Node, Pool};
+use super::{size_of_grid, NodeMeta};
+use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool};
 use glam::UVec3;
 use std::{
     alloc::Layout,
@@ -87,11 +87,6 @@ where
         leaf_node.set(&mut [], coords, value)
     }
 
-    fn write_layout(sizes: &mut [MaybeUninit<Layout>]) {
-        let layout = std::alloc::Layout::new::<Self>();
-        sizes[0].write(layout);
-    }
-
     type Iterator<'a> = LeafNodeIterator<'a, LOG2>;
     fn iter<'a>(&'a self, _pool: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
         LeafNodeIterator {
@@ -105,6 +100,18 @@ where
             location_offset: offset,
             bits_iterator: node.occupancy.iter_set_bits(),
         }
+    }
+}
+
+impl<const LOG2: UVec3> const NodeConst for LeafNode<LOG2>
+where
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]) {
+        metas[Self::LEVEL].write(NodeMeta {
+            layout: std::alloc::Layout::new::<Self>(),
+            getter: Self::get_in_pools,
+        });
     }
 }
 

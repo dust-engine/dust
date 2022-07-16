@@ -13,6 +13,11 @@ pub use root::*;
 
 use crate::Pool;
 
+pub struct NodeMeta<V> {
+    pub(crate) layout: Layout,
+    pub(crate) getter: fn(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<V>,
+}
+
 pub trait Node: 'static + Default + Debug {
     /// span of the node.
     const EXTENT_LOG2: UVec3;
@@ -40,13 +45,18 @@ pub trait Node: 'static + Default + Debug {
     /// This is called when the node was located in a node pool.
     fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>);
 
-    fn write_layout(sizes: &mut [MaybeUninit<Layout>]);
-
     type Iterator<'a>: Iterator<Item = UVec3>;
     /// This is called when the node was owned as the root node in the tree.
     fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a>;
     /// This is called when the node was located in a node pool.
     fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a>;
+}
+
+/// Trait that contains const methods for the node.
+pub trait NodeConst: Node {
+    /// Method that congregates metadata of each level of the tree into an array.
+    /// Implementation shoud write NodeMeta into `metas[Self::LEVEL]`.
+    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]);
 }
 
 /// Macro that simplifies tree type construction.

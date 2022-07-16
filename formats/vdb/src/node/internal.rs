@@ -1,5 +1,5 @@
-use super::size_of_grid;
-use crate::{bitmask::SetBitIterator, BitMask, Node, Pool};
+use super::{size_of_grid, NodeMeta};
+use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool};
 use glam::UVec3;
 use std::{
     alloc::Layout,
@@ -135,14 +135,6 @@ where
         }
     }
 
-    fn write_layout(sizes: &mut [MaybeUninit<Layout>]) {
-        if Self::LEVEL < sizes.len() {
-            let layout = std::alloc::Layout::new::<Self>();
-            sizes[Self::LEVEL as usize].write(layout);
-        }
-        CHILD::write_layout(sizes);
-    }
-
     type Iterator<'a> = InternalNodeIterator<'a, CHILD, FANOUT_LOG2>;
     fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
         InternalNodeIterator {
@@ -162,6 +154,20 @@ where
             child_ptrs: &node.child_ptrs,
             child_iterator: None,
         }
+    }
+}
+
+impl<CHILD: ~const NodeConst + Node, const FANOUT_LOG2: UVec3> const NodeConst
+    for InternalNode<CHILD, FANOUT_LOG2>
+where
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]) {
+        metas[Self::LEVEL as usize].write(NodeMeta {
+            layout: std::alloc::Layout::new::<Self>(),
+            getter: Self::get_in_pools,
+        });
+        CHILD::write_meta(metas);
     }
 }
 

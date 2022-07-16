@@ -2,7 +2,9 @@ use std::{alloc::Layout, marker::PhantomData, mem::MaybeUninit};
 
 use glam::UVec3;
 
-use crate::{Node, Pool};
+use crate::{Node, NodeConst, Pool};
+
+use super::NodeMeta;
 
 pub enum RootNodeEntry {
     Occupied(u32),
@@ -101,10 +103,6 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         }
     }
 
-    fn write_layout(sizes: &mut [MaybeUninit<Layout>]) {
-        CHILD::write_layout(sizes);
-    }
-
     fn get_in_pools(_pools: &[Pool], _coords: UVec3, _ptr: u32) -> Option<Self::Voxel> {
         unreachable!("Root Node is never kept in a pool!")
     }
@@ -123,6 +121,16 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     }
     fn iter_in_pool<'a>(_pools: &'a [Pool], _ptr: u32, _offset: UVec3) -> Self::Iterator<'a> {
         unreachable!("Root Node is never kept in a pool!")
+    }
+}
+
+impl<CHILD: ~const NodeConst> const NodeConst for RootNode<CHILD> {
+    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]) {
+        metas[Self::LEVEL as usize].write(NodeMeta {
+            layout: std::alloc::Layout::new::<Self>(),
+            getter: Self::get_in_pools,
+        });
+        CHILD::write_meta(metas);
     }
 }
 

@@ -2,7 +2,7 @@ use std::{alloc::Layout, mem::MaybeUninit};
 
 use glam::UVec3;
 
-use crate::{Node, Pool};
+use crate::{Node, NodeConst, NodeMeta, Pool};
 
 pub struct Tree<ROOT: Node>
 where
@@ -25,16 +25,22 @@ where
 /// ```
 impl<ROOT: Node> Tree<ROOT>
 where
-    [(); ROOT::LEVEL as usize]: Sized,
+    [(); ROOT::LEVEL as usize + 1]: Sized,
 {
-    pub fn new() -> Self {
-        let mut layouts: [MaybeUninit<Layout>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
-        ROOT::write_layout(&mut layouts);
-        let layouts: [Layout; ROOT::LEVEL as usize] = unsafe {
+    pub fn new() -> Self
+    where
+        ROOT: ~const NodeConst,
+    {
+        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
+        for (i, meta) in Self::METAS.iter().take(ROOT::LEVEL).enumerate() {
+            let pool = Pool::new(meta.layout, 10);
+            pools[i].write(pool);
+        }
+
+        let pools: [Pool; ROOT::LEVEL as usize] = unsafe {
             // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504
-            (&*(&MaybeUninit::new(layouts) as *const _ as *const MaybeUninit<_>)).assume_init_read()
+            (&*(&MaybeUninit::new(pools) as *const _ as *const MaybeUninit<_>)).assume_init_read()
         };
-        let pools = layouts.map(|layout| Pool::new(layout, 10));
         Self {
             root: ROOT::default(),
             pool: pools,
@@ -96,4 +102,30 @@ where
     pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
+}
+
+/// Workaround for https://github.com/rust-lang/rust/issues/88424#issuecomment-911158795
+trait TreeMeta<ROOT: Node>
+where
+    [(); ROOT::LEVEL as usize + 1]: Sized,
+{
+    const METAS: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1];
+}
+
+impl<ROOT: ~const NodeConst> const TreeMeta<ROOT> for Tree<ROOT>
+where
+    [(); ROOT::LEVEL as usize + 1]: Sized,
+{
+    const METAS: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1] = {
+        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL as usize + 1] =
+            MaybeUninit::uninit_array();
+
+        ROOT::write_meta(&mut metas);
+        let metas: [crate::node::NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1] = unsafe {
+            // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504
+            (&*(&MaybeUninit::new(metas) as *const _ as *const MaybeUninit<_>)).assume_init_read()
+        };
+
+        metas
+    };
 }
