@@ -10,6 +10,8 @@
 #![feature(const_maybe_uninit_assume_init_read)]
 #![feature(const_trait_impl)]
 #![feature(const_mut_refs)]
+#![feature(const_for)]
+#![feature(const_intoiterator_identity)]
 
 mod accessor;
 mod bitmask;
@@ -21,4 +23,5 @@ pub use bitmask::BitMask;
 pub use pool::Pool;
 pub use tree::Tree;
 
+pub use accessor::Accessor;
 pub use node::*;

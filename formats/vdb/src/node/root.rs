@@ -56,7 +56,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
 
     type Voxel = CHILD::Voxel;
     #[inline]
-    fn get(&self, pools: &[Pool], coords: UVec3) -> Option<Self::Voxel> {
+    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> Option<Self::Voxel> {
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let entry = self.map.get(&RootKey(root_offset));
         if let Some(entry) = entry {
@@ -69,7 +69,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
                         y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
                         z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
                     };
-                    CHILD::get_in_pools(pools, new_coords, *ptr)
+                    CHILD::get_in_pools(pools, new_coords, *ptr, cached_path)
                 },
             }
         } else {
@@ -77,7 +77,13 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         }
     }
 
-    fn set(&mut self, pools: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>) {
+    fn set(
+        &mut self,
+        pools: &mut [Pool],
+        coords: UVec3,
+        value: Option<Self::Voxel>,
+        cached_path: &mut [u32],
+    ) {
         // ptr is meaningless and always 0 for root nodes.
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let key = RootKey(root_offset);
@@ -99,15 +105,26 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
                 y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
                 z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
             };
-            CHILD::set_in_pools(pools, new_coords, child_ptr, value)
+            CHILD::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
         }
     }
 
-    fn get_in_pools(_pools: &[Pool], _coords: UVec3, _ptr: u32) -> Option<Self::Voxel> {
+    fn get_in_pools(
+        _pools: &[Pool],
+        _coords: UVec3,
+        _ptr: u32,
+        _cached_path: &mut [u32],
+    ) -> Option<Self::Voxel> {
         unreachable!("Root Node is never kept in a pool!")
     }
 
-    fn set_in_pools(_pools: &mut [Pool], _coords: UVec3, _ptr: u32, _value: Option<Self::Voxel>) {
+    fn set_in_pools(
+        _pools: &mut [Pool],
+        _coords: UVec3,
+        _ptr: u32,
+        _value: Option<Self::Voxel>,
+        _cached_path: &mut [u32],
+    ) {
         unreachable!("Root Node is never kept in a pool!")
     }
     type Iterator<'a> = RootIterator<'a, CHILD>;
@@ -129,6 +146,8 @@ impl<CHILD: ~const NodeConst> const NodeConst for RootNode<CHILD> {
         metas[Self::LEVEL as usize].write(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
+            extent_log2: Self::EXTENT_LOG2,
+            fanout_log2: Self::EXTENT_LOG2,
         });
         CHILD::write_meta(metas);
     }

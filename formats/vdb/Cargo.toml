@@ -9,3 +9,6 @@ edition = "2021"
 glam = { git = "https://github.com/bitshifter/glam-rs" }
 fxhash = "0.2"
 nohash = "0.2.0"
+
+[dev-dependencies]
+rand = "0.8.5"

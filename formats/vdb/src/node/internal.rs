@@ -68,7 +68,7 @@ where
 
     type Voxel = CHILD::Voxel;
     #[inline]
-    fn get(&self, pools: &[Pool], coords: UVec3) -> Option<Self::Voxel> {
+    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> Option<Self::Voxel> {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
@@ -84,11 +84,17 @@ where
                 y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
                 z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
             };
-            <CHILD as Node>::get_in_pools(pools, new_coords, child_ptr)
+            <CHILD as Node>::get_in_pools(pools, new_coords, child_ptr, cached_path)
         }
     }
     #[inline]
-    fn set(&mut self, pools: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>) {
+    fn set(
+        &mut self,
+        pools: &mut [Pool],
+        coords: UVec3,
+        value: Option<Self::Voxel>,
+        cached_path: &mut [u32],
+    ) {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
@@ -117,21 +123,38 @@ where
                 z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
             };
             let child_ptr = self.child_ptrs[index].occupied;
-            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value)
+            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
         }
     }
     #[inline]
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel> {
+    fn get_in_pools(
+        pools: &[Pool],
+        coords: UVec3,
+        ptr: u32,
+        cached_path: &mut [u32],
+    ) -> Option<Self::Voxel> {
+        if cached_path.len() > 0 {
+            cached_path[Self::LEVEL] = ptr;
+        }
         let node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
-        node.get(pools, coords)
+        node.get(pools, coords, cached_path)
     }
 
     #[inline]
-    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>) {
+    fn set_in_pools(
+        pools: &mut [Pool],
+        coords: UVec3,
+        ptr: u32,
+        value: Option<Self::Voxel>,
+        cached_path: &mut [u32],
+    ) {
         // Safety: r was taken from pools[Self::LEVEL] and we know that self.set only access pools[CHILD::LEVEL].
+        if cached_path.len() > 0 {
+            cached_path[Self::LEVEL] = ptr;
+        }
         unsafe {
             let r = pools[Self::LEVEL].get_item_mut::<Self>(ptr) as *mut Self;
-            (*r).set(pools, coords, value)
+            (*r).set(pools, coords, value, cached_path)
         }
     }
 
@@ -166,6 +189,8 @@ where
         metas[Self::LEVEL as usize].write(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
+            extent_log2: Self::EXTENT_LOG2,
+            fanout_log2: FANOUT_LOG2,
         });
         CHILD::write_meta(metas);
     }

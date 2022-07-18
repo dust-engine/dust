@@ -15,7 +15,10 @@ use crate::Pool;
 
 pub struct NodeMeta<V> {
     pub(crate) layout: Layout,
-    pub(crate) getter: fn(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<V>,
+    pub(crate) getter:
+        fn(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> Option<V>,
+    pub(crate) extent_log2: UVec3,
+    pub(crate) fanout_log2: UVec3,
 }
 
 pub trait Node: 'static + Default + Debug {
@@ -33,17 +36,38 @@ pub trait Node: 'static + Default + Debug {
 
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
-    fn get(&self, pools: &[Pool], coords: UVec3) -> Option<Self::Voxel>;
+    /// Implementation will write to cached_path for all levels below the current level.
+    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> Option<Self::Voxel>;
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
-    fn set(&mut self, pools: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>);
+    /// Implementation will write to cached_path for all levels below the current level.
+    fn set(
+        &mut self,
+        pools: &mut [Pool],
+        coords: UVec3,
+        value: Option<Self::Voxel>,
+        cached_path: &mut [u32],
+    );
 
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel>;
+    /// Implementation will write to cached_path for all levels including the current level.
+    fn get_in_pools(
+        pools: &[Pool],
+        coords: UVec3,
+        ptr: u32,
+        cached_path: &mut [u32],
+    ) -> Option<Self::Voxel>;
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
-    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>);
+    /// Implementation will write to cached_path for all levels including the current level.
+    fn set_in_pools(
+        pools: &mut [Pool],
+        coords: UVec3,
+        ptr: u32,
+        value: Option<Self::Voxel>,
+        cached_path: &mut [u32],
+    );
 
     type Iterator<'a>: Iterator<Item = UVec3>;
     /// This is called when the node was owned as the root node in the tree.

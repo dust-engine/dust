@@ -52,7 +52,7 @@ where
     type Voxel = bool;
 
     #[inline]
-    fn get(&self, _: &[Pool], coords: UVec3) -> Option<Self::Voxel> {
+    fn get(&self, _: &[Pool], coords: UVec3, _cached_path: &mut [u32]) -> Option<Self::Voxel> {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
@@ -64,7 +64,13 @@ where
         return Some(active);
     }
     #[inline]
-    fn set(&mut self, _: &mut [Pool], coords: UVec3, value: Option<Self::Voxel>) {
+    fn set(
+        &mut self,
+        _: &mut [Pool],
+        coords: UVec3,
+        value: Option<Self::Voxel>,
+        _cached_path: &mut [u32],
+    ) {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
@@ -76,15 +82,32 @@ where
         }
     }
     #[inline]
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32) -> Option<Self::Voxel> {
+    fn get_in_pools(
+        pools: &[Pool],
+        coords: UVec3,
+        ptr: u32,
+        cached_path: &mut [u32],
+    ) -> Option<Self::Voxel> {
+        if cached_path.len() > 0 {
+            cached_path[0] = ptr;
+        }
         let leaf_node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
-        leaf_node.get(&[], coords)
+        leaf_node.get(&[], coords, cached_path)
     }
 
     #[inline]
-    fn set_in_pools(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<Self::Voxel>) {
+    fn set_in_pools(
+        pools: &mut [Pool],
+        coords: UVec3,
+        ptr: u32,
+        value: Option<Self::Voxel>,
+        cached_path: &mut [u32],
+    ) {
+        if cached_path.len() > 0 {
+            cached_path[0] = ptr;
+        }
         let leaf_node = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(ptr) };
-        leaf_node.set(&mut [], coords, value)
+        leaf_node.set(&mut [], coords, value, cached_path)
     }
 
     type Iterator<'a> = LeafNodeIterator<'a, LOG2>;
@@ -111,6 +134,8 @@ where
         metas[Self::LEVEL].write(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
+            extent_log2: Self::EXTENT_LOG2,
+            fanout_log2: LOG2,
         });
     }
 }

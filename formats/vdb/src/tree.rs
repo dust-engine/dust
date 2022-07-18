@@ -2,14 +2,14 @@ use std::{alloc::Layout, mem::MaybeUninit};
 
 use glam::UVec3;
 
-use crate::{Node, NodeConst, NodeMeta, Pool};
+use crate::{Accessor, Node, NodeConst, NodeMeta, Pool};
 
 pub struct Tree<ROOT: Node>
 where
     [(); ROOT::LEVEL as usize]: Sized,
 {
     pub(crate) root: ROOT,
-    pool: [Pool; ROOT::LEVEL as usize],
+    pub(crate) pool: [Pool; ROOT::LEVEL as usize],
 }
 
 /// ```
@@ -76,12 +76,12 @@ where
 
     #[inline]
     pub fn get_value(&self, coords: UVec3) -> Option<ROOT::Voxel> {
-        self.root.get(&self.pool, coords)
+        self.root.get(&self.pool, coords, &mut [])
     }
 
     #[inline]
     pub fn set_value(&mut self, coords: UVec3, value: Option<ROOT::Voxel>) {
-        self.root.set(&mut self.pool, coords, value)
+        self.root.set(&mut self.pool, coords, value, &mut [])
     }
 
     /// ```
@@ -105,11 +105,12 @@ where
 }
 
 /// Workaround for https://github.com/rust-lang/rust/issues/88424#issuecomment-911158795
-trait TreeMeta<ROOT: Node>
+pub(crate) trait TreeMeta<ROOT: Node>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
 {
     const METAS: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1];
+    const META_MASK: UVec3;
 }
 
 impl<ROOT: ~const NodeConst> const TreeMeta<ROOT> for Tree<ROOT>
@@ -127,5 +128,19 @@ where
         };
 
         metas
+    };
+    const META_MASK: UVec3 = {
+        let mut mask: UVec3 = UVec3::ZERO;
+        let mut i = 0;
+        while i < Self::METAS.len() {
+            let meta = &Self::METAS[i];
+            mask = UVec3 {
+                x: mask.x | (1 << (meta.extent_log2.x - 1)),
+                y: mask.y | (1 << (meta.extent_log2.y - 1)),
+                z: mask.z | (1 << (meta.extent_log2.z - 1)),
+            };
+            i += 1;
+        }
+        mask
     };
 }
