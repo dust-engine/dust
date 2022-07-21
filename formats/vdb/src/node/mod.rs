@@ -17,6 +17,8 @@ pub struct NodeMeta<V> {
     pub(crate) layout: Layout,
     pub(crate) getter:
         fn(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> Option<V>,
+    pub(crate) setter:
+        fn(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<V>, cached_path: &mut [u32]),
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
 }

@@ -1,0 +1,11 @@
+[package]
+name = "dust_vox"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dot_vox = { git = "https://github.com/dust-engine/dot_vox" }
+dust_vdb = { path = "../vdb" }
+glam = { git = "https://github.com/bitshifter/glam-rs" }

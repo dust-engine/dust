@@ -136,6 +136,7 @@ where
             getter: Self::get_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             fanout_log2: LOG2,
+            setter: Self::set_in_pools,
         });
     }
 }

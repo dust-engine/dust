@@ -64,12 +64,96 @@ where
     }
 }
 
+
+pub struct AccessorMut<'a, ROOT: Node>
+where
+    [(); ROOT::LEVEL as usize]: Sized,
+{
+    tree: &'a mut Tree<ROOT>,
+    ptrs: [u32; ROOT::LEVEL],
+    last_coords: Option<UVec3>,
+}
+
+
+impl<'a, ROOT: Node> AccessorMut<'a, ROOT>
+where
+    [(); ROOT::LEVEL as usize + 1]: Sized,
+{
+    
+    pub fn get(&mut self, coords: UVec3) -> Option<ROOT::Voxel>
+    where
+        ROOT: ~const NodeConst,
+    {
+        let result = if let Some(last_coords) = self.last_coords {
+            let lca_level = lowest_common_ancestor_level(
+                last_coords,
+                coords,
+                <Tree<ROOT> as TreeMeta<ROOT>>::META_MASK,
+                ROOT::LEVEL as u32,
+            );
+            if lca_level == ROOT::LEVEL as u32 {
+                self.tree.root.get(&self.tree.pool, coords, &mut self.ptrs)
+            } else {
+                let meta = &<Tree<ROOT> as TreeMeta<ROOT>>::METAS[lca_level as usize];
+                let ptr = self.ptrs[lca_level as usize];
+                let new_coords = UVec3 {
+                    x: coords.x & ((1_u32 << meta.extent_log2.x) - 1),
+                    y: coords.y & ((1_u32 << meta.extent_log2.y) - 1),
+                    z: coords.z & ((1_u32 << meta.extent_log2.z) - 1),
+                };
+                (meta.getter)(&self.tree.pool, new_coords, ptr, &mut self.ptrs)
+            }
+        } else {
+            self.tree.root.get(&self.tree.pool, coords, &mut self.ptrs)
+        };
+        self.last_coords = Some(coords);
+        return result;
+    }
+    pub fn set(&mut self, coords: UVec3, value: Option<ROOT::Voxel>)
+    where
+        ROOT: ~const NodeConst,
+    {
+        let result = if let Some(last_coords) = self.last_coords {
+            let lca_level = lowest_common_ancestor_level(
+                last_coords,
+                coords,
+                <Tree<ROOT> as TreeMeta<ROOT>>::META_MASK,
+                ROOT::LEVEL as u32,
+            );
+            if lca_level == ROOT::LEVEL as u32 {
+                self.tree.root.set(&mut self.tree.pool, coords, value, &mut self.ptrs)
+            } else {
+                let meta = &<Tree<ROOT> as TreeMeta<ROOT>>::METAS[lca_level as usize];
+                let ptr = self.ptrs[lca_level as usize];
+                let new_coords = UVec3 {
+                    x: coords.x & ((1_u32 << meta.extent_log2.x) - 1),
+                    y: coords.y & ((1_u32 << meta.extent_log2.y) - 1),
+                    z: coords.z & ((1_u32 << meta.extent_log2.z) - 1),
+                };
+                (meta.setter)(&mut self.tree.pool, new_coords, ptr, value, &mut self.ptrs)
+            }
+        } else {
+            self.tree.root.set(&mut self.tree.pool, coords, value, &mut self.ptrs)
+        };
+        self.last_coords = Some(coords);
+        return result;
+    }
+}
+
+
 impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
 {
     pub fn accessor(&self) -> Accessor<ROOT> {
         Accessor {
+            tree: self,
+            ptrs: [0; ROOT::LEVEL],
+            last_coords: None,
+        }
+    }
+    pub fn accessor_mut(&mut self) -> AccessorMut<ROOT> {
+        AccessorMut {
             tree: self,
             ptrs: [0; ROOT::LEVEL],
             last_coords: None,

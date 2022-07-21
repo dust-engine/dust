@@ -146,6 +146,7 @@ impl<CHILD: ~const NodeConst> const NodeConst for RootNode<CHILD> {
         metas[Self::LEVEL as usize].write(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
+            setter: Self::set_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             fanout_log2: Self::EXTENT_LOG2,
         });
