@@ -40,6 +40,11 @@ where
         y: 1 << LOG2.y,
         z: 1 << LOG2.z,
     };
+    const EXTENT_MASK: UVec3 = UVec3 {
+        x: Self::EXTENT.x - 1,
+        y: Self::EXTENT.y - 1,
+        z: Self::EXTENT.z - 1,
+    };
     const LEVEL: usize = 0;
     fn new() -> Self {
         Self {
@@ -136,6 +141,7 @@ where
             getter: Self::get_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             fanout_log2: LOG2,
+            extent_mask: Self::EXTENT_MASK,
             setter: Self::set_in_pools,
         });
     }

@@ -42,3 +42,7 @@ bevy_asset = { path = "../bevy/crates/bevy_asset" }
 bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
 bevy_utils = { path = "../bevy/crates/bevy_utils" }
 bevy_hierarchy = { path = "../bevy/crates/bevy_hierarchy" }
+
+[profile.profile]
+inherits = "release"
+debug = true

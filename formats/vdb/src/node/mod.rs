@@ -21,12 +21,15 @@ pub struct NodeMeta<V> {
         fn(pools: &mut [Pool], coords: UVec3, ptr: u32, value: Option<V>, cached_path: &mut [u32]),
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
+
+    pub(crate) extent_mask: UVec3, // = (1 << extent_log2) - 1
 }
 
 pub trait Node: 'static + Default + Debug {
     /// span of the node.
     const EXTENT_LOG2: UVec3;
     const EXTENT: UVec3;
+    const EXTENT_MASK: UVec3;  // = (1 << extent_log2) - 1
     /// Max number of child nodes.
     const SIZE: usize;
 

@@ -42,6 +42,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         y: u32::MAX,
         z: u32::MAX,
     };
+    const EXTENT_MASK: UVec3 = Self::EXTENT;
 
     const SIZE: usize = usize::MAX;
 
@@ -149,6 +150,7 @@ impl<CHILD: ~const NodeConst> const NodeConst for RootNode<CHILD> {
             setter: Self::set_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             fanout_log2: Self::EXTENT_LOG2,
+            extent_mask: Self::EXTENT_MASK,
         });
         CHILD::write_meta(metas);
     }

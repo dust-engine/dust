@@ -91,7 +91,7 @@ impl Pool {
     pub unsafe fn get(&self, ptr: u32) -> *const u8 {
         let chunk_index = (ptr as usize) >> self.chunk_size_log2;
         let item_index = (ptr as usize) & ((1 << self.chunk_size_log2) - 1);
-        return self.chunks[chunk_index].add(item_index * self.layout.size());
+        return self.chunks.get_unchecked(chunk_index).add(item_index * self.layout.size());
     }
     #[inline]
     pub unsafe fn get_mut(&mut self, ptr: u32) -> *mut u8 {

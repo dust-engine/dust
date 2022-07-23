@@ -57,6 +57,11 @@ where
         y: 1 << Self::EXTENT_LOG2.y,
         z: 1 << Self::EXTENT_LOG2.z,
     };
+    const EXTENT_MASK: UVec3 = UVec3 {
+        x: Self::EXTENT.x - 1,
+        y: Self::EXTENT.y - 1,
+        z: Self::EXTENT.z - 1,
+    };
     const LEVEL: usize = CHILD::LEVEL + 1;
     fn new() -> Self {
         Self {
@@ -117,11 +122,7 @@ where
             todo!() // TODO: clear recursively, propagate if completely cleared
         }
         unsafe {
-            let new_coords = UVec3 {
-                x: coords.x & ((1_u32 << CHILD::EXTENT_LOG2.x) - 1),
-                y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
-                z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
-            };
+            let new_coords = coords & CHILD::EXTENT_MASK;
             let child_ptr = self.child_ptrs[index].occupied;
             <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
         }
@@ -191,6 +192,7 @@ where
             getter: Self::get_in_pools,
             setter: Self::set_in_pools,
             extent_log2: Self::EXTENT_LOG2,
+            extent_mask: Self::EXTENT_MASK,
             fanout_log2: FANOUT_LOG2,
         });
         CHILD::write_meta(metas);
