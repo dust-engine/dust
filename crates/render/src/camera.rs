@@ -55,6 +55,7 @@ pub(crate) fn extract_camera_system(
         std::mem::size_of::<f32>() * 16
     );
     for (entity, camera, transform) in query.iter() {
+        let transform = transform.compute_transform();
         let rotation_matrix = Mat3::from_quat(transform.rotation).to_cols_array_2d();
         let params = PerspectiveCameraParameters {
             camera_view_col0: rotation_matrix[0],

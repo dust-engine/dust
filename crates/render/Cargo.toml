@@ -17,7 +17,7 @@ bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_utils = { git = "https://github.com/bevyengine/bevy" }
 bevy_hierarchy = { git = "https://github.com/bevyengine/bevy" }
 ash = { version = "0.37", features = ["linked"] }
-glam = "0.20"
+glam = "0.21"
 
 vk-mem = { git = "https://github.com/dust-engine/vk-mem-rs" }
 

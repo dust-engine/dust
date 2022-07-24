@@ -111,6 +111,7 @@ fn asset_binding_system<A: RenderAsset>(
 }
 
 #[derive(bevy_ecs::schedule::SystemLabel)] // TODO: Simplify this
+#[system_label(ignore_fields)]
 pub struct BindlessAssetsSystem<T: RenderAsset> {
     _marker: PhantomData<T>,
 }

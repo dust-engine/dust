@@ -134,6 +134,7 @@ impl<A: RenderAsset> Default for RenderAssetStore<A> {
 }
 
 #[derive(SystemLabel)] // TODO: Simplify this
+#[system_label(ignore_fields)]
 pub struct PrepareRenderAssetsSystem<T: RenderAsset> {
     _marker: PhantomData<T>,
 }
