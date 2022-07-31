@@ -1,5 +1,5 @@
 [package]
-name = "dust_vox"
+name = "dust_format_vox"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +7,8 @@ edition = "2021"
 
 [dependencies]
 dot_vox = { git = "https://github.com/dust-engine/dot_vox" }
-dust_vdb = { path = "../vdb" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy" }
+bevy_app = { git = "https://github.com/bevyengine/bevy" }
+dust_format_vdb = { path = "../vdb" }
 glam = { git = "https://github.com/bitshifter/glam-rs" }
+anyhow = "*"

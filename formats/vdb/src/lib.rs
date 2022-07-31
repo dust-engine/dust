@@ -21,9 +21,25 @@ mod node;
 mod pool;
 mod tree;
 
+use std::marker::PhantomData;
+
 pub use bitmask::BitMask;
 pub use pool::Pool;
 pub use tree::Tree;
 
 pub use accessor::Accessor;
+pub use geometry::{GPUVdbGeometry, VdbGeometry};
 pub use node::*;
+
+#[derive(Default)]
+pub struct VdbPlugin<ROOT: Node> {
+    _marker: PhantomData<ROOT>,
+}
+impl<ROOT: NodeConst + Send + Sync> bevy_app::Plugin for VdbPlugin<ROOT>
+where
+    [(); ROOT::LEVEL as usize + 1]: Sized,
+{
+    fn build(&self, app: &mut bevy_app::App) {
+        app.add_plugin(dust_render::geometry::GeometryPlugin::<VdbGeometry<ROOT>>::default());
+    }
+}

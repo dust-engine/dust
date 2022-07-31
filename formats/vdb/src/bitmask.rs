@@ -76,7 +76,7 @@ where
 
 /// ```
 /// #![feature(generic_const_exprs)]
-/// let mut bitmask = dust_vdb::BitMask::<128>::new();
+/// let mut bitmask = dust_format_vdb::BitMask::<128>::new();
 /// bitmask.set(12, true);
 /// bitmask.set(101, true);
 /// let mut iter = bitmask.iter_set_bits();

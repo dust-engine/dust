@@ -25,6 +25,15 @@ where
     pub unit_size: Vec3,
 }
 
+impl<ROOT: Node> VdbGeometry<ROOT>
+where
+    [(); ROOT::LEVEL as usize + 1]: Sized,
+{
+    pub fn new(tree: Tree<ROOT>, unit_size: Vec3) -> Self {
+        Self { tree, unit_size }
+    }
+}
+
 impl<ROOT: ~const NodeConst> const TypeUuid for VdbGeometry<ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,

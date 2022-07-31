@@ -1,5 +1,5 @@
 [package]
-name = "dust_vdb"
+name = "dust_format_vdb"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,6 +13,7 @@ dust_render = { path = "../../crates/render" }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
+bevy_app = { git = "https://github.com/bevyengine/bevy" }
 
 dustash = { path = "../../../dustash" }
 
