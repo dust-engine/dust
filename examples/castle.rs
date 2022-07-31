@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs)]
 use bevy_asset::{AssetServer, Assets, Handle};
 use bevy_ecs::prelude::*;
 
@@ -56,8 +57,8 @@ fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
-    let handle: Handle<dust_format_explicit_aabbs::AABBGeometry> =
-        asset_server.load("../assets/out.aabb");
+    let handle: Handle<dust_format_vox::VoxGeometry> =
+        asset_server.load("../assets/castle.vox");
     // let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
     commands
         .spawn()

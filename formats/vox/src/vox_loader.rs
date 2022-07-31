@@ -43,6 +43,6 @@ impl AssetLoader for VoxLoader {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["aabb"]
+        &["vox"]
     }
 }

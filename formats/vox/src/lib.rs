@@ -6,6 +6,7 @@ use bevy_asset::AddAsset;
 use dust_format_vdb::NodeConst;
 pub use vox_loader::*;
 
+pub type VoxGeometry = dust_format_vdb::VdbGeometry<vox_loader::TreeRoot>;
 #[derive(Default)]
 pub struct VoxPlugin;
 impl bevy_app::Plugin for VoxPlugin {
