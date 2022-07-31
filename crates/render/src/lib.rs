@@ -12,9 +12,9 @@ pub mod renderer;
 pub mod shader;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
+pub use ash::vk;
 
 use ash::extensions::{ext, khr};
-use ash::vk;
 use bevy_app::{App, AppLabel, CoreStage, Plugin};
 use bevy_asset::AddAsset;
 use bevy_ecs::schedule::StageLabel;

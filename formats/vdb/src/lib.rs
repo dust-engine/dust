@@ -12,9 +12,11 @@
 #![feature(const_mut_refs)]
 #![feature(const_for)]
 #![feature(const_intoiterator_identity)]
+#![feature(portable_simd)]
 
 mod accessor;
 mod bitmask;
+mod geometry;
 mod node;
 mod pool;
 mod tree;

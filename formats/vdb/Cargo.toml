@@ -9,6 +9,12 @@ edition = "2021"
 glam = { git = "https://github.com/bitshifter/glam-rs" }
 fxhash = "0.2"
 nohash = "0.2.0"
+dust_render = { path = "../../crates/render" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
+
+dustash = { path = "../../../dustash" }
 
 [dev-dependencies]
 rand = "0.8.5"

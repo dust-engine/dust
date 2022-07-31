@@ -4,7 +4,7 @@ mod root;
 
 use std::alloc::Layout;
 use std::fmt::Debug;
-use std::mem::MaybeUninit;
+use std::mem::{size_of, MaybeUninit};
 
 use glam::UVec3;
 pub use internal::*;
@@ -27,9 +27,10 @@ pub struct NodeMeta<V> {
 
 pub trait Node: 'static + Default + Debug {
     /// span of the node.
+    type LeafType: IsLeaf;
     const EXTENT_LOG2: UVec3;
     const EXTENT: UVec3;
-    const EXTENT_MASK: UVec3;  // = (1 << extent_log2) - 1
+    const EXTENT_MASK: UVec3; // = (1 << extent_log2) - 1
     /// Max number of child nodes.
     const SIZE: usize;
 
@@ -79,6 +80,12 @@ pub trait Node: 'static + Default + Debug {
     fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a>;
     /// This is called when the node was located in a node pool.
     fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a>;
+
+    type LeafIterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)>;
+    /// This is called when the node was owned as the root node in the tree.
+    fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a>;
+    /// This is called when the node was located in a node pool.
+    fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a>;
 }
 
 /// Trait that contains const methods for the node.

@@ -32,6 +32,7 @@ pub struct RootNode<CHILD: Node> {
 }
 
 impl<CHILD: Node> Node for RootNode<CHILD> {
+    type LeafType = CHILD::LeafType;
     const EXTENT_LOG2: UVec3 = UVec3 {
         x: 32,
         y: 32,
@@ -140,6 +141,21 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     fn iter_in_pool<'a>(_pools: &'a [Pool], _ptr: u32, _offset: UVec3) -> Self::Iterator<'a> {
         unreachable!("Root Node is never kept in a pool!")
     }
+
+    type LeafIterator<'a> = RootLeafIterator<'a, CHILD>;
+
+    fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {
+        RootLeafIterator {
+            pools,
+            map_iterator: self.map.iter(),
+            child_iterator: None,
+            location_offset: offset,
+        }
+    }
+
+    fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
+        unreachable!("Root Node is never kept in a pool!")
+    }
 }
 
 impl<CHILD: ~const NodeConst> const NodeConst for RootNode<CHILD> {
@@ -184,6 +200,44 @@ impl<'a, CHILD: Node> Iterator for RootIterator<'a, CHILD> {
                     RootNodeEntry::Occupied(ptr) => {
                         self.child_iterator =
                             Some(CHILD::iter_in_pool(self.pools, *ptr, self.location_offset));
+                        continue;
+                    }
+                    _ => {
+                        return None;
+                    }
+                }
+            } else {
+                // Also ran out. We have nothing left.
+                return None;
+            }
+        }
+    }
+}
+pub struct RootLeafIterator<'a, CHILD: Node> {
+    pools: &'a [Pool],
+    map_iterator: std::collections::hash_map::Iter<'a, RootKey, RootNodeEntry>,
+    child_iterator: Option<CHILD::LeafIterator<'a>>,
+    location_offset: UVec3,
+}
+
+impl<'a, CHILD: Node> Iterator for RootLeafIterator<'a, CHILD> {
+    type Item = (UVec3, &'a CHILD::LeafType);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // Try taking it out from the current child
+            if let Some(item) = self.child_iterator.as_mut().and_then(|a| a.next()) {
+                return Some(item);
+            }
+            // self.child_iterator is None or ran out. Grab the next child.
+            if let Some((_, root_node)) = self.map_iterator.next() {
+                match root_node {
+                    RootNodeEntry::Occupied(ptr) => {
+                        self.child_iterator = Some(CHILD::iter_leaf_in_pool(
+                            self.pools,
+                            *ptr,
+                            self.location_offset,
+                        ));
                         continue;
                     }
                     _ => {

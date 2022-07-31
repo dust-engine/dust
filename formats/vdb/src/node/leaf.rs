@@ -3,6 +3,7 @@ use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool};
 use glam::UVec3;
 use std::{
     alloc::Layout,
+    iter::Once,
     mem::{size_of, MaybeUninit},
 };
 
@@ -10,7 +11,7 @@ use std::{
 /// so that the occupancy mask happens to be exactly 64 bits.
 /// Size: 3 u32
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LeafNode<const LOG2: UVec3>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
@@ -23,18 +24,37 @@ where
     pub material_ptr: u32,
 }
 
+pub trait IsLeaf: Node {
+    fn get_occupancy(&self, data: &mut [u64]);
+}
+
+impl<const LOG2: UVec3> IsLeaf for LeafNode<LOG2>
+where
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    fn get_occupancy(&self, data: &mut [u64]) {
+        debug_assert_eq!(std::mem::size_of::<u64>(), std::mem::size_of::<usize>());
+        let len = self.occupancy.data.len();
+        debug_assert!(data.len() >= len);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.occupancy.data.as_ptr() as *mut u64,
+                data.as_mut_ptr(),
+                len,
+            );
+        }
+    }
+}
+
 impl<const LOG2: UVec3> Node for LeafNode<LOG2>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// Total number of voxels contained within the leaf node.
     const SIZE: usize = size_of_grid(LOG2);
+    type LeafType = Self;
     /// Extent of the leaf node in each axis.
-    const EXTENT_LOG2: UVec3 = UVec3 {
-        x: LOG2.x,
-        y: LOG2.y,
-        z: LOG2.z,
-    };
+    const EXTENT_LOG2: UVec3 = LOG2;
     const EXTENT: UVec3 = UVec3 {
         x: 1 << LOG2.x,
         y: 1 << LOG2.y,
@@ -128,6 +148,19 @@ where
             location_offset: offset,
             bits_iterator: node.occupancy.iter_set_bits(),
         }
+    }
+
+    type LeafIterator<'a> = Once<(UVec3, &'a Self)>;
+
+    #[inline]
+    fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {
+        std::iter::once((offset, self))
+    }
+
+    #[inline]
+    fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
+        let node = unsafe { pools[0].get_item::<Self>(ptr) };
+        std::iter::once((offset, node))
     }
 }
 

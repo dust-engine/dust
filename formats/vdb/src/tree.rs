@@ -1,8 +1,14 @@
-use std::{alloc::Layout, mem::MaybeUninit};
+use std::{
+    alloc::Layout,
+    marker::PhantomData,
+    mem::{size_of, MaybeUninit},
+};
 
-use glam::UVec3;
+use glam::{UVec3, Vec3};
 
-use crate::{Accessor, Node, NodeConst, NodeMeta, Pool};
+use crate::{
+    pool::PoolIterator, size_of_grid, Accessor, LeafNode, Node, NodeConst, NodeMeta, Pool,
+};
 
 pub struct Tree<ROOT: Node>
 where
@@ -102,6 +108,10 @@ where
     pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
+
+    pub fn iter_leaf<'a>(&'a self) -> ROOT::LeafIterator<'a> {
+        self.root.iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
+    }
 }
 
 /// Workaround for https://github.com/rust-lang/rust/issues/88424#issuecomment-911158795
@@ -111,6 +121,7 @@ where
 {
     const METAS: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1];
     const META_MASK: UVec3;
+    const ID: u64;
 }
 
 impl<ROOT: ~const NodeConst> const TreeMeta<ROOT> for Tree<ROOT>
@@ -142,5 +153,17 @@ where
             i += 1;
         }
         mask
+    };
+    const ID: u64 = {
+        let mut id: u64 = 0;
+        let mut i = 0;
+        while i < Self::METAS.len() {
+            let meta = &Self::METAS[i];
+            id = id * 32 + meta.extent_log2.x as u64;
+            id = id * 32 + meta.extent_log2.y as u64;
+            id = id * 32 + meta.extent_log2.z as u64;
+            i += 1;
+        }
+        id
     };
 }

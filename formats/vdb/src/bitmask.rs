@@ -1,10 +1,11 @@
 use std::mem::size_of;
 
+#[derive(Clone)]
 pub struct BitMask<const SIZE: usize>
 where
     [(); SIZE / size_of::<usize>() / 8]: Sized,
 {
-    data: [usize; SIZE / size_of::<usize>() / 8],
+    pub(crate) data: [usize; SIZE / size_of::<usize>() / 8],
 }
 
 impl<const SIZE: usize> Default for BitMask<SIZE>
@@ -66,6 +67,10 @@ where
             i: 0,
             state: self.data[0],
         }
+    }
+
+    pub fn is_zeroed(&self) -> bool {
+        self.data.iter().all(|&a| a == 0)
     }
 }
 

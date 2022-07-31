@@ -46,6 +46,7 @@ impl<CHILD: Node, const FANOUT_LOG2: UVec3> Node for InternalNode<CHILD, FANOUT_
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
+    type LeafType = CHILD::LeafType;
     const SIZE: usize = size_of_grid(FANOUT_LOG2);
     const EXTENT_LOG2: UVec3 = UVec3 {
         x: FANOUT_LOG2.x + CHILD::EXTENT_LOG2.x,
@@ -160,6 +161,7 @@ where
     }
 
     type Iterator<'a> = InternalNodeIterator<'a, CHILD, FANOUT_LOG2>;
+    #[inline]
     fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
         InternalNodeIterator {
             pools,
@@ -169,9 +171,35 @@ where
             child_iterator: None,
         }
     }
+    #[inline]
     fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a> {
         let node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
         InternalNodeIterator {
+            pools,
+            location_offset: offset,
+            child_mask_iterator: node.child_mask.iter_set_bits(),
+            child_ptrs: &node.child_ptrs,
+            child_iterator: None,
+        }
+    }
+
+    type LeafIterator<'a> = InternalNodeLeafIterator<'a, CHILD, FANOUT_LOG2>;
+
+    #[inline]
+    fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {
+        InternalNodeLeafIterator {
+            pools,
+            location_offset: offset,
+            child_mask_iterator: self.child_mask.iter_set_bits(),
+            child_ptrs: &self.child_ptrs,
+            child_iterator: None,
+        }
+    }
+
+    #[inline]
+    fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
+        let node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
+        InternalNodeLeafIterator {
             pools,
             location_offset: offset,
             child_mask_iterator: node.child_mask.iter_set_bits(),
@@ -244,6 +272,52 @@ where
                 };
                 let offset = offset * CHILD::EXTENT;
                 self.child_iterator = Some(CHILD::iter_in_pool(
+                    self.pools,
+                    child_ptr,
+                    self.location_offset + offset,
+                ));
+                continue;
+            } else {
+                // Also ran out. We have nothing left.
+                return None;
+            }
+        }
+    }
+}
+
+pub struct InternalNodeLeafIterator<'a, CHILD: Node, const FANOUT_LOG2: UVec3>
+where
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    pools: &'a [Pool],
+    location_offset: UVec3,
+    child_mask_iterator: SetBitIterator<'a, { size_of_grid(FANOUT_LOG2) }>,
+    child_iterator: Option<CHILD::LeafIterator<'a>>,
+    child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
+}
+impl<'a, CHILD: Node, const FANOUT_LOG2: UVec3> Iterator
+    for InternalNodeLeafIterator<'a, CHILD, FANOUT_LOG2>
+where
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    type Item = (UVec3, &'a CHILD::LeafType);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // Try taking it out from the current child
+            if let Some(item) = self.child_iterator.as_mut().and_then(|a| a.next()) {
+                return Some(item);
+            }
+            // self.child_iterator is None or ran out. Grab the next child.
+            if let Some(next_child_index) = self.child_mask_iterator.next() {
+                let child_ptr = unsafe { self.child_ptrs[next_child_index].occupied };
+                let offset = UVec3 {
+                    x: next_child_index as u32 >> (FANOUT_LOG2.z + FANOUT_LOG2.y),
+                    y: (next_child_index as u32 >> FANOUT_LOG2.z) & ((1 << FANOUT_LOG2.y) - 1),
+                    z: next_child_index as u32 & ((1 << FANOUT_LOG2.z) - 1),
+                };
+                let offset = offset * CHILD::EXTENT;
+                self.child_iterator = Some(CHILD::iter_leaf_in_pool(
                     self.pools,
                     child_ptr,
                     self.location_offset + offset,

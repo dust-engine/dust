@@ -57,7 +57,6 @@ where
     }
 }
 
-
 pub struct AccessorMut<'a, ROOT: Node>
 where
     [(); ROOT::LEVEL as usize]: Sized,
@@ -67,12 +66,10 @@ where
     last_coords: UVec3,
 }
 
-
 impl<'a, ROOT: Node> AccessorMut<'a, ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
 {
-    
     #[inline]
     pub fn get(&mut self, coords: UVec3) -> Option<ROOT::Voxel>
     where
@@ -95,7 +92,7 @@ where
         };
         return result;
     }
-    
+
     #[inline]
     pub fn set(&mut self, coords: UVec3, value: Option<ROOT::Voxel>)
     where
@@ -109,7 +106,9 @@ where
         );
         self.last_coords = coords;
         if lca_level >= ROOT::LEVEL as u32 {
-            self.tree.root.set(&mut self.tree.pool, coords, value, &mut self.ptrs);
+            self.tree
+                .root
+                .set(&mut self.tree.pool, coords, value, &mut self.ptrs);
         } else {
             let meta = &<Tree<ROOT> as TreeMeta<ROOT>>::METAS[lca_level as usize];
             let new_coords = coords & meta.extent_mask;
@@ -118,7 +117,6 @@ where
         }
     }
 }
-
 
 impl<ROOT: Node> Tree<ROOT>
 where
@@ -145,7 +143,7 @@ mod tests {
     use glam::UVec3;
 
     use super::lowest_common_ancestor_level;
-    use crate::{hierarchy, tree::TreeMeta, Tree, Node};
+    use crate::{hierarchy, tree::TreeMeta, Node, Tree};
 
     #[test]
     fn test() {
