@@ -3,8 +3,9 @@
 
 mod vox_loader;
 use bevy_asset::AddAsset;
-use dust_format_vdb::NodeConst;
+mod material;
 pub use vox_loader::*;
+pub use material::{DummyMaterial, GPUDummyMaterial};
 
 pub type VoxGeometry = dust_format_vdb::VdbGeometry<vox_loader::TreeRoot>;
 #[derive(Default)]

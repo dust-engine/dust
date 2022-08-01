@@ -8,7 +8,12 @@ edition = "2021"
 [dependencies]
 dot_vox = { git = "https://github.com/dust-engine/dot_vox" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_app = { git = "https://github.com/bevyengine/bevy" }
 dust_format_vdb = { path = "../vdb" }
+dustash = { path = "../../../dustash" }
+dust_render = { path = "../../crates/render" }
+ash = "0.37"
 glam = { git = "https://github.com/bitshifter/glam-rs" }
 anyhow = "*"

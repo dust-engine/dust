@@ -37,6 +37,7 @@ impl AssetLoader for VoxLoader {
             let model = model.models.iter().max_by_key(|a| a.voxels.len()).unwrap();
             let tree = convert_model(model);
             let geometry = dust_format_vdb::VdbGeometry::new(tree, Vec3::ONE);
+            println!("Asset loaded");
             load_context.set_default_asset(LoadedAsset::new(geometry));
             Ok(())
         })
