@@ -32,6 +32,11 @@ dust_format_vdb = { path = "formats/vdb" }
 smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras" }
 glam = "0.21"
 
+[features]
+default = ["x11"]
+wayland = ["bevy_winit/wayland"]
+x11 = ["bevy_winit/x11"]
+
 [patch."https://github.com/bevyengine/bevy"]
 bevy_app = { path = "../bevy/crates/bevy_app" }
 bevy_window = { path = "../bevy/crates/bevy_window" }
