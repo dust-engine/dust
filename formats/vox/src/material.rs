@@ -17,11 +17,9 @@ use dustash::resources::Image;
 use dustash::Device;
 use std::sync::Arc;
 
-#[derive(bevy_reflect::TypeUuid)]
-#[derive(Default)]
+#[derive(bevy_reflect::TypeUuid, Default)]
 #[uuid = "75a9a733-04d7-4acb-8600-9a7d24ff0599"] // TODO: better UUID
-pub struct DummyMaterial {
-}
+pub struct DummyMaterial {}
 
 impl RenderAsset for DummyMaterial {
     type GPUAsset = GPUDummyMaterial;
@@ -31,9 +29,7 @@ impl RenderAsset for DummyMaterial {
         &mut self,
         allocator: &mut bevy_ecs::system::SystemParamItem<Self::CreateBuildDataParam>,
     ) -> Self::BuildData {
-        println!(
-            "Create nbuild data"
-        );
+        println!("Create nbuild data");
     }
 }
 
@@ -54,8 +50,7 @@ impl Material for DummyMaterial {
     }
 }
 
-pub struct GPUDummyMaterial {
-}
+pub struct GPUDummyMaterial {}
 
 impl GPURenderAsset<DummyMaterial> for GPUDummyMaterial {
     type BuildParam = (SRes<Arc<Device>>, SRes<Arc<Allocator>>, SRes<Arc<Queues>>);
@@ -65,8 +60,7 @@ impl GPURenderAsset<DummyMaterial> for GPUDummyMaterial {
         commands_future: &mut dustash::sync::CommandsFuture,
         params: &mut bevy_ecs::system::SystemParamItem<Self::BuildParam>,
     ) -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 

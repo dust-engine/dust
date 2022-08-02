@@ -18,7 +18,7 @@ use dustash::{
 
 use crate::{material::GPUGeometryMaterial, renderable::Renderable, RenderStage};
 use ash::vk;
-use bevy_hierarchy::{Children, BuildChildren};
+use bevy_hierarchy::{BuildChildren, Children};
 
 /// This plugin generates a BLAS for each unique combination of geometries.
 #[derive(Default)]

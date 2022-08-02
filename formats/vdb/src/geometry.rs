@@ -82,11 +82,14 @@ where
             .collect();
         let size = std::mem::size_of_val(nodes.as_slice());
         assert_eq!(size, nodes.len() * 32);
+        println!("Allocating some buffer for {} elements", nodes.len());
         let mut buffer = allocator
             .allocate_buffer(&BufferRequest {
                 size: size as u64,
+                alignment: 16,
                 // TODO: also make this ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR for integrated GPUs.
-                usage: dust_render::vk::BufferUsageFlags::TRANSFER_SRC,
+                usage: dust_render::vk::BufferUsageFlags::TRANSFER_SRC
+                    | dust_render::vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                 scenario: dustash::resources::alloc::MemoryAllocScenario::StagingBuffer,
                 ..Default::default()
             })
@@ -113,15 +116,52 @@ impl<ROOT: NodeConst + Sync + Send> GPURenderAsset<VdbGeometry<ROOT>> for GPUVdb
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
 {
-    type BuildParam = ();
+    type BuildParam = SRes<Arc<Allocator>>;
 
     fn build(
         build_set: <VdbGeometry<ROOT> as RenderAsset>::BuildData,
         commands_future: &mut CommandsFuture,
-        params: &mut SystemParamItem<Self::BuildParam>,
+        allocator: &mut SystemParamItem<Self::BuildParam>,
     ) -> Self {
-        Self {
-            buffer: Arc::new(build_set),
+        if build_set
+            .memory_properties()
+            .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+        {
+            println!("Using device local");
+            Self {
+                buffer: Arc::new(build_set),
+            }
+        } else {
+            let size = build_set.size();
+            println!(
+                "Alignment is ->>>>>>>>>>>>>>>>>>>>>>>>{}",
+                build_set.alignment()
+            );
+            let device_local_buffer = allocator
+                .allocate_buffer(&BufferRequest {
+                    size,
+                    alignment: build_set.alignment(),
+                    usage: vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                        | vk::BufferUsageFlags::TRANSFER_DST
+                        | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    ..Default::default()
+                })
+                .unwrap();
+            let device_local_buffer = Arc::new(device_local_buffer);
+            commands_future.then_commands(|mut recorder| {
+                recorder.copy_buffer(
+                    build_set,
+                    device_local_buffer.clone(),
+                    &[vk::BufferCopy {
+                        src_offset: 0,
+                        dst_offset: 0,
+                        size,
+                    }],
+                );
+            });
+            Self {
+                buffer: device_local_buffer,
+            }
         }
     }
 }

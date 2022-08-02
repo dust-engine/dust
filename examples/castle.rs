@@ -55,10 +55,9 @@ fn main() {
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut assets: ResMut<Assets<DummyMaterial>>
+    mut assets: ResMut<Assets<DummyMaterial>>,
 ) {
-    let handle: Handle<dust_format_vox::VoxGeometry> =
-        asset_server.load("../assets/castle.vox");
+    let handle: Handle<dust_format_vox::VoxGeometry> = asset_server.load("../assets/castle.vox");
     let material_handle = assets.add(DummyMaterial::default());
     //let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
     commands
