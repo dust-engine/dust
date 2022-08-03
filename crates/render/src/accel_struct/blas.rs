@@ -108,20 +108,6 @@ fn build_blas(
             continue;
         }
 
-        let mut buffers: Vec<Arc<MemBuffer>> = Vec::with_capacity(geometry_materials.len());
-        for geometry_material in geometry_materials.iter() {
-            if let Some(buffer) = geometry_material.blas_input_primitives.as_ref() {
-                buffers.push(buffer.clone())
-            } else {
-                // Instance is not ready yet because of missing geometry data.
-                continue 'outer;
-            }
-
-            if geometry_material.sbt_data.is_none() {
-                continue 'outer;
-            }
-        }
-
         geometry_materials.sort_by_key(|geometry_material| geometry_material.geometry_handle);
         let primitive_ids: Vec<_> = geometry_materials
             .iter()
@@ -146,12 +132,26 @@ fn build_blas(
                 "give me a blas with the following geometries: {:?}",
                 primitive_ids
             );
+            
+            let mut buffers: Vec<(Arc<MemBuffer>, std::alloc::Layout)> = Vec::with_capacity(geometry_materials.len());
+            for geometry_material in geometry_materials.iter() {
+                if let Some(buffer) = geometry_material.blas_input_primitives.as_ref() {
+                    buffers.push((buffer.clone(), geometry_material.blas_input_layout))
+                } else {
+                    // Instance is not ready yet because of missing geometry data.
+                    continue 'outer;
+                }
+    
+                if geometry_material.sbt_data.is_none() {
+                    continue 'outer;
+                }
+            }
             let mut builder = AabbBlasBuilder::new(
                 vk::BuildAccelerationStructureFlagsKHR::ALLOW_COMPACTION
                     | vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE,
             );
-            for geometry_primitive in buffers {
-                builder.add_geometry::<()>(geometry_primitive, vk::GeometryFlagsKHR::empty());
+            for (primitive_buffer, layout) in buffers {
+                builder.add_geometry(primitive_buffer, vk::GeometryFlagsKHR::empty(), layout);
                 // TODO: add geometry flags
             }
             // Queue up the rebuild command.

@@ -25,9 +25,9 @@ vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
 
 void main()
 {
-    vec3 min = geometryInfo.values[gl_PrimitiveID * 2];
-    vec3 max = geometryInfo.values[gl_PrimitiveID * 2 + 1];
+    //vec3 min = geometryInfo.values[gl_PrimitiveID * 2];
+    //vec3 max = geometryInfo.values[gl_PrimitiveID * 2 + 1];
 
-    vec2 intersection = intersectAABB(gl_WorldRayOriginEXT, gl_WorldRayDirectionEXT , min, max);
-    reportIntersectionEXT(intersection.x, 0);
+    //vec2 intersection = intersectAABB(gl_WorldRayOriginEXT, gl_WorldRayDirectionEXT , min, max);
+    reportIntersectionEXT(10.0, 0);
 }

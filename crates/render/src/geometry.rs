@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc, alloc::{LayoutError, Layout}};
 
 use crate::{
     render_asset::{GPURenderAsset, RenderAsset, RenderAssetPlugin},
@@ -34,6 +34,9 @@ pub trait Geometry: RenderAsset {
 /// RenderWorld Assets.
 pub trait GPUGeometry<T: Geometry>: GPURenderAsset<T> {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer>;
+    fn blas_input_layout() -> Layout {
+        std::alloc::Layout::new::<ash::vk::AabbPositionsKHR>()
+    }
 
     type SbtInfo: Copy;
     type GeometryInfoParams: SystemParam;

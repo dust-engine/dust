@@ -1,3 +1,4 @@
+use std::alloc::Layout;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -42,6 +43,7 @@ pub struct GPUGeometryMaterial {
     pub material_handle: HandleId,
     // None if the geometry hasn't been loaded yet. This tells the BLAS systems to not build the BLAS yet.
     pub blas_input_primitives: Option<Arc<MemBuffer>>,
+    pub blas_input_layout: Layout,
     pub sbt_data: Option<[u8; 32]>, // 32 byte
     pub hitgroup_index: u32,
 }
@@ -122,6 +124,7 @@ where
                                 geometry_handle: geometry_handle.id,
                                 material_handle: material_handle.id,
                                 blas_input_primitives: Some(buf),
+                                blas_input_layout: <<<T as Material>::Geometry as RenderAsset>::GPUAsset>::blas_input_layout(),
                                 sbt_data: Some(sbt_data),
                                 hitgroup_index,
                             });
@@ -132,6 +135,7 @@ where
                         geometry_handle: geometry_handle.id,
                         material_handle: material_handle.id,
                         blas_input_primitives: None,
+                        blas_input_layout: <<<T as Material>::Geometry as RenderAsset>::GPUAsset>::blas_input_layout(),
                         sbt_data: None,
                         hitgroup_index,
                     });

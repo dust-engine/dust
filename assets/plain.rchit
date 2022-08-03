@@ -25,11 +25,5 @@ vec3 randomColorList[5] = {
 layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
 
 void main() {
-    uint width = imageSize(bindless_StorageImage[materialInfo]).x;
-    ivec2 sampleLocation = ivec2(
-        gl_PrimitiveID & width,
-        gl_PrimitiveID / width.x
-    );
-    float v = imageLoad(bindless_StorageImage[materialInfo], sampleLocation).x / 255.0;
-    primaryRayPayload.color = vec3(v,v,v);
+    primaryRayPayload.color = vec3(1.0, 1.0, 1.0);
 }

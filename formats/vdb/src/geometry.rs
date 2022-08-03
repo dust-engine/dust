@@ -62,7 +62,7 @@ where
             .tree
             .iter_leaf()
             .map(|(position, d)| {
-                let position = position.as_vec3a() * leaf_extent;
+                let position = position.as_vec3a();
                 let max_position = leaf_extent + position;
                 let aabb = vk::AabbPositionsKHR {
                     min_x: position.x,
@@ -104,6 +104,7 @@ where
 }
 
 // size: 8 x u32 = 32 bytes
+#[repr(C)]
 struct GPUVdbNode {
     aabb: vk::AabbPositionsKHR,
     mask: u64,
@@ -188,6 +189,9 @@ where
 {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer> {
         &self.buffer
+    }
+    fn blas_input_layout() -> std::alloc::Layout {
+        unimplemented!()
     }
 
     type SbtInfo = u64;

@@ -71,6 +71,9 @@ impl GPUGeometry<VoxGeometry> for VoxGPUGeometry {
     fn blas_input_buffer(&self) -> &std::sync::Arc<dustash::resources::alloc::MemBuffer> {
         GPUGeometry::<VoxGeometryInner>::blas_input_buffer(&self.0)
     }
+    fn blas_input_layout() -> std::alloc::Layout {
+        std::alloc::Layout::new::<(ash::vk::AabbPositionsKHR, u64)>()
+    }
 
     type SbtInfo = <VoxGPUGeometryInner as GPUGeometry<VoxGeometryInner>>::SbtInfo;
 
