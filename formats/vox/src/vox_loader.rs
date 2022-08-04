@@ -1,11 +1,11 @@
 use dot_vox::Model;
-use dust_format_vdb::hierarchy;
+use dust_vdb::hierarchy;
 use glam::{UVec3, Vec3};
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 
 pub type TreeRoot = hierarchy!(4, 2, 2);
-pub type Tree = dust_format_vdb::Tree<TreeRoot>;
+pub type Tree = dust_vdb::Tree<TreeRoot>;
 
 //  2,266,302 ns/iter
 pub fn convert_model(model: &Model) -> Tree {

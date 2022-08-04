@@ -97,7 +97,7 @@ pub trait NodeConst: Node {
 
 /// Macro that simplifies tree type construction.
 /// ```
-/// use dust_format_vdb::{hierarchy, Node};
+/// use dust_vdb::{hierarchy, Node};
 /// // Create a 4x4x4 LeafNode
 /// let hierarchy = <hierarchy!(2)>::new();
 /// // Create a two-level tree with 2x2x2 leafs and 8x8x8 root.

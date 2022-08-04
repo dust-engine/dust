@@ -20,7 +20,7 @@ where
 
 /// ```
 /// #![feature(generic_const_exprs)]
-/// use dust_format_vdb::{hierarchy, Node, Tree};
+/// use dust_vdb::{hierarchy, Node, Tree};
 /// use glam::UVec3;
 /// let mut tree = Tree::<hierarchy!(2, 2)>::new();
 /// tree.set_value(UVec3{x: 0, y: 4, z: 0}, Some(true));
@@ -92,7 +92,7 @@ where
 
     /// ```
     /// #![feature(generic_const_exprs)]
-    /// use dust_format_vdb::{Tree, hierarchy};
+    /// use dust_vdb::{Tree, hierarchy};
     /// use glam::UVec3;
     /// let mut tree = Tree::<hierarchy!(4, 2)>::new();
     /// tree.set_value(UVec3::new(0, 1, 2), Some(true));

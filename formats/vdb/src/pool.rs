@@ -22,7 +22,7 @@ unsafe impl Sync for Pool {}
 /// A memory pool for objects of the same layout.
 /// ```
 /// use std::alloc::Layout;
-/// use dust_format_vdb::Pool;
+/// use dust_vdb::Pool;
 /// let item: u64 = 0;
 /// // Create a pool of u64s with 2 items in each block.
 /// unsafe {
