@@ -17,7 +17,10 @@ use glam::{Vec3, Vec3A};
 // size: 8 x u32 = 32 bytes
 #[repr(C)]
 struct GPUVoxNode {
-    aabb: vk::AabbPositionsKHR,
+    x: u16,
+    y: u16,
+    z: u16,
+    w: u16,
     mask: u64,
 }
 
@@ -26,11 +29,11 @@ struct GPUVoxNode {
 /// Wrapper for VoxGeometryInner. Without the wrapper, the linking fails due to a rustc bug
 pub struct VoxGeometry {
     tree: Tree,
-    pub unit_size: Vec3,
+    pub unit_size: f32,
 }
 
 impl VoxGeometry {
-    pub fn new(tree: Tree, unit_size: Vec3) -> Self {
+    pub fn new(tree: Tree, unit_size: f32) -> Self {
         Self { tree, unit_size }
     }
 }
@@ -38,7 +41,8 @@ impl VoxGeometry {
 impl RenderAsset for VoxGeometry {
     type GPUAsset = VoxGPUGeometry;
 
-    type BuildData = MemBuffer;
+    /// AABBBuffer, GeometryBuffer
+    type BuildData = (MemBuffer, MemBuffer);
 
     type CreateBuildDataParam = SRes<Arc<Allocator>>;
 
@@ -46,51 +50,84 @@ impl RenderAsset for VoxGeometry {
         &mut self,
         allocator: &mut SystemParamItem<Self::CreateBuildDataParam>,
     ) -> Self::BuildData {
-        let leaf_extent: Vec3A = <<TreeRoot as Node>::LeafType as Node>::EXTENT.as_vec3a();
-        let leaf_extent: Vec3A = Vec3A::from(self.unit_size) * leaf_extent;
+        let leaf_extent_int = <<TreeRoot as Node>::LeafType as Node>::EXTENT;
+        let leaf_extent: Vec3A = leaf_extent_int.as_vec3a();
+        let leaf_extent: Vec3A = self.unit_size * leaf_extent;
 
-        let nodes: Vec<GPUVoxNode> = self
+        let (aabbs, nodes): (Vec<vk::AabbPositionsKHR>, Vec<GPUVoxNode>) = self
             .tree
             .iter_leaf()
             .map(|(position, d)| {
-                let position = position.as_vec3a();
-                let max_position = leaf_extent + position;
-                let aabb = vk::AabbPositionsKHR {
-                    min_x: position.x,
-                    min_y: position.y,
-                    min_z: position.z,
-                    max_x: max_position.x,
-                    max_y: max_position.y,
-                    max_z: max_position.z,
+                let aabb = {
+                    let position = position.as_vec3a();
+                    let max_position = leaf_extent + position;
+                    vk::AabbPositionsKHR {
+                        min_x: position.x,
+                        min_y: position.y,
+                        min_z: position.z,
+                        max_x: max_position.x,
+                        max_y: max_position.y,
+                        max_z: max_position.z,
+                    }
                 };
                 let mut mask = [0_u64; 1];
                 d.get_occupancy(&mut mask);
-                GPUVoxNode {
-                    aabb,
-                    mask: mask[0],
-                }
+                let mask = mask[0];
+                let node = {
+                    GPUVoxNode {
+                        x: position.x as u16,
+                        y: position.y as u16,
+                        z: position.z as u16,
+                        w: 0,
+                        mask,
+                    }
+                };
+                (aabb, node)
             })
-            .collect();
-        let size = std::mem::size_of_val(nodes.as_slice());
-        assert_eq!(size, nodes.len() * 32);
-        println!("Allocating some buffer for {} elements", nodes.len());
-        let mut buffer = allocator
-            .allocate_buffer(&BufferRequest {
-                size: size as u64,
-                alignment: 16,
-                // TODO: also make this ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR for integrated GPUs.
-                usage: dust_render::vk::BufferUsageFlags::TRANSFER_SRC
-                    | dust_render::vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                scenario: dustash::resources::alloc::MemoryAllocScenario::StagingBuffer,
-                ..Default::default()
-            })
-            .unwrap();
-
-        let data = unsafe { std::slice::from_raw_parts(nodes.as_ptr() as *const u8, size) };
-        buffer.map_scoped(|slice| {
-            slice.copy_from_slice(data);
-        });
-        buffer
+            .unzip();
+        let aabb_buffer = {
+            let size = std::mem::size_of_val(aabbs.as_slice());
+            assert_eq!(size, aabbs.len() * 24);
+            let mut buffer = allocator
+                .allocate_buffer(&BufferRequest {
+                    size: size as u64,
+                    alignment: 0,
+                    // TODO: also make this ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR for integrated GPUs.
+                    usage: dust_render::vk::BufferUsageFlags::TRANSFER_SRC
+                        | dust_render::vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    scenario: dustash::resources::alloc::MemoryAllocScenario::StagingBuffer,
+                    ..Default::default()
+                })
+                .unwrap();
+    
+            let data = unsafe { std::slice::from_raw_parts(aabbs.as_ptr() as *const u8, size) };
+            buffer.map_scoped(|slice| {
+                slice.copy_from_slice(data);
+            });
+            buffer
+        };
+        let geometry_buffer = {
+            let size = std::mem::size_of_val(nodes.as_slice());
+            assert_eq!(size, nodes.len() * 16);
+            let mut buffer = allocator
+                .allocate_buffer(&BufferRequest {
+                    size: size as u64,
+                    alignment: 0,
+                    // TODO: also make this ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR for integrated GPUs.
+                    usage: dust_render::vk::BufferUsageFlags::TRANSFER_SRC
+                        | dust_render::vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    scenario: dustash::resources::alloc::MemoryAllocScenario::StagingBuffer,
+                    ..Default::default()
+                })
+                .unwrap();
+    
+            let data = unsafe { std::slice::from_raw_parts(nodes.as_ptr() as *const u8, size) };
+            buffer.map_scoped(|slice| {
+                slice.copy_from_slice(data);
+            });
+            buffer
+        };
+        (aabb_buffer, geometry_buffer)
     }
 }
 
@@ -112,7 +149,8 @@ impl Geometry for VoxGeometry {
 
 pub struct VoxGPUGeometry {
     /// Buffer with vk::AabbPositionKHR and u64 mask interleaved.
-    buffer: Arc<MemBuffer>,
+    aabb_buffer: Arc<MemBuffer>,
+    geometry_buffer: Arc<MemBuffer>,
 }
 impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
     type BuildParam = SRes<Arc<Allocator>>;
@@ -122,35 +160,54 @@ impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
         commands_future: &mut dustash::sync::CommandsFuture,
         allocator: &mut SystemParamItem<Self::BuildParam>,
     ) -> Self {
-        if build_set
+        let (aabb_buffer, geometry_buffer) = build_set;
+        if geometry_buffer
             .memory_properties()
             .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         {
             println!("Using device local");
             Self {
-                buffer: Arc::new(build_set),
+                aabb_buffer: Arc::new(aabb_buffer),
+                geometry_buffer: Arc::new(geometry_buffer),
             }
         } else {
-            let size = build_set.size();
-            println!(
-                "Alignment is ->>>>>>>>>>>>>>>>>>>>>>>>{}",
-                build_set.alignment()
-            );
-            let device_local_buffer = allocator
+            let device_local_aabb_buffer = allocator
                 .allocate_buffer(&BufferRequest {
-                    size,
-                    alignment: build_set.alignment(),
+                    size: aabb_buffer.size(),
+                    alignment: aabb_buffer.alignment(),
                     usage: vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                         | vk::BufferUsageFlags::TRANSFER_DST
                         | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                     ..Default::default()
                 })
                 .unwrap();
-            let device_local_buffer = Arc::new(device_local_buffer);
+            let device_local_aabb_buffer = Arc::new(device_local_aabb_buffer);
+            let device_local_geometry_buffer = allocator
+                .allocate_buffer(&BufferRequest {
+                    size: geometry_buffer.size(),
+                    alignment: geometry_buffer.alignment(),
+                    usage: vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                        | vk::BufferUsageFlags::TRANSFER_DST
+                        | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    ..Default::default()
+                })
+                .unwrap();
+            let device_local_geometry_buffer = Arc::new(device_local_geometry_buffer);
             commands_future.then_commands(|mut recorder| {
+                let size = geometry_buffer.size();
                 recorder.copy_buffer(
-                    build_set,
-                    device_local_buffer.clone(),
+                    geometry_buffer,
+                    device_local_geometry_buffer.clone(),
+                    &[vk::BufferCopy {
+                        src_offset: 0,
+                        dst_offset: 0,
+                        size,
+                    }],
+                );
+                let size = aabb_buffer.size();
+                recorder.copy_buffer(
+                    aabb_buffer,
+                    device_local_aabb_buffer.clone(),
                     &[vk::BufferCopy {
                         src_offset: 0,
                         dst_offset: 0,
@@ -159,7 +216,8 @@ impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
                 );
             });
             Self {
-                buffer: device_local_buffer,
+                aabb_buffer: device_local_aabb_buffer,
+                geometry_buffer: device_local_geometry_buffer
             }
         }
     }
@@ -167,10 +225,7 @@ impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
 
 impl GPUGeometry<VoxGeometry> for VoxGPUGeometry {
     fn blas_input_buffer(&self) -> &Arc<MemBuffer> {
-        &self.buffer
-    }
-    fn blas_input_layout() -> std::alloc::Layout {
-        std::alloc::Layout::new::<(ash::vk::AabbPositionsKHR, u64)>()
+        &self.aabb_buffer
     }
 
     type SbtInfo = u64;
@@ -182,6 +237,6 @@ impl GPUGeometry<VoxGeometry> for VoxGPUGeometry {
         handle: &bevy_asset::Handle<VoxGeometry>,
         params: &mut bevy_ecs::system::SystemParamItem<Self::GeometryInfoParams>,
     ) -> Self::SbtInfo {
-        self.buffer.device_address()
+        self.geometry_buffer.device_address()
     }
 }

@@ -25,5 +25,6 @@ vec3 randomColorList[5] = {
 layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
 
 void main() {
-    primaryRayPayload.color = vec3(1.0, 1.0, 1.0);
+    float v = gl_RayTmaxEXT / 400.0;
+    primaryRayPayload.color = vec3(v,v,v);
 }

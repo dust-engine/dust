@@ -13,8 +13,8 @@ pub fn convert_model(model: &Model) -> Tree {
     for voxel in model.voxels.iter() {
         let coords: UVec3 = UVec3 {
             x: voxel.x as u32,
-            y: voxel.y as u32,
-            z: voxel.z as u32,
+            y: voxel.z as u32,
+            z: voxel.y as u32,
         };
         tree.set_value(coords, Some(true));
     }
@@ -34,10 +34,10 @@ impl AssetLoader for VoxLoader {
     ) -> bevy_asset::BoxedFuture<'a, Result<(), anyhow::Error>> {
         Box::pin(async {
             let model = dot_vox::load_bytes(bytes).map_err(|str| anyhow::Error::msg(str))?;
-            let model = model.models.iter().max_by_key(|a| a.voxels.len()).unwrap();
+            let (i, model) = model.models.iter().enumerate().max_by_key(|a| a.1.voxels.len()).unwrap();
             let tree = convert_model(model);
-            let geometry = crate::VoxGeometry::new(tree, Vec3::ONE);
-            println!("Asset loaded");
+            let geometry = crate::VoxGeometry::new(tree, 1.0);
+            println!("Asset loaded {}", i);
             load_context.set_default_asset(LoadedAsset::new(geometry));
             Ok(())
         })

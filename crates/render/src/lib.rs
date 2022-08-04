@@ -116,6 +116,7 @@ impl RenderPlugin {
                 &vk::PhysicalDeviceFeatures2::builder()
                     .features(vk::PhysicalDeviceFeatures {
                         shader_int64: vk::TRUE,
+                        shader_int16: vk::TRUE,
                         ..Default::default()
                     })
                     .push_next(&mut vk::PhysicalDeviceAccelerationStructureFeaturesKHR {
@@ -124,6 +125,10 @@ impl RenderPlugin {
                     })
                     .push_next(&mut vk::PhysicalDeviceRayTracingPipelineFeaturesKHR {
                         ray_tracing_pipeline: vk::TRUE,
+                        ..Default::default()
+                    })
+                    .push_next(&mut vk::PhysicalDeviceVulkan11Features {
+                        storage_buffer16_bit_access: vk::TRUE,
                         ..Default::default()
                     })
                     .push_next(&mut vk::PhysicalDeviceVulkan12Features {
@@ -135,6 +140,7 @@ impl RenderPlugin {
                         descriptor_binding_storage_buffer_update_after_bind: vk::TRUE,
                         descriptor_binding_partially_bound: vk::TRUE,
                         runtime_descriptor_array: vk::TRUE,
+                        shader_int8: vk::TRUE,
                         ..Default::default()
                     })
                     .push_next(&mut vk::PhysicalDeviceVulkan13Features {
