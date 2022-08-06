@@ -4,7 +4,7 @@ use glam::UVec3;
 use std::{
     alloc::Layout,
     marker::PhantomData,
-    mem::{size_of, MaybeUninit},
+    mem::{size_of, MaybeUninit}, cell::UnsafeCell,
 };
 
 #[derive(Clone, Copy)]
@@ -300,7 +300,7 @@ impl<'a, CHILD: Node, const FANOUT_LOG2: UVec3> Iterator
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
-    type Item = (UVec3, &'a CHILD::LeafType);
+    type Item = (UVec3, &'a UnsafeCell<CHILD::LeafType>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {

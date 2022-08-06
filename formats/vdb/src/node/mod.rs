@@ -3,6 +3,7 @@ mod leaf;
 mod root;
 
 use std::alloc::Layout;
+use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::mem::{size_of, MaybeUninit};
 
@@ -81,7 +82,7 @@ pub trait Node: 'static + Default + Debug {
     /// This is called when the node was located in a node pool.
     fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a>;
 
-    type LeafIterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)>;
+    type LeafIterator<'a>: Iterator<Item = (UVec3, &'a UnsafeCell<Self::LeafType>)>;
     /// This is called when the node was owned as the root node in the tree.
     fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a>;
     /// This is called when the node was located in a node pool.

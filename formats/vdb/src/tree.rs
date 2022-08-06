@@ -109,8 +109,18 @@ where
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
 
-    pub fn iter_leaf<'a>(&'a self) -> ROOT::LeafIterator<'a> {
-        self.root.iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
+    pub fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a ROOT::LeafType)> {
+        self.root.iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 }).map(|(position, leaf)| unsafe {
+            let leaf: &'a ROOT::LeafType = & *leaf.get();
+            (position, leaf)
+        })
+    }
+
+    pub fn iter_leaf_mut<'a>(&'a mut self) -> impl Iterator<Item = (UVec3, &'a mut ROOT::LeafType)> {
+        self.root.iter_leaf(&mut self.pool, UVec3 { x: 0, y: 0, z: 0 }).map(|(position, leaf)| unsafe {
+            let leaf: &'a mut ROOT::LeafType = &mut *leaf.get();
+            (position, leaf)
+        })
     }
 }
 

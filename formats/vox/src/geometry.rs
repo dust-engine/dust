@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::material::{DummyMaterial, GPUDummyMaterial};
 use crate::vox_loader::*;
 use ash::vk;
 use bevy_asset::AddAsset;

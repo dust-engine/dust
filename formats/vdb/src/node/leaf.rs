@@ -4,7 +4,7 @@ use glam::UVec3;
 use std::{
     alloc::Layout,
     iter::Once,
-    mem::{size_of, MaybeUninit},
+    mem::{size_of, MaybeUninit}, cell::UnsafeCell,
 };
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
@@ -150,17 +150,17 @@ where
         }
     }
 
-    type LeafIterator<'a> = Once<(UVec3, &'a Self)>;
+    type LeafIterator<'a> = Once<(UVec3, &'a UnsafeCell<Self>)>;
 
     #[inline]
     fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {
-        std::iter::once((offset, self))
+        std::iter::once((offset, unsafe {std::mem::transmute(self)}))
     }
 
     #[inline]
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
         let node = unsafe { pools[0].get_item::<Self>(ptr) };
-        std::iter::once((offset, node))
+        std::iter::once((offset, unsafe {std::mem::transmute(node)}))
     }
 }
 

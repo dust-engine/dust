@@ -72,6 +72,10 @@ where
     pub fn is_zeroed(&self) -> bool {
         self.data.iter().all(|&a| a == 0)
     }
+
+    pub fn count_ones(&self) -> usize {
+        self.data.iter().map(|a| a.count_ones() as usize).sum()
+    }
 }
 
 /// ```

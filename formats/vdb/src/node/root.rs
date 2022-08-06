@@ -1,4 +1,4 @@
-use std::{alloc::Layout, marker::PhantomData, mem::MaybeUninit};
+use std::{alloc::Layout, marker::PhantomData, mem::MaybeUninit, cell::UnsafeCell};
 
 use glam::UVec3;
 
@@ -221,7 +221,7 @@ pub struct RootLeafIterator<'a, CHILD: Node> {
 }
 
 impl<'a, CHILD: Node> Iterator for RootLeafIterator<'a, CHILD> {
-    type Item = (UVec3, &'a CHILD::LeafType);
+    type Item = (UVec3, &'a UnsafeCell<CHILD::LeafType>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {

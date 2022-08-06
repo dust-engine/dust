@@ -7,7 +7,7 @@ use bevy_ecs::system::{Commands, Res};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
 use dust_format_explicit_aabbs::material::DensityMaterial;
-use dust_format_vox::DummyMaterial;
+use dust_format_vox::PaletteMaterial;
 use dust_render::camera::PerspectiveCamera;
 
 use dust_render::renderable::Renderable;
@@ -45,7 +45,7 @@ fn main() {
     .add_plugin(dust_render::pipeline::RayTracingRendererPlugin::<
         DefaultRenderer,
     >::default())
-    .add_plugin(dust_render::material::MaterialPlugin::<DummyMaterial>::default())
+    .add_plugin(dust_render::material::MaterialPlugin::<PaletteMaterial>::default())
     .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
     .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
     .add_startup_system(setup);
@@ -55,10 +55,9 @@ fn main() {
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut assets: ResMut<Assets<DummyMaterial>>,
 ) {
     let handle: Handle<dust_format_vox::VoxGeometry> = asset_server.load("../assets/castle.vox");
-    let material_handle = assets.add(DummyMaterial::default());
+    let material_handle: Handle<PaletteMaterial> = asset_server.load("../assets/castle.vox#material");
     //let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
     commands
         .spawn()

@@ -1,4 +1,5 @@
 #![feature(into_future)]
+#![feature(alloc_layout_extra)]
 
 //pub mod accel_struct;
 pub mod accel_struct;
@@ -10,6 +11,7 @@ pub mod render_asset;
 pub mod renderable;
 pub mod renderer;
 pub mod shader;
+pub mod attributes;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
 pub use ash::vk;
