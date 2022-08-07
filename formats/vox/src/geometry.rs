@@ -11,7 +11,7 @@ use dust_render::{
 };
 use dust_vdb::{IsLeaf, Node};
 use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer};
-use glam::{Vec3, Vec3A};
+use glam::{Vec3, Vec3A, UVec3};
 
 // size: 8 x u32 = 32 bytes
 #[repr(C)]
@@ -21,6 +21,8 @@ struct GPUVoxNode {
     z: u16,
     w: u16,
     mask: u64,
+    material_ptr: u32,
+    reserved: u32,
 }
 
 #[derive(bevy_reflect::TypeUuid)]
@@ -32,8 +34,17 @@ pub struct VoxGeometry {
 }
 
 impl VoxGeometry {
-    pub fn new(tree: Tree, unit_size: f32) -> Self {
+    pub fn from_tree(tree: Tree, unit_size: f32) -> Self {
         Self { tree, unit_size }
+    }
+    pub fn new(unit_size: f32) -> Self {
+        Self { tree: Tree::new(), unit_size }
+    }
+    pub fn set(&mut self, coords: UVec3, value: Option<bool>) {
+        self.tree.set_value(coords, value)
+    }
+    pub fn get(&mut self, coords: UVec3) -> Option<bool> {
+        self.tree.get_value(coords)
     }
 }
 
@@ -79,6 +90,8 @@ impl RenderAsset for VoxGeometry {
                         z: position.z as u16,
                         w: 0,
                         mask,
+                        material_ptr: d.material_ptr,
+                        reserved: 0
                     }
                 };
                 (aabb, node)
@@ -107,7 +120,7 @@ impl RenderAsset for VoxGeometry {
         };
         let geometry_buffer = {
             let size = std::mem::size_of_val(nodes.as_slice());
-            assert_eq!(size, nodes.len() * 16);
+            assert_eq!(size, nodes.len() * 24);
             let mut buffer = allocator
                 .allocate_buffer(&BufferRequest {
                     size: size as u64,

@@ -8,6 +8,8 @@ struct Block
 {
     u16vec4 position;
     uint64_t mask;
+    uint32_t material_ptr;
+    uint32_t reserved;
 };
 
 layout(buffer_reference, buffer_reference_align = 8, scalar) buffer GeometryInfo {
@@ -16,8 +18,9 @@ layout(buffer_reference, buffer_reference_align = 8, scalar) buffer GeometryInfo
 
 layout(shaderRecordEXT) buffer sbt {
     GeometryInfo geometryInfo;
-    uint32_t materialInfo;
+    uint64_t materialInfo;
 };
+hitAttributeEXT uint8_t voxelId;
 
 vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
     vec3 tMin = (box_min - origin) / dir;
@@ -95,6 +98,7 @@ void dda(vec3 origin, vec3 dir, uint64_t grid, float scale) {
     };
 
     float realT = hitDistance / scale;
+    voxelId = hit;
     reportIntersectionEXT(realT, 0);
     return;
 }

@@ -15,5 +15,5 @@ dust_vdb = { path = "../vdb" }
 dustash = { path = "../../../dustash" }
 dust_render = { path = "../../crates/render" }
 ash = "0.37"
-glam = { git = "https://github.com/bitshifter/glam-rs" }
+glam = "0.21"
 anyhow = "*"

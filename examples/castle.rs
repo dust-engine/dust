@@ -7,12 +7,12 @@ use bevy_ecs::system::{Commands, Res};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
 use dust_format_explicit_aabbs::material::DensityMaterial;
-use dust_format_vox::PaletteMaterial;
+use dust_format_vox::{PaletteMaterial, VoxGeometry};
 use dust_render::camera::PerspectiveCamera;
 
 use dust_render::renderable::Renderable;
 
-use glam::Vec3;
+use glam::{Vec3, UVec3};
 
 use dust_render::renderer::Renderer as DefaultRenderer;
 
@@ -55,8 +55,15 @@ fn main() {
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut geometry: ResMut<Assets<VoxGeometry>>
 ) {
-    let handle: Handle<dust_format_vox::VoxGeometry> = asset_server.load("../assets/castle.vox");
+    let mut test_geometry = VoxGeometry::new(1.0);
+    test_geometry.set(UVec3::new(0, 0, 0), Some(true));
+    test_geometry.set(UVec3::new(3, 3, 3), Some(true));
+    test_geometry.set(UVec3::new(3, 3, 4), Some(true));
+    test_geometry.set(UVec3::new(3, 3, 5), Some(true));
+    let handle = geometry.add(test_geometry);
+    //let handle: Handle<VoxGeometry> = asset_server.load("../assets/castle.vox");
     let material_handle: Handle<PaletteMaterial> = asset_server.load("../assets/castle.vox#material");
     //let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
     commands

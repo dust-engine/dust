@@ -72,7 +72,7 @@ impl AssetLoader for VoxLoader {
             let model = dot_vox::load_bytes(bytes).map_err(|str| anyhow::Error::msg(str))?;
             let (i, model) = model.models.iter().enumerate().max_by_key(|a| a.1.voxels.len()).unwrap();
             let (tree, material) = convert_model(&self.allocator, model);
-            let geometry = crate::VoxGeometry::new(tree, 1.0);
+            let geometry = crate::VoxGeometry::from_tree(tree, 1.0);
             println!("Asset loaded {}", i);
             load_context.set_default_asset(LoadedAsset::new(geometry));
 

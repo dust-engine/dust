@@ -2,17 +2,35 @@
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
 
 struct RayPayload {
     vec3 color;
 };
 
+struct Block
+{
+    u16vec4 position;
+    uint64_t mask;
+    uint32_t material_ptr;
+    uint32_t reserved;
+};
+
+layout(buffer_reference, buffer_reference_align = 8, scalar) buffer GeometryInfo {
+    Block blocks[];
+};
+layout(buffer_reference) buffer MaterialInfo {
+    uint8_t materials[];
+};
 
 layout(shaderRecordEXT) buffer sbt {
-    uint64_t geometryInfo;
-    uint32_t materialInfo;
+    GeometryInfo geometryInfo;
+    MaterialInfo materialInfo;
 };
 layout(set = 1, binding = 1, r8ui) uniform readonly uimage2D bindless_StorageImage[];
+
+hitAttributeEXT uint8_t voxelId;
 
 vec3 randomColorList[5] = {
     vec3(0.976, 0.906, 0.906),
@@ -25,5 +43,7 @@ vec3 randomColorList[5] = {
 layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
 
 void main() {
-    primaryRayPayload.color = randomColorList[gl_PrimitiveID % 5];
+    uint32_t material_ptr = geometryInfo.blocks[gl_PrimitiveID+7].material_ptr;
+    uint32_t palette_value = material_ptr + uint32_t(voxelId);
+    primaryRayPayload.color = randomColorList[uint32_t(voxelId) % 5];
 }

@@ -135,6 +135,7 @@ impl RenderPlugin {
                     })
                     .push_next(&mut vk::PhysicalDeviceVulkan12Features {
                         buffer_device_address: vk::TRUE,
+                        storage_buffer8_bit_access: vk::TRUE,
                         timeline_semaphore: vk::TRUE,
                         descriptor_binding_sampled_image_update_after_bind: vk::TRUE,
                         descriptor_binding_storage_image_update_after_bind: vk::TRUE,

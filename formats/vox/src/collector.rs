@@ -70,8 +70,9 @@ impl IntoIterator for ModelIndexCollector {
     fn into_iter(mut self) -> Self::IntoIter {
         let mut sum: u32 = 0;
         for i in self.block_counts.iter_mut() {
+            let value = *i;
             *i = sum;
-            sum += *i;
+            sum += value;
         }
         ModelIndexCollectorIterator {
             collector: self,
