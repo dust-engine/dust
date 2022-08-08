@@ -23,10 +23,14 @@ layout(buffer_reference, buffer_reference_align = 8, scalar) buffer GeometryInfo
 layout(buffer_reference) buffer MaterialInfo {
     uint8_t materials[];
 };
+layout(buffer_reference) buffer PaletteInfo {
+    u8vec4 palette[];
+};
 
 layout(shaderRecordEXT) buffer sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
+    PaletteInfo paletteInfo;
 };
 layout(set = 1, binding = 1, r8ui) uniform readonly uimage2D bindless_StorageImage[];
 
@@ -44,6 +48,8 @@ layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
 
 void main() {
     uint32_t material_ptr = geometryInfo.blocks[gl_PrimitiveID+7].material_ptr;
-    uint32_t palette_value = material_ptr + uint32_t(voxelId);
-    primaryRayPayload.color = randomColorList[uint32_t(voxelId) % 5];
+
+    uint8_t palette_index = materialInfo.materials[material_ptr + uint32_t(voxelId)];
+    u8vec4 color = paletteInfo.palette[palette_index +1];
+    primaryRayPayload.color = vec3(color.r / 255.0, color.g / 255.0, color.b / 255.0);
 }

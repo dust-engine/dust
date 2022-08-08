@@ -8,6 +8,7 @@ use dust_render::material::{GPUMaterial, Material};
 use dust_render::render_asset::BindlessGPUAsset;
 use dust_render::render_asset::BindlessGPUAssetDescriptors;
 use dust_render::render_asset::GPURenderAsset;
+use dust_render::render_asset::GPURenderAssetBuildResult;
 use dust_render::render_asset::RenderAsset;
 use dust_render::shader::SpecializedShader;
 use dustash::queue::QueueType;
@@ -77,7 +78,7 @@ impl GPURenderAsset<DensityMaterial> for GPUDensityMaterial {
         build_set: <DensityMaterial as RenderAsset>::BuildData,
         commands_future: &mut dustash::sync::CommandsFuture,
         params: &mut bevy_ecs::system::SystemParamItem<Self::BuildParam>,
-    ) -> Self {
+    ) -> GPURenderAssetBuildResult<DensityMaterial> {
         let (image_srcbuffer, extent) = build_set;
         let (device, allocator, queues) = params;
         let image = allocator
@@ -197,10 +198,10 @@ impl GPURenderAsset<DensityMaterial> for GPUDensityMaterial {
             },
         )
         .unwrap();
-        Self {
+        GPURenderAssetBuildResult::Success(Self {
             density_map: image,
             density_map_view: view,
-        }
+        })
     }
 }
 

@@ -7,7 +7,7 @@ use bevy_ecs::system::{lifetimeless::SRes, StaticSystemParam, SystemParamItem};
 use bevy_reflect::TypeUuid;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
-    render_asset::{GPURenderAsset, RenderAsset},
+    render_asset::{GPURenderAsset, RenderAsset, GPURenderAssetBuildResult},
     shader::SpecializedShader,
 };
 use dustash::{
@@ -79,14 +79,14 @@ impl GPURenderAsset<AABBGeometry> for AABBGPUGeometry {
         build_set: MemBuffer,
         commands_future: &mut dustash::sync::CommandsFuture,
         allocator: &mut SystemParamItem<Self::BuildParam>,
-    ) -> Self {
+    ) -> GPURenderAssetBuildResult<AABBGeometry> {
         if build_set
             .memory_properties()
             .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         {
-            Self {
+            GPURenderAssetBuildResult::Success(Self {
                 primitives_buffer: Arc::new(build_set),
-            }
+            })
         } else {
             let size = build_set.size();
             let device_local_buffer = allocator
@@ -111,9 +111,10 @@ impl GPURenderAsset<AABBGeometry> for AABBGPUGeometry {
                     }],
                 );
             });
-            Self {
-                primitives_buffer: device_local_buffer,
-            }
+            GPURenderAssetBuildResult::Success(
+                Self {
+                    primitives_buffer: device_local_buffer,
+                })
         }
     }
 }

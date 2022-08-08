@@ -62,8 +62,8 @@ fn setup(
     test_geometry.set(UVec3::new(3, 3, 3), Some(true));
     test_geometry.set(UVec3::new(3, 3, 4), Some(true));
     test_geometry.set(UVec3::new(3, 3, 5), Some(true));
-    let handle = geometry.add(test_geometry);
-    //let handle: Handle<VoxGeometry> = asset_server.load("../assets/castle.vox");
+    //let handle = geometry.add(test_geometry);
+    let handle: Handle<VoxGeometry> = asset_server.load("../assets/castle.vox");
     let material_handle: Handle<PaletteMaterial> = asset_server.load("../assets/castle.vox#material");
     //let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
     commands

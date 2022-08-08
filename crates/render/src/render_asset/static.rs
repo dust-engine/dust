@@ -42,14 +42,22 @@ pub trait RenderAsset: Asset + Sized + 'static {
     ) -> Self::BuildData;
 }
 
+pub enum GPURenderAssetBuildResult<T: RenderAsset> {
+    Success(T::GPUAsset),
+    MissingDependency(T::BuildData)
+}
+
 /// The render asset on the GPU.
-pub trait GPURenderAsset<T: RenderAsset>: Send + Sync + 'static {
+pub trait GPURenderAsset<T: RenderAsset>: Send + Sync + 'static + Sized {
     type BuildParam: SystemParam;
+
+    /// Return None if not ready to build yet. The render asset system will attempt the build again
+    /// at a later time, potentially in the next frame.
     fn build(
         build_set: T::BuildData,
         commands_future: &mut CommandsFuture,
         params: &mut SystemParamItem<Self::BuildParam>,
-    ) -> Self;
+    ) -> GPURenderAssetBuildResult<T>;
 }
 
 struct ExtractedAssets<A: RenderAsset> {
@@ -76,6 +84,7 @@ fn create_build_data<A: RenderAsset>(
     for event in events.iter() {
         match event {
             AssetEvent::Created { handle } | AssetEvent::Modified { handle } => {
+                println!("Create build data {}", std::any::type_name::<A>());
                 changed_assets.insert(handle);
             }
             AssetEvent::Removed { handle } => {
@@ -110,8 +119,13 @@ fn move_extracted_assets<A: RenderAsset>(
 }
 
 pub struct RenderAssetStore<A: RenderAsset> {
+    /// Assets that were already built.
     assets: HashMap<Handle<A>, A::GPUAsset>,
-    pending_builds: Option<(Vec<(Handle<A>, Option<A::GPUAsset>)>, TimelineSemaphoreOp)>,
+
+    /// Assets that were submitted to GPU but still pending.
+    pending_builds: Option<(Vec<(Handle<A>, A::GPUAsset)>, TimelineSemaphoreOp)>,
+
+    /// Assets deferred to the next frame and not yet submitted to GPU.
     buffered_builds: Option<ExtractedAssets<A>>,
 }
 impl<A: RenderAsset> RenderAssetStore<A> {
@@ -193,11 +207,9 @@ fn prepare_render_assets<T: RenderAsset>(
     if let Some((mut carrier, signal)) = render_asset_store.pending_builds.take() {
         if signal.finished().unwrap() {
             // Finished, put it into the store.
-            for (handle, geometry) in carrier.drain(..) {
+            for (handle, gpu_asset) in carrier.drain(..) {
                 event_writer.send(RenderAssetEvent::Created(handle.clone_weak()));
-                if let Some(geometry) = geometry {
-                    render_asset_store.assets.insert(handle, geometry);
-                }
+                render_asset_store.assets.insert(handle, gpu_asset);
                 // TODO: send signal.
             }
         } else {
@@ -215,22 +227,35 @@ fn prepare_render_assets<T: RenderAsset>(
             queues.clone(),
             queues.of_type(QueueType::Transfer).index(),
         );
-        let mut pending_builds: Vec<(Handle<T>, Option<T::GPUAsset>)> = Vec::new();
+        let mut pending_builds: Vec<(Handle<T>, T::GPUAsset)> = Vec::new();
         for handle in buffered_builds.removed.drain(..) {
             render_asset_store.assets.remove(&handle);
         }
+
+        let mut rebuffered_builds: Vec<(Handle<T>, T::BuildData)> = Vec::new();
         for (handle, update) in buffered_builds.extracted.drain(..) {
-            let geometry =
-                <T::GPUAsset as GPURenderAsset<T>>::build(update, &mut future, &mut build_params);
-            pending_builds.push((handle, Some(geometry)));
+            match
+                <T::GPUAsset as GPURenderAsset<T>>::build(update, &mut future, &mut build_params) {
+                GPURenderAssetBuildResult::Success(gpu_asset) => {
+                    pending_builds.push((handle, gpu_asset));
+                },
+                GPURenderAssetBuildResult::MissingDependency(build_data) => {
+                    rebuffered_builds.push((handle, build_data));
+                }
+            }
         }
+        if rebuffered_builds.len() > 0 {
+            render_asset_store.buffered_builds = Some(ExtractedAssets {
+                extracted: rebuffered_builds,
+                removed: Vec::new(),
+            });
+        }
+
         if future.is_empty() {
             // If the future is empty, no commands were recorded. Transition to existing state directly.
-            for (handle, geometry) in pending_builds.drain(..) {
+            for (handle, gpu_asset) in pending_builds.drain(..) {
                 event_writer.send(RenderAssetEvent::Created(handle.clone_weak()));
-                if let Some(geometry) = geometry {
-                    render_asset_store.assets.insert(handle, geometry);
-                }
+                render_asset_store.assets.insert(handle, gpu_asset);
             }
         } else {
             let signal = future

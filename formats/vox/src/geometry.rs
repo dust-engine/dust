@@ -7,7 +7,7 @@ use bevy_ecs::system::lifetimeless::SRes;
 use bevy_ecs::system::SystemParamItem;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
-    render_asset::{GPURenderAsset, RenderAsset},
+    render_asset::{GPURenderAsset, RenderAsset, GPURenderAssetBuildResult},
 };
 use dust_vdb::{IsLeaf, Node};
 use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer};
@@ -171,17 +171,17 @@ impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
         build_set: <VoxGeometry as RenderAsset>::BuildData,
         commands_future: &mut dustash::sync::CommandsFuture,
         allocator: &mut SystemParamItem<Self::BuildParam>,
-    ) -> Self {
+    ) -> GPURenderAssetBuildResult<VoxGeometry> {
         let (aabb_buffer, geometry_buffer) = build_set;
         if geometry_buffer
             .memory_properties()
             .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         {
             println!("Using device local");
-            Self {
+            GPURenderAssetBuildResult::Success(Self {
                 aabb_buffer: Arc::new(aabb_buffer),
                 geometry_buffer: Arc::new(geometry_buffer),
-            }
+            })
         } else {
             let device_local_aabb_buffer = allocator
                 .allocate_buffer(&BufferRequest {
@@ -227,10 +227,11 @@ impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
                     }],
                 );
             });
-            Self {
-                aabb_buffer: device_local_aabb_buffer,
-                geometry_buffer: device_local_geometry_buffer
-            }
+            GPURenderAssetBuildResult::Success(
+                Self {
+                    aabb_buffer: device_local_aabb_buffer,
+                    geometry_buffer: device_local_geometry_buffer
+                })
         }
     }
 }

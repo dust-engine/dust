@@ -128,11 +128,6 @@ fn build_blas(
                 // Skip: another version of this BLAS is already being built
                 continue;
             }
-            println!(
-                "give me a blas with the following geometries: {:?}",
-                primitive_ids
-            );
-            
             let mut buffers: Vec<(Arc<MemBuffer>, std::alloc::Layout)> = Vec::with_capacity(geometry_materials.len());
             for geometry_material in geometry_materials.iter() {
                 if let Some(buffer) = geometry_material.blas_input_primitives.as_ref() {
