@@ -11,7 +11,6 @@ pub mod render_asset;
 pub mod renderable;
 pub mod renderer;
 pub mod shader;
-pub mod attributes;
 #[cfg(feature = "swapchain")]
 pub mod swapchain;
 pub use ash::vk;

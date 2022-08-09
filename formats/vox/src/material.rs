@@ -4,21 +4,14 @@ use bevy_asset::AssetServer;
 use bevy_asset::Handle;
 use bevy_ecs::system::lifetimeless::SRes;
 use bevy_ecs::system::SystemParamItem;
-use dust_render::attributes::AttributeWriter;
-use dust_render::attributes::IntegerWriter;
 use dust_render::material::{GPUMaterial, Material};
-use dust_render::render_asset::BindlessGPUAsset;
 use dust_render::render_asset::BindlessGPUAssetDescriptors;
 use dust_render::render_asset::GPURenderAsset;
 use dust_render::render_asset::GPURenderAssetBuildResult;
 use dust_render::render_asset::RenderAsset;
 use dust_render::render_asset::RenderAssetStore;
 use dust_render::shader::SpecializedShader;
-use dustash::queue::QueueType;
-use dustash::queue::Queues;
 use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer, MemoryAllocScenario};
-use dustash::resources::Image;
-use dustash::Device;
 use std::sync::Arc;
 
 use crate::VoxPalette;
@@ -27,11 +20,11 @@ use crate::VoxPalette;
 #[uuid = "75a9a733-04d7-4acb-8600-9a7d24ff0599"] // TODO: better UUID
 pub struct PaletteMaterial {
     palette: Handle<VoxPalette>,
-    data: Arc<MemBuffer>
+    data: Vec<u8>
 }
 
 impl PaletteMaterial {
-    pub fn new(palette: Handle<VoxPalette>, data: Arc<MemBuffer>) -> PaletteMaterial {
+    pub fn new(palette: Handle<VoxPalette>, data: Vec<u8>) -> PaletteMaterial {
         Self {
             palette,
             data
@@ -47,7 +40,13 @@ impl RenderAsset for PaletteMaterial {
         &mut self,
         allocator: &mut bevy_ecs::system::SystemParamItem<Self::CreateBuildDataParam>,
     ) -> Self::BuildData {
-        (self.palette.clone(), self.data.clone()) // TODO: upload data here instead.
+        let mut staging_buffer = allocator.allocate_buffer(
+            &BufferRequest { size: self.data.len() as u64, alignment: 4, usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC, scenario: MemoryAllocScenario::StagingBuffer, ..Default::default() },
+        ).unwrap();
+        staging_buffer.map_scoped(|slice| {
+            slice.copy_from_slice(self.data.as_slice());
+        });
+        (self.palette.clone(), Arc::new(staging_buffer)) // TODO: upload data here instead.
     }
 }
 

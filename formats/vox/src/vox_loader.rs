@@ -17,7 +17,7 @@ use crate::palette::{Color, VoxPalette};
 
 
 //  2,266,302 ns/iter
-pub fn convert_model(allocator: &Arc<Allocator>, model: &Model, palette: &Handle<VoxPalette>) -> (Tree, PaletteMaterial) {
+pub fn convert_model(model: &Model, palette: &Handle<VoxPalette>) -> (Tree, PaletteMaterial) {
     let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
 
 
@@ -40,12 +40,13 @@ pub fn convert_model(allocator: &Arc<Allocator>, model: &Model, palette: &Handle
 
         leaf.material_ptr = palette_indexes.running_sum()[block_index];
     }
+    println!("max running sum {}", palette_indexes.running_sum()[palette_indexes.running_sum().len() - 1]);
 
-    use dust_render::attributes::AttributeWriter;
-    let writer = dust_render::attributes::IntegerWriter::from_iter(allocator, palette_indexes);
+    let material_data: Vec<u8> = palette_indexes.collect();
+    println!("Collected {} materials", material_data.len());
     (
         tree,
-        PaletteMaterial::new(palette.clone(), writer.into_resource())
+        PaletteMaterial::new(palette.clone(), material_data)
     )
     
 }
@@ -54,17 +55,10 @@ use bevy_asset::{AssetLoader, LoadedAsset, Handle};
 
 use crate::material::PaletteMaterial;
 
+#[derive(Default)]
 pub struct VoxLoader {
-    allocator: Arc<Allocator>,
 }
 
-impl VoxLoader {
-    pub fn new(allocator: Arc<Allocator>) -> Self {
-        Self {
-            allocator
-        }
-    }
-}
 
 impl AssetLoader for VoxLoader {
     fn load<'a>(
@@ -90,7 +84,7 @@ impl AssetLoader for VoxLoader {
 
 
             let (i, model) = file.models.iter().enumerate().max_by_key(|a| a.1.voxels.len()).unwrap();
-            let (tree, material) = convert_model(&self.allocator, model, &palette_handle);
+            let (tree, material) = convert_model(model, &palette_handle);
             let geometry = crate::VoxGeometry::from_tree(tree, 1.0);
 
             println!("Asset loaded {}", i);

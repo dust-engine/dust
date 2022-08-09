@@ -26,7 +26,7 @@ impl ModelIndexCollector {
         self.block_counts[block_index] += 1;
 
         let index = (voxel.x & 0b11) | ((voxel.y & 0b11) << 2) | ((voxel.z & 0b11) << 4);
-        self.grid[block_index + index as usize] = voxel.i + 1;
+        self.grid[block_index * 4 * 4 * 4 + index as usize] = voxel.i + 1;
     }
 }
 pub struct ModelIndexCollectorIterator {
@@ -53,6 +53,9 @@ impl Iterator for ModelIndexCollectorIterator {
             return Some(val);
         }
         None
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len(), Some(self.len()))
     }
 }
 impl ExactSizeIterator for ModelIndexCollectorIterator 

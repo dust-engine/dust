@@ -20,7 +20,7 @@ struct Block
 layout(buffer_reference, buffer_reference_align = 8, scalar) buffer GeometryInfo {
     Block blocks[];
 };
-layout(buffer_reference) buffer MaterialInfo {
+layout(buffer_reference, buffer_reference_align = 1, scalar) buffer MaterialInfo {
     uint8_t materials[];
 };
 layout(buffer_reference) buffer PaletteInfo {
@@ -47,9 +47,9 @@ vec3 randomColorList[5] = {
 layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
 
 void main() {
-    uint32_t material_ptr = geometryInfo.blocks[gl_PrimitiveID+7].material_ptr;
+    uint32_t material_ptr = geometryInfo.blocks[gl_PrimitiveID].material_ptr;
 
     uint8_t palette_index = materialInfo.materials[material_ptr + uint32_t(voxelId)];
-    u8vec4 color = paletteInfo.palette[palette_index +1];
+    u8vec4 color = paletteInfo.palette[palette_index];
     primaryRayPayload.color = vec3(color.r / 255.0, color.g / 255.0, color.b / 255.0);
 }
