@@ -9,15 +9,15 @@ use dustash::resources::alloc::{MemBuffer, Allocator, BufferRequest, MemoryAlloc
 #[repr(C)]
 #[derive(Debug)]
 pub struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8
 }
 
 #[derive(bevy_reflect::TypeUuid)]
 #[uuid = "75a9a733-04d8-4acb-8600-9a7d24ff0599"] // TODO: better UUID
-pub struct VoxPalette (pub Box<[Color; 256]>); // TODO: 256
+pub struct VoxPalette (pub Box<[Color; 255]>); // TODO: 256
 
 pub struct VoxPaletteGPU {
     pub(crate) palette: Arc<MemBuffer>

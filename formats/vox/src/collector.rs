@@ -5,6 +5,7 @@ pub struct ModelIndexCollector {
     block_counts: Box<[u32; 64 * 64 * 64]>,
     count: usize,
 }
+
 impl ModelIndexCollector {
     pub fn new() -> Self {
         unsafe {
@@ -25,7 +26,8 @@ impl ModelIndexCollector {
 
         self.block_counts[block_index] += 1;
 
-        let index = (voxel.x & 0b11) | ((voxel.y & 0b11) << 2) | ((voxel.z & 0b11) << 4);
+        let index = (voxel.z & 0b11) | ((voxel.y & 0b11) << 2) | ((voxel.x & 0b11) << 4);
+        // Use one-based index here so that 0 indicates null
         self.grid[block_index * 4 * 4 * 4 + index as usize] = voxel.i + 1;
     }
 }
@@ -50,7 +52,7 @@ impl Iterator for ModelIndexCollectorIterator {
             if val == 0 {
                 continue;
             }
-            return Some(val);
+            return Some(val - 1); // Convert back into zero-based index here
         }
         None
     }

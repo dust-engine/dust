@@ -1,12 +1,6 @@
-use std::sync::Arc;
-
-use ash::vk;
-use bevy_ecs::system::lifetimeless::SRes;
 use dot_vox::Model;
-use dust_render::render_asset::{RenderAsset, GPURenderAsset, GPURenderAssetBuildResult};
 use dust_vdb::hierarchy;
-use dustash::resources::alloc::{Allocator, MemBuffer, BufferRequest, MemoryAllocScenario};
-use glam::{UVec3, Vec3};
+use glam::UVec3;
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 
@@ -23,10 +17,14 @@ pub fn convert_model(model: &Model, palette: &Handle<VoxPalette>) -> (Tree, Pale
 
     let mut tree = Tree::new();
     for voxel in model.voxels.iter() {
+        let mut voxel = voxel.clone();
+        std::mem::swap(&mut voxel.z, &mut voxel.y);
+        voxel.z = 255 - voxel.z;
+
         let coords: UVec3 = UVec3 {
             x: voxel.x as u32,
-            y: voxel.z as u32,
-            z: voxel.y as u32,
+            y: voxel.y as u32,
+            z: voxel.z as u32,
         };
         tree.set_value(coords, Some(true));
         palette_index_collector.set(voxel.clone());
@@ -70,14 +68,12 @@ impl AssetLoader for VoxLoader {
             let file = dot_vox::load_bytes(bytes).map_err(|str| anyhow::Error::msg(str))?;
 
             let palette = unsafe {
-                const LEN: usize = 256;
+                const LEN: usize = 255;
                 let mem = std::alloc::alloc(std::alloc::Layout::new::<[Color; LEN]>()) as *mut [Color; LEN];
                 let mut mem = Box::from_raw(mem);
-                assert_eq!(file.palette.len(), 256);
-                for i in 0..256 {
+                for i in 0..255 {
                     mem[i] = std::mem::transmute(file.palette[i]);
                 }
-                println!("Palette is {:?}", mem);
                 VoxPalette(mem)
             };
             let palette_handle = load_context.set_labeled_asset("palette", LoadedAsset::new(palette));

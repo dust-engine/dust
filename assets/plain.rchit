@@ -47,9 +47,12 @@ vec3 randomColorList[5] = {
 layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
 
 void main() {
-    uint32_t material_ptr = geometryInfo.blocks[gl_PrimitiveID].material_ptr;
+    Block block = geometryInfo.blocks[gl_PrimitiveID];
 
-    uint8_t palette_index = materialInfo.materials[material_ptr + uint32_t(voxelId)];
+    u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << voxelId) - 1));
+    uint32_t voxelMemoryOffset = bitCount(masked.x) + bitCount(masked.y);
+
+    uint8_t palette_index = materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = paletteInfo.palette[palette_index];
     primaryRayPayload.color = vec3(color.r / 255.0, color.g / 255.0, color.b / 255.0);
 }
