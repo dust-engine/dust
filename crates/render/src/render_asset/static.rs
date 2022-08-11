@@ -44,7 +44,7 @@ pub trait RenderAsset: Asset + Sized + 'static {
 
 pub enum GPURenderAssetBuildResult<T: RenderAsset> {
     Success(T::GPUAsset),
-    MissingDependency(T::BuildData)
+    MissingDependency(T::BuildData),
 }
 
 /// The render asset on the GPU.
@@ -234,11 +234,11 @@ fn prepare_render_assets<T: RenderAsset>(
 
         let mut rebuffered_builds: Vec<(Handle<T>, T::BuildData)> = Vec::new();
         for (handle, update) in buffered_builds.extracted.drain(..) {
-            match
-                <T::GPUAsset as GPURenderAsset<T>>::build(update, &mut future, &mut build_params) {
+            match <T::GPUAsset as GPURenderAsset<T>>::build(update, &mut future, &mut build_params)
+            {
                 GPURenderAssetBuildResult::Success(gpu_asset) => {
                     pending_builds.push((handle, gpu_asset));
-                },
+                }
                 GPURenderAssetBuildResult::MissingDependency(build_data) => {
                     rebuffered_builds.push((handle, build_data));
                 }

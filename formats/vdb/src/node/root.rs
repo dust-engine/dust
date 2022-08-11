@@ -1,4 +1,4 @@
-use std::{alloc::Layout, marker::PhantomData, mem::MaybeUninit, cell::UnsafeCell};
+use std::{cell::UnsafeCell, marker::PhantomData, mem::MaybeUninit};
 
 use glam::UVec3;
 
@@ -153,7 +153,11 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         }
     }
 
-    fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
+    fn iter_leaf_in_pool<'a>(
+        _pools: &'a [Pool],
+        _ptr: u32,
+        _offset: UVec3,
+    ) -> Self::LeafIterator<'a> {
         unreachable!("Root Node is never kept in a pool!")
     }
 }

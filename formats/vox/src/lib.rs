@@ -2,21 +2,17 @@
 #![feature(test)]
 
 mod collector;
-mod vox_loader;
 mod palette;
-use std::sync::Arc;
+mod vox_loader;
 
 use bevy_asset::AddAsset;
 mod geometry;
 mod material;
-use dust_render::{
-    geometry::{GPUGeometry, Geometry},
-    render_asset::{GPURenderAsset, RenderAsset, RenderAssetStore}, RenderApp,
-};
-pub use palette::VoxPalette;
-use dustash::resources::alloc::Allocator;
+use dust_render::{render_asset::RenderAssetStore, RenderApp};
+
 pub use geometry::VoxGeometry;
-pub use material::{PaletteMaterial, GPUPaletteMaterial};
+pub use material::{GPUPaletteMaterial, PaletteMaterial};
+pub use palette::VoxPalette;
 pub use vox_loader::*;
 #[derive(Default)]
 pub struct VoxPlugin;
@@ -26,8 +22,8 @@ impl bevy_app::Plugin for VoxPlugin {
             .add_asset::<VoxPalette>() // TODO: find better way to unify this with others
             .add_plugin(dust_render::geometry::GeometryPlugin::<VoxGeometry>::default())
             .add_plugin(dust_render::render_asset::RenderAssetPlugin::<VoxPalette>::default());
-        
+
         app.sub_app_mut(RenderApp)
-        .init_resource::<RenderAssetStore<VoxPalette>>();
+            .init_resource::<RenderAssetStore<VoxPalette>>();
     }
 }

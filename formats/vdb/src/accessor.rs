@@ -178,7 +178,7 @@ mod tests {
         let mut tree = MyTree::new();
 
         let mut set_locations: Vec<UVec3> = Vec::with_capacity(100);
-        for i in 0..100 {
+        for _i in 0..100 {
             let x: u8 = rng.gen();
             let y: u8 = rng.gen();
             let z: u8 = rng.gen();

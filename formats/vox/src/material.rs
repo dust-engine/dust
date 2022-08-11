@@ -20,15 +20,12 @@ use crate::VoxPalette;
 #[uuid = "75a9a733-04d7-4acb-8600-9a7d24ff0599"] // TODO: better UUID
 pub struct PaletteMaterial {
     palette: Handle<VoxPalette>,
-    data: Vec<u8>
+    data: Vec<u8>,
 }
 
 impl PaletteMaterial {
     pub fn new(palette: Handle<VoxPalette>, data: Vec<u8>) -> PaletteMaterial {
-        Self {
-            palette,
-            data
-        }
+        Self { palette, data }
     }
 }
 
@@ -40,9 +37,15 @@ impl RenderAsset for PaletteMaterial {
         &mut self,
         allocator: &mut bevy_ecs::system::SystemParamItem<Self::CreateBuildDataParam>,
     ) -> Self::BuildData {
-        let mut staging_buffer = allocator.allocate_buffer(
-            &BufferRequest { size: self.data.len() as u64, alignment: 4, usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC, scenario: MemoryAllocScenario::StagingBuffer, ..Default::default() },
-        ).unwrap();
+        let mut staging_buffer = allocator
+            .allocate_buffer(&BufferRequest {
+                size: self.data.len() as u64,
+                alignment: 4,
+                usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC,
+                scenario: MemoryAllocScenario::StagingBuffer,
+                ..Default::default()
+            })
+            .unwrap();
         staging_buffer.map_scoped(|slice| {
             slice.copy_from_slice(self.data.as_slice());
         });
@@ -53,7 +56,9 @@ impl RenderAsset for PaletteMaterial {
 impl Material for PaletteMaterial {
     type Geometry = crate::VoxGeometry;
 
-    fn anyhit_shader(asset_server: &AssetServer) -> Option<dust_render::shader::SpecializedShader> {
+    fn anyhit_shader(
+        _asset_server: &AssetServer,
+    ) -> Option<dust_render::shader::SpecializedShader> {
         None
     }
 
@@ -73,7 +78,7 @@ pub struct GPUPaletteMaterial {
 }
 
 impl GPURenderAsset<PaletteMaterial> for GPUPaletteMaterial {
-    type BuildParam = (SRes<RenderAssetStore<VoxPalette>>);
+    type BuildParam = SRes<RenderAssetStore<VoxPalette>>;
 
     fn build(
         (palette_handle, material_buffer): <PaletteMaterial as RenderAsset>::BuildData,
@@ -98,18 +103,17 @@ impl GPURenderAsset<PaletteMaterial> for GPUPaletteMaterial {
 impl GPUMaterial<PaletteMaterial> for GPUPaletteMaterial {
     type SbtData = (u64, u64); // material_address, palette_address
 
-    type MaterialInfoParams = (SRes<BindlessGPUAssetDescriptors>);
+    type MaterialInfoParams = SRes<BindlessGPUAssetDescriptors>;
     fn material_info(
         &self,
-        handle: &Handle<PaletteMaterial>,
-        bindless_store: &mut SystemParamItem<Self::MaterialInfoParams>,
+        _handle: &Handle<PaletteMaterial>,
+        _bindless_store: &mut SystemParamItem<Self::MaterialInfoParams>,
     ) -> Self::SbtData {
         let material_address = self.data.device_address();
         let palette_address = self.palette_data.device_address();
         (material_address, palette_address)
     }
 }
-
 
 // questions about the asset system:
 // - barrier between render world and main world

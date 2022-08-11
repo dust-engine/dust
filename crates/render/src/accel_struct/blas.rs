@@ -128,7 +128,8 @@ fn build_blas(
                 // Skip: another version of this BLAS is already being built
                 continue;
             }
-            let mut buffers: Vec<(Arc<MemBuffer>, std::alloc::Layout)> = Vec::with_capacity(geometry_materials.len());
+            let mut buffers: Vec<(Arc<MemBuffer>, std::alloc::Layout)> =
+                Vec::with_capacity(geometry_materials.len());
             for geometry_material in geometry_materials.iter() {
                 if let Some(buffer) = geometry_material.blas_input_primitives.as_ref() {
                     buffers.push((buffer.clone(), geometry_material.blas_input_layout))
@@ -136,7 +137,7 @@ fn build_blas(
                     // Instance is not ready yet because of missing geometry data.
                     continue 'outer;
                 }
-    
+
                 if geometry_material.sbt_data.is_none() {
                     continue 'outer;
                 }

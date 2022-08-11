@@ -1,4 +1,3 @@
-
 /// dox_vox::Voxel to solid materials
 pub struct ModelIndexCollector {
     grid: Box<[u8; 256 * 256 * 256]>,
@@ -9,9 +8,11 @@ pub struct ModelIndexCollector {
 impl ModelIndexCollector {
     pub fn new() -> Self {
         unsafe {
-            let grid_ptr = std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u8; 256 * 256 * 256]>());
-            let block_counts_ptr = std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u32; 64 * 64 * 64]>());
-            
+            let grid_ptr =
+                std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u8; 256 * 256 * 256]>());
+            let block_counts_ptr =
+                std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u32; 64 * 64 * 64]>());
+
             Self {
                 count: 0,
                 grid: Box::from_raw(grid_ptr as *mut [u8; 256 * 256 * 256]),
@@ -22,7 +23,8 @@ impl ModelIndexCollector {
     pub fn set(&mut self, voxel: dot_vox::Voxel) {
         self.count += 1;
         let block_index = (voxel.x >> 2, voxel.y >> 2, voxel.z >> 2);
-        let block_index = block_index.0 as usize + block_index.1 as usize * 64 + block_index.2 as usize * 64 * 64;
+        let block_index =
+            block_index.0 as usize + block_index.1 as usize * 64 + block_index.2 as usize * 64 * 64;
 
         self.block_counts[block_index] += 1;
 
@@ -37,7 +39,7 @@ pub struct ModelIndexCollectorIterator {
 }
 
 impl ModelIndexCollectorIterator {
-    pub fn running_sum(&self) -> &[u32; 64*64*64] {
+    pub fn running_sum(&self) -> &[u32; 64 * 64 * 64] {
         &self.collector.block_counts
     }
 }
@@ -60,8 +62,7 @@ impl Iterator for ModelIndexCollectorIterator {
         (self.len(), Some(self.len()))
     }
 }
-impl ExactSizeIterator for ModelIndexCollectorIterator 
-{
+impl ExactSizeIterator for ModelIndexCollectorIterator {
     fn len(&self) -> usize {
         self.collector.count
     }
@@ -81,7 +82,7 @@ impl IntoIterator for ModelIndexCollector {
         }
         ModelIndexCollectorIterator {
             collector: self,
-            current: 0
+            current: 0,
         }
     }
 }

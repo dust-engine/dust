@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use crate::vox_loader::*;
 use ash::vk;
-use bevy_asset::AddAsset;
+
 use bevy_ecs::system::lifetimeless::SRes;
 use bevy_ecs::system::SystemParamItem;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
-    render_asset::{GPURenderAsset, RenderAsset, GPURenderAssetBuildResult},
+    render_asset::{GPURenderAsset, GPURenderAssetBuildResult, RenderAsset},
 };
 use dust_vdb::{IsLeaf, Node};
 use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer};
-use glam::{Vec3, Vec3A, UVec3};
+use glam::{UVec3, Vec3A};
 
 // size: 8 x u32 = 32 bytes
 #[repr(C)]
@@ -38,7 +38,10 @@ impl VoxGeometry {
         Self { tree, unit_size }
     }
     pub fn new(unit_size: f32) -> Self {
-        Self { tree: Tree::new(), unit_size }
+        Self {
+            tree: Tree::new(),
+            unit_size,
+        }
     }
     pub fn set(&mut self, coords: UVec3, value: Option<bool>) {
         self.tree.set_value(coords, value)
@@ -91,7 +94,7 @@ impl RenderAsset for VoxGeometry {
                         w: 0,
                         mask,
                         material_ptr: d.material_ptr,
-                        reserved: 0
+                        reserved: 0,
                     }
                 };
                 (aabb, node)
@@ -111,7 +114,7 @@ impl RenderAsset for VoxGeometry {
                     ..Default::default()
                 })
                 .unwrap();
-    
+
             let data = unsafe { std::slice::from_raw_parts(aabbs.as_ptr() as *const u8, size) };
             buffer.map_scoped(|slice| {
                 slice.copy_from_slice(data);
@@ -132,7 +135,7 @@ impl RenderAsset for VoxGeometry {
                     ..Default::default()
                 })
                 .unwrap();
-    
+
             let data = unsafe { std::slice::from_raw_parts(nodes.as_ptr() as *const u8, size) };
             buffer.map_scoped(|slice| {
                 slice.copy_from_slice(data);
@@ -227,11 +230,10 @@ impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
                     }],
                 );
             });
-            GPURenderAssetBuildResult::Success(
-                Self {
-                    aabb_buffer: device_local_aabb_buffer,
-                    geometry_buffer: device_local_geometry_buffer
-                })
+            GPURenderAssetBuildResult::Success(Self {
+                aabb_buffer: device_local_aabb_buffer,
+                geometry_buffer: device_local_geometry_buffer,
+            })
         }
     }
 }
@@ -247,8 +249,8 @@ impl GPUGeometry<VoxGeometry> for VoxGPUGeometry {
 
     fn geometry_info(
         &self,
-        handle: &bevy_asset::Handle<VoxGeometry>,
-        params: &mut bevy_ecs::system::SystemParamItem<Self::GeometryInfoParams>,
+        _handle: &bevy_asset::Handle<VoxGeometry>,
+        _params: &mut bevy_ecs::system::SystemParamItem<Self::GeometryInfoParams>,
     ) -> Self::SbtInfo {
         self.geometry_buffer.device_address()
     }

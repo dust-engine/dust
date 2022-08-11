@@ -5,7 +5,7 @@ mod root;
 use std::alloc::Layout;
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
-use std::mem::{size_of, MaybeUninit};
+use std::mem::MaybeUninit;
 
 use glam::UVec3;
 pub use internal::*;

@@ -8,12 +8,9 @@ pub type TreeRoot = hierarchy!(4, 2, 2);
 pub type Tree = dust_vdb::Tree<TreeRoot>;
 use crate::palette::{Color, VoxPalette};
 
-
-
 //  2,266,302 ns/iter
 pub fn convert_model(model: &Model, palette: &Handle<VoxPalette>) -> (Tree, PaletteMaterial) {
     let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
-
 
     let mut tree = Tree::new();
     for voxel in model.voxels.iter() {
@@ -34,29 +31,27 @@ pub fn convert_model(model: &Model, palette: &Handle<VoxPalette>) -> (Tree, Pale
     // TODO: use iter_leaf_mut here, and insert indices
     for (location, leaf) in tree.iter_leaf_mut() {
         let block_index = (location.x >> 2, location.y >> 2, location.z >> 2);
-        let block_index = block_index.0 as usize + block_index.1 as usize * 64 + block_index.2 as usize * 64 * 64;
+        let block_index =
+            block_index.0 as usize + block_index.1 as usize * 64 + block_index.2 as usize * 64 * 64;
 
         leaf.material_ptr = palette_indexes.running_sum()[block_index];
     }
-    println!("max running sum {}", palette_indexes.running_sum()[palette_indexes.running_sum().len() - 1]);
+    println!(
+        "max running sum {}",
+        palette_indexes.running_sum()[palette_indexes.running_sum().len() - 1]
+    );
 
     let material_data: Vec<u8> = palette_indexes.collect();
     println!("Collected {} materials", material_data.len());
-    (
-        tree,
-        PaletteMaterial::new(palette.clone(), material_data)
-    )
-    
+    (tree, PaletteMaterial::new(palette.clone(), material_data))
 }
 
-use bevy_asset::{AssetLoader, LoadedAsset, Handle};
+use bevy_asset::{AssetLoader, Handle, LoadedAsset};
 
 use crate::material::PaletteMaterial;
 
 #[derive(Default)]
-pub struct VoxLoader {
-}
-
+pub struct VoxLoader {}
 
 impl AssetLoader for VoxLoader {
     fn load<'a>(
@@ -69,17 +64,23 @@ impl AssetLoader for VoxLoader {
 
             let palette = unsafe {
                 const LEN: usize = 255;
-                let mem = std::alloc::alloc(std::alloc::Layout::new::<[Color; LEN]>()) as *mut [Color; LEN];
+                let mem = std::alloc::alloc(std::alloc::Layout::new::<[Color; LEN]>())
+                    as *mut [Color; LEN];
                 let mut mem = Box::from_raw(mem);
                 for i in 0..255 {
                     mem[i] = std::mem::transmute(file.palette[i]);
                 }
                 VoxPalette(mem)
             };
-            let palette_handle = load_context.set_labeled_asset("palette", LoadedAsset::new(palette));
+            let palette_handle =
+                load_context.set_labeled_asset("palette", LoadedAsset::new(palette));
 
-
-            let (i, model) = file.models.iter().enumerate().max_by_key(|a| a.1.voxels.len()).unwrap();
+            let (i, model) = file
+                .models
+                .iter()
+                .enumerate()
+                .max_by_key(|a| a.1.voxels.len())
+                .unwrap();
             let (tree, material) = convert_model(model, &palette_handle);
             let geometry = crate::VoxGeometry::from_tree(tree, 1.0);
 

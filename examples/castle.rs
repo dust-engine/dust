@@ -6,13 +6,12 @@ use bevy_ecs::system::{Commands, Res};
 
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
-use dust_format_explicit_aabbs::material::DensityMaterial;
 use dust_format_vox::{PaletteMaterial, VoxGeometry};
 use dust_render::camera::PerspectiveCamera;
 
 use dust_render::renderable::Renderable;
 
-use glam::{Vec3, UVec3};
+use glam::{UVec3, Vec3};
 
 use dust_render::renderer::Renderer as DefaultRenderer;
 
@@ -48,14 +47,15 @@ fn main() {
     .add_plugin(dust_render::material::MaterialPlugin::<PaletteMaterial>::default())
     .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
     .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
-    .add_startup_system(setup);
+    .add_startup_system(setup)
+    .add_system(print_position_system);
     app.run();
 }
 
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut geometry: ResMut<Assets<VoxGeometry>>
+    _geometry: ResMut<Assets<VoxGeometry>>,
 ) {
     let mut test_geometry = VoxGeometry::new(1.0);
     test_geometry.set(UVec3::new(0, 0, 0), Some(true));
@@ -64,7 +64,8 @@ fn setup(
     test_geometry.set(UVec3::new(3, 3, 5), Some(true));
     //let handle = geometry.add(test_geometry);
     let handle: Handle<VoxGeometry> = asset_server.load("../assets/castle.vox");
-    let material_handle: Handle<PaletteMaterial> = asset_server.load("../assets/castle.vox#material");
+    let material_handle: Handle<PaletteMaterial> =
+        asset_server.load("../assets/castle.vox#material");
     //let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
     commands
         .spawn()
@@ -78,10 +79,20 @@ fn setup(
         .spawn()
         .insert(PerspectiveCamera::default())
         .insert(Transform::default())
+        .insert(PrintingLocation)
         .insert(GlobalTransform::default())
         .insert_bundle(smooth_bevy_cameras::controllers::fps::FpsCameraBundle::new(
             smooth_bevy_cameras::controllers::fps::FpsCameraController::default(),
             Vec3::new(0.0, 0.0, 10.0),
             Vec3::new(0.0, 0.0, 0.0),
         ));
+}
+
+#[derive(Component)]
+struct PrintingLocation;
+
+fn print_position_system(_commands: Commands, query: Query<(&GlobalTransform, &PrintingLocation)>) {
+    for (transform, _) in &mut query.iter() {
+        println!("{:?}", transform.translation());
+    }
 }

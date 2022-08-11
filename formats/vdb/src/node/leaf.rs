@@ -2,9 +2,9 @@ use super::{size_of_grid, NodeMeta};
 use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool};
 use glam::UVec3;
 use std::{
-    alloc::Layout,
+    cell::UnsafeCell,
     iter::Once,
-    mem::{size_of, MaybeUninit}, cell::UnsafeCell,
+    mem::{size_of, MaybeUninit},
 };
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
@@ -153,14 +153,14 @@ where
     type LeafIterator<'a> = Once<(UVec3, &'a UnsafeCell<Self>)>;
 
     #[inline]
-    fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {
-        std::iter::once((offset, unsafe {std::mem::transmute(self)}))
+    fn iter_leaf<'a>(&'a self, _pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {
+        std::iter::once((offset, unsafe { std::mem::transmute(self) }))
     }
 
     #[inline]
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
         let node = unsafe { pools[0].get_item::<Self>(ptr) };
-        std::iter::once((offset, unsafe {std::mem::transmute(node)}))
+        std::iter::once((offset, unsafe { std::mem::transmute(node) }))
     }
 }
 
