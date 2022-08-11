@@ -1,5 +1,6 @@
 use std::{ffi::c_void, sync::Arc};
 
+use crate::{Device, Queues};
 use bevy_asset::AssetServer;
 use bevy_ecs::{
     prelude::*,
@@ -12,10 +13,9 @@ use dustash::{
     command::{pool::CommandPool, recorder::CommandExecutable},
     descriptor::{DescriptorPool, DescriptorSet, DescriptorSetLayout},
     frames::PerFrame,
-    queue::{QueueType, Queues},
+    queue::QueueType,
     ray_tracing::pipeline::PipelineLayout,
     sync::{CommandsFuture, GPUFuture},
-    Device,
 };
 
 use crate::{
@@ -33,6 +33,7 @@ pub struct RenderPerFrameState {
     pipeline_generation: u64,
 }
 
+#[derive(Resource)]
 pub struct RenderState {
     command_pool: Arc<CommandPool>,
     desc_pool: Option<Arc<DescriptorPool>>,
@@ -46,17 +47,17 @@ pub struct PushConstants {
 
 impl FromWorld for RenderState {
     fn from_world(world: &mut World) -> Self {
-        let device: &Arc<Device> = world.resource();
-        let queues: &Arc<Queues> = world.resource();
+        let device: &crate::Device = world.resource();
+        let queues: &crate::Queues = world.resource();
         let pool = CommandPool::new(
-            device.clone(),
+            device.0.clone(),
             vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
             queues.of_type(QueueType::Compute).family_index(),
         )
         .unwrap();
 
         let desc_layout = DescriptorSetLayout::new(
-            device.clone(),
+            device.0.clone(),
             &vk::DescriptorSetLayoutCreateInfo::builder()
                 .bindings(&[
                     vk::DescriptorSetLayoutBinding {
@@ -86,7 +87,7 @@ impl FromWorld for RenderState {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Resource)]
 pub struct Renderer {
     pipeline_layout: Arc<PipelineLayout>,
 }
@@ -94,12 +95,8 @@ const PRIMARY_RAY_PIPELINE: PipelineIndex = PipelineIndex::new(0);
 impl crate::pipeline::RayTracingRenderer for Renderer {
     fn new(app: &mut bevy_app::App) -> Self {
         let render_app = app.sub_app_mut(crate::RenderApp);
-        let device = render_app
-            .world
-            .get_resource::<Arc<Device>>()
-            .unwrap()
-            .clone();
         render_app.world.init_resource::<RenderState>();
+        let device = render_app.world.resource::<crate::Device>().0.clone();
         let render_state = render_app.world.get_resource::<RenderState>().unwrap();
         let material_descriptor_vec = render_app
             .world
@@ -153,9 +150,9 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
 
     type RenderParam = (
         SResMut<Windows>,
-        SRes<Arc<Device>>,
+        SRes<Device>,
         SResMut<RenderState>,
-        SRes<Arc<Queues>>,
+        SRes<Queues>,
         Local<'static, PerFrame<RenderPerFrameState>>,
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
@@ -183,7 +180,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                 // We need one descriptor for each image.
                 state.desc_pool = Some(Arc::new(
                     DescriptorPool::new(
-                        device.clone(),
+                        device.0.clone(),
                         &vk::DescriptorPoolCreateInfo::builder()
                             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
                             .max_sets(num_swapchain_images)
@@ -376,7 +373,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         per_frame_state.cmd_exec = Some(cmd_exec.clone());
 
         let mut ray_tracing_future =
-            CommandsFuture::new(queues.clone(), queues.index_of_type(QueueType::Compute));
+            CommandsFuture::new(queues.0.clone(), queues.index_of_type(QueueType::Compute));
         ray_tracing_future.then_command_exec(cmd_exec);
 
         // rtx depends on acquired swapchain image

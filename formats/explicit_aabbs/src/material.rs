@@ -27,7 +27,7 @@ pub struct DensityMaterial {
 
 impl RenderAsset for DensityMaterial {
     type GPUAsset = GPUDensityMaterial;
-    type CreateBuildDataParam = SRes<Arc<Allocator>>;
+    type CreateBuildDataParam = SRes<dust_render::Allocator>;
     type BuildData = (MemBuffer, vk::Extent2D);
     fn create_build_data(
         &mut self,
@@ -72,7 +72,7 @@ pub struct GPUDensityMaterial {
 }
 
 impl GPURenderAsset<DensityMaterial> for GPUDensityMaterial {
-    type BuildParam = (SRes<Arc<Device>>, SRes<Arc<Allocator>>, SRes<Arc<Queues>>);
+    type BuildParam = (SRes<dust_render::Device>, SRes<dust_render::Allocator>, SRes<dust_render::Queues>);
 
     fn build(
         build_set: <DensityMaterial as RenderAsset>::BuildData,

@@ -1,15 +1,15 @@
 use crate::pipeline::RenderSystem;
 use crate::RenderStage;
 use crate::{accel_struct::blas::BlasComponent, renderable::Renderable};
+use crate::{AccelerationStructureLoader, Allocator, Queues};
 use ash::vk;
 use bevy_asset::HandleId;
 use bevy_ecs::prelude::Query;
 use bevy_ecs::prelude::*;
 use bevy_transform::prelude::GlobalTransform;
 use bevy_utils::HashMap;
-use dustash::accel_struct::{AccelerationStructure, AccelerationStructureLoader};
-use dustash::queue::Queues;
-use dustash::{queue::QueueType, resources::alloc::Allocator, sync::CommandsFuture};
+use dustash::accel_struct::AccelerationStructure;
+use dustash::{queue::QueueType, sync::CommandsFuture};
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -21,7 +21,7 @@ impl bevy_app::Plugin for TlasPlugin {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct TLASStore {
     pub tlas: Option<Arc<AccelerationStructure>>,
     pub tlas_build_future: Option<CommandsFuture>,
@@ -36,9 +36,9 @@ struct InstanceEntry {
 /// This runs in the Render stage of the render world.
 fn build_tlas(
     mut store: ResMut<TLASStore>,
-    allocator: Res<Arc<Allocator>>,
-    accel_struct_loader: Res<Arc<AccelerationStructureLoader>>,
-    queues: Res<Arc<Queues>>,
+    allocator: Res<Allocator>,
+    accel_struct_loader: Res<AccelerationStructureLoader>,
+    queues: Res<Queues>,
     query: Query<(&GlobalTransform, &BlasComponent, &Renderable)>,
 ) {
     let mut map: HashMap<InstanceEntry, u32> = Default::default();

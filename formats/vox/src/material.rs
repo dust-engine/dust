@@ -31,7 +31,7 @@ impl PaletteMaterial {
 
 impl RenderAsset for PaletteMaterial {
     type GPUAsset = GPUPaletteMaterial;
-    type CreateBuildDataParam = SRes<Arc<Allocator>>;
+    type CreateBuildDataParam = SRes<dust_render::Allocator>;
     type BuildData = (Handle<VoxPalette>, Arc<MemBuffer>);
     fn create_build_data(
         &mut self,

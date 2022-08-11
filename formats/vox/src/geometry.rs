@@ -57,7 +57,7 @@ impl RenderAsset for VoxGeometry {
     /// AABBBuffer, GeometryBuffer
     type BuildData = (MemBuffer, MemBuffer);
 
-    type CreateBuildDataParam = SRes<Arc<Allocator>>;
+    type CreateBuildDataParam = SRes<dust_render::Allocator>;
 
     fn create_build_data(
         &mut self,
@@ -168,7 +168,7 @@ pub struct VoxGPUGeometry {
     geometry_buffer: Arc<MemBuffer>,
 }
 impl GPURenderAsset<VoxGeometry> for VoxGPUGeometry {
-    type BuildParam = SRes<Arc<Allocator>>;
+    type BuildParam = SRes<dust_render::Allocator>;
 
     fn build(
         build_set: <VoxGeometry as RenderAsset>::BuildData,

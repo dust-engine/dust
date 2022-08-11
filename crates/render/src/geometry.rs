@@ -1,8 +1,4 @@
-use std::{
-    alloc::{Layout, LayoutError},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{alloc::Layout, marker::PhantomData, sync::Arc};
 
 use crate::{
     render_asset::{GPURenderAsset, RenderAsset, RenderAssetPlugin},

@@ -27,7 +27,7 @@ impl RenderAsset for VoxPalette {
 
     type BuildData = Arc<MemBuffer>;
 
-    type CreateBuildDataParam = SRes<Arc<Allocator>>;
+    type CreateBuildDataParam = SRes<dust_render::Allocator>;
 
     fn create_build_data(
         &mut self,

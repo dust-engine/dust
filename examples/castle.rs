@@ -47,8 +47,7 @@ fn main() {
     .add_plugin(dust_render::material::MaterialPlugin::<PaletteMaterial>::default())
     .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
     .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
-    .add_startup_system(setup)
-    .add_system(print_position_system);
+    .add_startup_system(setup);
     app.run();
 }
 
@@ -79,20 +78,10 @@ fn setup(
         .spawn()
         .insert(PerspectiveCamera::default())
         .insert(Transform::default())
-        .insert(PrintingLocation)
         .insert(GlobalTransform::default())
         .insert_bundle(smooth_bevy_cameras::controllers::fps::FpsCameraBundle::new(
             smooth_bevy_cameras::controllers::fps::FpsCameraController::default(),
             Vec3::new(0.0, 0.0, 10.0),
             Vec3::new(0.0, 0.0, 0.0),
         ));
-}
-
-#[derive(Component)]
-struct PrintingLocation;
-
-fn print_position_system(_commands: Commands, query: Query<(&GlobalTransform, &PrintingLocation)>) {
-    for (transform, _) in &mut query.iter() {
-        println!("{:?}", transform.translation());
-    }
 }

@@ -1,20 +1,19 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::Deref, sync::Arc};
 
-use crate::RenderWorld;
+use crate::{Queues, RenderWorld};
+use crate::{SurfaceLoader, SwapchainLoader};
 use ash::vk;
 use bevy_app::{App, Plugin};
 use bevy_ecs::{
     event::EventReader,
     schedule::{ParallelSystemDescriptorCoercion, SystemLabel},
-    system::{Res, ResMut},
+    system::{Res, ResMut, Resource},
 };
 use bevy_window::WindowId;
 use dustash::{
     frames::{AcquiredFrame, PerFrame},
-    queue::Queues,
-    surface::{Surface, SurfaceLoader},
-    swapchain::SwapchainLoader,
-    Device, Task,
+    surface::Surface,
+    Task,
 };
 
 pub struct Window {
@@ -43,7 +42,7 @@ struct ExtractedWindow {
     handle: bevy_window::RawWindowHandleWrapper,
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct Windows {
     extracted_windows: Vec<ExtractedWindow>,
     windows: HashMap<bevy_window::WindowId, Window>,
@@ -93,10 +92,12 @@ fn extract_windows(
 /// - Acquire swapchain image for all windows
 fn prepare_windows(
     mut windows: ResMut<Windows>,
-    surface_loader: Res<Arc<SurfaceLoader>>,
-    swapchain_loader: Res<Arc<SwapchainLoader>>,
+    surface_loader: Res<SurfaceLoader>,
+    swapchain_loader: Res<SwapchainLoader>,
 ) {
     let windows = &mut *windows;
+    let swapchain_loader: &Arc<dustash::swapchain::SwapchainLoader> = swapchain_loader.deref();
+    let surface_loader: &Arc<dustash::surface::SurfaceLoader> = surface_loader.deref();
     for extracted_window in windows.extracted_windows.iter() {
         if let Some(window) = windows.windows.get_mut(&extracted_window.id) {
             // Update the window
@@ -151,9 +152,9 @@ fn prepare_windows(
 }
 
 // Flush and present
-fn queue_flush_and_present(mut windows: ResMut<Windows>, mut queues: ResMut<Arc<Queues>>) {
+fn queue_flush_and_present(mut windows: ResMut<Windows>, mut queues: ResMut<Queues>) {
     use futures_util::FutureExt;
-    let queues: &mut Queues = Arc::get_mut(&mut queues)
+    let queues: &mut dustash::queue::Queues = Arc::get_mut(&mut queues.0)
         .expect("All references to Queues should be dropped by the end of the frame.");
     let task = queues.flush().unwrap().shared();
 
@@ -175,10 +176,14 @@ pub enum SwapchainSystem {
 pub struct SwapchainPlugin;
 impl Plugin for SwapchainPlugin {
     fn build(&self, render_app: &mut App) {
-        let device = render_app.world.resource::<Arc<Device>>().clone();
+        let device = render_app.world.resource::<crate::Device>().deref().clone();
         render_app
-            .insert_resource(Arc::new(SurfaceLoader::new(device.instance().clone())))
-            .insert_resource(Arc::new(SwapchainLoader::new(device)))
+            .insert_resource(crate::SurfaceLoader(Arc::new(
+                dustash::surface::SurfaceLoader::new(device.instance().clone()),
+            )))
+            .insert_resource(crate::SwapchainLoader(Arc::new(
+                dustash::swapchain::SwapchainLoader::new(device),
+            )))
             .init_resource::<Windows>()
             .add_system_to_stage(
                 crate::RenderStage::Extract,

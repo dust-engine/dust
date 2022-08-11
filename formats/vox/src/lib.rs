@@ -8,7 +8,7 @@ mod vox_loader;
 use bevy_asset::AddAsset;
 mod geometry;
 mod material;
-use dust_render::{render_asset::RenderAssetStore, RenderApp};
+use dust_render::{render_asset::RenderAssetStore, RenderApp, renderable::Renderable};
 
 pub use geometry::VoxGeometry;
 pub use material::{GPUPaletteMaterial, PaletteMaterial};
@@ -27,3 +27,14 @@ impl bevy_app::Plugin for VoxPlugin {
             .init_resource::<RenderAssetStore<VoxPalette>>();
     }
 }
+
+/*
+#[derive(bevy_ecs::bundle::Bundle)]
+pub struct VoxBundle {
+    renderable: Renderable,
+    transform: bevy_transform::Transform,
+    global_transform: GlobalTransform,
+    geometry_handle: Handle<VoxGeometry>,
+    material_handle: Handle<PaletteMaterial>,
+}
+*/

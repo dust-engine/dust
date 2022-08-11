@@ -35,7 +35,7 @@ impl RenderAsset for AABBGeometry {
 
     type BuildData = MemBuffer;
 
-    type CreateBuildDataParam = SRes<Arc<Allocator>>;
+    type CreateBuildDataParam = SRes<dust_render::Allocator>;
 
     fn create_build_data(
         &mut self,
@@ -74,7 +74,7 @@ impl Geometry for AABBGeometry {
 }
 
 impl GPURenderAsset<AABBGeometry> for AABBGPUGeometry {
-    type BuildParam = SRes<Arc<Allocator>>;
+    type BuildParam = SRes<dust_render::Allocator>;
     fn build(
         build_set: MemBuffer,
         commands_future: &mut dustash::sync::CommandsFuture,

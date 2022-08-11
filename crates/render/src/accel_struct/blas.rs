@@ -1,18 +1,19 @@
 use std::sync::Arc;
 
+use crate::{AccelerationStructureLoader, Allocator, Queues};
 use bevy_app::Plugin;
 use bevy_asset::HandleId;
 use bevy_ecs::{
     component::Component,
     entity::Entity,
-    system::{Commands, Query, Res, ResMut},
+    system::{Commands, Query, Res, ResMut, Resource},
 };
 use bevy_transform::prelude::GlobalTransform;
 use bevy_utils::{HashMap, HashSet};
 use dustash::{
-    accel_struct::{build::AabbBlasBuilder, AccelerationStructure, AccelerationStructureLoader},
-    queue::{QueueType, Queues},
-    resources::alloc::{Allocator, MemBuffer},
+    accel_struct::{build::AabbBlasBuilder, AccelerationStructure},
+    queue::QueueType,
+    resources::alloc::MemBuffer,
     sync::CommandsFuture,
 };
 
@@ -46,7 +47,7 @@ fn extract_renderable(
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 struct BlasStore {
     /// Mapping from a list of GeometryIds to the acceleration structure
     blas: HashMap<Vec<HandleId>, Arc<AccelerationStructure>>,
@@ -63,9 +64,9 @@ pub struct BlasComponent {
 fn build_blas(
     mut commands: Commands,
     mut blas_store: ResMut<BlasStore>,
-    loader: Res<Arc<AccelerationStructureLoader>>,
-    allocator: Res<Arc<Allocator>>,
-    queues: Res<Arc<Queues>>,
+    loader: Res<AccelerationStructureLoader>,
+    allocator: Res<Allocator>,
+    queues: Res<Queues>,
     query: Query<(
         Entity,
         &Renderable,

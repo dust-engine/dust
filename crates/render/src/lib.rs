@@ -15,14 +15,16 @@ pub mod shader;
 pub mod swapchain;
 pub use ash::vk;
 
+mod resource;
+
+pub use resource::*;
+
 use ash::extensions::{ext, khr};
 use bevy_app::{App, AppLabel, CoreStage, Plugin};
 use bevy_asset::AddAsset;
 use bevy_ecs::schedule::StageLabel;
+use bevy_ecs::system::Resource;
 use bevy_ecs::world::World;
-use dustash::accel_struct::AccelerationStructureLoader;
-use dustash::ray_tracing::pipeline::RayTracingLoader;
-use dustash::resources::alloc::Allocator;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -47,7 +49,7 @@ pub enum RenderStage {
 
 /// A "scratch" world used to avoid allocating new worlds every frame when
 // swapping out the Render World.
-#[derive(Default)]
+#[derive(Default, Resource)]
 struct ScratchRenderWorld(World);
 impl Deref for ScratchRenderWorld {
     type Target = World;
@@ -63,7 +65,7 @@ impl DerefMut for ScratchRenderWorld {
 }
 
 /// The Render App World. This is only available as a resource during the Extract step.
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct RenderWorld(World);
 impl Deref for RenderWorld {
     type Target = World;
@@ -151,16 +153,20 @@ impl RenderPlugin {
                     }),
             )
             .unwrap();
-        let allocator = Allocator::new(device.clone());
+        let allocator = dustash::resources::alloc::Allocator::new(device.clone());
 
-        let acceleration_structure_loader = AccelerationStructureLoader::new(device.clone());
-        render_world.insert_resource(Arc::new(acceleration_structure_loader));
-        let ray_tracing_loader = RayTracingLoader::new(device.clone());
-        render_world.insert_resource(Arc::new(ray_tracing_loader));
-        render_world.insert_resource(device);
-        render_world.insert_resource(instance);
-        render_world.insert_resource(Arc::new(queues));
-        render_world.insert_resource(Arc::new(allocator));
+        let acceleration_structure_loader =
+            dustash::accel_struct::AccelerationStructureLoader::new(device.clone());
+        render_world.insert_resource(crate::AccelerationStructureLoader(Arc::new(
+            acceleration_structure_loader,
+        )));
+        let ray_tracing_loader =
+            dustash::ray_tracing::pipeline::RayTracingLoader::new(device.clone());
+        render_world.insert_resource(crate::RayTracingLoader(Arc::new(ray_tracing_loader)));
+        render_world.insert_resource(crate::Device(device));
+        render_world.insert_resource(crate::Instance(instance));
+        render_world.insert_resource(crate::Queues(Arc::new(queues)));
+        render_world.insert_resource(crate::Allocator(Arc::new(allocator)));
     }
 }
 impl Plugin for RenderPlugin {
@@ -174,20 +180,12 @@ impl Plugin for RenderPlugin {
         self.add_render_resources(&mut render_app.world);
 
         // Let's put certain render resources into the main world as well, since they're Arc
-        app.world.insert_resource(
-            render_app
-                .world
-                .get_resource::<Arc<Allocator>>()
-                .unwrap()
-                .clone(),
-        );
-        app.world.insert_resource(
-            render_app
-                .world
-                .get_resource::<Arc<dustash::Device>>()
-                .unwrap()
-                .clone(),
-        );
+        app.world.insert_resource(crate::Allocator(
+            render_app.world.resource::<crate::Allocator>().0.clone(),
+        ));
+        app.world.insert_resource(crate::Device(
+            render_app.world.resource::<crate::Device>().0.clone(),
+        ));
 
         render_app
             .add_stage(CoreStage::First, SystemStage::parallel()) // For events

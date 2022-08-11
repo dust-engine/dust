@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::geometry::{GPUGeometry, Geometry};
-use crate::pipeline::{HitGroup, HitGroupType};
+use crate::pipeline::{HitGroup, HitGroupType, HitGroups};
 use crate::render_asset::{
     BindlessAssetsSystem, GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore,
 };
@@ -86,7 +86,7 @@ where
         };
         let mut hitgroups = app
             .world
-            .get_resource_mut::<Vec<HitGroup>>()
+            .get_resource_mut::<HitGroups>()
             .expect("MaterialPlugin must be registered after RenderPlugin");
         let hitgroup_index = hitgroups.len() as u32;
         hitgroups.push(hitgroup);

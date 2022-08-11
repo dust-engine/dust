@@ -1,10 +1,15 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use crate::{
     accel_struct::blas::BlasComponent,
     shader::{Shader, SpecializedShader},
-    RenderApp, RenderStage,
+    Allocator, RenderApp, RenderStage,
 };
+use crate::{Device, Queues, RayTracingLoader};
 use bevy_app::Plugin;
 use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
 use bevy_ecs::{
@@ -13,13 +18,12 @@ use bevy_ecs::{
 };
 use bevy_utils::{HashMap, HashSet};
 use dustash::{
-    queue::{QueueType, Queues},
+    queue::QueueType,
     ray_tracing::{
-        pipeline::{PipelineLayout, RayTracingLoader, RayTracingPipelineLayout},
+        pipeline::{PipelineLayout, RayTracingPipelineLayout},
         sbt::{Sbt, SbtLayout},
     },
     sync::CommandsFuture,
-    Device,
 };
 
 pub use dustash::ray_tracing::sbt::HitGroupType;
@@ -32,7 +36,7 @@ pub struct HitGroup {
 impl HitGroup {
     fn try_extract_shaders(
         &self,
-        device: &Arc<Device>,
+        device: &Arc<dustash::Device>,
         shaders: &Assets<Shader>,
     ) -> Option<dustash::ray_tracing::sbt::HitGroup> {
         use dustash::shader::SpecializedShader as SpecializedShaderModule;
@@ -76,7 +80,7 @@ pub struct RayTracingPipelineBuildJob {
 impl RayTracingPipelineBuildJob {
     pub fn try_create_sbt_layout(
         &self,
-        device: &Arc<Device>,
+        device: &Arc<dustash::Device>,
         shaders: &Assets<Shader>,
         hitgroups: &[dustash::ray_tracing::sbt::HitGroup],
     ) -> Option<SbtLayout> {
@@ -116,7 +120,7 @@ pub trait RayTracingPipeline {
     }
 }
 
-pub trait RayTracingRenderer: Clone + Send + Sync + 'static {
+pub trait RayTracingRenderer: Clone + Send + Sync + 'static + Resource {
     fn new(app: &mut bevy_app::App) -> Self;
     // Build the pipeline by calling self.add_pipeline()
     fn build(&self, index: PipelineIndex, asset_server: &AssetServer)
@@ -135,6 +139,20 @@ impl PipelineIndex {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct HitGroups(Vec<HitGroup>);
+impl Deref for HitGroups {
+    type Target = Vec<HitGroup>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for HitGroups {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub struct RayTracingRendererPlugin<T: RayTracingRenderer> {
     _marker: PhantomData<T>,
 }
@@ -148,9 +166,9 @@ impl<T: RayTracingRenderer> Default for RayTracingRendererPlugin<T> {
 
 impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
     fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<Vec<HitGroup>>();
+        app.init_resource::<HitGroups>();
         app.sub_app_mut(RenderApp)
-            .init_resource::<Option<Vec<ExtractedRayTracingPipelineLayout>>>()
+            .init_resource::<ExtractedRayTracingPipelineLayoutsContainer>()
             .init_resource::<PipelineCache>()
             .init_resource::<crate::render_asset::BindlessGPUAssetDescriptors>()
             .add_system_to_stage(RenderStage::Extract, extract_pipeline_system::<T>)
@@ -201,9 +219,9 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
     mut events: EventReader<AssetEvent<Shader>>,
     mut pipeline_shaders: Local<PipelineShaders>,
     asset_server: Res<AssetServer>,
-    device: Res<Arc<Device>>,
+    device: Res<Device>,
     shaders: Res<Assets<Shader>>,
-    hit_groups: Res<Vec<HitGroup>>,
+    hit_groups: Res<HitGroups>,
     renderer: Res<T>,
 ) {
     commands.insert_resource(renderer.clone());
@@ -322,10 +340,10 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
         })
         .collect();
     // These are the pipelines that we would like to rebuild this frame.
-    commands.insert_resource(Some(layouts));
+    commands.insert_resource(ExtractedRayTracingPipelineLayoutsContainer(Some(layouts)));
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct PipelineCache {
     pub generation: u64,
     pub pipelines: Vec<Option<Arc<dustash::ray_tracing::pipeline::RayTracingPipeline>>>,
@@ -336,10 +354,24 @@ pub struct PipelineCache {
 #[derive(Clone, Hash, Debug, Eq, PartialEq, SystemLabel)]
 struct PreparePipelineSystem;
 
+#[derive(Resource, Default)]
+struct ExtractedRayTracingPipelineLayoutsContainer(Option<Vec<ExtractedRayTracingPipelineLayout>>);
+impl Deref for ExtractedRayTracingPipelineLayoutsContainer {
+    type Target = Option<Vec<ExtractedRayTracingPipelineLayout>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for ExtractedRayTracingPipelineLayoutsContainer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 fn prepare_pipeline_system<T: RayTracingRenderer>(
-    mut layouts: ResMut<Option<Vec<ExtractedRayTracingPipelineLayout>>>,
+    mut layouts: ResMut<ExtractedRayTracingPipelineLayoutsContainer>,
     mut pipeline_cache: ResMut<PipelineCache>,
-    rtx_loader: Res<Arc<RayTracingLoader>>,
+    rtx_loader: Res<RayTracingLoader>,
 ) {
     if layouts.is_none() {
         return;
@@ -397,8 +429,8 @@ struct PrepareSbtSystem;
 
 fn prepare_sbt_system(
     mut pipeline_cache: ResMut<PipelineCache>,
-    allocator: Res<Arc<dustash::resources::alloc::Allocator>>,
-    queues: Res<Arc<Queues>>,
+    allocator: Res<Allocator>,
+    queues: Res<Queues>,
     query: Query<&BlasComponent>,
 ) {
     // TODO: skip creating the SBT when there's no change

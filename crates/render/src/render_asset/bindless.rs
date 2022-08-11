@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 use ash::vk;
 use bevy_app::Plugin;
@@ -6,10 +6,10 @@ use bevy_asset::HandleId;
 use bevy_ecs::{
     event::EventReader,
     prelude::FromWorld,
-    system::{Res, ResMut},
+    system::{Res, ResMut, Resource},
 };
 use bevy_utils::HashMap;
-use dustash::{descriptor::DescriptorVecBinding, Device};
+use dustash::descriptor::DescriptorVecBinding;
 
 use crate::{RenderApp, RenderStage};
 
@@ -21,16 +21,17 @@ pub trait BindlessGPUAsset<T: RenderAsset>: GPURenderAsset<T> {
     fn binding(&self) -> dustash::descriptor::DescriptorVecBinding;
 }
 
+#[derive(Resource)]
 pub struct BindlessGPUAssetDescriptors {
     pub descriptor_vec: dustash::descriptor::DescriptorVec,
     asset_handle_to_index: HashMap<HandleId, u32>,
 }
 impl FromWorld for BindlessGPUAssetDescriptors {
     fn from_world(world: &mut bevy_ecs::prelude::World) -> Self {
-        let device: &Arc<Device> = world.resource();
+        let device: &crate::Device = world.resource();
         Self {
             descriptor_vec: dustash::descriptor::DescriptorVec::new(
-                device.clone(),
+                device.0.clone(),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )
             .unwrap(),

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::ops::{Deref, DerefMut};
 
 use ash::vk;
 use bevy_app::{App, Plugin};
@@ -8,12 +8,15 @@ use bevy_asset::{AddAsset, Asset, AssetEvent, Assets, Handle};
 
 use bevy_ecs::event::{EventReader, EventWriter};
 
+use crate::Queues;
 use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 use bevy_ecs::schedule::SystemLabel;
-use bevy_ecs::system::{Commands, Res, ResMut, StaticSystemParam, SystemParam, SystemParamItem};
+use bevy_ecs::system::{
+    Commands, Res, ResMut, Resource, StaticSystemParam, SystemParam, SystemParamItem,
+};
 use bevy_utils::{HashMap, HashSet};
 use dustash::queue::semaphore::TimelineSemaphoreOp;
-use dustash::queue::{QueueType, Queues};
+use dustash::queue::QueueType;
 use dustash::sync::{CommandsFuture, GPUFuture};
 
 /// Asset that can be send to the GPU.
@@ -64,6 +67,7 @@ struct ExtractedAssets<A: RenderAsset> {
     extracted: Vec<(Handle<A>, A::BuildData)>,
     removed: Vec<Handle<A>>,
 }
+impl<A: RenderAsset> Resource for ExtractedAssets<A> {}
 impl<A: RenderAsset> ExtractedAssets<A> {
     pub fn merge(&mut self, other: Self) {
         self.extracted.extend(other.extracted);
@@ -101,20 +105,34 @@ fn create_build_data<A: RenderAsset>(
         }
     }
 
-    commands.insert_resource(Some(ExtractedAssets {
+    commands.insert_resource(ExtractedAssetsContainer(Some(ExtractedAssets {
         extracted: extracted_assets,
         removed,
-    }));
+    })))
 }
 
+#[derive(Resource)]
+struct ExtractedAssetsContainer<A: RenderAsset>(Option<ExtractedAssets<A>>);
+impl<A: RenderAsset> Deref for ExtractedAssetsContainer<A> {
+    type Target = Option<ExtractedAssets<A>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl<A: RenderAsset> DerefMut for ExtractedAssetsContainer<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 /// This runs in the Extract stage of the Render World.
 /// It takes the GeometryCarrier from the App World into the Render World.
 fn move_extracted_assets<A: RenderAsset>(
     mut commands: Commands,
-    mut extracted_assets: ResMut<Option<ExtractedAssets<A>>>,
+    mut extracted_assets: ResMut<ExtractedAssetsContainer<A>>,
 ) {
     if let Some(carrier) = extracted_assets.take() {
-        commands.insert_resource(Some(carrier));
+        commands.insert_resource(ExtractedAssetsContainer(Some(carrier)));
     }
 }
 
@@ -128,6 +146,8 @@ pub struct RenderAssetStore<A: RenderAsset> {
     /// Assets deferred to the next frame and not yet submitted to GPU.
     buffered_builds: Option<ExtractedAssets<A>>,
 }
+
+impl<A: RenderAsset> Resource for RenderAssetStore<A> {}
 impl<A: RenderAsset> RenderAssetStore<A> {
     pub fn get(&self, handle: &Handle<A>) -> Option<&A::GPUAsset> {
         self.assets.get(handle)
@@ -188,9 +208,9 @@ impl<T: RenderAsset> Debug for PrepareRenderAssetsSystem<T> {
 /// It takes the extracted BuildSet and ChangeSet and apply them to the Geometry
 /// in the render world.
 fn prepare_render_assets<T: RenderAsset>(
-    mut extracted_assets: ResMut<Option<ExtractedAssets<T>>>,
+    mut extracted_assets: ResMut<ExtractedAssetsContainer<T>>,
     mut render_asset_store: ResMut<RenderAssetStore<T>>,
-    queues: Res<Arc<Queues>>,
+    queues: Res<Queues>,
     mut event_writer: EventWriter<RenderAssetEvent<T>>,
     mut build_params: StaticSystemParam<<T::GPUAsset as GPURenderAsset<T>>::BuildParam>,
 ) {
@@ -224,7 +244,7 @@ fn prepare_render_assets<T: RenderAsset>(
     // Buffered -> Pending
     if let Some(mut buffered_builds) = render_asset_store.buffered_builds.take() {
         let mut future = dustash::sync::CommandsFuture::new(
-            queues.clone(),
+            queues.0.clone(),
             queues.of_type(QueueType::Transfer).index(),
         );
         let mut pending_builds: Vec<(Handle<T>, T::GPUAsset)> = Vec::new();
