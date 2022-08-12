@@ -31,14 +31,12 @@ fn main() {
     })
     .add_plugin(bevy_core::CorePlugin::default())
     .add_plugin(bevy_transform::TransformPlugin::default())
+    .add_plugin(bevy_hierarchy::HierarchyPlugin::default())
     .add_plugin(bevy_input::InputPlugin::default())
     .add_plugin(bevy_window::WindowPlugin::default())
     .add_plugin(bevy_asset::AssetPlugin::default())
-    //.add_plugin(dust_raytrace::DustPlugin::default())
-    //add_plugin(bevy::scene::ScenePlugin::default())
+    .add_plugin(bevy_scene::ScenePlugin::default())
     .add_plugin(bevy_winit::WinitPlugin::default())
-    //.add_plugin(flycamera::FlyCameraPlugin)
-    //.add_plugin(fps_counter::FPSCounterPlugin)
     .add_plugin(dust_render::RenderPlugin::default())
     .add_plugin(dust_format_vox::VoxPlugin::default())
     .add_plugin(dust_render::pipeline::RayTracingRendererPlugin::<
@@ -56,24 +54,11 @@ fn setup(
     asset_server: Res<AssetServer>,
     _geometry: ResMut<Assets<VoxGeometry>>,
 ) {
-    let mut test_geometry = VoxGeometry::new(1.0);
-    test_geometry.set(UVec3::new(0, 0, 0), Some(true));
-    test_geometry.set(UVec3::new(3, 3, 3), Some(true));
-    test_geometry.set(UVec3::new(3, 3, 4), Some(true));
-    test_geometry.set(UVec3::new(3, 3, 5), Some(true));
-    //let handle = geometry.add(test_geometry);
-    let handle: Handle<VoxGeometry> = asset_server.load("../assets/castle.vox");
-    let material_handle: Handle<PaletteMaterial> =
-        asset_server.load("../assets/castle.vox#material");
-    //let material_handle: Handle<DensityMaterial> = asset_server.load("../assets/test.bmp");
-    commands
-        .spawn()
-        .insert(Renderable::default())
-        .insert(Transform::default())
-        .insert(GlobalTransform::default())
-        .insert(handle)
-        .insert(material_handle);
 
+    commands.spawn_bundle(bevy_scene::SceneBundle {
+        scene: asset_server.load("../assets/castle.vox"),
+        ..Default::default()
+    });
     commands
         .spawn()
         .insert(PerspectiveCamera::default())

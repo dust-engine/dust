@@ -22,6 +22,7 @@ ash = { version = "0.37", features = ["linked"] }
 
 
 [dev-dependencies]
+bevy_scene = { git = "https://github.com/bevyengine/bevy" }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy", features=["filesystem_watcher"] }
 bevy_hierarchy = { git = "https://github.com/bevyengine/bevy" }
@@ -48,6 +49,7 @@ bevy_asset = { path = "../bevy/crates/bevy_asset" }
 bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
 bevy_utils = { path = "../bevy/crates/bevy_utils" }
 bevy_hierarchy = { path = "../bevy/crates/bevy_hierarchy" }
+bevy_scene = { path = "../bevy/crates/bevy_scene" }
 
 [profile.profile]
 inherits = "release"

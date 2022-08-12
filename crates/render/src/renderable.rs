@@ -1,11 +1,14 @@
 use ash::vk;
 
 use bevy_ecs::component::Component;
+use bevy_reflect::Reflect;
+use bevy_ecs::reflect::ReflectComponent;
 use bitflags::bitflags;
 
 bitflags! {
     /// Defines the flags for a [`Renderable`]
     /// Corresponds to VkAccelerationStructureInstanceKHR::flags
+    #[derive(Reflect)]
     pub struct RenderableFlags: u8 {
         /// Disables face culling for this renderable.
         const TRIANGLE_FACING_CULL_DISABLE = vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as u8;
@@ -31,7 +34,8 @@ impl Default for RenderableFlags {
 }
 
 /// Marker component for instances in the scene.
-#[derive(Component, Clone, Default)]
+#[derive(Component, Clone, Default, Reflect)]
+#[reflect(Component)]
 pub struct Renderable {
     /// Index into the BLASStore
     pub flags: RenderableFlags,

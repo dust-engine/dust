@@ -176,6 +176,8 @@ impl Plugin for RenderPlugin {
             .add_asset::<Shader>()
             .add_asset_loader(ShaderLoader::default());
 
+        app.register_type::<renderable::Renderable>();
+
         let mut render_app = App::empty();
         self.add_render_resources(&mut render_app.world);
 

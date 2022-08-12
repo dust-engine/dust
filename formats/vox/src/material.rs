@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::VoxPalette;
 
 #[derive(bevy_reflect::TypeUuid)]
-#[uuid = "75a9a733-04d7-4acb-8600-9a7d24ff0599"] // TODO: better UUID
+#[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0a"]
 pub struct PaletteMaterial {
     palette: Handle<VoxPalette>,
     data: Vec<u8>,
@@ -37,6 +37,7 @@ impl RenderAsset for PaletteMaterial {
         &mut self,
         allocator: &mut bevy_ecs::system::SystemParamItem<Self::CreateBuildDataParam>,
     ) -> Self::BuildData {
+        assert_ne!(self.data.len(), 0);
         let mut staging_buffer = allocator
             .allocate_buffer(&BufferRequest {
                 size: self.data.len() as u64,
@@ -49,7 +50,7 @@ impl RenderAsset for PaletteMaterial {
         staging_buffer.map_scoped(|slice| {
             slice.copy_from_slice(self.data.as_slice());
         });
-        (self.palette.clone(), Arc::new(staging_buffer)) // TODO: upload data here instead.
+        (self.palette.clone(), Arc::new(staging_buffer))
     }
 }
 

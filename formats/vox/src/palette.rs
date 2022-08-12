@@ -2,21 +2,13 @@ use std::sync::Arc;
 
 use ash::vk;
 use bevy_ecs::system::lifetimeless::SRes;
+use dot_vox::Color;
 use dust_render::render_asset::{GPURenderAsset, GPURenderAssetBuildResult, RenderAsset};
 use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer, MemoryAllocScenario};
 
-#[repr(C)]
-#[derive(Debug)]
-pub struct Color {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub a: u8,
-}
-
 #[derive(bevy_reflect::TypeUuid)]
-#[uuid = "75a9a733-04d8-4acb-8600-9a7d24ff0599"] // TODO: better UUID
-pub struct VoxPalette(pub Box<[Color; 255]>); // TODO: 256
+#[uuid = "c7713cf2-527f-45ac-8eed-cbbcdc7302fd"]
+pub struct VoxPalette(pub Box<[dot_vox::Color; 255]>);
 
 pub struct VoxPaletteGPU {
     pub(crate) palette: Arc<MemBuffer>,

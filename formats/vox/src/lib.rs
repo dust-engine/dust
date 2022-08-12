@@ -5,10 +5,10 @@ mod collector;
 mod palette;
 mod vox_loader;
 
-use bevy_asset::AddAsset;
+use bevy_asset::{AddAsset, Handle};
 mod geometry;
 mod material;
-use dust_render::{render_asset::RenderAssetStore, RenderApp, renderable::Renderable};
+use dust_render::{render_asset::RenderAssetStore, renderable::Renderable, RenderApp};
 
 pub use geometry::VoxGeometry;
 pub use material::{GPUPaletteMaterial, PaletteMaterial};
@@ -28,13 +28,25 @@ impl bevy_app::Plugin for VoxPlugin {
     }
 }
 
-/*
 #[derive(bevy_ecs::bundle::Bundle)]
 pub struct VoxBundle {
     renderable: Renderable,
-    transform: bevy_transform::Transform,
-    global_transform: GlobalTransform,
+    transform: bevy_transform::prelude::Transform,
+    global_transform: bevy_transform::prelude::GlobalTransform,
     geometry_handle: Handle<VoxGeometry>,
     material_handle: Handle<PaletteMaterial>,
 }
-*/
+impl VoxBundle {
+    pub fn from_geometry_material(
+        geometry: Handle<VoxGeometry>,
+        material: Handle<PaletteMaterial>,
+    ) -> Self {
+        VoxBundle {
+            renderable: Renderable::default(),
+            transform: bevy_transform::prelude::Transform::default(),
+            global_transform: bevy_transform::prelude::GlobalTransform::default(),
+            geometry_handle: geometry,
+            material_handle: material,
+        }
+    }
+}
