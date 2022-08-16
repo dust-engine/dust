@@ -30,16 +30,18 @@ struct GPUVoxNode {
 /// Wrapper for VoxGeometryInner. Without the wrapper, the linking fails due to a rustc bug
 pub struct VoxGeometry {
     tree: Tree,
+    size: [u8; 3],
     pub unit_size: f32,
 }
 
 impl VoxGeometry {
-    pub fn from_tree(tree: Tree, unit_size: f32) -> Self {
-        Self { tree, unit_size }
+    pub fn from_tree(tree: Tree, size: [u8; 3], unit_size: f32) -> Self {
+        Self { tree, unit_size, size }
     }
     pub fn new(unit_size: f32) -> Self {
         Self {
             tree: Tree::new(),
+            size: [255; 3],
             unit_size,
         }
     }

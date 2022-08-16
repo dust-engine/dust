@@ -6,7 +6,7 @@ use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, SceneNode, SignedPermutationMatrix};
 use dust_vdb::hierarchy;
-use glam::{IVec3, UVec3};
+use glam::{IVec3, UVec3, Vec3Swizzles};
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 
@@ -36,19 +36,22 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
         parent: WorldOrParent<'_, '_>,
         translation: glam::IVec3,
         rotation: SignedPermutationMatrix,
+        name: Option<&str>,
     ) {
         let node = &self.scene.scenes[node as usize];
         match node {
             SceneNode::Transform {
-                attributes: _,
+                attributes,
                 frames,
                 child,
+                layer_id: _,
             } => {
                 if frames.len() != 1 {
                     unimplemented!("Multiple frame in transform node");
                 }
+                let name = attributes.get("_name").map(String::as_str);
                 let frame = &frames[0];
-                let this_translation = frame.translation().map(IVec3::from).unwrap_or(IVec3::ZERO);
+                let mut this_translation = frame.translation().map(IVec3::from).unwrap_or(IVec3::ZERO);
 
                 let this_rotation = frame
                     .rotation()
@@ -56,7 +59,7 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
                 //let rotation = rotation * this_rotation; // reverse?
                 let translation = translation + this_translation;
 
-                self.traverse_recursive(*child, parent, translation, this_rotation);
+                self.traverse_recursive(*child, parent, translation, this_rotation, name);
             }
             SceneNode::Group {
                 attributes: _,
@@ -64,7 +67,7 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
             } => {
                 parent
                     .spawn()
-                    .insert(self.to_transform(translation, rotation))
+                    .insert(self.to_transform(translation, rotation, UVec3::ZERO))
                     .insert(GlobalTransform::default())
                     .with_children(|builder| {
                         for &i in children {
@@ -73,6 +76,7 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
                                 WorldOrParent::Parent(builder),
                                 glam::IVec3::ZERO,
                                 SignedPermutationMatrix::IDENTITY,
+                                None,
                             );
                         }
                     });
@@ -91,17 +95,16 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
                     &self.cache[shape_model.model_id as usize]
                 {
                     // Retrieve from cache
-                    println!("Reused bundle {}", shape_model.model_id);
                     (geometry.clone(), material.clone())
                 } else {
                     // Build new
-                    println!("Spawned bundle {}", shape_model.model_id);
                     let model = &self.scene.models[shape_model.model_id as usize];
                     if model.voxels.len() == 0 {
                         return;
                     }
                     let (tree, material) = self.load_model(model, self.palette);
-                    let geometry = VoxGeometry::from_tree(tree, 1.0);
+                    assert!(model.size.x <= 255 && model.size.y <= 255 && model.size.z <= 255);
+                    let geometry = VoxGeometry::from_tree(tree, [model.size.x as u8, model.size.z as u8, model.size.y as u8], 1.0);
 
                     let geometry_handle = self.load_context.set_labeled_asset(
                         &format!("Geometry{}", shape_model.model_id),
@@ -116,8 +119,9 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
                     (geometry_handle, material_handle)
                 };
 
+                let size = self.scene.models[shape_model.model_id as usize].size;
                 parent.spawn_bundle(VoxBundle {
-                    transform: self.to_transform(translation, rotation),
+                    transform: self.to_transform(translation, rotation, UVec3 { x: size.x , y: size.y, z: size.z }),
                     ..VoxBundle::from_geometry_material(geometry_handle, material_handle)
                 });
             }
@@ -128,16 +132,21 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
         &self,
         translation: glam::IVec3,
         rotation: SignedPermutationMatrix,
+        size: glam::UVec3,
     ) -> Transform {
+        let mut translation = translation.as_vec3a().xzy();
+        translation.z *= -1.0;
+
         let (quat, scale) = rotation.to_quat_scale();
+        let quat = glam::Quat::from_array(quat);
+        let quat = glam::Quat::from_xyzw(quat.x, quat.z, -quat.y, quat.w);
+        let mut scale = glam::Vec3A::from_array(scale).xzy(); // no need to negate scale.y because scale is not a coordinate
+
+        let center = quat * (size.xzy().as_vec3a() / 2.0);
         Transform {
-            translation: glam::Vec3::new(
-                translation.x as f32,
-                translation.y as f32,
-                translation.z as f32,
-            ),
-            rotation: glam::Quat::from_array(quat),
-            scale: glam::Vec3::from_array(scale),
+            translation: (translation - center * scale).into(),
+            rotation: quat,
+            scale: scale.into(),
         }
     }
 
@@ -146,17 +155,19 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
 
         let mut tree = Tree::new();
         for voxel in model.voxels.iter() {
-            let mut voxel = voxel.clone();
-            std::mem::swap(&mut voxel.z, &mut voxel.y);
-            voxel.z = 255 - voxel.z;
-
+            let voxel = dot_vox::Voxel {
+                x: voxel.x,
+                y: voxel.z,
+                z: model.size.y as u8 - voxel.y,
+                i: voxel.i,
+            };
             let coords: UVec3 = UVec3 {
                 x: voxel.x as u32,
                 y: voxel.y as u32,
-                z: voxel.z as u32,
+                z: voxel.z as u32
             };
             tree.set_value(coords, Some(true));
-            palette_index_collector.set(voxel.clone());
+            palette_index_collector.set(voxel);
         }
 
         let palette_indexes = palette_index_collector.into_iter();
@@ -215,6 +226,7 @@ impl AssetLoader for VoxLoader {
                 WorldOrParent::World(&mut world),
                 IVec3::ZERO,
                 SignedPermutationMatrix::IDENTITY,
+                None,
             );
             let scene = bevy_scene::Scene::new(world);
             load_context.set_default_asset(LoadedAsset::new(scene));
@@ -247,6 +259,12 @@ impl<'w, 'q> WorldOrParent<'w, 'q> {
                 a
             }
             WorldOrParent::Parent(parent) => parent.spawn_bundle(bundle),
+        }
+    }
+    fn has_parent(&self) -> bool {
+        match self {
+            WorldOrParent::World(_) => false,
+            WorldOrParent::Parent(_) => true
         }
     }
 }
