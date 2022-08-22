@@ -54,5 +54,5 @@ void main() {
 
     uint8_t palette_index = materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = paletteInfo.palette[palette_index];
-    primaryRayPayload.color = vec3(color.r / 255.0, color.g / 255.0, color.b / 255.0);
+    primaryRayPayload.color = vec3(color.rgb) / 255.0;
 }

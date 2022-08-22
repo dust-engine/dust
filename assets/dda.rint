@@ -4,6 +4,8 @@
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 
+layout (constant_id = 0) const bool AUTO_CLOSEST_HIT_ATTRIBUTES = true;
+
 struct Block
 {
     u16vec4 position;
@@ -98,7 +100,19 @@ void dda(vec3 origin, vec3 dir, uint64_t grid, float scale) {
     };
 
     float realT = hitDistance / scale;
-    voxelId = hit;
+
+
+    // Usually one would expect the `hitAttributeEXT` value in the closest hit shader to be the one set
+    // during the intersection shader invocation of the closest hit point. This is the case on NVIDIA GPUs.
+    // However, on my AMD GPU (6600XT), the `hitAttributeEXT` value seems to reflect the value set during
+    // the most recent intersection shader invocation instead.
+    // Meaning that if additional intersection tests were performed after the closest hit, wrong values
+    // would be reflected in the closest hit shader.
+    // Here, for NVIDIA GPUs we always set the voxelId. On AMD GPUs we manually make the comparison with gl_RayTmaxEXT.
+    if (AUTO_CLOSEST_HIT_ATTRIBUTES || realT <= gl_RayTmaxEXT) {
+        voxelId = hit;
+    }
+
     reportIntersectionEXT(realT, 0);
     return;
 }

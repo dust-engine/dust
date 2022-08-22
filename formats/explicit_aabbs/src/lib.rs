@@ -3,7 +3,7 @@ pub mod material;
 use ash::vk;
 use bevy_app::Plugin;
 use bevy_asset::{AddAsset, AssetServer, Handle};
-use bevy_ecs::system::{lifetimeless::SRes, StaticSystemParam, SystemParamItem};
+use bevy_ecs::{system::{lifetimeless::SRes, StaticSystemParam, SystemParamItem}, world::World};
 use bevy_reflect::TypeUuid;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
@@ -64,7 +64,7 @@ impl Geometry for AABBGeometry {
         todo!()
     }
 
-    fn intersection_shader(asset_server: &AssetServer) -> SpecializedShader {
+    fn intersection_shader(world: &World, asset_server: &AssetServer) -> SpecializedShader {
         let handle = asset_server.load("dda.rint.spv");
         SpecializedShader {
             shader: handle,

@@ -229,7 +229,6 @@ impl AssetLoader for VoxLoader {
                         [model.size.x as u8, model.size.z as u8, model.size.y as u8],
                         1.0,
                     );
-                    // end time consuming step
                     (*model_id, geometry, material)
                 })
                 .collect();

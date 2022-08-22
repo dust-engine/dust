@@ -11,7 +11,7 @@ use bevy_asset::{AssetServer, Handle, HandleId};
 use bevy_ecs::{
     component::Component,
     entity::Entity,
-    system::{Commands, Query, SystemParam, SystemParamItem},
+    system::{Commands, Query, SystemParam, SystemParamItem}, world::World,
 };
 
 use dustash::resources::alloc::MemBuffer;
@@ -28,7 +28,7 @@ pub trait Geometry: RenderAsset {
     /// This gets persisted in the render world.
 
     fn aabb(&self) -> GeometryAABB;
-    fn intersection_shader(asset_server: &AssetServer) -> SpecializedShader;
+    fn intersection_shader(world: &World, asset_server: &AssetServer) -> SpecializedShader;
 }
 
 /// RenderWorld Assets.

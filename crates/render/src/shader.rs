@@ -45,5 +45,31 @@ impl AssetLoader for ShaderLoader {
 #[derive(Clone)]
 pub struct SpecializedShader {
     pub shader: Handle<Shader>,
-    pub specialization: Option<SpecializationInfo>,
+    pub specialization: SpecializationInfo,
+}
+
+impl From<Handle<Shader>> for SpecializedShader {
+    fn from(handle: Handle<Shader>) -> Self {
+        Self {
+            shader: handle,
+            specialization: SpecializationInfo::new()
+        }
+    }
+}
+
+impl SpecializedShader {
+    pub fn new(shader: Handle<Shader>) -> Self {
+        Self {
+            shader,
+            specialization: SpecializationInfo::new(),
+        }
+    }
+    pub fn with<T: Copy + 'static>(mut self, constant_id: u32, item: T) -> Self {
+        self.specialization.push(constant_id, item);
+        self
+    }
+    pub fn with_bool(mut self, constant_id: u32, item: bool) -> Self {
+        self.specialization.push_bool(constant_id, item);
+        self
+    }
 }

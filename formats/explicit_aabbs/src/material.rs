@@ -4,6 +4,7 @@ use bevy_asset::AssetServer;
 use bevy_asset::Handle;
 use bevy_ecs::system::lifetimeless::SRes;
 use bevy_ecs::system::SystemParamItem;
+use bevy_ecs::world::World;
 use dust_render::material::{GPUMaterial, Material};
 use dust_render::render_asset::BindlessGPUAsset;
 use dust_render::render_asset::BindlessGPUAssetDescriptors;
@@ -51,17 +52,15 @@ impl RenderAsset for DensityMaterial {
 impl Material for DensityMaterial {
     type Geometry = crate::AABBGeometry;
 
-    fn anyhit_shader(asset_server: &AssetServer) -> Option<dust_render::shader::SpecializedShader> {
+    fn anyhit_shader(_world: &World, asset_server: &AssetServer) -> Option<dust_render::shader::SpecializedShader> {
         None
     }
 
     fn closest_hit_shader(
+        _world: &World,
         asset_server: &AssetServer,
     ) -> Option<dust_render::shader::SpecializedShader> {
-        Some(SpecializedShader {
-            shader: asset_server.load("plain.rchit.spv"),
-            specialization: None,
-        })
+        Some(asset_server.load("plain.rchit.spv").into())
     }
 }
 

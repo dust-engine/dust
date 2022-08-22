@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::vox_loader::*;
 use ash::vk;
 
-use bevy_ecs::system::lifetimeless::SRes;
+use bevy_ecs::{system::lifetimeless::SRes, world::World};
 use bevy_ecs::system::SystemParamItem;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
@@ -158,13 +158,24 @@ impl Geometry for VoxGeometry {
     }
 
     fn intersection_shader(
+        world: &World,
         asset_server: &bevy_asset::AssetServer,
     ) -> dust_render::shader::SpecializedShader {
+        let device = world.resource::<dust_render::Device>();
+        let vendor_id = device.physical_device().properties().vendor_id;
+
+        // Usually one would expect the `hitAttributeEXT` value in the closest hit shader to be the one set
+        // during the intersection shader invocation of the closest hit point. This is the case on NVIDIA GPUs.
+        // However, on my AMD GPU (6600XT), the `hitAttributeEXT` value seems to reflect the value set during
+        // the most recent intersection shader invocation instead.
+        // Meaning that if additional intersection tests were performed after the closest hit, wrong values
+        // would be reflected in the closest hit shader.
+        // Here we manually make the comparison when setting the closest hit shader on AMD GPUs.
+        let auto_closest_hit_attributes = vendor_id != 4098;
+
         let handle = asset_server.load("dda.rint.spv");
-        dust_render::shader::SpecializedShader {
-            shader: handle,
-            specialization: Default::default(),
-        }
+        dust_render::shader::SpecializedShader::new(handle)
+            .with_bool(0, auto_closest_hit_attributes) // AUTO_CLOSEST_HIT_ATTRIBUTES
     }
 }
 

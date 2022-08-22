@@ -1,9 +1,9 @@
 use ash::vk;
-use bevy_asset::AssetLoader;
 use bevy_asset::AssetServer;
 use bevy_asset::Handle;
 use bevy_ecs::system::lifetimeless::SRes;
 use bevy_ecs::system::SystemParamItem;
+use bevy_ecs::world::World;
 use dust_render::material::{GPUMaterial, Material};
 use dust_render::render_asset::BindlessGPUAssetDescriptors;
 use dust_render::render_asset::GPURenderAsset;
@@ -11,7 +11,7 @@ use dust_render::render_asset::GPURenderAssetBuildResult;
 use dust_render::render_asset::RenderAsset;
 use dust_render::render_asset::RenderAssetStore;
 use dust_render::shader::SpecializedShader;
-use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer, MemoryAllocScenario};
+use dustash::resources::alloc::{BufferRequest, MemBuffer, MemoryAllocScenario};
 use std::sync::Arc;
 
 use crate::VoxPalette;
@@ -58,18 +58,17 @@ impl Material for PaletteMaterial {
     type Geometry = crate::VoxGeometry;
 
     fn anyhit_shader(
+        world: &World,
         _asset_server: &AssetServer,
     ) -> Option<dust_render::shader::SpecializedShader> {
         None
     }
 
     fn closest_hit_shader(
+        world: &World,
         asset_server: &AssetServer,
     ) -> Option<dust_render::shader::SpecializedShader> {
-        Some(SpecializedShader {
-            shader: asset_server.load("plain.rchit.spv"),
-            specialization: None,
-        })
+        Some(SpecializedShader::new(asset_server.load("plain.rchit.spv")))
     }
 }
 
@@ -88,14 +87,12 @@ impl GPURenderAsset<PaletteMaterial> for GPUPaletteMaterial {
     ) -> GPURenderAssetBuildResult<PaletteMaterial> {
         // maybe get the future of that different thing, and chain it here?
         if let Some(palette) = render_asset_store.get(&palette_handle) {
-            println!("Build GPUPaletteMaterial");
             GPURenderAssetBuildResult::Success(Self {
                 data: material_buffer.make_device_local(commands_future),
                 palette_data: palette.palette.clone(),
             })
         } else {
             // defer
-            println!("Deferred GPUPaletteMaterial");
             GPURenderAssetBuildResult::MissingDependency((palette_handle, material_buffer))
         }
     }

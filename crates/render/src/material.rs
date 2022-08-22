@@ -17,13 +17,14 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 use bevy_ecs::system::{Commands, Query, Res, StaticSystemParam, SystemParam, SystemParamItem};
 
+use bevy_ecs::world::World;
 use dustash::resources::alloc::MemBuffer;
 
 pub trait Material: RenderAsset {
     type Geometry: Geometry;
 
-    fn anyhit_shader(asset_server: &AssetServer) -> Option<SpecializedShader>;
-    fn closest_hit_shader(asset_server: &AssetServer) -> Option<SpecializedShader>;
+    fn anyhit_shader(world: &World, asset_server: &AssetServer) -> Option<SpecializedShader>;
+    fn closest_hit_shader(world: &World, asset_server: &AssetServer) -> Option<SpecializedShader>;
 }
 
 pub trait GPUMaterial<T: Material>: GPURenderAsset<T> {
@@ -79,9 +80,9 @@ where
 
         let asset_server = app.world.get_resource::<AssetServer>().unwrap();
         let hitgroup = HitGroup {
-            intersection_shader: Some(T::Geometry::intersection_shader(asset_server)),
-            anyhit_shader: T::anyhit_shader(asset_server),
-            closest_hit_shader: T::closest_hit_shader(asset_server),
+            intersection_shader: Some(T::Geometry::intersection_shader(&app.world, asset_server)),
+            anyhit_shader: T::anyhit_shader(&app.world, asset_server),
+            closest_hit_shader: T::closest_hit_shader(&app.world, asset_server),
             ty: HitGroupType::Procedural,
         };
         let mut hitgroups = app

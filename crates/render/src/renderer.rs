@@ -129,14 +129,8 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         match index {
             PRIMARY_RAY_PIPELINE => RayTracingPipelineBuildJob {
                 pipeline_layout: self.pipeline_layout.clone(),
-                raygen_shader: SpecializedShader {
-                    shader: asset_server.load("primary.rgen.spv"),
-                    specialization: None,
-                },
-                miss_shaders: vec![SpecializedShader {
-                    shader: asset_server.load("sky.rmiss.spv"),
-                    specialization: None,
-                }],
+                raygen_shader: SpecializedShader::new(asset_server.load("primary.rgen.spv")),
+                miss_shaders: vec![SpecializedShader::new(asset_server.load("sky.rmiss.spv"))],
                 callable_shaders: vec![],
                 max_recursion_depth: 1,
             },

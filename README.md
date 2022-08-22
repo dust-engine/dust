@@ -1,0 +1,1 @@
+Next step: interleaving data, AABBs and the mask.

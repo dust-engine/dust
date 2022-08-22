@@ -88,7 +88,6 @@ fn create_build_data<A: RenderAsset>(
     for event in events.iter() {
         match event {
             AssetEvent::Created { handle } | AssetEvent::Modified { handle } => {
-                println!("Create build data {}", std::any::type_name::<A>());
                 changed_assets.insert(handle);
             }
             AssetEvent::Removed { handle } => {
