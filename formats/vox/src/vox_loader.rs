@@ -1,5 +1,7 @@
+use std::collections::HashSet;
+
 use bevy_ecs::{
-    prelude::Bundle,
+    prelude::{Bundle, Entity},
     world::{EntityMut, World},
 };
 use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
@@ -7,6 +9,7 @@ use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, SceneNode, SignedPermutationMatrix};
 use dust_vdb::hierarchy;
 use glam::{IVec3, UVec3, Vec3Swizzles};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 
@@ -21,15 +24,14 @@ use crate::material::PaletteMaterial;
 #[derive(Default)]
 pub struct VoxLoader {}
 
-struct SceneGraphTraverser<'a, 'd> {
+struct SceneGraphTraverser<'a> {
     unit_size: f32,
     scene: &'a DotVoxData,
-    cache: &'a mut Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>)>>,
-    palette: &'a Handle<VoxPalette>,
-    load_context: &'a mut bevy_asset::LoadContext<'d>,
+    models: HashSet<u32>,
+    instances: Vec<(u32, Entity)>,
 }
 
-impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
+impl<'a> SceneGraphTraverser<'a> {
     fn traverse_recursive(
         &mut self,
         node: u32,
@@ -51,7 +53,8 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
                 }
                 let name = attributes.get("_name").map(String::as_str);
                 let frame = &frames[0];
-                let mut this_translation = frame.translation().map(IVec3::from).unwrap_or(IVec3::ZERO);
+                let mut this_translation =
+                    frame.translation().map(IVec3::from).unwrap_or(IVec3::ZERO);
 
                 let this_rotation = frame
                     .rotation()
@@ -90,40 +93,27 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
                     unimplemented!("Multiple shape models in Shape node");
                 }
                 let shape_model = &models[0];
-
-                let (geometry_handle, material_handle) = if let Some((geometry, material)) =
-                    &self.cache[shape_model.model_id as usize]
-                {
-                    // Retrieve from cache
-                    (geometry.clone(), material.clone())
-                } else {
-                    // Build new
-                    let model = &self.scene.models[shape_model.model_id as usize];
-                    if model.voxels.len() == 0 {
-                        return;
-                    }
-                    let (tree, material) = self.load_model(model, self.palette);
-                    assert!(model.size.x <= 255 && model.size.y <= 255 && model.size.z <= 255);
-                    let geometry = VoxGeometry::from_tree(tree, [model.size.x as u8, model.size.z as u8, model.size.y as u8], 1.0);
-
-                    let geometry_handle = self.load_context.set_labeled_asset(
-                        &format!("Geometry{}", shape_model.model_id),
-                        LoadedAsset::new(geometry),
-                    );
-                    let material_handle = self.load_context.set_labeled_asset(
-                        &format!("Material{}", shape_model.model_id),
-                        LoadedAsset::new(material),
-                    );
-                    self.cache[shape_model.model_id as usize] =
-                        Some((geometry_handle.clone(), material_handle.clone()));
-                    (geometry_handle, material_handle)
-                };
-
+                let model = &self.scene.models[shape_model.model_id as usize];
+                if model.voxels.len() == 0 {
+                    return;
+                }
                 let size = self.scene.models[shape_model.model_id as usize].size;
-                parent.spawn_bundle(VoxBundle {
-                    transform: self.to_transform(translation, rotation, UVec3 { x: size.x , y: size.y, z: size.z }),
-                    ..VoxBundle::from_geometry_material(geometry_handle, material_handle)
-                });
+                let entity = parent
+                    .spawn_bundle(VoxBundle {
+                        transform: self.to_transform(
+                            translation,
+                            rotation,
+                            UVec3 {
+                                x: size.x,
+                                y: size.y,
+                                z: size.z,
+                            },
+                        ),
+                        ..VoxBundle::from_geometry_material(Handle::default(), Handle::default())
+                    })
+                    .id();
+                self.instances.push((shape_model.model_id, entity));
+                self.models.insert(shape_model.model_id);
             }
         }
     }
@@ -149,6 +139,19 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
             scale: scale.into(),
         }
     }
+}
+
+impl VoxLoader {
+    fn load_palette(&self, palette: &[dot_vox::Color]) -> VoxPalette {
+        unsafe {
+            const LEN: usize = 255;
+            let mem =
+                std::alloc::alloc(std::alloc::Layout::new::<[Color; LEN]>()) as *mut [Color; LEN];
+            let mut mem = Box::from_raw(mem);
+            mem.copy_from_slice(&palette[0..LEN]);
+            VoxPalette(mem)
+        }
+    }
 
     fn load_model(&self, model: &Model, palette: &Handle<VoxPalette>) -> (Tree, PaletteMaterial) {
         let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
@@ -164,7 +167,7 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
             let coords: UVec3 = UVec3 {
                 x: voxel.x as u32,
                 y: voxel.y as u32,
-                z: voxel.z as u32
+                z: voxel.z as u32,
             };
             tree.set_value(coords, Some(true));
             palette_index_collector.set(voxel);
@@ -185,19 +188,6 @@ impl<'a, 'd> SceneGraphTraverser<'a, 'd> {
     }
 }
 
-impl VoxLoader {
-    fn load_palette(&self, palette: &[dot_vox::Color]) -> VoxPalette {
-        unsafe {
-            const LEN: usize = 255;
-            let mem =
-                std::alloc::alloc(std::alloc::Layout::new::<[Color; LEN]>()) as *mut [Color; LEN];
-            let mut mem = Box::from_raw(mem);
-            mem.copy_from_slice(&palette[0..LEN]);
-            VoxPalette(mem)
-        }
-    }
-}
-
 impl AssetLoader for VoxLoader {
     fn load<'a>(
         &'a self,
@@ -213,13 +203,11 @@ impl AssetLoader for VoxLoader {
                 load_context.set_labeled_asset("palette", LoadedAsset::new(palette));
 
             let mut world = World::default();
-            let mut cache: Vec<_> = vec![None; file.models.len()];
             let mut traverser = SceneGraphTraverser {
                 unit_size: 1.0,
                 scene: &file,
-                cache: &mut cache,
-                palette: &palette_handle,
-                load_context,
+                models: HashSet::new(),
+                instances: Vec::new(),
             };
             traverser.traverse_recursive(
                 0,
@@ -228,6 +216,44 @@ impl AssetLoader for VoxLoader {
                 SignedPermutationMatrix::IDENTITY,
                 None,
             );
+
+            let geometry_materials: Vec<_> = traverser
+                .models
+                .par_iter()
+                .map(|model_id| {
+                    let model = &file.models[*model_id as usize];
+                    let (tree, material) = self.load_model(model, &palette_handle);
+                    assert!(model.size.x <= 255 && model.size.y <= 255 && model.size.z <= 255);
+                    let geometry = VoxGeometry::from_tree(
+                        tree,
+                        [model.size.x as u8, model.size.z as u8, model.size.y as u8],
+                        1.0,
+                    );
+                    // end time consuming step
+                    (*model_id, geometry, material)
+                })
+                .collect();
+            let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>)>> =
+                vec![None; file.models.len()];
+            for (model_id, geometry, material) in geometry_materials.into_iter() {
+                let geometry_handle = load_context.set_labeled_asset(
+                    &format!("Geometry{}", model_id),
+                    LoadedAsset::new(geometry),
+                );
+                let material_handle = load_context.set_labeled_asset(
+                    &format!("Material{}", model_id),
+                    LoadedAsset::new(material),
+                );
+                models[model_id as usize] = Some((geometry_handle, material_handle));
+            }
+            for (model_id, entity) in traverser.instances.iter() {
+                let mut entity = world.entity_mut(*entity);
+                let (geometry_handle, material_handle) =
+                    models[*model_id as usize].as_ref().unwrap();
+                *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry_handle.clone();
+                *entity.get_mut::<Handle<PaletteMaterial>>().unwrap() = material_handle.clone();
+            }
+
             let scene = bevy_scene::Scene::new(world);
             load_context.set_default_asset(LoadedAsset::new(scene));
             Ok(())
@@ -264,7 +290,7 @@ impl<'w, 'q> WorldOrParent<'w, 'q> {
     fn has_parent(&self) -> bool {
         match self {
             WorldOrParent::World(_) => false,
-            WorldOrParent::Parent(_) => true
+            WorldOrParent::Parent(_) => true,
         }
     }
 }

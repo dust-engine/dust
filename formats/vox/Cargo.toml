@@ -14,6 +14,7 @@ bevy_app = { git = "https://github.com/bevyengine/bevy" }
 bevy_transform = { git = "https://github.com/bevyengine/bevy" }
 bevy_scene = { git = "https://github.com/bevyengine/bevy" }
 bevy_hierarchy = { git = "https://github.com/bevyengine/bevy" }
+rayon = "1.5"
 dust_vdb = { path = "../vdb" }
 dustash = { path = "../../../dustash" }
 dust_render = { path = "../../crates/render" }

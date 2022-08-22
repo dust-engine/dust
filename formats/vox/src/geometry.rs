@@ -36,7 +36,11 @@ pub struct VoxGeometry {
 
 impl VoxGeometry {
     pub fn from_tree(tree: Tree, size: [u8; 3], unit_size: f32) -> Self {
-        Self { tree, unit_size, size }
+        Self {
+            tree,
+            unit_size,
+            size,
+        }
     }
     pub fn new(unit_size: f32) -> Self {
         Self {
