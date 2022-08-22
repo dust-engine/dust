@@ -1,8 +1,8 @@
 use ash::vk;
 
 use bevy_ecs::component::Component;
-use bevy_reflect::Reflect;
 use bevy_ecs::reflect::ReflectComponent;
+use bevy_reflect::Reflect;
 use bitflags::bitflags;
 
 bitflags! {

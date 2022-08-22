@@ -27,9 +27,9 @@ pub struct TLASStore {
     pub tlas_build_future: Option<CommandsFuture>,
 }
 
-#[derive(Eq, Hash, PartialEq, Clone)]
-struct InstanceEntry {
-    geometries: Vec<(HandleId, HandleId)>,
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
+pub(crate) struct InstanceEntry {
+    pub(crate) geometries: Vec<(HandleId, HandleId)>,
 }
 
 /// Build a TLAS.
@@ -39,15 +39,19 @@ fn build_tlas(
     allocator: Res<Allocator>,
     accel_struct_loader: Res<AccelerationStructureLoader>,
     queues: Res<Queues>,
-    query: Query<(&GlobalTransform, &BlasComponent, &Renderable)>,
+    query: Query<(Entity, &GlobalTransform, &BlasComponent, &Renderable)>,
 ) {
     let mut map: HashMap<InstanceEntry, u32> = Default::default();
     let mut current_sbt_offset: u32 = 0;
     // TODO: skip recreating TLAS when there's no change.
     // TODO: View frustrum culling
-    let instances: Vec<_> = query
+    // TODO: stable query iteration order
+    let mut instances: Vec<_> = query.iter().collect();
+    // TODO: when we have stable query iteration order we can eliminate this sort_by_key
+    instances.sort_by_key(|(entity, _, _, _)| *entity);
+    let instances: Vec<_> = instances
         .iter()
-        .map(|(global_transform, blas, renderable)| {
+        .map(|(_, global_transform, blas, renderable)| {
             let mut transform = vk::TransformMatrixKHR { matrix: [0.0; 12] };
             transform.matrix.clone_from_slice(
                 &global_transform
@@ -57,6 +61,7 @@ fn build_tlas(
             );
 
             // Deduplicate by geometry and material
+            // Why not deduplicate by BLAS here? Because BLAS only reflects the geometry used. SBT also contains material info
             let entry = InstanceEntry {
                 geometries: blas
                     .geometry_materials

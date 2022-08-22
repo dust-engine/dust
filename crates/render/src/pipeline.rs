@@ -5,7 +5,8 @@ use std::{
 };
 
 use crate::{
-    accel_struct::blas::BlasComponent,
+    accel_struct::{blas::BlasComponent, tlas::InstanceEntry},
+    geometry,
     shader::{Shader, SpecializedShader},
     Allocator, RenderApp, RenderStage,
 };
@@ -431,7 +432,7 @@ fn prepare_sbt_system(
     mut pipeline_cache: ResMut<PipelineCache>,
     allocator: Res<Allocator>,
     queues: Res<Queues>,
-    query: Query<&BlasComponent>,
+    query: Query<(Entity, &BlasComponent)>,
 ) {
     // TODO: skip creating the SBT when there's no change
     // We always create a new SBT when there's a change. This is to avoid mutation while the SBT was being
@@ -456,9 +457,36 @@ fn prepare_sbt_system(
                 }
             })
     {
-        let rhit_data: Vec<_> = query
+        // This is not right, we have to dedupliicated things here!!!!
+        let mut rhit_data: Vec<_> = query.iter().collect();
+
+        // TODO: when we have stable query iteration order we can eliminate this sort_by_key
+        rhit_data.sort_by_key(|(entity, _)| *entity);
+
+        let mut map: HashSet<InstanceEntry> = Default::default();
+        let rhit_data: Vec<_> = rhit_data
             .iter()
-            .flat_map(|blas| {
+            .filter(|(_, blas)| {
+                let entry = InstanceEntry {
+                    geometries: blas
+                        .geometry_materials
+                        .iter()
+                        .map(|geometry_material| {
+                            (
+                                geometry_material.geometry_handle,
+                                geometry_material.material_handle,
+                            )
+                        })
+                        .collect(),
+                };
+                if map.contains(&entry) {
+                    false
+                } else {
+                    map.insert(entry);
+                    true
+                }
+            })
+            .flat_map(|(_, blas)| {
                 blas.geometry_materials.iter().map(|geometry_material| {
                     (
                         geometry_material.hitgroup_index as usize,
