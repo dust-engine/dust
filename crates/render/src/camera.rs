@@ -1,7 +1,7 @@
 use bevy_ecs::{
     component::Component,
     entity::Entity,
-    system::{Commands, Query},
+    system::{Commands, Query, Local},
 };
 use bevy_transform::prelude::GlobalTransform;
 use bevy_window::WindowId;
@@ -34,7 +34,7 @@ pub struct PerspectiveCameraParameters {
     pub camera_view_col1: [f32; 3],
     pub far: f32,
     pub camera_view_col2: [f32; 3],
-    _padding: f32,
+    pub frame_index: u32,
 
     pub camera_position: [f32; 3],
     pub tan_half_fov: f32,
@@ -46,8 +46,16 @@ pub struct ExtractedCamera {
     pub params: PerspectiveCameraParameters,
 }
 
+pub struct CameraFrameIndex(u32);
+impl Default for CameraFrameIndex {
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
 pub(crate) fn extract_camera_system(
     mut commands: Commands,
+    mut camera_frame_index: Local<CameraFrameIndex>,
     query: Query<(Entity, &PerspectiveCamera, &GlobalTransform)>,
 ) {
     debug_assert_eq!(
@@ -63,7 +71,7 @@ pub(crate) fn extract_camera_system(
             camera_view_col1: rotation_matrix[1],
             far: camera.far,
             camera_view_col2: rotation_matrix[2],
-            _padding: 0.0,
+            frame_index: camera_frame_index.0,
             camera_position: transform.translation.to_array(),
             tan_half_fov: (camera.fov / 2.0).tan(),
         };
@@ -72,4 +80,5 @@ pub(crate) fn extract_camera_system(
             params,
         });
     }
+    camera_frame_index.0 += 1;
 }

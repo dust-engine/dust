@@ -1,7 +1,7 @@
 use std::{ffi::c_void, sync::Arc};
 
-use crate::{Device, Queues};
-use bevy_asset::AssetServer;
+use crate::{Device, Queues, render_asset::{RawBuffer, RenderAssetStore, RenderAssetPlugin, RawBufferLoader}};
+use bevy_asset::{AssetServer, Handle, Assets, AddAsset};
 use bevy_ecs::{
     prelude::*,
     system::{
@@ -74,6 +74,13 @@ impl FromWorld for RenderState {
                         stage_flags: vk::ShaderStageFlags::RAYGEN_KHR,
                         ..Default::default()
                     },
+                    vk::DescriptorSetLayoutBinding {
+                        binding: 2,
+                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                        descriptor_count: 1,
+                        stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                        ..Default::default()
+                    },
                 ])
                 .build(),
         )
@@ -90,10 +97,13 @@ impl FromWorld for RenderState {
 #[derive(Clone, Resource)]
 pub struct Renderer {
     pipeline_layout: Arc<PipelineLayout>,
+    heitz_bluenoise: Handle<RawBuffer>,
 }
 const PRIMARY_RAY_PIPELINE: PipelineIndex = PipelineIndex::new(0);
 impl crate::pipeline::RayTracingRenderer for Renderer {
     fn new(app: &mut bevy_app::App) -> Self {
+        app.add_plugin(RenderAssetPlugin::<RawBuffer>::default())
+            .add_asset_loader(RawBufferLoader::default());
         let render_app = app.sub_app_mut(crate::RenderApp);
         render_app.world.init_resource::<RenderState>();
         let device = render_app.world.resource::<crate::Device>().0.clone();
@@ -117,8 +127,11 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                 .build(),
         )
         .unwrap();
+
+        let asset_server = app.world.resource::<AssetServer>();
         Renderer {
             pipeline_layout: Arc::new(pipeline_layout),
+            heitz_bluenoise: asset_server.load("heitz_spp64.bin")
         }
     }
     fn build(
@@ -151,6 +164,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         SResMut<crate::pipeline::PipelineCache>,
         SResMut<TLASStore>,
         SRes<crate::render_asset::BindlessGPUAssetDescriptors>,
+        SRes<RenderAssetStore<RawBuffer>>,
         SQuery<bevy_ecs::system::lifetimeless::Read<ExtractedCamera>>,
     );
     fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {
@@ -163,8 +177,10 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             pipeline_cache,
             tlas_store,
             material_descriptor_vec,
+            raw_buffers,
             cameras,
         ) = params;
+        let blue_noise_buffer = raw_buffers.get(&self.heitz_bluenoise);
 
         {
             // Update descriptor pool
@@ -187,6 +203,10 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                                     ty: vk::DescriptorType::STORAGE_IMAGE,
                                     descriptor_count: num_swapchain_images,
                                 },
+                                vk::DescriptorPoolSize {
+                                    ty: vk::DescriptorType::STORAGE_BUFFER,
+                                    descriptor_count: 1,
+                                }, // For the blue noise
                             ])
                             .build(),
                     )
@@ -288,6 +308,25 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                 );
             }
         }
+        if let Some(bluenoise_buffer) = blue_noise_buffer {
+            unsafe {
+                device.update_descriptor_sets(
+                    &[vk::WriteDescriptorSet::builder()
+                        .dst_set(per_frame_state.desc_set.raw())
+                        .dst_binding(2)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(&[
+                            vk::DescriptorBufferInfo {
+                                buffer: bluenoise_buffer.buffer,
+                                offset: 0,
+                                range: bluenoise_buffer.size(),
+                            }
+                        ])
+                        .build()],
+                    &[],
+                );
+            }
+        }
 
         // Record command buffer
         let buf = per_frame_state.cmd_exec.take().map_or_else(
@@ -333,7 +372,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                     )
                 },
             );
-            if let Some(sbt) = pipeline_cache.sbts.get(0).unwrap_or(&None) {
+            if let Some(sbt) = pipeline_cache.sbts.get(0).unwrap_or(&None) && blue_noise_buffer.is_some() {
                 if tlas_store.tlas.is_some() {
                     // We must have already created the pipeline before we're able to create an SBT.
                     recorder
