@@ -9,14 +9,16 @@ use bevy_ecs::{
         SystemParamItem,
     },
 };
+use ash::vk;
 use dustash::{
     command::{pool::CommandPool, recorder::CommandExecutable},
     descriptor::{DescriptorPool, DescriptorSet, DescriptorSetLayout},
     frames::PerFrame,
     queue::QueueType,
     ray_tracing::pipeline::PipelineLayout,
-    sync::{CommandsFuture, GPUFuture},
+    sync::{CommandsFuture, GPUFuture}, resources::alloc::{MemBuffer, BufferRequest},
 };
+use vk_mem::AllocationCreateFlags;
 
 use crate::{
     accel_struct::tlas::TLASStore,
@@ -25,12 +27,24 @@ use crate::{
     shader::SpecializedShader,
     swapchain::Windows,
 };
-use ash::vk;
+
+#[derive(Resource)]
+pub struct ProceduralSky {
+    turbidity: f32,
+    albedo: glam::Vec3,
+    direction: glam::Vec3,
+}
+impl Default for ProceduralSky {
+    fn default() -> Self {
+        Self { turbidity:3.0, albedo: glam::Vec3::new(0.3, 0.3, 0.3), direction: glam::Vec3::new(10000.0, 5000.0, 10000.0) }
+    }
+}
 
 pub struct RenderPerFrameState {
     cmd_exec: Option<Arc<CommandExecutable>>,
     desc_set: DescriptorSet,
     pipeline_generation: u64,
+    sky_buffer: Arc<MemBuffer>,
 }
 
 #[derive(Resource)]
@@ -78,7 +92,14 @@ impl FromWorld for RenderState {
                         binding: 2,
                         descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
                         descriptor_count: 1,
-                        stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                        stage_flags: vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR,
+                        ..Default::default()
+                    },
+                    vk::DescriptorSetLayoutBinding { // sky parameters
+                        binding: 3,
+                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                        descriptor_count: 1,
+                        stage_flags: vk::ShaderStageFlags::MISS_KHR,
                         ..Default::default()
                     },
                 ])
@@ -165,6 +186,8 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
         SResMut<TLASStore>,
         SRes<crate::render_asset::BindlessGPUAssetDescriptors>,
         SRes<RenderAssetStore<RawBuffer>>,
+        SRes<crate::Allocator>,
+        Local<'static, ProceduralSky>,
         SQuery<bevy_ecs::system::lifetimeless::Read<ExtractedCamera>>,
     );
     fn render(&self, params: &mut SystemParamItem<Self::RenderParam>) {
@@ -178,6 +201,8 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             tlas_store,
             material_descriptor_vec,
             raw_buffers,
+            allocator,
+            sky,
             cameras,
         ) = params;
         let blue_noise_buffer = raw_buffers.get(&self.heitz_bluenoise);
@@ -205,7 +230,7 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                                 },
                                 vk::DescriptorPoolSize {
                                     ty: vk::DescriptorType::STORAGE_BUFFER,
-                                    descriptor_count: 1,
+                                    descriptor_count: 1 + num_swapchain_images,
                                 }, // For the blue noise
                             ])
                             .build(),
@@ -252,9 +277,21 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                     },
                     |a| a.desc_set,
                 );
+                
+                let sky_layout = std::alloc::Layout::new::<hosek_wilkie_sky::SkyModelState>();
+                let sky_buffer = allocator.allocate_buffer(&BufferRequest {
+                    size: sky_layout.size() as u64,
+                    alignment: sky_layout.align() as u64,
+                    usage: vk::BufferUsageFlags::STORAGE_BUFFER,
+                    scenario: dustash::resources::alloc::MemoryAllocScenario::DynamicUniform,
+                    allocation_flags: AllocationCreateFlags::MAPPED,
+                    ..Default::default()
+                }).unwrap();
+                assert!(sky_buffer.host_visible());
                 unsafe {
                     device.update_descriptor_sets(
-                        &[vk::WriteDescriptorSet::builder()
+                        &[
+                            vk::WriteDescriptorSet::builder()
                             .dst_set(desc_set.raw())
                             .dst_binding(0)
                             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
@@ -263,7 +300,20 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                                 image_view: current_frame.image_view,
                                 image_layout: vk::ImageLayout::GENERAL,
                             }])
-                            .build()],
+                            .build(),
+                            vk::WriteDescriptorSet::builder()
+                            .dst_set(desc_set.raw())
+                            .dst_binding(3)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .buffer_info(&[
+                                vk::DescriptorBufferInfo {
+                                    buffer: sky_buffer.buffer,
+                                    offset: 0,
+                                    range: sky_buffer.size(),
+                                }
+                            ])
+                            .build()
+                        ],
                         &[],
                     );
                     println!(
@@ -277,9 +327,17 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
                     cmd_exec: None,
                     desc_set,
                     pipeline_generation: pipeline_cache.generation,
+                    sky_buffer: Arc::new(sky_buffer),
                 }
             },
         );
+
+        {
+            let sky = hosek_wilkie_sky::SkyModelState::new(sky.turbidity, sky.albedo.into(), sky.direction.into());
+            per_frame_state.sky_buffer.get_mut().copy_from_slice(unsafe {
+                std::slice::from_raw_parts(&sky as *const _ as *const u8, std::mem::size_of_val(&sky))
+            });
+        }
 
         // Update per-frame descriptor sets
         // We have one descriptor set per frame to ensure that by the time we get to this point,
