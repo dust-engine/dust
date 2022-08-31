@@ -487,3 +487,16 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
             .then_present(current_frame);
     }
 }
+
+
+
+fn trace_rays(
+    sbt: i32, // Future with resource
+    tlas: i32, // Future with resource
+    camera: i32, // for push constants
+    image: i32, // Future with resource
+    skybuffer: i32,
+    heitz_buffer: i32, // Asset
+) {
+
+}

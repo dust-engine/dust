@@ -6,6 +6,7 @@
 
 struct RayPayload {
     vec3 color;
+    float hitT;
 };
 
 layout(location = 0) rayPayloadInEXT RayPayload primaryRayPayload;
@@ -19,4 +20,5 @@ const mat3 XYZ_2_RGB = (mat3(
 void main() {
     vec3 sky_color_xyz = arhosek_sky_radiance(normalize(gl_WorldRayDirectionEXT));
     primaryRayPayload.color = sky_color_xyz;
+    primaryRayPayload.hitT = 0.0;
 }

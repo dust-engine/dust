@@ -6,10 +6,15 @@
 
 struct RayPayload {
     vec3 color;
+    float hitT;
 };
 
 layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
 layout(set = 0, binding = 1) uniform accelerationStructureEXT accelerationStructure;
+layout(set = 0, binding = 3) readonly buffer ArHosekSkyModelConfiguration{
+	ArHosekSkyModelChannelConfiguration channels[3];
+    vec3 direction; // normalized
+} hosek_config;
 layout(push_constant) uniform constants
 {
     vec4 camera_view_col0_near;
@@ -33,6 +38,7 @@ void main() {
 
     const vec3 pixelCameraWorld =  rotationMatrix * vec3(pixelCamera, -1);
 
+    // Trace primary ray.
     traceRayEXT(
         accelerationStructure, // acceleration structure
         gl_RayFlagsOpaqueEXT,       // rayFlags

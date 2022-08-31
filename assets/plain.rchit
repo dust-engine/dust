@@ -7,6 +7,7 @@
 
 struct RayPayload {
     vec3 color;
+    float hitT;
 };
 
 struct Block
@@ -55,4 +56,5 @@ void main() {
     uint8_t palette_index = materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = paletteInfo.palette[palette_index];
     primaryRayPayload.color = vec3(color.rgb) / 255.0;
+    primaryRayPayload.hitT = gl_RayTmaxEXT;
 }
