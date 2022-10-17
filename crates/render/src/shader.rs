@@ -7,7 +7,8 @@ use dustash::{shader::SpecializationInfo, Device};
 #[derive(TypeUuid)]
 #[uuid = "ec052e5b-03ab-443f-9eac-b368526350fa"]
 pub struct Shader {
-    data: Box<[u32]>,
+    data: Box<[u8]>,
+    pub entry_point: String,
 }
 
 impl Shader {
@@ -26,9 +27,8 @@ impl AssetLoader for ShaderLoader {
     ) -> bevy_asset::BoxedFuture<'a, Result<(), anyhow::Error>> {
         assert!(bytes.len() % 4 == 0);
         let shader = Shader {
-            data: unsafe {
-                std::slice::from_raw_parts(bytes.as_ptr() as *const u32, bytes.len() / 4).into()
-            },
+            data: bytes.to_owned().into_boxed_slice(),
+            entry_point: "main".to_string()
         };
 
         Box::pin(async {

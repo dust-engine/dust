@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-dot_vox = { git = "https://github.com/dust-engine/dot_vox", branch = "develop" }
+dot_vox = "5.1"
 bevy_asset = { git = "https://github.com/bevyengine/bevy" }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy" }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy" }

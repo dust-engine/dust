@@ -234,14 +234,14 @@ impl Plugin for RenderPlugin {
             {
                 let render = render_app
                     .schedule
-                    .get_stage_mut::<SystemStage>(&CoreStage::First)
+                    .get_stage_mut::<SystemStage>(CoreStage::First)
                     .unwrap();
                 render.run(&mut render_app.world);
             }
             {
                 let extract = render_app
                     .schedule
-                    .get_stage_mut::<SystemStage>(&RenderStage::Extract)
+                    .get_stage_mut::<SystemStage>(RenderStage::Extract)
                     .unwrap();
 
                 // temporarily add the render world to the app world as a resource
@@ -261,28 +261,28 @@ impl Plugin for RenderPlugin {
             {
                 let render = render_app
                     .schedule
-                    .get_stage_mut::<SystemStage>(&RenderStage::Prepare)
+                    .get_stage_mut::<SystemStage>(RenderStage::Prepare)
                     .unwrap();
                 render.run(&mut render_app.world);
             }
             {
                 let render = render_app
                     .schedule
-                    .get_stage_mut::<SystemStage>(&RenderStage::Build)
+                    .get_stage_mut::<SystemStage>(RenderStage::Build)
                     .unwrap();
                 render.run(&mut render_app.world);
             }
             {
                 let render = render_app
                     .schedule
-                    .get_stage_mut::<SystemStage>(&RenderStage::Render)
+                    .get_stage_mut::<SystemStage>(RenderStage::Render)
                     .unwrap();
                 render.run(&mut render_app.world);
             }
             {
                 let cleanup = render_app
                     .schedule
-                    .get_stage_mut::<SystemStage>(&RenderStage::Cleanup)
+                    .get_stage_mut::<SystemStage>(RenderStage::Cleanup)
                     .unwrap();
                 cleanup.run(&mut render_app.world);
 

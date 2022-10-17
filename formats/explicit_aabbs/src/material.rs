@@ -96,7 +96,7 @@ impl GPURenderAsset<DensityMaterial> for GPUDensityMaterial {
             .unwrap();
         let image = Arc::new(image);
         let queue_family_index = commands_future.queue_family_index();
-        commands_future.then_commands(|mut recorder| {
+        commands_future.then_commands(|mut recorder| unsafe {
             use dustash::resources::HasImage;
             recorder.pipeline_barrier(
                 vk::PipelineStageFlags::empty(),

@@ -125,6 +125,7 @@ where
 }
 
 /// Workaround for https://github.com/rust-lang/rust/issues/88424#issuecomment-911158795
+#[const_trait]
 pub(crate) trait TreeMeta<ROOT: Node>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,

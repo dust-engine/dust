@@ -6,7 +6,7 @@ use bevy_ecs::{
 };
 use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
-use dot_vox::{Color, DotVoxData, Model, SceneNode, SignedPermutationMatrix};
+use dot_vox::{Color, DotVoxData, Model, SceneNode, Rotation};
 use dust_vdb::hierarchy;
 use glam::{IVec3, UVec3, Vec3Swizzles};
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
@@ -37,7 +37,7 @@ impl<'a> SceneGraphTraverser<'a> {
         node: u32,
         parent: WorldOrParent<'_, '_>,
         translation: glam::IVec3,
-        rotation: SignedPermutationMatrix,
+        rotation: Rotation,
         name: Option<&str>,
     ) {
         let node = &self.scene.scenes[node as usize];
@@ -54,11 +54,11 @@ impl<'a> SceneGraphTraverser<'a> {
                 let name = attributes.get("_name").map(String::as_str);
                 let frame = &frames[0];
                 let mut this_translation =
-                    frame.translation().map(IVec3::from).unwrap_or(IVec3::ZERO);
+                    frame.position().map(|position| IVec3 { x: position.x, y: position.y, z: position.z }).unwrap_or(IVec3::ZERO);
 
                 let this_rotation = frame
-                    .rotation()
-                    .unwrap_or(SignedPermutationMatrix::IDENTITY);
+                    .orientation()
+                    .unwrap_or(Rotation::IDENTITY);
                 //let rotation = rotation * this_rotation; // reverse?
                 let translation = translation + this_translation;
 
@@ -69,16 +69,17 @@ impl<'a> SceneGraphTraverser<'a> {
                 children,
             } => {
                 parent
-                    .spawn()
-                    .insert(self.to_transform(translation, rotation, UVec3::ZERO))
-                    .insert(GlobalTransform::default())
+                    .spawn((
+                        self.to_transform(translation, rotation, UVec3::ZERO),
+                        GlobalTransform::default()
+                    ))
                     .with_children(|builder| {
                         for &i in children {
                             self.traverse_recursive(
                                 i,
                                 WorldOrParent::Parent(builder),
                                 glam::IVec3::ZERO,
-                                SignedPermutationMatrix::IDENTITY,
+                                Rotation::IDENTITY,
                                 None,
                             );
                         }
@@ -99,7 +100,7 @@ impl<'a> SceneGraphTraverser<'a> {
                 }
                 let size = self.scene.models[shape_model.model_id as usize].size;
                 let entity = parent
-                    .spawn_bundle(VoxBundle {
+                    .spawn(VoxBundle {
                         transform: self.to_transform(
                             translation,
                             rotation,
@@ -121,7 +122,7 @@ impl<'a> SceneGraphTraverser<'a> {
     fn to_transform(
         &self,
         translation: glam::IVec3,
-        rotation: SignedPermutationMatrix,
+        rotation: Rotation,
         size: glam::UVec3,
     ) -> Transform {
         let mut translation = translation.as_vec3a().xzy();
@@ -213,7 +214,7 @@ impl AssetLoader for VoxLoader {
                 0,
                 WorldOrParent::World(&mut world),
                 IVec3::ZERO,
-                SignedPermutationMatrix::IDENTITY,
+                Rotation::IDENTITY,
                 None,
             );
 
@@ -270,20 +271,12 @@ enum WorldOrParent<'w, 'q> {
 }
 
 impl<'w, 'q> WorldOrParent<'w, 'q> {
-    fn spawn(self) -> EntityMut<'w> {
-        match self {
-            WorldOrParent::World(world) => world.spawn(),
-            WorldOrParent::Parent(parent) => parent.spawn(),
-        }
-    }
-    fn spawn_bundle(self, bundle: impl Bundle + Send + Sync + 'static) -> EntityMut<'w> {
+    fn spawn(self, bundle: impl Bundle + Send + Sync + 'static) -> EntityMut<'w> {
         match self {
             WorldOrParent::World(world) => {
-                let mut a = world.spawn();
-                a.insert_bundle(bundle);
-                a
+                world.spawn(bundle)
             }
-            WorldOrParent::Parent(parent) => parent.spawn_bundle(bundle),
+            WorldOrParent::Parent(parent) => parent.spawn(bundle),
         }
     }
     fn has_parent(&self) -> bool {

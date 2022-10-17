@@ -60,10 +60,11 @@ fn setup(
         ..Default::default()
     });
     commands
-        .spawn()
-        .insert(PerspectiveCamera::default())
-        .insert(Transform::default())
-        .insert(GlobalTransform::default())
+        .spawn((
+            PerspectiveCamera::default(),
+            Transform::default(),
+            GlobalTransform::default(),
+        ))
         .insert_bundle(smooth_bevy_cameras::controllers::fps::FpsCameraBundle::new(
             smooth_bevy_cameras::controllers::fps::FpsCameraController::default(),
             Vec3::new(0.0, 0.0, 10.0),

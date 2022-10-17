@@ -8,13 +8,12 @@ use crate::render_asset::{
     BindlessAssetsSystem, GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore,
 };
 use crate::shader::SpecializedShader;
-
+use bevy_ecs::schedule::IntoSystemDescriptor;
 use bevy_app::{App, Plugin};
 use bevy_asset::{AssetServer, Handle, HandleId};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 
-use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 use bevy_ecs::system::{Commands, Query, Res, StaticSystemParam, SystemParam, SystemParamItem};
 
 use bevy_ecs::world::World;
@@ -122,8 +121,8 @@ where
                             };
 
                             commands.entity(entity).insert(GPUGeometryMaterial {
-                                geometry_handle: geometry_handle.id,
-                                material_handle: material_handle.id,
+                                geometry_handle: geometry_handle.id(),
+                                material_handle: material_handle.id(),
                                 blas_input_primitives: Some(buf),
                                 blas_input_layout: <<<T as Material>::Geometry as RenderAsset>::GPUAsset>::blas_input_layout(),
                                 sbt_data: Some(sbt_data),
@@ -133,8 +132,8 @@ where
                         }
                     }
                     commands.entity(entity).insert(GPUGeometryMaterial {
-                        geometry_handle: geometry_handle.id,
-                        material_handle: material_handle.id,
+                        geometry_handle: geometry_handle.id(),
+                        material_handle: material_handle.id(),
                         blas_input_primitives: None,
                         blas_input_layout: <<<T as Material>::Geometry as RenderAsset>::GPUAsset>::blas_input_layout(),
                         sbt_data: None,

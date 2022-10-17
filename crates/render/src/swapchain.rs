@@ -2,11 +2,12 @@ use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use crate::{Queues, RenderWorld};
 use crate::{SurfaceLoader, SwapchainLoader};
+use bevy_ecs::schedule::IntoSystemDescriptor;
 use ash::vk;
 use bevy_app::{App, Plugin};
 use bevy_ecs::{
     event::EventReader,
-    schedule::{ParallelSystemDescriptorCoercion, SystemLabel},
+    schedule::{SystemLabel},
     system::{Res, ResMut, Resource},
 };
 use bevy_window::WindowId;

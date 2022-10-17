@@ -8,13 +8,13 @@ use bevy_ecs::{
     prelude::FromWorld,
     system::{Res, ResMut, Resource},
 };
+use bevy_ecs::schedule::IntoSystemDescriptor;
 use bevy_utils::HashMap;
 use dustash::descriptor::DescriptorVecBinding;
 
 use crate::{RenderApp, RenderStage};
 
 use super::{GPURenderAsset, PrepareRenderAssetsSystem, RenderAsset, RenderAssetStore};
-use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 
 /// GPU Asset that, upon creation, will be written to the corresponding bindless heap.
 pub trait BindlessGPUAsset<T: RenderAsset>: GPURenderAsset<T> {
@@ -94,7 +94,7 @@ fn asset_binding_system<A: RenderAsset>(
             super::RenderAssetEvent::Created(handle) => {
                 let binding = render_asset_store.get(handle).unwrap().binding();
                 bindings.push(binding);
-                handle_ids.push(handle.id);
+                handle_ids.push(handle.id());
             }
         }
     }

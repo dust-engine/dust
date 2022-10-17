@@ -90,6 +90,7 @@ pub trait Node: 'static + Default + Debug {
 }
 
 /// Trait that contains const methods for the node.
+#[const_trait]
 pub trait NodeConst: Node {
     /// Method that congregates metadata of each level of the tree into an array.
     /// Implementation shoud write NodeMeta into `metas[Self::LEVEL]`.

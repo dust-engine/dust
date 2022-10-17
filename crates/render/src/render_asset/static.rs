@@ -5,11 +5,10 @@ use std::ops::{Deref, DerefMut};
 use ash::vk;
 use bevy_app::{App, Plugin};
 use bevy_asset::{AddAsset, Asset, AssetEvent, Assets, Handle};
-
+use bevy_ecs::schedule::IntoSystemDescriptor;
 use bevy_ecs::event::{EventReader, EventWriter};
 
 use crate::Queues;
-use bevy_ecs::schedule::ParallelSystemDescriptorCoercion;
 use bevy_ecs::schedule::SystemLabel;
 use bevy_ecs::system::{
     Commands, Res, ResMut, Resource, StaticSystemParam, SystemParam, SystemParamItem,

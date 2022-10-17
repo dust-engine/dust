@@ -20,8 +20,9 @@ use bevy_ecs::{
 use bevy_utils::{HashMap, HashSet};
 use dustash::{
     queue::QueueType,
+    pipeline::Pipeline,
     ray_tracing::{
-        pipeline::{PipelineLayout, RayTracingPipelineLayout},
+        pipeline::{RayTracingPipelineLayout},
         sbt::{Sbt, SbtLayout},
     },
     sync::CommandsFuture,
@@ -35,6 +36,7 @@ pub struct HitGroup {
     pub closest_hit_shader: Option<SpecializedShader>,
 }
 impl HitGroup {
+    /// Returns Some if all three hitgroup shaders are loaded. Otherwise return None.
     fn try_extract_shaders(
         &self,
         device: &Arc<dustash::Device>,
@@ -43,10 +45,11 @@ impl HitGroup {
         use dustash::shader::SpecializedShader as SpecializedShaderModule;
 
         let build_shader = |specialized_shader: &SpecializedShader| {
-            let raygen_shader = shaders.get(&specialized_shader.shader)?;
+            let shader = shaders.get(&specialized_shader.shader)?;
             Some(SpecializedShaderModule {
-                shader: Arc::new(raygen_shader.create(device.clone())),
+                shader: Arc::new(shader.create(device.clone())),
                 specialization: specialized_shader.specialization.clone(),
+                entry_point: shader.entry_point.clone()
             })
         };
         let hit_group = dustash::ray_tracing::sbt::HitGroup {
@@ -72,7 +75,6 @@ impl HitGroup {
 }
 
 pub struct RayTracingPipelineBuildJob {
-    pub pipeline_layout: Arc<PipelineLayout>,
     pub raygen_shader: SpecializedShader,
     pub miss_shaders: Vec<SpecializedShader>,
     pub callable_shaders: Vec<SpecializedShader>,
@@ -91,6 +93,7 @@ impl RayTracingPipelineBuildJob {
             Some(SpecializedShaderModule {
                 shader: Arc::new(raygen_shader.create(device.clone())),
                 specialization: specialized_shader.specialization.clone(),
+                entry_point: raygen_shader.entry_point.clone()
             })
         };
         let raygen_shader = build_shader(&self.raygen_shader)?;
@@ -106,13 +109,11 @@ impl RayTracingPipelineBuildJob {
 }
 pub trait RayTracingPipeline {
     fn max_recursion_depth(&self) -> u32;
-    fn pipeline_layout(&self) -> Arc<PipelineLayout>;
     fn raygen_shader(&self, asset_server: &AssetServer) -> SpecializedShader;
     fn miss_shaders(&self, asset_server: &AssetServer) -> Vec<SpecializedShader>;
     fn callable_shaders(&self, asset_server: &AssetServer) -> Vec<SpecializedShader>;
     fn build(&self, asset_server: &AssetServer) -> RayTracingPipelineBuildJob {
         RayTracingPipelineBuildJob {
-            pipeline_layout: self.pipeline_layout(),
             raygen_shader: self.raygen_shader(asset_server),
             miss_shaders: self.miss_shaders(asset_server),
             callable_shaders: self.callable_shaders(asset_server),
@@ -198,7 +199,6 @@ impl<T: RayTracingRenderer> Plugin for RayTracingRendererPlugin<T> {
 pub struct ExtractedRayTracingPipelineLayout {
     index: PipelineIndex,
     max_recursion_depth: u32,
-    pipeline_layout: Arc<PipelineLayout>,
     sbt_layout: SbtLayout,
 }
 
@@ -331,7 +331,6 @@ fn extract_pipeline_system<T: RayTracingRenderer>(
                 Some(ExtractedRayTracingPipelineLayout {
                     index: *pipeline_index,
                     max_recursion_depth: job.max_recursion_depth,
-                    pipeline_layout: job.pipeline_layout,
                     sbt_layout,
                 })
             } else {
@@ -383,17 +382,14 @@ fn prepare_pipeline_system<T: RayTracingRenderer>(
     }
     let pipelines = {
         let layouts: Vec<_> = layouts
-            .iter()
-            .map(|layout| RayTracingPipelineLayout {
-                pipeline_layout: &layout.pipeline_layout,
-                sbt_layout: &layout.sbt_layout,
-                max_recursion_depth: layout.max_recursion_depth,
-            })
+            .into_iter()
+            .map(|layout| layout.sbt_layout)
             .collect();
 
-        dustash::ray_tracing::pipeline::RayTracingPipeline::create_many(
+        dustash::ray_tracing::pipeline::RayTracingPipeline::create_from_shaders(
             rtx_loader.clone(),
-            layouts.as_slice(),
+            todo!(),
+            &layouts,
         )
     }
     .unwrap();
@@ -502,7 +498,6 @@ fn prepare_sbt_system(
             std::iter::once(()),
             rhit_data,
             &allocator,
-            &mut commands_future,
         );
         pipeline_cache.sbts[index] = Some(sbt);
     }
