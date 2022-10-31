@@ -7,7 +7,7 @@ use crate::pipeline::{HitGroup, HitGroupType, HitGroups};
 use crate::render_asset::{
     BindlessAssetsSystem, GPURenderAsset, RenderAsset, RenderAssetPlugin, RenderAssetStore,
 };
-use crate::shader::SpecializedShader;
+use crate::shader::SpecializedShaderHandle;
 use bevy_ecs::schedule::IntoSystemDescriptor;
 use bevy_app::{App, Plugin};
 use bevy_asset::{AssetServer, Handle, HandleId};
@@ -22,8 +22,8 @@ use dustash::resources::alloc::MemBuffer;
 pub trait Material: RenderAsset {
     type Geometry: Geometry;
 
-    fn anyhit_shader(world: &World, asset_server: &AssetServer) -> Option<SpecializedShader>;
-    fn closest_hit_shader(world: &World, asset_server: &AssetServer) -> Option<SpecializedShader>;
+    fn anyhit_shader(world: &World, asset_server: &AssetServer) -> Option<SpecializedShaderHandle>;
+    fn closest_hit_shader(world: &World, asset_server: &AssetServer) -> Option<SpecializedShaderHandle>;
 }
 
 pub trait GPUMaterial<T: Material>: GPURenderAsset<T> {

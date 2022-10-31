@@ -2,7 +2,7 @@ use std::{alloc::Layout, marker::PhantomData, sync::Arc};
 
 use crate::{
     render_asset::{GPURenderAsset, RenderAsset, RenderAssetPlugin},
-    shader::SpecializedShader,
+    shader::SpecializedShaderHandle,
     RenderStage,
 };
 
@@ -28,7 +28,7 @@ pub trait Geometry: RenderAsset {
     /// This gets persisted in the render world.
 
     fn aabb(&self) -> GeometryAABB;
-    fn intersection_shader(world: &World, asset_server: &AssetServer) -> SpecializedShader;
+    fn intersection_shader(world: &World, asset_server: &AssetServer) -> SpecializedShaderHandle;
 }
 
 /// RenderWorld Assets.

@@ -28,8 +28,6 @@ bevy_winit = { git = "https://github.com/bevyengine/bevy", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 futures-lite = "^1.12"
 
-hosek-wilkie-sky = { path = "../../../hosek-wilkie-sky" }
-
 [features]
 swapchain = ["bevy_window", "bevy_winit"]
 default = ["swapchain"]

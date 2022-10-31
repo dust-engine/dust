@@ -43,12 +43,12 @@ impl AssetLoader for ShaderLoader {
 }
 
 #[derive(Clone)]
-pub struct SpecializedShader {
+pub struct SpecializedShaderHandle {
     pub shader: Handle<Shader>,
     pub specialization: SpecializationInfo,
 }
 
-impl From<Handle<Shader>> for SpecializedShader {
+impl From<Handle<Shader>> for SpecializedShaderHandle {
     fn from(handle: Handle<Shader>) -> Self {
         Self {
             shader: handle,
@@ -57,7 +57,7 @@ impl From<Handle<Shader>> for SpecializedShader {
     }
 }
 
-impl SpecializedShader {
+impl SpecializedShaderHandle {
     pub fn new(shader: Handle<Shader>) -> Self {
         Self {
             shader,

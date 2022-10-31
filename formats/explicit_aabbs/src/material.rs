@@ -11,7 +11,7 @@ use dust_render::render_asset::BindlessGPUAssetDescriptors;
 use dust_render::render_asset::GPURenderAsset;
 use dust_render::render_asset::GPURenderAssetBuildResult;
 use dust_render::render_asset::RenderAsset;
-use dust_render::shader::SpecializedShader;
+use dust_render::shader::SpecializedShaderHandle;
 use dustash::queue::QueueType;
 use dustash::queue::Queues;
 use dustash::resources::alloc::{Allocator, BufferRequest, MemBuffer, MemoryAllocScenario};
@@ -52,14 +52,14 @@ impl RenderAsset for DensityMaterial {
 impl Material for DensityMaterial {
     type Geometry = crate::AABBGeometry;
 
-    fn anyhit_shader(_world: &World, asset_server: &AssetServer) -> Option<dust_render::shader::SpecializedShader> {
+    fn anyhit_shader(_world: &World, asset_server: &AssetServer) -> Option<dust_render::shader::SpecializedShaderHandle> {
         None
     }
 
     fn closest_hit_shader(
         _world: &World,
         asset_server: &AssetServer,
-    ) -> Option<dust_render::shader::SpecializedShader> {
+    ) -> Option<dust_render::shader::SpecializedShaderHandle> {
         Some(asset_server.load("plain.rchit.spv").into())
     }
 }

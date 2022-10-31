@@ -7,6 +7,7 @@ pub mod camera;
 pub mod geometry;
 pub mod material;
 pub mod pipeline;
+pub mod pipeline2;
 pub mod render_asset;
 pub mod renderable;
 pub mod renderer;

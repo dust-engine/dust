@@ -8,7 +8,7 @@ use bevy_reflect::TypeUuid;
 use dust_render::{
     geometry::{GPUGeometry, Geometry},
     render_asset::{GPURenderAsset, GPURenderAssetBuildResult, RenderAsset},
-    shader::SpecializedShader,
+    shader::SpecializedShaderHandle,
 };
 use dustash::{
     command::recorder::CommandRecorder,
@@ -64,9 +64,9 @@ impl Geometry for AABBGeometry {
         todo!()
     }
 
-    fn intersection_shader(world: &World, asset_server: &AssetServer) -> SpecializedShader {
+    fn intersection_shader(world: &World, asset_server: &AssetServer) -> SpecializedShaderHandle {
         let handle = asset_server.load("dda.rint.spv");
-        SpecializedShader {
+        SpecializedShaderHandle {
             shader: handle,
             specialization: Default::default(),
         }

@@ -1,6 +1,6 @@
-use std::{ffi::c_void, sync::Arc};
+use std::{ffi::c_void, sync::Arc, hash::Hash};
 
-use crate::{Device, Queues, render_asset::{RawBuffer, RenderAssetStore, RenderAssetPlugin, RawBufferLoader}};
+use crate::{Device, Queues, render_asset::{RawBuffer, RenderAssetStore, RenderAssetPlugin, RawBufferLoader}, geometry::Geometry, material::Material};
 use bevy_asset::{AssetServer, Handle, Assets, AddAsset};
 use bevy_ecs::{
     prelude::*,
@@ -24,7 +24,7 @@ use crate::{
     accel_struct::tlas::TLASStore,
     camera::{ExtractedCamera, PerspectiveCameraParameters},
     pipeline::{PipelineIndex, RayTracingPipelineBuildJob},
-    shader::SpecializedShader,
+    shader::SpecializedShaderHandle,
     swapchain::Windows,
 };
 
@@ -106,8 +106,8 @@ impl crate::pipeline::RayTracingRenderer for Renderer {
     ) -> RayTracingPipelineBuildJob {
         match index {
             PRIMARY_RAY_PIPELINE => RayTracingPipelineBuildJob {
-                raygen_shader: SpecializedShader::new(asset_server.load("primary.rgen.spv")),
-                miss_shaders: vec![SpecializedShader::new(asset_server.load("sky.rmiss.spv"))],
+                raygen_shader: SpecializedShaderHandle::new(asset_server.load("primary.rgen.spv")),
+                miss_shaders: vec![SpecializedShaderHandle::new(asset_server.load("sky.rmiss.spv"))],
                 callable_shaders: vec![],
                 max_recursion_depth: 1,
             },

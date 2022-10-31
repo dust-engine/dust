@@ -7,7 +7,7 @@ use std::{
 use crate::{
     accel_struct::{blas::BlasComponent, tlas::InstanceEntry},
     geometry,
-    shader::{Shader, SpecializedShader},
+    shader::{Shader, SpecializedShaderHandle},
     Allocator, RenderApp, RenderStage,
 };
 use crate::{Device, Queues, RayTracingLoader};
@@ -31,9 +31,9 @@ use dustash::{
 pub use dustash::ray_tracing::sbt::HitGroupType;
 pub struct HitGroup {
     pub ty: HitGroupType,
-    pub intersection_shader: Option<SpecializedShader>,
-    pub anyhit_shader: Option<SpecializedShader>,
-    pub closest_hit_shader: Option<SpecializedShader>,
+    pub intersection_shader: Option<SpecializedShaderHandle>,
+    pub anyhit_shader: Option<SpecializedShaderHandle>,
+    pub closest_hit_shader: Option<SpecializedShaderHandle>,
 }
 impl HitGroup {
     /// Returns Some if all three hitgroup shaders are loaded. Otherwise return None.
@@ -44,7 +44,7 @@ impl HitGroup {
     ) -> Option<dustash::ray_tracing::sbt::HitGroup> {
         use dustash::shader::SpecializedShader as SpecializedShaderModule;
 
-        let build_shader = |specialized_shader: &SpecializedShader| {
+        let build_shader = |specialized_shader: &SpecializedShaderHandle| {
             let shader = shaders.get(&specialized_shader.shader)?;
             Some(SpecializedShaderModule {
                 shader: Arc::new(shader.create(device.clone())),
@@ -75,9 +75,9 @@ impl HitGroup {
 }
 
 pub struct RayTracingPipelineBuildJob {
-    pub raygen_shader: SpecializedShader,
-    pub miss_shaders: Vec<SpecializedShader>,
-    pub callable_shaders: Vec<SpecializedShader>,
+    pub raygen_shader: SpecializedShaderHandle,
+    pub miss_shaders: Vec<SpecializedShaderHandle>,
+    pub callable_shaders: Vec<SpecializedShaderHandle>,
     pub max_recursion_depth: u32,
 }
 impl RayTracingPipelineBuildJob {
@@ -88,7 +88,7 @@ impl RayTracingPipelineBuildJob {
         hitgroups: &[dustash::ray_tracing::sbt::HitGroup],
     ) -> Option<SbtLayout> {
         use dustash::shader::SpecializedShader as SpecializedShaderModule;
-        let build_shader = |specialized_shader: &SpecializedShader| {
+        let build_shader = |specialized_shader: &SpecializedShaderHandle| {
             let raygen_shader = shaders.get(&specialized_shader.shader)?;
             Some(SpecializedShaderModule {
                 shader: Arc::new(raygen_shader.create(device.clone())),
@@ -109,9 +109,9 @@ impl RayTracingPipelineBuildJob {
 }
 pub trait RayTracingPipeline {
     fn max_recursion_depth(&self) -> u32;
-    fn raygen_shader(&self, asset_server: &AssetServer) -> SpecializedShader;
-    fn miss_shaders(&self, asset_server: &AssetServer) -> Vec<SpecializedShader>;
-    fn callable_shaders(&self, asset_server: &AssetServer) -> Vec<SpecializedShader>;
+    fn raygen_shader(&self, asset_server: &AssetServer) -> SpecializedShaderHandle;
+    fn miss_shaders(&self, asset_server: &AssetServer) -> Vec<SpecializedShaderHandle>;
+    fn callable_shaders(&self, asset_server: &AssetServer) -> Vec<SpecializedShaderHandle>;
     fn build(&self, asset_server: &AssetServer) -> RayTracingPipelineBuildJob {
         RayTracingPipelineBuildJob {
             raygen_shader: self.raygen_shader(asset_server),

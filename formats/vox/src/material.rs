@@ -10,7 +10,7 @@ use dust_render::render_asset::GPURenderAsset;
 use dust_render::render_asset::GPURenderAssetBuildResult;
 use dust_render::render_asset::RenderAsset;
 use dust_render::render_asset::RenderAssetStore;
-use dust_render::shader::SpecializedShader;
+use dust_render::shader::SpecializedShaderHandle;
 use dustash::resources::alloc::{BufferRequest, MemBuffer, MemoryAllocScenario};
 use std::sync::Arc;
 
@@ -60,15 +60,15 @@ impl Material for PaletteMaterial {
     fn anyhit_shader(
         world: &World,
         _asset_server: &AssetServer,
-    ) -> Option<dust_render::shader::SpecializedShader> {
+    ) -> Option<dust_render::shader::SpecializedShaderHandle> {
         None
     }
 
     fn closest_hit_shader(
         world: &World,
         asset_server: &AssetServer,
-    ) -> Option<dust_render::shader::SpecializedShader> {
-        Some(SpecializedShader::new(asset_server.load("plain.rchit.spv")))
+    ) -> Option<dust_render::shader::SpecializedShaderHandle> {
+        Some(SpecializedShaderHandle::new(asset_server.load("plain.rchit.spv")))
     }
 }
 

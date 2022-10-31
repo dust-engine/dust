@@ -160,7 +160,7 @@ impl Geometry for VoxGeometry {
     fn intersection_shader(
         world: &World,
         asset_server: &bevy_asset::AssetServer,
-    ) -> dust_render::shader::SpecializedShader {
+    ) -> dust_render::shader::SpecializedShaderHandle {
         let device = world.resource::<dust_render::Device>();
         let vendor_id = device.physical_device().properties().vendor_id;
 
@@ -174,7 +174,7 @@ impl Geometry for VoxGeometry {
         let auto_closest_hit_attributes = vendor_id != 4098;
 
         let handle = asset_server.load("dda.rint.spv");
-        dust_render::shader::SpecializedShader::new(handle)
+        dust_render::shader::SpecializedShaderHandle::new(handle)
             .with_bool(0, auto_closest_hit_attributes) // AUTO_CLOSEST_HIT_ATTRIBUTES
     }
 }
