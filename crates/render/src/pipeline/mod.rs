@@ -4,9 +4,15 @@ use bevy_ecs::system::Resource;
 use rhyolite::PipelineLayout;
 mod builder;
 mod manager;
+mod standard;
 
 use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader};
 pub use builder::RayTracingPipelineBuilder;
+pub use manager::RayTracingPipelineManager;
+
+
+pub use standard::StandardPipeline;
+
 struct RayTracingPipelineCharacteristicsMaterialInfo {
     ty: rhyolite::RayTracingHitGroupType,
     /// Pipeline library containing n hitgroups, where n = number of ray types.
@@ -40,13 +46,14 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
         1
     }
 
-    fn material_instance_added<M: Material<Pipeline = Self>>(&mut self, _material: &M) -> SbtIndex {
-        todo!("For each subpipeline that needs to use the material, call material_instance_added");
-        todo!("For each subpipeline, call get_pipeline");
-        // map from (material, raytype) to hitgroup index using the pipeline objects.
-        // hitgroup index needs to be adjusted by subpipeline
-        todo!("Call material instance add(material.parameters, hitgroup_index) on sbtmanager")
-    }
+    /// Assuming that the ray tracing pipeline contains a number of sub-pipelines,
+    /// each managed by a RayTracingPipelineManager,
+    /// implementations generally need to do the following:
+    /// 1. For each sub-pipeline rendering the material, call material_instance_added
+    /// 2. map from (material, raytype) to hitgroup index using the pipeline objects.
+    /// hitgroup index needs to be adjusted by subpipeline
+    /// 3. Call material instance add(material.parameters, hitgroup_index) on sbtmanager
+    fn material_instance_added<M: Material<Pipeline = Self>>(&mut self, _material: &M) -> SbtIndex;
     fn material_instance_removed<M: Material<Pipeline = Self>>(&mut self) {}
 
     fn new(

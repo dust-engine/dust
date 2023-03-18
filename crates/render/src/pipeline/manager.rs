@@ -27,10 +27,10 @@ pub struct RayTracingPipelineManagerSpecializedPipeline<'a> {
     /// hitgroup index = hitgroup_mapping[material_index] + ray_type
     hitgroup_mapping: &'a BTreeMap<u32, u32>,
 }
-struct RayTracingPipelineManager {
+pub struct RayTracingPipelineManager {
     /// A pipeline library containing raygen, raymiss, callable shaders
     pipeline_base_library: Option<DeferredValue<Arc<RayTracingPipelineLibrary>>>,
-    pipeline_characteristics: Rc<RayTracingPipelineCharacteristics>,
+    pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
     current_material_flag: u64,
     specialized_pipelines: BTreeMap<u64, RayTracingPipelineManagerSpecializedPipelineDeferred>,
     materials: Vec<RayTracingPipelineManagerMaterialInfo>,
@@ -40,7 +40,7 @@ struct RayTracingPipelineManager {
 
 impl RayTracingPipelineManager {
     pub fn new(
-        pipeline_characteristics: Rc<RayTracingPipelineCharacteristics>,
+        pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
         pipeline_cache: Option<Arc<PipelineCache>>,
     ) -> Self {
         let materials = pipeline_characteristics

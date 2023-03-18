@@ -13,10 +13,11 @@ use crate::{
     shader::SpecializedShader,
 };
 
+pub type MaterialType = rhyolite::RayTracingHitGroupType;
 // Handle<Material> is a component
 pub trait Material: Send + Sync + 'static + TypeUuid {
     type Pipeline: RayTracingPipeline;
-    const TYPE: rhyolite::RayTracingHitGroupType;
+    const TYPE: MaterialType;
     fn rahit_shader(ray_type: u32) -> Option<SpecializedShader>;
     fn rchit_shader(ray_type: u32) -> Option<SpecializedShader>;
     fn intersection_shader(ray_type: u32) -> Option<SpecializedShader>;

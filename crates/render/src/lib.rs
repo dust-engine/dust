@@ -12,3 +12,8 @@ pub struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, _app: &mut bevy_app::App) {}
 }
+
+
+
+pub use material::*;
+pub use pipeline::*;

@@ -1,0 +1,12 @@
+[package]
+name = "vox"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dot_vox = { git = "https://github.com/dust-engine/dot_vox.git" }
+dust-render = { path = "../render" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
