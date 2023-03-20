@@ -8,7 +8,8 @@ use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, SceneNode, Rotation};
 use glam::{IVec3, UVec3, Vec3Swizzles};
-use rhyolite::{ash::vk, future::GPUCommandFutureExt, QueueRef};
+use rhyolite::{ash::vk, future::{GPUCommandFutureExt, GPUCommandFuture}, QueueRef, macros::commands, commands};
+use rayon::prelude::*;
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 use crate::{TreeRoot, Tree, VoxBundle};
@@ -167,7 +168,7 @@ impl VoxLoader {
         }
     }
 
-    fn load_model(&self, model: &Model, palette: Handle<VoxPalette>) -> impl Future<Output = (Tree, PaletteMaterial)> + Send {
+    fn load_model(&self, model: &Model, palette: Handle<VoxPalette>) -> impl GPUCommandFuture<Output = (VoxGeometry, PaletteMaterial)> +Send{
         let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
 
         let mut tree = Tree::new();
@@ -198,7 +199,7 @@ impl VoxLoader {
             leaf.material_ptr = palette_indexes.running_sum()[block_index];
         }
 
-        let material_buffer = self.allocator.create_device_buffer_with_writer(
+        let material_buffer = self.allocator.create_dynamic_asset_buffer_with_writer(
             palette_indexes.len() as u64,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             |slice| {
@@ -206,12 +207,21 @@ impl VoxLoader {
                     *dst = src;
                 }
             }
-        ).unwrap().schedule_on_queue(self.transfer_queue);
-        let future_to_wait = self.queues.submit(material_buffer, &mut Default::default());
-        async {
-            let buffer = future_to_wait.await.into_inner();
-            (tree, PaletteMaterial::new(palette, buffer))
-        }
+        ).unwrap();
+
+        
+        let geometry = VoxGeometry::from_tree(
+            tree,
+            [model.size.x as u8, model.size.z as u8, model.size.y as u8],
+            1.0,
+            &self.allocator
+        );
+
+        let future_to_wait = material_buffer.join(geometry);
+        future_to_wait.map(|(buffer, geometry)| {
+            let buffer = buffer.into_inner();
+            (geometry, PaletteMaterial::new(palette, buffer))
+        })
     } 
 }
 
@@ -244,19 +254,22 @@ impl AssetLoader for VoxLoader {
                 None,
             );
 
-            let mut geometry_materials: Vec<_> = Vec::with_capacity(traverser.models.len());
-            for model_id in traverser.models.iter() {
+            let geometry_material_futures: Vec<_> = traverser.models.par_iter().map(|model_id| {
                 let model = &file.models[*model_id as usize];
-                let (tree, material) = self.load_model(model, palette_handle.clone()).await;
                 assert!(model.size.x <= 255 && model.size.y <= 255 && model.size.z <= 255);
-                let geometry = VoxGeometry::from_tree(
-                    tree,
-                    [model.size.x as u8, model.size.z as u8, model.size.y as u8],
-                    1.0,
-                );
-                geometry_materials.push(
-                    (*model_id, geometry, material));
-            }
+
+                (*model_id,
+                    self.load_model(model, palette_handle.clone()))
+            }).collect();
+            let geometry_materials = commands! {
+                let mut geometry_materials: Vec<_> = Vec::with_capacity(traverser.models.len());
+                for (model_id, future) in geometry_material_futures.into_iter() {
+                    let (geometry, material) = future.await;
+                    geometry_materials.push((model_id, geometry, material));
+                }
+                geometry_materials
+            }.schedule_on_queue(self.transfer_queue);
+            let geometry_materials = self.queues.submit(geometry_materials, &mut Default::default()).await;
 
             let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>)>> =
                 vec![None; file.models.len()];

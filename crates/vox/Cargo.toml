@@ -8,15 +8,16 @@ edition = "2021"
 [dependencies]
 dot_vox = { git = "https://github.com/dust-engine/dot_vox.git" }
 dust-render = { path = "../render" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
-bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
+bevy_app = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
+bevy_ecs = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
+bevy_scene = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a", default-features=false, features=["serialize"] }
+bevy_asset = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
+bevy_reflect = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
+bevy_hierarchy = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
+bevy_transform = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
 rhyolite = { path = "../../../rhyolite/core" }
 rhyolite-bevy = { path = "../../../rhyolite/bevy" }
 dust_vdb = { path = "../vdb" }
 glam = "0.23.0"
 anyhow = "*"
+rayon = "1.7"

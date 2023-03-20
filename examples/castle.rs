@@ -1,6 +1,7 @@
 #![feature(generators)]
 #![feature(int_roundings)]
 use bevy_app::{App, Plugin};
+use bevy_asset::{AssetServer, Handle};
 use bevy_ecs::prelude::*;
 use bevy_window::{PrimaryWindow, Window};
 use pin_project::pin_project;
@@ -40,8 +41,10 @@ fn main() {
         .add_plugin(bevy_window::WindowPlugin::default())
         .add_plugin(bevy_a11y::AccessibilityPlugin)
         .add_plugin(bevy_winit::WinitPlugin::default())
+        .add_plugin(bevy_asset::AssetPlugin::default())
         .add_plugin(rhyolite_bevy::RenderPlugin::default())
         .add_plugin(bevy_time::TimePlugin::default())
+        .add_plugin(bevy_scene::ScenePlugin::default())
         .add_plugin(bevy_diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default());
     let main_window = app
@@ -60,5 +63,17 @@ fn main() {
 
     app.add_plugin(dust_vox::VoxPlugin);
 
+    app.add_startup_system(setup);
+
     app.run();
+}
+
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>
+) {
+    commands.spawn(bevy_scene::SceneBundle {
+        scene: asset_server.load("castle.vox"),
+        ..Default::default()
+    });
 }

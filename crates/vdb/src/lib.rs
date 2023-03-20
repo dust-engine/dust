@@ -4,7 +4,6 @@
 #![feature(adt_const_params)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(alloc_layout_extra)]
-#![feature(generic_associated_types)]
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(const_maybe_uninit_write)]
 #![feature(const_maybe_uninit_assume_init_read)]

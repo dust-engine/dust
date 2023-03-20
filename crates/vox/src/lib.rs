@@ -1,5 +1,5 @@
 #![feature(generic_const_exprs)]
-#![feature(test)]
+#![feature(generators)]
 
 mod collector;
 mod palette;
@@ -25,7 +25,9 @@ pub struct VoxPlugin;
 impl bevy_app::Plugin for VoxPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.init_asset_loader::<loader::VoxLoader>()
-            .add_asset::<VoxPalette>();
+            .add_asset::<VoxPalette>()
+            .add_asset::<VoxGeometry>()
+            .add_asset::<PaletteMaterial>();
     }
 }
 
