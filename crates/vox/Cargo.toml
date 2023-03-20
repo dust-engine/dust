@@ -1,5 +1,5 @@
 [package]
-name = "vox"
+name = "dust-vox"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,5 +8,15 @@ edition = "2021"
 [dependencies]
 dot_vox = { git = "https://github.com/dust-engine/dot_vox.git" }
 dust-render = { path = "../render" }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
+bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "7d9cb1c4ab210595c5228af0ed4ec7d095241db5" }
+rhyolite = { path = "../../../rhyolite/core" }
+rhyolite-bevy = { path = "../../../rhyolite/bevy" }
+dust_vdb = { path = "../vdb" }
+glam = "0.23.0"
+anyhow = "*"

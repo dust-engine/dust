@@ -23,10 +23,6 @@ pub trait Material: Send + Sync + 'static + TypeUuid {
     fn intersection_shader(ray_type: u32) -> Option<SpecializedShader>;
     type ShaderParameters;
     fn parameters(&self, ray_type: u32) -> Self::ShaderParameters;
-
-    type Object;
-    // Add texture mapped object
-    fn add_object(&mut self, _obj: &Self::Object) {}
 }
 
 pub struct MaterialPlugin<M: Material> {
