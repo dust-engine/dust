@@ -5,11 +5,13 @@ use crate::{Tree, TreeRoot};
 use bevy_ecs::{system::lifetimeless::SRes, world::World};
 use bevy_ecs::system::SystemParamItem;
 
+use dust_render::Geometry;
 use dust_vdb::{IsLeaf, Node};
 use glam::{UVec3, Vec3A};
 use rhyolite::ResidentBuffer;
 use rhyolite::ash::vk;
-use rhyolite::future::{GPUCommandFuture, GPUCommandFutureExt};
+use rhyolite::debug::DebugObject;
+use rhyolite::future::{GPUCommandFuture, GPUCommandFutureExt, UnitCommandFuture};
 use rhyolite_bevy::Allocator;
 
 
@@ -21,11 +23,21 @@ pub struct VoxGeometry {
     pub unit_size: f32,
 
     /// Array of AABBs, used as Acceleration Strucutre Build Input
-    aabb_buffer: ResidentBuffer,
+    aabb_buffer: Arc<ResidentBuffer>,
 
     /// Array of `GPUVoxNode`, used during ray tracing.
     /// Its shader device address is written into the SBT Records
-    geometry_buffer: ResidentBuffer
+    geometry_buffer: Arc<ResidentBuffer>
+}
+
+impl Geometry for VoxGeometry {
+    const TYPE: dust_render::GeometryType = dust_render::GeometryType::AABBs;
+
+    type BLASInputBufferFuture = UnitCommandFuture<Arc<ResidentBuffer>>;
+
+    fn blas_input_buffer(&self) -> Self::BLASInputBufferFuture {
+        UnitCommandFuture::new(self.aabb_buffer.clone())
+    }
 }
 
 
@@ -85,20 +97,30 @@ impl VoxGeometry {
             assert_eq!(size, aabbs.len() * 24);
             let data = unsafe { std::slice::from_raw_parts(aabbs.as_ptr() as *const u8, size) };
             allocator.create_dynamic_asset_buffer_with_data(data, vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR).unwrap()
+            .map(|buffer| {
+                buffer.inspect(|buffer| {
+                    buffer.set_name("Vox BLAS Input AABB Buffer").unwrap();
+                })
+            })
         };
         let geometry_buffer = {
             let size = std::mem::size_of_val(nodes.as_slice());
             assert_eq!(size, nodes.len() * 24);
             let data = unsafe { std::slice::from_raw_parts(nodes.as_ptr() as *const u8, size) };
             allocator.create_dynamic_asset_buffer_with_data(data, vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).unwrap()
+            .map(|buffer| {
+                buffer.inspect(|buffer| {
+                    buffer.set_name("Vox Geometry Buffer").unwrap();
+                })
+            })
         };
         aabb_buffer.join(geometry_buffer).map(move |(aabb_buffer, geometry_buffer)| {
             Self {
                 tree,
                 size,
                 unit_size,
-                aabb_buffer: aabb_buffer.into_inner(),
-                geometry_buffer: geometry_buffer.into_inner()
+                aabb_buffer: Arc::new(aabb_buffer.into_inner()),
+                geometry_buffer: Arc::new(geometry_buffer.into_inner())
             }
         })
     }

@@ -9,6 +9,7 @@ use bevy_asset::{AddAsset, Handle};
 mod geometry;
 mod material;
 
+use dust_render::{GeometryPlugin, Renderable};
 use dust_vdb::hierarchy;
 pub use geometry::VoxGeometry;
 pub use material::{PaletteMaterial};
@@ -27,7 +28,8 @@ impl bevy_app::Plugin for VoxPlugin {
         app.init_asset_loader::<loader::VoxLoader>()
             .add_asset::<VoxPalette>()
             .add_asset::<VoxGeometry>()
-            .add_asset::<PaletteMaterial>();
+            .add_asset::<PaletteMaterial>()
+            .add_plugin(GeometryPlugin::<VoxGeometry>::default());
     }
 }
 
@@ -37,6 +39,7 @@ pub struct VoxBundle {
     global_transform: bevy_transform::prelude::GlobalTransform,
     geometry_handle: Handle<VoxGeometry>,
     material_handle: Handle<PaletteMaterial>,
+    renderable: Renderable
 }
 impl VoxBundle {
     pub fn from_geometry_material(
@@ -48,6 +51,7 @@ impl VoxBundle {
             global_transform: bevy_transform::prelude::GlobalTransform::default(),
             geometry_handle: geometry,
             material_handle: material,
+            renderable: Default::default()
         }
     }
 }

@@ -8,7 +8,7 @@ use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, SceneNode, Rotation};
 use glam::{IVec3, UVec3, Vec3Swizzles};
-use rhyolite::{ash::vk, future::{GPUCommandFutureExt, GPUCommandFuture}, QueueRef, macros::commands, commands};
+use rhyolite::{ash::vk, future::{GPUCommandFutureExt, GPUCommandFuture}, QueueRef, macros::commands, commands, debug::DebugObject};
 use rayon::prelude::*;
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
@@ -207,7 +207,12 @@ impl VoxLoader {
                     *dst = src;
                 }
             }
-        ).unwrap();
+        ).unwrap()
+        .map(|buffer| {
+            buffer.inspect(|buffer| {
+                buffer.set_name("Vox Material Buffer").unwrap();
+            })
+        });
 
         
         let geometry = VoxGeometry::from_tree(

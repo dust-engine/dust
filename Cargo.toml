@@ -17,6 +17,7 @@ members = [
 pin-project = "1.0"
 rhyolite = { path = "../rhyolite/core" }
 rhyolite-bevy = { path = "../rhyolite/bevy" }
+dust-render = { path = "./crates/render" }
 dust-vox = { path = "./crates/vox" }
 bevy_app = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
 bevy_ecs = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
@@ -32,3 +33,5 @@ bevy_a11y = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b800
 bevy_asset = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
 bevy_scene = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a", default-features=false }
 bevy_diagnostic = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
+image = "0.24"
+reqwest = { version = "*", features = ["blocking"] }
