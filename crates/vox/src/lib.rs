@@ -2,8 +2,8 @@
 #![feature(generators)]
 
 mod collector;
-mod palette;
 mod loader;
+mod palette;
 
 use bevy_asset::{AddAsset, Handle};
 mod geometry;
@@ -12,14 +12,12 @@ mod material;
 use dust_render::{GeometryPlugin, Renderable};
 use dust_vdb::hierarchy;
 pub use geometry::VoxGeometry;
-pub use material::{PaletteMaterial};
-pub use palette::VoxPalette;
 pub use loader::*;
-
+pub use material::PaletteMaterial;
+pub use palette::VoxPalette;
 
 pub type TreeRoot = hierarchy!(4, 2, 2);
 pub type Tree = dust_vdb::Tree<TreeRoot>;
-
 
 #[derive(Default)]
 pub struct VoxPlugin;
@@ -39,7 +37,7 @@ pub struct VoxBundle {
     global_transform: bevy_transform::prelude::GlobalTransform,
     geometry_handle: Handle<VoxGeometry>,
     material_handle: Handle<PaletteMaterial>,
-    renderable: Renderable
+    renderable: Renderable,
 }
 impl VoxBundle {
     pub fn from_geometry_material(
@@ -51,7 +49,7 @@ impl VoxBundle {
             global_transform: bevy_transform::prelude::GlobalTransform::default(),
             geometry_handle: geometry,
             material_handle: material,
-            renderable: Default::default()
+            renderable: Default::default(),
         }
     }
 }

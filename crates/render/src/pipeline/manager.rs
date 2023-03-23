@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Deref, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
 use bevy_asset::Assets;
 use rhyolite::{PipelineCache, RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo};

@@ -1,15 +1,15 @@
 #![feature(generators)]
 #![feature(int_roundings)]
 use bevy_app::{App, Plugin, Startup};
-use bevy_asset::{AssetServer, Handle};
+use bevy_asset::AssetServer;
 use bevy_ecs::prelude::*;
 use bevy_window::{PrimaryWindow, Window};
 use pin_project::pin_project;
 use rhyolite::ash::vk;
 use rhyolite::descriptor::DescriptorPool;
 use rhyolite::future::{
-    use_per_frame_state, Dispose, GPUCommandFutureExt, PerFrameContainer, PerFrameState,
-    RenderImage, DisposeContainer,
+    use_per_frame_state, DisposeContainer, GPUCommandFutureExt, PerFrameContainer, PerFrameState,
+    RenderImage,
 };
 use rhyolite::macros::glsl_reflected;
 use rhyolite::utils::retainer::{Retainer, RetainerHandle};
@@ -18,10 +18,7 @@ use rhyolite::{
     macros::{commands, gpu},
     ImageExt, QueueType,
 };
-use rhyolite::{
-    cstr, ComputePipeline, ComputePipelineCreateInfo, HasDevice, ImageLike, ImageRequest,
-    ImageViewLike,
-};
+use rhyolite::{cstr, ComputePipeline, HasDevice, ImageLike, ImageRequest, ImageViewLike};
 use rhyolite_bevy::{
     Allocator, Device, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
 };
@@ -69,16 +66,12 @@ fn main() {
     app.run();
 }
 
-fn setup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>
-) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(bevy_scene::SceneBundle {
         scene: asset_server.load("castle.vox"),
         ..Default::default()
     });
 }
-
 
 struct MyImage {
     image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
@@ -183,7 +176,7 @@ impl<
     fn init(
         self: std::pin::Pin<&mut Self>,
         _ctx: &mut rhyolite::future::CommandBufferRecordContext,
-        recycled_state: &mut Self::RecycledState,
+        _recycled_state: &mut Self::RecycledState,
     ) -> Option<(Self::Output, Self::RetainedState)> {
         None
     }
@@ -308,7 +301,7 @@ impl Plugin for RenderSystem {
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
             return;
         };
-                let transfer_queue = queue_router.of_type(QueueType::Transfer);
+                let _transfer_queue = queue_router.of_type(QueueType::Transfer);
                 let graphics_queue = queue_router.of_type(QueueType::Graphics);
                 let image_buffer = allocator
                     .create_device_buffer_with_data(
@@ -334,7 +327,7 @@ impl Plugin for RenderSystem {
                             }
                         ).unwrap().as_2d_view().unwrap()
                     }, |image| swapchain_image.inner().extent() != image.extent());
-                    let mut tmp_image = RenderImage::new(intermediate_image, vk::ImageLayout::UNDEFINED);
+                    let tmp_image = RenderImage::new(intermediate_image, vk::ImageLayout::UNDEFINED);
 
                     let mut tmp_image_region = tmp_image.map(|i| {
                         i.crop(vk::Extent3D {
@@ -348,7 +341,7 @@ impl Plugin for RenderSystem {
                         copy_buffer_to_image(&image_buffer, &mut tmp_image_region, vk::ImageLayout::TRANSFER_DST_OPTIMAL).await;
                         retain!(image_buffer);
                     }.schedule_on_queue(graphics_queue).await;
-                    let mut tmp_image = tmp_image_region.map(|image| image.into_inner());
+                    let tmp_image = tmp_image_region.map(|image| image.into_inner());
 
                     commands! {
                         pipeline.apply(&tmp_image, &mut swapchain_image).await;
@@ -363,4 +356,3 @@ impl Plugin for RenderSystem {
         app.add_system(sys.in_set(RenderSystems::Render));
     }
 }
-

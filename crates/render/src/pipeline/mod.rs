@@ -10,7 +10,6 @@ use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader};
 pub use builder::RayTracingPipelineBuilder;
 pub use manager::RayTracingPipelineManager;
 
-
 pub use standard::StandardPipeline;
 
 struct RayTracingPipelineCharacteristicsMaterialInfo {

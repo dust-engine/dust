@@ -1,21 +1,27 @@
-use std::{collections::HashSet, future::Future};
+use std::collections::HashSet;
 
+use crate::{palette::VoxPalette, VoxGeometry};
+/// MagicaVoxel trees are 256x256x256 max, so the numbers in the
+/// hierarchy must sum up to 8 where 2^8 = 256.
+use crate::{Tree, VoxBundle};
 use bevy_ecs::{
     prelude::{Bundle, Entity},
-    world::{EntityMut, World, FromWorld},
+    world::{EntityMut, FromWorld, World},
 };
 use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
-use dot_vox::{Color, DotVoxData, Model, SceneNode, Rotation};
+use dot_vox::{Color, DotVoxData, Model, Rotation, SceneNode};
 use glam::{IVec3, UVec3, Vec3Swizzles};
-use rhyolite::{ash::vk, future::{GPUCommandFutureExt, GPUCommandFuture}, QueueRef, macros::commands, commands, debug::DebugObject};
 use rayon::prelude::*;
-/// MagicaVoxel trees are 256x256x256 max, so the numbers in the
-/// hierarchy must sum up to 8 where 2^8 = 256.
-use crate::{TreeRoot, Tree, VoxBundle};
-use crate::{palette::VoxPalette, VoxGeometry};
+use rhyolite::{
+    ash::vk,
+    debug::DebugObject,
+    future::{GPUCommandFuture, GPUCommandFutureExt},
+    macros::commands,
+    QueueRef,
+};
 
-use bevy_asset::{AssetLoader, Assets, Handle, LoadedAsset};
+use bevy_asset::{AssetLoader, Handle, LoadedAsset};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter};
 
 use crate::material::PaletteMaterial;
@@ -29,11 +35,13 @@ impl FromWorld for VoxLoader {
     fn from_world(world: &mut World) -> Self {
         let allocator = world.resource::<rhyolite_bevy::Allocator>().clone();
         let queues = world.resource::<AsyncQueues>().clone();
-        let transfer_queue = world.resource::<QueuesRouter>().of_type(rhyolite::QueueType::Transfer);
+        let transfer_queue = world
+            .resource::<QueuesRouter>()
+            .of_type(rhyolite::QueueType::Transfer);
         Self {
             allocator,
             queues,
-            transfer_queue
+            transfer_queue,
         }
     }
 }
@@ -43,7 +51,7 @@ struct SceneGraphTraverser<'a> {
     scene: &'a DotVoxData,
     models: HashSet<u32>,
     instances: Vec<(u32, Entity)>,
-} 
+}
 
 impl<'a> SceneGraphTraverser<'a> {
     fn traverse_recursive(
@@ -52,7 +60,7 @@ impl<'a> SceneGraphTraverser<'a> {
         parent: WorldOrParent<'_, '_>,
         translation: glam::IVec3,
         rotation: Rotation,
-        name: Option<&str>,
+        _name: Option<&str>,
     ) {
         let node = &self.scene.scenes[node as usize];
         match node {
@@ -67,12 +75,16 @@ impl<'a> SceneGraphTraverser<'a> {
                 }
                 let name = attributes.get("_name").map(String::as_str);
                 let frame = &frames[0];
-                let mut this_translation =
-                    frame.position().map(|position| IVec3 { x: position.x, y: position.y, z: position.z }).unwrap_or(IVec3::ZERO);
+                let this_translation = frame
+                    .position()
+                    .map(|position| IVec3 {
+                        x: position.x,
+                        y: position.y,
+                        z: position.z,
+                    })
+                    .unwrap_or(IVec3::ZERO);
 
-                let this_rotation = frame
-                    .orientation()
-                    .unwrap_or(Rotation::IDENTITY);
+                let this_rotation = frame.orientation().unwrap_or(Rotation::IDENTITY);
                 //let rotation = rotation * this_rotation; // reverse?
                 let translation = translation + this_translation;
 
@@ -85,7 +97,7 @@ impl<'a> SceneGraphTraverser<'a> {
                 parent
                     .spawn((
                         self.to_transform(translation, rotation, UVec3::ZERO),
-                        GlobalTransform::default()
+                        GlobalTransform::default(),
                     ))
                     .with_children(|builder| {
                         for &i in children {
@@ -145,7 +157,7 @@ impl<'a> SceneGraphTraverser<'a> {
         let (quat, scale) = rotation.to_quat_scale();
         let quat = glam::Quat::from_array(quat);
         let quat = glam::Quat::from_xyzw(quat.x, quat.z, -quat.y, quat.w);
-        let mut scale = glam::Vec3A::from_array(scale).xzy(); // no need to negate scale.y because scale is not a coordinate
+        let scale = glam::Vec3A::from_array(scale).xzy(); // no need to negate scale.y because scale is not a coordinate
 
         let center = quat * (size.xzy().as_vec3a() / 2.0);
         Transform {
@@ -168,7 +180,11 @@ impl VoxLoader {
         }
     }
 
-    fn load_model(&self, model: &Model, palette: Handle<VoxPalette>) -> impl GPUCommandFuture<Output = (VoxGeometry, PaletteMaterial)> +Send{
+    fn load_model(
+        &self,
+        model: &Model,
+        palette: Handle<VoxPalette>,
+    ) -> impl GPUCommandFuture<Output = (VoxGeometry, PaletteMaterial)> + Send {
         let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
 
         let mut tree = Tree::new();
@@ -199,27 +215,29 @@ impl VoxLoader {
             leaf.material_ptr = palette_indexes.running_sum()[block_index];
         }
 
-        let material_buffer = self.allocator.create_dynamic_asset_buffer_with_writer(
-            palette_indexes.len() as u64,
-            vk::BufferUsageFlags::STORAGE_BUFFER,
-            |slice| {
-                for (src, dst) in palette_indexes.zip(slice.iter_mut()) {
-                    *dst = src;
-                }
-            }
-        ).unwrap()
-        .map(|buffer| {
-            buffer.inspect(|buffer| {
-                buffer.set_name("Vox Material Buffer").unwrap();
-            })
-        });
+        let material_buffer = self
+            .allocator
+            .create_dynamic_asset_buffer_with_writer(
+                palette_indexes.len() as u64,
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                |slice| {
+                    for (src, dst) in palette_indexes.zip(slice.iter_mut()) {
+                        *dst = src;
+                    }
+                },
+            )
+            .unwrap()
+            .map(|buffer| {
+                buffer.inspect(|buffer| {
+                    buffer.set_name("Vox Material Buffer").unwrap();
+                })
+            });
 
-        
         let geometry = VoxGeometry::from_tree(
             tree,
             [model.size.x as u8, model.size.z as u8, model.size.y as u8],
             1.0,
-            &self.allocator
+            &self.allocator,
         );
 
         let future_to_wait = material_buffer.join(geometry);
@@ -227,7 +245,7 @@ impl VoxLoader {
             let buffer = buffer.into_inner();
             (geometry, PaletteMaterial::new(palette, buffer))
         })
-    } 
+    }
 }
 
 impl AssetLoader for VoxLoader {
@@ -259,13 +277,16 @@ impl AssetLoader for VoxLoader {
                 None,
             );
 
-            let geometry_material_futures: Vec<_> = traverser.models.par_iter().map(|model_id| {
-                let model = &file.models[*model_id as usize];
-                assert!(model.size.x <= 255 && model.size.y <= 255 && model.size.z <= 255);
+            let geometry_material_futures: Vec<_> = traverser
+                .models
+                .par_iter()
+                .map(|model_id| {
+                    let model = &file.models[*model_id as usize];
+                    assert!(model.size.x <= 255 && model.size.y <= 255 && model.size.z <= 255);
 
-                (*model_id,
-                    self.load_model(model, palette_handle.clone()))
-            }).collect();
+                    (*model_id, self.load_model(model, palette_handle.clone()))
+                })
+                .collect();
             let geometry_materials = commands! {
                 let mut geometry_materials: Vec<_> = Vec::with_capacity(traverser.models.len());
                 for (model_id, future) in geometry_material_futures.into_iter() {
@@ -273,8 +294,12 @@ impl AssetLoader for VoxLoader {
                     geometry_materials.push((model_id, geometry, material));
                 }
                 geometry_materials
-            }.schedule_on_queue(self.transfer_queue);
-            let geometry_materials = self.queues.submit(geometry_materials, &mut Default::default()).await;
+            }
+            .schedule_on_queue(self.transfer_queue);
+            let geometry_materials = self
+                .queues
+                .submit(geometry_materials, &mut Default::default())
+                .await;
 
             let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>)>> =
                 vec![None; file.models.len()];
@@ -316,9 +341,7 @@ enum WorldOrParent<'w, 'q> {
 impl<'w, 'q> WorldOrParent<'w, 'q> {
     fn spawn(self, bundle: impl Bundle + Send + Sync + 'static) -> EntityMut<'w> {
         match self {
-            WorldOrParent::World(world) => {
-                world.spawn(bundle)
-            }
+            WorldOrParent::World(world) => world.spawn(bundle),
             WorldOrParent::Parent(parent) => parent.spawn(bundle),
         }
     }

@@ -1,7 +1,15 @@
-use std::{sync::Arc, alloc::Layout, collections::{BTreeMap, BTreeSet}};
+use std::{
+    alloc::Layout,
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use bevy_ecs::prelude::Component;
-use rhyolite::{Allocator, ash::vk, ResidentBuffer, future::{PerFrameState, SharedDeviceStateHostContainer}};
+use rhyolite::{
+    ash::vk,
+    future::{PerFrameState, SharedDeviceStateHostContainer},
+    Allocator, ResidentBuffer,
+};
 
 use crate::Material;
 
@@ -40,18 +48,16 @@ struct SbtLayout {
     handle_size: usize,
 }
 
-
 pub struct SbtManager {
     allocator: Allocator,
     layout: SbtLayout,
     total_raytype: u32,
-    
+
     sender: std::sync::mpsc::Sender<usize>,
     available_indices: std::sync::mpsc::Receiver<usize>,
 
     sbt: Vec<u8>,
     sbt_index_to_material: Vec<std::any::TypeId>,
-
 
     changeset: BTreeMap<vk::Buffer, BTreeSet<usize>>,
     frames: PerFrameState<ResidentBuffer>,

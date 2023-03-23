@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use bevy_ecs::system::Resource;
 
@@ -6,9 +6,8 @@ use super::{RayTracingPipeline, RayTracingPipelineManager};
 
 #[derive(Resource)]
 pub struct StandardPipeline {
-    primary_ray_pipeline: RayTracingPipelineManager
+    primary_ray_pipeline: RayTracingPipelineManager,
 }
-
 
 impl RayTracingPipeline for StandardPipeline {
     fn new(
@@ -17,10 +16,16 @@ impl RayTracingPipeline for StandardPipeline {
     ) -> Self {
         let pipeline_characteristics = Arc::new(pipeline_characteristic);
         Self {
-            primary_ray_pipeline: RayTracingPipelineManager::new(pipeline_characteristics, pipeline_cache)
+            primary_ray_pipeline: RayTracingPipelineManager::new(
+                pipeline_characteristics,
+                pipeline_cache,
+            ),
         }
     }
-    fn material_instance_added<M: crate::Material<Pipeline = Self>>(&mut self, _material: &M) -> crate::sbt::SbtIndex {
+    fn material_instance_added<M: crate::Material<Pipeline = Self>>(
+        &mut self,
+        _material: &M,
+    ) -> crate::sbt::SbtIndex {
         self.primary_ray_pipeline.material_instance_added::<M>();
         todo!()
     }
