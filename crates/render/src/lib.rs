@@ -1,4 +1,5 @@
 #![feature(let_chains)]
+#![feature(generators)]
 
 use bevy_app::{Plugin, Update};
 mod blas;
@@ -8,6 +9,7 @@ mod material;
 mod pipeline;
 mod sbt;
 mod shader;
+mod tlas;
 use bevy_ecs::{prelude::Component, reflect::ReflectComponent, schedule::IntoSystemConfigs};
 use bevy_reflect::Reflect;
 use blas::{build_blas_system, BlasStore};

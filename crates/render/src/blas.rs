@@ -41,7 +41,7 @@ pub struct NormalizedGeometryInner {
 
 #[derive(Component)]
 pub struct BLAS {
-    blas: Arc<AccelerationStructure>,
+    pub blas: Arc<AccelerationStructure>,
 }
 
 #[derive(Component)]
