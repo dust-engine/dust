@@ -19,7 +19,7 @@ pub use pipeline::*;
 use rhyolite::ash::vk;
 use rhyolite_bevy::RenderSystems;
 pub use shader::*;
-use tlas::TLASPlugin;
+pub use tlas::*;
 
 pub struct RenderPlugin {
     /// When true, the RenderPlugin will add TLASPlugin<Renderable>. As a result,
@@ -77,7 +77,7 @@ impl Plugin for RenderPlugin {
             ..rhyolite_bevy::RenderPlugin::default()
         })
         .register_type::<Renderable>()
-        .add_systems(Update, build_blas_system.in_set(RenderSystems::Render))
+        .add_systems(Update, build_blas_system.in_set(RenderSystems::SetUp))
         .init_resource::<BlasStore>();
 
         if self.tlas_include_all {

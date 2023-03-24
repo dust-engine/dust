@@ -4,6 +4,7 @@ use bevy_app::{App, Plugin, Startup};
 use bevy_asset::AssetServer;
 use bevy_ecs::prelude::*;
 use bevy_window::{PrimaryWindow, Window};
+use dust_render::TLASStore;
 use pin_project::pin_project;
 use rhyolite::ash::vk;
 use rhyolite::descriptor::DescriptorPool;
@@ -293,6 +294,7 @@ impl Plugin for RenderSystem {
         let sys =
             |mut queues: ResMut<Queues>,
              queue_router: Res<QueuesRouter>,
+             mut tlas_store: ResMut<TLASStore>,
              allocator: Res<Allocator>,
              image: Local<MyImage>,
              mut pipeline: Local<GaussianBlurPipeline>,
@@ -301,6 +303,7 @@ impl Plugin for RenderSystem {
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
             return;
         };
+                let accel_struct = tlas_store.accel_struct();
                 let _transfer_queue = queue_router.of_type(QueueType::Transfer);
                 let graphics_queue = queue_router.of_type(QueueType::Graphics);
                 let image_buffer = allocator
@@ -337,6 +340,10 @@ impl Plugin for RenderSystem {
                         }, Default::default())
                     });
                     commands! {
+                        if let Some(accel_struct) = accel_struct {
+                            let tlas = accel_struct.await;
+                            retain!(tlas);
+                        }
                         let image_buffer = image_buffer.await;
                         copy_buffer_to_image(&image_buffer, &mut tmp_image_region, vk::ImageLayout::TRANSFER_DST_OPTIMAL).await;
                         retain!(image_buffer);

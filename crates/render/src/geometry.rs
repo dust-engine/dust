@@ -46,8 +46,8 @@ impl<G: Geometry> Plugin for GeometryPlugin<G> {
         app.add_systems(
             Update,
             (crate::blas::geometry_normalize_system::<G>
-                .in_set(RenderSystems::Render)
-                .after(build_blas_system),),
+                .in_set(RenderSystems::SetUp)
+                .before(build_blas_system),),
         );
     }
 }

@@ -14,7 +14,7 @@ use rhyolite::{
     macros::commands,
     HasDevice, ManagedBuffer,
 };
-use rhyolite_bevy::Allocator;
+use rhyolite_bevy::{Allocator, RenderSystems};
 
 use crate::{
     blas::{build_blas_system, BLAS},
@@ -35,34 +35,34 @@ pub struct TLASStore<M = Renderable> {
 impl<M> TLASStore<M> {
     pub fn accel_struct(
         &mut self,
-    ) -> impl GPUCommandFuture<Output = RenderRes<Arc<AccelerationStructure>>> {
-        let buffer = self.buffer.buffer();
-        let requires_rebuild = std::mem::replace(&mut self.requires_rebuild, false);
+    ) -> Option<impl GPUCommandFuture<Output = RenderRes<Arc<AccelerationStructure>>>> {
+        let Some(buffer) = self.buffer.buffer() else {
+            return None;
+        };
 
-        let allocator = self.buffer.allocator().clone();
-        let num_primitives = self.buffer.len() as u32;
-        let geometry_flags = self.geometry_flags;
-        let build_flags = self.build_flags;
-        commands! { move
+        let requires_rebuild = std::mem::replace(&mut self.requires_rebuild, false);
+        let mut accel_struct = TLASBuildInfo::new(
+            self.buffer.allocator().clone(),
+            self.buffer.len() as u32,
+            self.geometry_flags,
+            self.build_flags,
+        );
+        let fut = commands! { move
             let old_tlas: &mut Option<Arc<AccelerationStructure>> = using!();
             if requires_rebuild && let Some(old_tlas) = old_tlas.as_ref() {
                 return RenderRes::new(old_tlas.clone());
             }
             let buffer = buffer.await;
 
-            let mut accel_struct = TLASBuildInfo::new(
-                allocator,
-                num_primitives,
-                geometry_flags,
-                build_flags,
-            ).build_for(buffer).await;
-            accel_struct.inner_mut().set_name("a");
+            let mut accel_struct = accel_struct.build_for(buffer).await;
+            accel_struct.inner_mut().set_name(&format!("TLAS for {}", std::any::type_name::<M>())).unwrap();
             accel_struct.map(|a| {
                 let new_tlas = Arc::new(a);
                 *old_tlas = Some(new_tlas.clone());
                 new_tlas
             })
-        }
+        };
+        Some(fut)
     }
 }
 impl<M> HasDevice for TLASStore<M> {
@@ -148,16 +148,21 @@ impl<M: Component> Default for TLASPlugin<M> {
 impl<M: Component> Plugin for TLASPlugin<M> {
     fn build(&self, app: &mut bevy_app::App) {
         let allocator = app.world.resource::<Allocator>().clone();
-        app.add_systems(Update, tlas_system::<M>.after(build_blas_system))
-            .insert_resource(TLASStore::<M> {
-                geometry_flags: self.geometry_flags,
-                build_flags: self.build_flags,
-                buffer: ManagedBuffer::new(
-                    allocator.into_inner(),
-                    vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-                ),
-                requires_rebuild: false,
-                _marker: PhantomData,
-            });
+        app.add_systems(
+            Update,
+            tlas_system::<M>
+                .after(build_blas_system)
+                .in_set(RenderSystems::SetUp),
+        )
+        .insert_resource(TLASStore::<M> {
+            geometry_flags: self.geometry_flags,
+            build_flags: self.build_flags,
+            buffer: ManagedBuffer::new(
+                allocator.into_inner(),
+                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+            ),
+            requires_rebuild: false,
+            _marker: PhantomData,
+        });
     }
 }
