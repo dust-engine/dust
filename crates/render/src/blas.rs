@@ -8,7 +8,7 @@ use bevy_asset::{AssetEvent, Assets, Handle, HandleUntyped};
 use bevy_ecs::{
     prelude::{Component, Entity, EventReader},
     query::{Added, Without},
-    system::{Commands, Local, Query, Res, ResMut, Resource},
+    system::{Commands, Local, ParamSet, Query, Res, ResMut, Resource},
 };
 use bevy_hierarchy::Children;
 use bevy_tasks::{IoTaskPool, Task};
@@ -41,7 +41,7 @@ pub struct NormalizedGeometryInner {
 
 #[derive(Component)]
 pub struct BLAS {
-    pub blas: Arc<AccelerationStructure>,
+    pub blas: Option<Arc<AccelerationStructure>>,
 }
 
 #[derive(Component)]
@@ -126,11 +126,15 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
 
 pub(crate) fn build_blas_system(
     mut commands: Commands,
-    mut root_query: Query<(
-        Entity,
-        &Renderable,
-        Option<&Children>,
-        Option<&mut NormalizedGeometry>,
+    mut root_query: ParamSet<(
+        Query<(
+            Entity,
+            &Renderable,
+            Option<&Children>,
+            Option<&BLAS>,
+            Option<&mut NormalizedGeometry>,
+        )>,
+        Query<(Entity, &mut BLAS)>,
     )>,
     mut children_query: Query<(Entity, &mut NormalizedGeometry), Without<Renderable>>,
     allocator: Res<rhyolite_bevy::Allocator>,
@@ -143,21 +147,30 @@ pub(crate) fn build_blas_system(
         if upload_job_task.is_finished() {
             let upload_job = futures_lite::future::block_on(upload_job.take().unwrap());
             for (entity, accel_struct) in upload_job.into_iter() {
-                commands.entity(entity).insert(BLAS {
-                    blas: Arc::new(accel_struct),
-                });
+                if let Some(mut blas) = root_query.p1().get_component_mut::<BLAS>(entity).ok() {
+                    blas.blas = Some(Arc::new(accel_struct))
+                }
             }
         } else {
             return;
         }
     }
     let mut builds: Vec<(Entity, AccelerationStructureBuild)> = Vec::new();
-    for (entity, renderable, children, mut normalized_geometry_on_root) in root_query.iter_mut() {
+    for (entity, renderable, children, blas, mut normalized_geometry_on_root) in
+        root_query.p0().iter_mut()
+    {
+        if blas.is_none() {
+            // If the entity doesn't already have a BLAS component, give it.
+            commands.entity(entity).insert(BLAS { blas: None });
+        }
+
+        // If some normalized geometry isn't ready yet on the root, skip.
         if let Some(geometry) = normalized_geometry_on_root.as_ref() {
             if geometry.0.is_none() {
                 continue;
             }
         }
+        // If some normalized geometry isn't ready yet on one of the children, skip.
         if let Some(children) = children {
             for child_entity in children.iter() {
                 if children_query
@@ -170,6 +183,8 @@ pub(crate) fn build_blas_system(
                 }
             }
         }
+
+        // Collect all the normalized geometry
         let mut geometries: Vec<NormalizedGeometryInner> = Vec::new();
         if let Some(geometry) = normalized_geometry_on_root.as_mut() {
             // Get the GPUGeometryPrimitives on the root
@@ -188,6 +203,7 @@ pub(crate) fn build_blas_system(
         if geometries.len() == 0 {
             continue;
         }
+
         let mut blas_builder = AabbBlasBuilder::new(renderable.blas_build_flags);
         for geometry in geometries.into_iter() {
             blas_builder.add_geometry(geometry.buffer, geometry.flags, geometry.layout);

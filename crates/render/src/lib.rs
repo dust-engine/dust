@@ -19,9 +19,26 @@ pub use pipeline::*;
 use rhyolite::ash::vk;
 use rhyolite_bevy::RenderSystems;
 pub use shader::*;
+use tlas::TLASPlugin;
 
-#[derive(Default)]
-pub struct RenderPlugin;
+pub struct RenderPlugin {
+    /// When true, the RenderPlugin will add TLASPlugin<Renderable>. As a result,
+    /// a default TLASStore will be inserted into the world with all entites with a Renderable component
+    /// included.
+    ///
+    /// In certain use cases you might want to build separate TLAS for different sets of entities. You may
+    /// turn off this default behavior and add your own TLAS inclusion markers and TLASPlugin<Marker>.
+    ///
+    /// Default: true
+    pub tlas_include_all: bool,
+}
+impl Default for RenderPlugin {
+    fn default() -> Self {
+        Self {
+            tlas_include_all: true,
+        }
+    }
+}
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut bevy_app::App) {
@@ -62,6 +79,10 @@ impl Plugin for RenderPlugin {
         .register_type::<Renderable>()
         .add_systems(Update, build_blas_system.in_set(RenderSystems::Render))
         .init_resource::<BlasStore>();
+
+        if self.tlas_include_all {
+            app.add_plugin(TLASPlugin::<Renderable>::default());
+        }
     }
 }
 
