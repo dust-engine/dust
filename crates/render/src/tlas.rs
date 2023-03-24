@@ -15,7 +15,7 @@ use rhyolite::{
 
 use crate::blas::BLAS;
 use bevy_transform::components::GlobalTransform;
-use rhyolite::accel_struct::build::build_tlas;
+use rhyolite::accel_struct::build::TLASBuildInfo;
 use rhyolite::future::GPUCommandFutureExt;
 
 #[derive(Resource)]
@@ -24,7 +24,7 @@ pub struct TLASStore<M> {
     build_flags: vk::BuildAccelerationStructureFlagsKHR,
     available_indices: Vec<u32>,
     buffer: ManagedBuffer<vk::AccelerationStructureInstanceKHR>,
-    tlas: Option<Arc<AccelerationStructure>>,
+    requires_rebuild: bool,
     _marker: PhantomData<M>,
 }
 impl<M> TLASStore<M> {
@@ -32,24 +32,26 @@ impl<M> TLASStore<M> {
         &mut self,
     ) -> impl GPUCommandFuture<Output = RenderRes<Arc<AccelerationStructure>>> {
         let buffer = self.buffer.buffer();
-        let allocator = self.buffer.allocator().clone();
-        let num_instances = self.buffer.len() as u32;
-        let geometry_flags = self.geometry_flags;
-        let build_flags = self.build_flags;
-        let old_tlas = self.tlas.as_mut().map(|a| a.clone());
+        let requires_rebuild = std::mem::replace(&mut self.requires_rebuild, false);
+
+        let build_info = TLASBuildInfo::new(
+            self.buffer.allocator().clone(),
+            self.buffer.len() as u32,
+            self.geometry_flags,
+            self.build_flags,
+        );
         commands! { move
-            if let Some(old_tlas) = old_tlas {
-                return RenderRes::new(old_tlas);
+            let old_tlas: &mut Option<Arc<AccelerationStructure>> = using!();
+            if requires_rebuild && let Some(old_tlas) = old_tlas.as_ref() {
+                return RenderRes::new(old_tlas.clone());
             }
             let buffer = buffer.await;
-            let accel_struct = build_tlas(
-                allocator,
-                buffer,
-                num_instances,
-                geometry_flags,
-                build_flags
-            ).map(|a| a.map(|a| Arc::new(a))).await;
-            accel_struct
+            let accel_struct = build_info.build_for(buffer).await;
+            accel_struct.map(|a| {
+                let new_tlas = Arc::new(a);
+                *old_tlas = Some(new_tlas.clone());
+                new_tlas
+            })
         }
     }
 }
@@ -74,7 +76,7 @@ fn tlas_system<M: Component>(
     >,
 ) {
     for (entity, blas, global_transform, index) in query.iter_mut() {
-        store.tlas = None;
+        store.requires_rebuild = true; // Invalidate existing TLAS
         let mut transform = vk::TransformMatrixKHR { matrix: [0.0; 12] };
         transform.matrix.clone_from_slice(
             &global_transform
