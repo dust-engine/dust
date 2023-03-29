@@ -1,7 +1,7 @@
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
+use std::{collections::{BTreeMap, HashMap}, ops::Deref, sync::Arc};
 
 use bevy_asset::Assets;
-use rhyolite::{PipelineCache, RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo};
+use rhyolite::{PipelineCache, RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo, ash::vk};
 
 use crate::{
     deferred_task::{DeferredTaskPool, DeferredValue},
@@ -21,12 +21,26 @@ struct RayTracingPipelineManagerSpecializedPipelineDeferred {
     /// hitgroup index = hitgroup_mapping[material_index] + ray_type
     hitgroup_mapping: BTreeMap<u32, u32>,
 }
+
 pub struct RayTracingPipelineManagerSpecializedPipeline<'a> {
+    material_mapping: &'a HashMap<std::any::TypeId, usize>,
     pipeline: &'a rhyolite::RayTracingPipeline,
     /// Mapping from (material_index, ray_type) to hitgroup index
     /// hitgroup index = hitgroup_mapping[material_index] + ray_type
     hitgroup_mapping: &'a BTreeMap<u32, u32>,
 }
+
+impl<'a> RayTracingPipelineManagerSpecializedPipeline<'a> {
+    pub fn raw_pipeline(&self) -> vk::Pipeline {
+        self.pipeline.raw()
+    }
+    pub fn get_sbt_handle(&self, material_type: std::any::TypeId, raytype: u32) -> &[u8] {
+        let material_index = *self.material_mapping.get(&material_type).unwrap() as u32;
+        let hitgroup_index = self.hitgroup_mapping[&material_index] + raytype;
+        self.pipeline.get_shader_group_handles().hitgroup(hitgroup_index as usize)
+    }
+}
+
 pub struct RayTracingPipelineManager {
     /// A pipeline library containing raygen, raymiss, callable shaders
     pipeline_base_library: Option<DeferredValue<Arc<RayTracingPipelineLibrary>>>,
@@ -87,6 +101,7 @@ impl RayTracingPipelineManager {
             let pipeline = self.specialized_pipelines.get_mut(&self.current_material_flag).unwrap();
             let p = pipeline.pipeline.try_get().unwrap();
             Some(RayTracingPipelineManagerSpecializedPipeline {
+                material_mapping: &self.pipeline_characteristics.material_to_index,
                 pipeline: p,
                 hitgroup_mapping: &pipeline.hitgroup_mapping
             })
@@ -97,6 +112,7 @@ impl RayTracingPipelineManager {
             let pipeline = self.specialized_pipelines.get_mut(&self.current_material_flag).unwrap();
             let p = pipeline.pipeline.try_get().unwrap();
             Some(RayTracingPipelineManagerSpecializedPipeline {
+                material_mapping: &self.pipeline_characteristics.material_to_index,
                 pipeline: p,
                 hitgroup_mapping: &pipeline.hitgroup_mapping
             })

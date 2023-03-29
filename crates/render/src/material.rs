@@ -1,10 +1,10 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, collections::{HashMap, HashSet}};
 
-use bevy_app::Plugin;
-use bevy_asset::{Assets, Handle};
+use bevy_app::{Plugin, Update};
+use bevy_asset::{Assets, Handle, AssetEvent};
 use bevy_ecs::{
-    query::Added,
-    system::{Query, Res, ResMut},
+    query::{Added, Changed},
+    system::{Query, Res, ResMut, Local, Commands}, prelude::{EventReader, Entity},
 };
 use bevy_reflect::TypeUuid;
 
@@ -28,6 +28,13 @@ pub trait Material: Send + Sync + 'static + TypeUuid {
 pub struct MaterialPlugin<M: Material> {
     _marker: PhantomData<M>,
 }
+impl<M: Material> Default for MaterialPlugin<M> {
+    fn default() -> Self {
+        Self {
+            _marker: PhantomData
+        }
+    }
+}
 impl<M: Material> Plugin for MaterialPlugin<M> {
     fn build(&self, app: &mut bevy_app::App) {
         let pipeline_builder: &mut RayTracingPipelineBuilder<M::Pipeline> = &mut *app
@@ -35,17 +42,53 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
             .get_resource_mut()
             .expect("MaterialPlugin must be inserted after the RayTracingPipeline plugin");
         pipeline_builder.register_material::<M>();
+        app.add_systems(Update, material_system::<M>);
     }
 }
 
+struct MaterialStore<T: Material> {
+    sbt_indices: HashMap<Handle<T>, SbtIndex>,
+    entitites: HashMap<Handle<T>, HashSet<Entity>>
+}
+impl<T: Material> Default for MaterialStore<T> {
+    fn default() -> Self {
+        Self {
+            sbt_indices: Default::default(),
+            entitites: Default::default()
+        }
+    }
+}
+
+
 fn material_system<T: Material>(
+    mut commands: Commands,
+    mut store: Local<MaterialStore<T>>,
     mut pipeline: ResMut<T::Pipeline>,
     materials: Res<Assets<T>>,
-    mut query: Query<(&Handle<T>, &mut SbtIndex), Added<Handle<T>>>,
+    mut events: EventReader<AssetEvent<T>>,
+    query: Query<(Entity, &Handle<T>), Changed<Handle<T>>>,
 ) {
-    for (material_handle, mut sbt_index) in query.iter_mut() {
-        if let Some(material) = materials.get(material_handle) {
-            *sbt_index = pipeline.material_instance_added(material);
+    for (entity, handle) in query.iter() {
+        store.entitites.entry(handle.clone_weak()).or_default().insert(entity);
+    }
+    for event in events.iter() {
+        match event {
+            AssetEvent::Created { handle } | AssetEvent::Modified { handle } => {
+                let material = materials.get(handle).unwrap();
+                let sbt_index = pipeline.material_instance_added(material);
+                // Now, for all entities with Handle<T>, add SbtIndex.
+                if let Some(old_sbt_index) = store.sbt_indices.get(handle) && old_sbt_index == &sbt_index {
+
+                } else {
+                    store.sbt_indices.insert(handle.clone_weak(), sbt_index);
+                    for entity in store.entitites.get(handle).unwrap().iter() {
+                        commands.entity(*entity).insert(sbt_index);
+                    }
+                }
+            },
+            AssetEvent::Removed { handle } => {
+                todo!()
+            },
         }
     }
 }

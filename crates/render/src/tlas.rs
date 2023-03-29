@@ -41,7 +41,7 @@ impl<M> TLASStore<M> {
         };
 
         let requires_rebuild = std::mem::replace(&mut self.requires_rebuild, false);
-        let mut accel_struct = TLASBuildInfo::new(
+        let accel_struct = TLASBuildInfo::new(
             self.buffer.allocator().clone(),
             self.buffer.len() as u32,
             self.geometry_flags,
@@ -49,7 +49,7 @@ impl<M> TLASStore<M> {
         );
         let fut = commands! { move
             let old_tlas: &mut Option<Arc<AccelerationStructure>> = using!();
-            if requires_rebuild && let Some(old_tlas) = old_tlas.as_ref() {
+            if !requires_rebuild && let Some(old_tlas) = old_tlas.as_ref() {
                 return RenderRes::new(old_tlas.clone());
             }
             let buffer = buffer.await;
@@ -122,6 +122,8 @@ fn tlas_system<M: Component>(
             });
         };
     }
+    // TODO: implement removal. Create array from TLASIndex -> Entity in TLASStore. Using removal detection,
+    // for each removed entity, move last ones to front, use the entity tag to change the TLASIndex stored in ECS.
 }
 
 pub struct TLASPlugin<M = Renderable>
@@ -159,7 +161,7 @@ impl<M: Component> Plugin for TLASPlugin<M> {
             build_flags: self.build_flags,
             buffer: ManagedBuffer::new(
                 allocator.into_inner(),
-                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             ),
             requires_rebuild: false,
             _marker: PhantomData,

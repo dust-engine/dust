@@ -52,6 +52,10 @@ impl dust_render::Material for PaletteMaterial {
     type ShaderParameters = PaletteMaterialShaderParams;
 
     fn parameters(&self, _ray_type: u32) -> Self::ShaderParameters {
-        todo!()
+        PaletteMaterialShaderParams {
+            geometry_ptr: 0,
+            material_ptr: 0,
+            palette_ptr: 0
+        }
     }
 }

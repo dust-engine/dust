@@ -1,5 +1,7 @@
 #![feature(let_chains)]
 #![feature(generators)]
+#![feature(associated_type_defaults)]
+#![feature(alloc_layout_extra)]
 
 use bevy_app::{Plugin, Update};
 mod blas;
@@ -31,11 +33,16 @@ pub struct RenderPlugin {
     ///
     /// Default: true
     pub tlas_include_all: bool,
+
+
+    /// Use the standard pipeline.
+    pub use_standard_pipeline: bool
 }
 impl Default for RenderPlugin {
     fn default() -> Self {
         Self {
             tlas_include_all: true,
+            use_standard_pipeline: true
         }
     }
 }
@@ -82,6 +89,9 @@ impl Plugin for RenderPlugin {
 
         if self.tlas_include_all {
             app.add_plugin(TLASPlugin::<Renderable>::default());
+        }
+        if self.use_standard_pipeline {
+            app.add_plugin(RayTracingPipelinePlugin::<StandardPipeline>::default());
         }
     }
 }

@@ -1,7 +1,8 @@
 use std::{alloc::Layout, collections::HashMap, marker::PhantomData, sync::Arc};
 
+use bevy_app::Update;
 use bevy_ecs::{system::Resource, world::World};
-use rhyolite::{PipelineCache, PipelineLayout};
+use rhyolite::{PipelineCache, PipelineLayout, HasDevice};
 use rhyolite_bevy::Allocator;
 
 use crate::{material::Material, shader::SpecializedShader};
@@ -13,10 +14,10 @@ use super::{
 
 #[derive(Resource)]
 pub struct RayTracingPipelineBuilder<P: RayTracingPipeline> {
-    allocator: rhyolite::Allocator,
-    layout: Layout,
+    allocator: rhyolite_bevy::Allocator,
+    layout_size: usize,
+    layout_align: usize,
 
-    pipeline_layout: Arc<PipelineLayout>,
     material_to_index: HashMap<std::any::TypeId, usize>,
     materials: Vec<RayTracingPipelineCharacteristicsMaterialInfo>,
     /// Raygen shaders, miss shaders, callable shaders.
@@ -24,11 +25,11 @@ pub struct RayTracingPipelineBuilder<P: RayTracingPipeline> {
     _marker: PhantomData<P>,
 }
 impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
-    pub fn new(world: &World, layout: Arc<PipelineLayout>) -> Self {
+    pub fn new(world: &World) -> Self {
         RayTracingPipelineBuilder {
-            allocator: world.resource::<Allocator>().clone().into_inner(),
-            layout: Layout::from_size_align(0, 0).unwrap(),
-            pipeline_layout: layout,
+            allocator: world.resource::<Allocator>().clone(),
+            layout_align: 0,
+            layout_size: 0,
             material_to_index: Default::default(),
             materials: Vec::new(),
             shaders: Vec::new(),
@@ -37,11 +38,8 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
     }
     pub fn register_material<M: Material<Pipeline = P>>(&mut self) {
         let new_material_entry_layout = Layout::new::<M::ShaderParameters>();
-        self.layout = Layout::from_size_align(
-            self.layout.size().max(new_material_entry_layout.size()),
-            self.layout.align().max(new_material_entry_layout.align()),
-        )
-        .unwrap();
+        self.layout_size = self.layout_size.max(new_material_entry_layout.size());
+        self.layout_align = self.layout_align.max(new_material_entry_layout.align());
         let id = self.materials.len();
         self.material_to_index
             .insert(std::any::TypeId::of::<M>(), id);
@@ -56,17 +54,19 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
                         (rchit, rint, rahit)
                     })
                     .collect(),
-            })
+            });
     }
-    fn build(self, pipeline_cache: Option<Arc<PipelineCache>>) -> P {
+    pub fn build(self, pipeline_cache: Option<Arc<PipelineCache>>) -> P {
+        let pipeline_layout = P::pipeline_layout(self.allocator.device());
         let characteristics = RayTracingPipelineCharacteristics {
-            layout: self.pipeline_layout,
+            layout: pipeline_layout,
+            sbt_param_layout: Layout::from_size_align(self.layout_size, self.layout_align).unwrap_or(Layout::new::<()>()),
             material_to_index: self.material_to_index,
             materials: self.materials,
             shaders: self.shaders,
             num_raytype: P::num_raytypes(),
             create_info: Default::default(),
         };
-        P::new(characteristics, pipeline_cache)
+        P::new(self.allocator, characteristics, pipeline_cache)
     }
 }
