@@ -1,6 +1,7 @@
-use std::{collections::HashMap, sync::Arc, alloc::Layout};
+use std::{alloc::Layout, collections::HashMap, sync::Arc};
 
-use bevy_ecs::{system::Resource, prelude::Component};
+use bevy_asset::AssetServer;
+use bevy_ecs::{prelude::Component, system::Resource};
 use rhyolite::PipelineLayout;
 use rhyolite_bevy::Allocator;
 mod builder;
@@ -8,12 +9,12 @@ mod manager;
 mod plugin;
 mod standard;
 
-use crate::{material::Material, sbt::{SbtIndex, SbtManager}, shader::SpecializedShader, Renderable};
+use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable};
 pub use builder::RayTracingPipelineBuilder;
 pub use manager::{RayTracingPipelineManager, RayTracingPipelineManagerSpecializedPipeline};
 
-pub use standard::StandardPipeline;
 pub use plugin::RayTracingPipelinePlugin;
+pub use standard::StandardPipeline;
 
 struct RayTracingPipelineCharacteristicsMaterialInfo {
     ty: rhyolite::RayTracingHitGroupType,
@@ -31,12 +32,11 @@ impl RayTracingPipelineCharacteristics {
 }
 
 pub struct RayTracingPipelineCharacteristics {
+    pub num_frame_in_flight: u32,
     layout: Arc<PipelineLayout>,
     pub sbt_param_layout: Layout,
     material_to_index: HashMap<std::any::TypeId, usize>,
     materials: Vec<RayTracingPipelineCharacteristicsMaterialInfo>,
-    /// Raygen shaders, miss shaders, callable shaders.
-    shaders: Vec<SpecializedShader>,
 
     pub num_raytype: u32,
     create_info: rhyolite::RayTracingPipelineLibraryCreateInfo,
@@ -66,6 +66,7 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
     fn new(
         allocator: Allocator,
         pipeline_characteristic: RayTracingPipelineCharacteristics,
+        asset_server: &AssetServer,
         pipeline_cache: Option<Arc<rhyolite::PipelineCache>>,
     ) -> Self;
 }

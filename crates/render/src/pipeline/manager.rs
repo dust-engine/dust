@@ -1,7 +1,14 @@
-use std::{collections::{BTreeMap, HashMap}, ops::Deref, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Deref,
+    sync::Arc,
+};
 
 use bevy_asset::Assets;
-use rhyolite::{PipelineCache, RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo, ash::vk};
+use rhyolite::{
+    HasDevice, PipelineCache, PipelineLayout, RayTracingPipelineLibrary,
+    RayTracingPipelineLibraryCreateInfo,
+};
 
 use crate::{
     deferred_task::{DeferredTaskPool, DeferredValue},
@@ -16,28 +23,43 @@ struct RayTracingPipelineManagerMaterialInfo {
     pipeline_library: Option<DeferredValue<Arc<RayTracingPipelineLibrary>>>,
 }
 struct RayTracingPipelineManagerSpecializedPipelineDeferred {
-    pipeline: DeferredValue<rhyolite::RayTracingPipeline>,
+    pipeline: DeferredValue<Arc<rhyolite::RayTracingPipeline>>,
     /// Mapping from (material_index, ray_type) to hitgroup index
     /// hitgroup index = hitgroup_mapping[material_index] + ray_type
     hitgroup_mapping: BTreeMap<u32, u32>,
 }
 
+#[derive(Clone, Copy)]
 pub struct RayTracingPipelineManagerSpecializedPipeline<'a> {
     material_mapping: &'a HashMap<std::any::TypeId, usize>,
-    pipeline: &'a rhyolite::RayTracingPipeline,
+    pipeline: &'a Arc<rhyolite::RayTracingPipeline>,
     /// Mapping from (material_index, ray_type) to hitgroup index
     /// hitgroup index = hitgroup_mapping[material_index] + ray_type
     hitgroup_mapping: &'a BTreeMap<u32, u32>,
 }
+impl<'a> HasDevice for RayTracingPipelineManagerSpecializedPipeline<'a> {
+    fn device(&self) -> &Arc<rhyolite::Device> {
+        self.pipeline.device()
+    }
+}
 
 impl<'a> RayTracingPipelineManagerSpecializedPipeline<'a> {
-    pub fn raw_pipeline(&self) -> vk::Pipeline {
-        self.pipeline.raw()
+    pub fn layout(&self) -> &Arc<PipelineLayout> {
+        self.pipeline.layout()
     }
-    pub fn get_sbt_handle(&self, material_type: std::any::TypeId, raytype: u32) -> &[u8] {
+    pub fn pipeline(&self) -> &Arc<rhyolite::RayTracingPipeline> {
+        self.pipeline
+    }
+    pub fn get_sbt_handle_for_material(
+        &self,
+        material_type: std::any::TypeId,
+        raytype: u32,
+    ) -> &[u8] {
         let material_index = *self.material_mapping.get(&material_type).unwrap() as u32;
         let hitgroup_index = self.hitgroup_mapping[&material_index] + raytype;
-        self.pipeline.get_shader_group_handles().hitgroup(hitgroup_index as usize)
+        self.pipeline
+            .sbt_handles()
+            .hitgroup(hitgroup_index as usize)
     }
 }
 
@@ -50,11 +72,19 @@ pub struct RayTracingPipelineManager {
     materials: Vec<RayTracingPipelineManagerMaterialInfo>,
 
     pipeline_cache: Option<Arc<PipelineCache>>,
+
+    shaders: Vec<SpecializedShader>,
 }
 
 impl RayTracingPipelineManager {
+    pub fn layout(&self) -> &Arc<PipelineLayout> {
+        &self.pipeline_characteristics.layout
+    }
     pub fn new(
         pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
+        raygen_shader: SpecializedShader,
+        miss_shaders: Vec<SpecializedShader>,
+        callable_shaders: Vec<SpecializedShader>,
         pipeline_cache: Option<Arc<PipelineCache>>,
     ) -> Self {
         let materials = pipeline_characteristics
@@ -65,6 +95,11 @@ impl RayTracingPipelineManager {
                 pipeline_library: None,
             })
             .collect();
+
+        let shaders = std::iter::once(raygen_shader)
+            .chain(miss_shaders.into_iter())
+            .chain(callable_shaders.into_iter())
+            .collect();
         Self {
             pipeline_base_library: None,
             pipeline_characteristics,
@@ -72,6 +107,7 @@ impl RayTracingPipelineManager {
             specialized_pipelines: BTreeMap::new(),
             materials,
             pipeline_cache,
+            shaders,
         }
     }
     pub fn material_instance_added<M: Material>(&mut self) {
@@ -165,12 +201,13 @@ impl RayTracingPipelineManager {
         }
         let create_info = self.pipeline_characteristics.create_info.clone();
         let pipeline = DeferredTaskPool::get().schedule(move |op| {
-            rhyolite::RayTracingPipeline::create_from_libraries(
+            let (pipeline, result) = rhyolite::RayTracingPipeline::create_from_libraries(
                 libs.iter().map(|a| a.deref()),
                 &create_info,
                 None,
                 op,
-            )
+            );
+            (Arc::new(pipeline), result)
         });
 
         self.specialized_pipelines.insert(
@@ -192,12 +229,8 @@ impl RayTracingPipelineManager {
                 entry_point: a.entry_point,
             })
         };
-        let shaders: Option<Vec<rhyolite::shader::SpecializedShader<'_, _>>> = self
-            .pipeline_characteristics
-            .shaders
-            .iter()
-            .map(normalize_shader)
-            .collect();
+        let shaders: Option<Vec<rhyolite::shader::SpecializedShader<'_, _>>> =
+            self.shaders.iter().map(normalize_shader).collect();
         let Some(shaders) = shaders else {
             return
         };

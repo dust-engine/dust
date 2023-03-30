@@ -2,7 +2,7 @@ use std::{ffi::CStr, sync::Arc};
 
 use bevy_asset::{AssetLoader, Handle, LoadedAsset};
 use bevy_reflect::TypeUuid;
-use rhyolite::{ash::vk, shader::SpecializationInfo};
+use rhyolite::{ash::vk, cstr, shader::SpecializationInfo};
 
 #[derive(TypeUuid)]
 #[uuid = "10c440f6-ca49-435b-998a-ee2c351044c4"]
@@ -20,9 +20,25 @@ pub struct SpecializedShader {
     pub specialization_info: SpecializationInfo,
     pub entry_point: &'static CStr,
 }
+impl SpecializedShader {
+    pub fn for_shader(shader: Handle<ShaderModule>, stage: vk::ShaderStageFlags) -> Self {
+        Self {
+            stage,
+            flags: vk::PipelineShaderStageCreateFlags::empty(),
+            shader,
+            specialization_info: SpecializationInfo::default(),
+            entry_point: cstr!("main"),
+        }
+    }
+}
 
 pub struct SpirvLoader {
     device: rhyolite_bevy::Device,
+}
+impl SpirvLoader {
+    pub(crate) fn new(device: rhyolite_bevy::Device) -> Self {
+        Self { device }
+    }
 }
 impl AssetLoader for SpirvLoader {
     fn load<'a>(

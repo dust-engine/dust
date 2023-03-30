@@ -1,10 +1,14 @@
-use std::{marker::PhantomData, collections::{HashMap, HashSet}};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+};
 
 use bevy_app::{Plugin, Update};
-use bevy_asset::{Assets, Handle, AssetEvent};
+use bevy_asset::{AssetEvent, Assets, Handle};
 use bevy_ecs::{
-    query::{Added, Changed},
-    system::{Query, Res, ResMut, Local, Commands}, prelude::{EventReader, Entity},
+    prelude::{Entity, EventReader},
+    query::Changed,
+    system::{Commands, Local, Query, Res, ResMut},
 };
 use bevy_reflect::TypeUuid;
 
@@ -31,7 +35,7 @@ pub struct MaterialPlugin<M: Material> {
 impl<M: Material> Default for MaterialPlugin<M> {
     fn default() -> Self {
         Self {
-            _marker: PhantomData
+            _marker: PhantomData,
         }
     }
 }
@@ -48,17 +52,16 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 
 struct MaterialStore<T: Material> {
     sbt_indices: HashMap<Handle<T>, SbtIndex>,
-    entitites: HashMap<Handle<T>, HashSet<Entity>>
+    entitites: HashMap<Handle<T>, HashSet<Entity>>,
 }
 impl<T: Material> Default for MaterialStore<T> {
     fn default() -> Self {
         Self {
             sbt_indices: Default::default(),
-            entitites: Default::default()
+            entitites: Default::default(),
         }
     }
 }
-
 
 fn material_system<T: Material>(
     mut commands: Commands,
@@ -69,7 +72,11 @@ fn material_system<T: Material>(
     query: Query<(Entity, &Handle<T>), Changed<Handle<T>>>,
 ) {
     for (entity, handle) in query.iter() {
-        store.entitites.entry(handle.clone_weak()).or_default().insert(entity);
+        store
+            .entitites
+            .entry(handle.clone_weak())
+            .or_default()
+            .insert(entity);
     }
     for event in events.iter() {
         match event {
@@ -85,10 +92,10 @@ fn material_system<T: Material>(
                         commands.entity(*entity).insert(sbt_index);
                     }
                 }
-            },
-            AssetEvent::Removed { handle } => {
+            }
+            AssetEvent::Removed { handle: _ } => {
                 todo!()
-            },
+            }
         }
     }
 }

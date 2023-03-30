@@ -55,7 +55,7 @@ impl dust_render::Material for PaletteMaterial {
         PaletteMaterialShaderParams {
             geometry_ptr: 0,
             material_ptr: 0,
-            palette_ptr: 0
+            palette_ptr: 0,
         }
     }
 }

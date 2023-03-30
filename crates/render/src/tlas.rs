@@ -10,7 +10,7 @@ use bevy_ecs::{
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
-    future::{GPUCommandFuture, PerFrameState, RenderRes, SharedDeviceStateHostContainer},
+    future::{GPUCommandFuture, RenderRes},
     macros::commands,
     HasDevice, ManagedBuffer,
 };
@@ -161,7 +161,8 @@ impl<M: Component> Plugin for TLASPlugin<M> {
             build_flags: self.build_flags,
             buffer: ManagedBuffer::new(
                 allocator.into_inner(),
-                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                    | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             ),
             requires_rebuild: false,
             _marker: PhantomData,

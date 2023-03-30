@@ -18,3 +18,4 @@ bevy_reflect = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b
 once_cell = "1.17"
 futures-lite = "1.11"
 crossbeam-channel = "^0.5"
+pin-project = "1"

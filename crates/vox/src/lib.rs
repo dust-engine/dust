@@ -9,7 +9,7 @@ use bevy_asset::{AddAsset, Handle};
 mod geometry;
 mod material;
 
-use dust_render::{GeometryPlugin, Renderable, MaterialPlugin};
+use dust_render::{GeometryPlugin, MaterialPlugin, Renderable};
 use dust_vdb::hierarchy;
 pub use geometry::VoxGeometry;
 pub use loader::*;

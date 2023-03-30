@@ -1,11 +1,11 @@
 use std::{alloc::Layout, collections::HashMap, marker::PhantomData, sync::Arc};
 
-use bevy_app::Update;
+use bevy_asset::AssetServer;
 use bevy_ecs::{system::Resource, world::World};
-use rhyolite::{PipelineCache, PipelineLayout, HasDevice};
+use rhyolite::{HasDevice, PipelineCache};
 use rhyolite_bevy::Allocator;
 
-use crate::{material::Material, shader::SpecializedShader};
+use crate::material::Material;
 
 use super::{
     RayTracingPipeline, RayTracingPipelineCharacteristics,
@@ -21,7 +21,6 @@ pub struct RayTracingPipelineBuilder<P: RayTracingPipeline> {
     material_to_index: HashMap<std::any::TypeId, usize>,
     materials: Vec<RayTracingPipelineCharacteristicsMaterialInfo>,
     /// Raygen shaders, miss shaders, callable shaders.
-    shaders: Vec<SpecializedShader>,
     _marker: PhantomData<P>,
 }
 impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
@@ -32,7 +31,6 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
             layout_size: 0,
             material_to_index: Default::default(),
             materials: Vec::new(),
-            shaders: Vec::new(),
             _marker: PhantomData,
         }
     }
@@ -56,17 +54,28 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
                     .collect(),
             });
     }
-    pub fn build(self, pipeline_cache: Option<Arc<PipelineCache>>) -> P {
+    pub fn build(
+        self,
+        num_frame_in_flight: u32,
+        asset_server: &AssetServer,
+        pipeline_cache: Option<Arc<PipelineCache>>,
+    ) -> P {
         let pipeline_layout = P::pipeline_layout(self.allocator.device());
         let characteristics = RayTracingPipelineCharacteristics {
+            num_frame_in_flight,
             layout: pipeline_layout,
-            sbt_param_layout: Layout::from_size_align(self.layout_size, self.layout_align).unwrap_or(Layout::new::<()>()),
+            sbt_param_layout: Layout::from_size_align(self.layout_size, self.layout_align)
+                .unwrap_or(Layout::new::<()>()),
             material_to_index: self.material_to_index,
             materials: self.materials,
-            shaders: self.shaders,
             num_raytype: P::num_raytypes(),
             create_info: Default::default(),
         };
-        P::new(self.allocator, characteristics, pipeline_cache)
+        P::new(
+            self.allocator,
+            characteristics,
+            asset_server,
+            pipeline_cache,
+        )
     }
 }

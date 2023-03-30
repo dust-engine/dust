@@ -2,6 +2,8 @@
 #![feature(generators)]
 #![feature(associated_type_defaults)]
 #![feature(alloc_layout_extra)]
+#![feature(int_roundings)]
+#![feature(associated_type_bounds)]
 
 use bevy_app::{Plugin, Update};
 mod blas;
@@ -12,6 +14,7 @@ mod pipeline;
 mod sbt;
 mod shader;
 mod tlas;
+use bevy_asset::AddAsset;
 use bevy_ecs::{prelude::Component, reflect::ReflectComponent, schedule::IntoSystemConfigs};
 use bevy_reflect::Reflect;
 use blas::{build_blas_system, BlasStore};
@@ -34,15 +37,14 @@ pub struct RenderPlugin {
     /// Default: true
     pub tlas_include_all: bool,
 
-
     /// Use the standard pipeline.
-    pub use_standard_pipeline: bool
+    pub use_standard_pipeline: bool,
 }
 impl Default for RenderPlugin {
     fn default() -> Self {
         Self {
             tlas_include_all: true,
-            use_standard_pipeline: true
+            use_standard_pipeline: true,
         }
     }
 }
@@ -85,7 +87,11 @@ impl Plugin for RenderPlugin {
         })
         .register_type::<Renderable>()
         .add_systems(Update, build_blas_system.in_set(RenderSystems::SetUp))
-        .init_resource::<BlasStore>();
+        .init_resource::<BlasStore>()
+        .add_asset::<ShaderModule>();
+
+        let device = app.world.resource::<rhyolite_bevy::Device>();
+        app.add_asset_loader(SpirvLoader::new(device.clone()));
 
         if self.tlas_include_all {
             app.add_plugin(TLASPlugin::<Renderable>::default());
