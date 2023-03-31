@@ -36,6 +36,7 @@ impl<T> DeferredValue<T> {
     pub fn is_done(&self) -> bool {
         match self {
             Self::Done(_) => true,
+            Self::Pending(task) => task.is_finished(),
             _ => false,
         }
     }

@@ -133,31 +133,44 @@ impl RayTracingPipelineManager {
         let material_count = self.pipeline_characteristics.material_count();
         let full_material_mask = (1 << material_count) - 1;
 
-        if let Some(pipeline) = self.specialized_pipelines.get(&self.current_material_flag) &&
-        pipeline.pipeline.is_done()  {
-            let pipeline = self.specialized_pipelines.get_mut(&self.current_material_flag).unwrap();
-            let p = pipeline.pipeline.try_get().unwrap();
-            Some(RayTracingPipelineManagerSpecializedPipeline {
-                material_mapping: &self.pipeline_characteristics.material_to_index,
-                pipeline: p,
-                hitgroup_mapping: &pipeline.hitgroup_mapping
-            })
-        } else if let Some(pipeline) = self.specialized_pipelines.get(&full_material_mask) &&
-        pipeline.pipeline.is_done() {
-            // Fallback to general purpose pipeline
-            self.build_specialized_pipeline(self.current_material_flag, |mat| mat.instance_count > 0, shader_store);
-            let pipeline = self.specialized_pipelines.get_mut(&self.current_material_flag).unwrap();
-            let p = pipeline.pipeline.try_get().unwrap();
-            Some(RayTracingPipelineManagerSpecializedPipeline {
-                material_mapping: &self.pipeline_characteristics.material_to_index,
-                pipeline: p,
-                hitgroup_mapping: &pipeline.hitgroup_mapping
-            })
-        } else {
-            // Even the full featured pipeline wasn't built yet.
-            self.build_specialized_pipeline(full_material_mask, |_| true, shader_store);
-            None
+        if !self
+            .specialized_pipelines
+            .contains_key(&self.current_material_flag)
+        {
+            self.build_specialized_pipeline(
+                self.current_material_flag,
+                |mat| mat.instance_count > 0,
+                shader_store,
+            );
         }
+        if full_material_mask != self.current_material_flag
+            && !self.specialized_pipelines.contains_key(&full_material_mask)
+        {
+            self.build_specialized_pipeline(full_material_mask, |_| true, shader_store);
+        }
+
+        if let Some(pipeline) = self.specialized_pipelines.get(&self.current_material_flag) && pipeline.pipeline.is_done() {
+            let pipeline = self.specialized_pipelines.get_mut(&self.current_material_flag).unwrap();
+            let p = pipeline.pipeline.try_get().unwrap();
+            return Some(RayTracingPipelineManagerSpecializedPipeline {
+                material_mapping: &self.pipeline_characteristics.material_to_index,
+                pipeline: p,
+                hitgroup_mapping: &pipeline.hitgroup_mapping
+            });
+        }
+
+        if full_material_mask != self.current_material_flag && let Some(pipeline) = self.specialized_pipelines.get(&full_material_mask) && pipeline.pipeline.is_done() {
+            let pipeline = self.specialized_pipelines.get_mut(&self.current_material_flag).unwrap();
+            let p = pipeline.pipeline.try_get().unwrap();
+            tracing::trace!(material_flag = self.current_material_flag, full_material_flag = full_material_mask, "Using fallback pipeline");
+            return Some(RayTracingPipelineManagerSpecializedPipeline {
+                material_mapping: &self.pipeline_characteristics.material_to_index,
+                pipeline: p,
+                hitgroup_mapping: &pipeline.hitgroup_mapping
+            });
+        }
+
+        None
     }
     fn build_specialized_pipeline(
         &mut self,
@@ -168,16 +181,18 @@ impl RayTracingPipelineManager {
         let mut libs: Vec<Arc<RayTracingPipelineLibrary>> =
             Vec::with_capacity(self.materials.len() + 1);
 
-        let Some(base_lib) = self.pipeline_base_library.as_mut() else {
+        let mut ready = true;
+        if let Some(base_lib) = self.pipeline_base_library.as_mut() {
+            if let Some(base_lib) = base_lib.try_get() {
+                libs.push(base_lib.clone());
+            } else {
+                ready = false;
+            };
+        } else {
             // schedule build
             self.build_base_pipeline_library(shader_store);
-            return;
+            ready = false;
         };
-        let Some(base_lib) = base_lib.try_get() else {
-            return;
-        };
-        println!("Discovered bulit base library: {:?}", base_lib.raw());
-        libs.push(base_lib.clone());
 
         let mut hitgroup_mapping: BTreeMap<u32, u32> = BTreeMap::new();
         let mut current_hitgroup: u32 = 0;
@@ -188,19 +203,30 @@ impl RayTracingPipelineManager {
             .filter(|(_, material)| material_filter(&material))
         {
             // For each active material
-            let Some(pipeline_library) = material.pipeline_library.as_mut() else {
+            if let Some(pipeline_library) = material.pipeline_library.as_mut() {
+                if let Some(pipeline_library) = pipeline_library.try_get() {
+                    libs.push(pipeline_library.clone());
+                    hitgroup_mapping.insert(i as u32, current_hitgroup);
+                    current_hitgroup += self.pipeline_characteristics.num_raytype;
+                } else {
+                    // Pipeline library is being built
+                    return;
+                }
+            } else {
                 // Need to schedule build for the pipeline library.
-                Self::build_material_pipeline_library(i, material, &self.pipeline_characteristics, self.pipeline_characteristics.create_info.clone(), self.pipeline_cache.clone(), shader_store);
-                return;
+                Self::build_material_pipeline_library(
+                    i,
+                    material,
+                    &self.pipeline_characteristics,
+                    self.pipeline_characteristics.create_info.clone(),
+                    self.pipeline_cache.clone(),
+                    shader_store,
+                );
+                ready = false;
             };
-            let Some(pipeline_library) = pipeline_library.try_get() else {
-                // Pipeline library is being built
-                return;
-            };
-            println!("Discovered bulit library: {:?}", pipeline_library.raw());
-            libs.push(pipeline_library.clone());
-            hitgroup_mapping.insert(i as u32, current_hitgroup);
-            current_hitgroup += self.pipeline_characteristics.num_raytype;
+        }
+        if !ready {
+            return;
         }
         let create_info = self.pipeline_characteristics.create_info.clone();
         let pipeline: bevy_tasks::Task<VkResult<Arc<RayTracingPipeline>>> =
@@ -212,6 +238,9 @@ impl RayTracingPipelineManager {
                     DeferredTaskPool::get().inner().clone(),
                 )
                 .await?;
+                tracing::trace!(handle = ?lib.raw(), "Built rtx pipeline");
+                drop(libs);
+                drop(create_info);
                 Ok(Arc::new(lib))
             });
 
@@ -253,6 +282,7 @@ impl RayTracingPipelineManager {
                     DeferredTaskPool::get().inner().clone(),
                 )
                 .await?;
+                tracing::trace!(handle = ?lib.raw(), "Built base pipelibe library");
                 Ok(Arc::new(lib))
             });
         self.pipeline_base_library = Some(task.into());
@@ -299,6 +329,7 @@ impl RayTracingPipelineManager {
                     DeferredTaskPool::get().inner().clone(),
                 )
                 .await?;
+                tracing::trace!(handle = ?lib.raw(), "Built material pipelibe library");
                 Ok(Arc::new(lib))
             });
         mat.pipeline_library = Some(task.into());
