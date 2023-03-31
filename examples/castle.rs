@@ -97,8 +97,10 @@ impl Plugin for RenderSystem {
                     commands! {
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
+                            println!("Has tlas");
                             let accel_struct = accel_struct.await;
                             if let Some(render) = pipeline.render(&mut swapchain_image, &accel_struct, shaders.deref()) {
+                                println!("has pipeline");
                                 render.await;
                                 rendered = true;
                             }

@@ -18,6 +18,7 @@ use bevy_asset::AddAsset;
 use bevy_ecs::{prelude::Component, reflect::ReflectComponent, schedule::IntoSystemConfigs};
 use bevy_reflect::Reflect;
 use blas::{build_blas_system, BlasStore};
+use deferred_task::DeferredTaskPool;
 pub use geometry::*;
 pub use material::*;
 pub use pipeline::*;
@@ -62,6 +63,7 @@ impl Plugin for RenderPlugin {
                 rhyolite::ash::extensions::khr::DeferredHostOperations::name(),
                 rhyolite::ash::extensions::khr::AccelerationStructure::name(),
                 rhyolite::ash::extensions::khr::RayTracingPipeline::name(),
+                rhyolite::ash::vk::KhrPipelineLibraryFn::name(),
             ],
             enabled_device_features: Box::new(rhyolite::PhysicalDeviceFeatures {
                 v13: vk::PhysicalDeviceVulkan13Features {
@@ -91,6 +93,7 @@ impl Plugin for RenderPlugin {
         .add_asset::<ShaderModule>();
 
         let device = app.world.resource::<rhyolite_bevy::Device>();
+        DeferredTaskPool::init(device.inner().clone());
         app.add_asset_loader(SpirvLoader::new(device.clone()));
 
         if self.tlas_include_all {

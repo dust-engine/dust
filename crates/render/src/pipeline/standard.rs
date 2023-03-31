@@ -44,7 +44,10 @@ impl HasDevice for StandardPipeline {
 impl RayTracingPipeline for StandardPipeline {
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
         let set1 = set_layout! {
-            img_output: vk::DescriptorType::SAMPLED_IMAGE,
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
+            img_output: vk::DescriptorType::STORAGE_IMAGE,
+
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
         }
         .build(device.clone())
@@ -79,7 +82,7 @@ impl RayTracingPipeline for StandardPipeline {
             primary_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics,
                 SpecializedShader::for_shader(
-                    asset_server.load("primary.rgen"),
+                    asset_server.load("primary.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
                 Vec::new(),

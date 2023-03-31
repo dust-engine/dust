@@ -5,9 +5,10 @@ use std::{
 };
 
 use bevy_asset::Assets;
+use bevy_tasks::AsyncComputeTaskPool;
 use rhyolite::{
-    HasDevice, PipelineCache, PipelineLayout, RayTracingPipelineLibrary,
-    RayTracingPipelineLibraryCreateInfo,
+    ash::prelude::VkResult, HasDevice, PipelineCache, PipelineLayout, RayTracingPipeline,
+    RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo, Task,
 };
 
 use crate::{
@@ -175,6 +176,7 @@ impl RayTracingPipelineManager {
         let Some(base_lib) = base_lib.try_get() else {
             return;
         };
+        println!("Discovered bulit base library: {:?}", base_lib.raw());
         libs.push(base_lib.clone());
 
         let mut hitgroup_mapping: BTreeMap<u32, u32> = BTreeMap::new();
@@ -195,20 +197,23 @@ impl RayTracingPipelineManager {
                 // Pipeline library is being built
                 return;
             };
+            println!("Discovered bulit library: {:?}", pipeline_library.raw());
             libs.push(pipeline_library.clone());
             hitgroup_mapping.insert(i as u32, current_hitgroup);
             current_hitgroup += self.pipeline_characteristics.num_raytype;
         }
         let create_info = self.pipeline_characteristics.create_info.clone();
-        let pipeline = DeferredTaskPool::get().schedule(move |op| {
-            let (pipeline, result) = rhyolite::RayTracingPipeline::create_from_libraries(
-                libs.iter().map(|a| a.deref()),
-                &create_info,
-                None,
-                op,
-            );
-            (Arc::new(pipeline), result)
-        });
+        let pipeline: bevy_tasks::Task<VkResult<Arc<RayTracingPipeline>>> =
+            AsyncComputeTaskPool::get().spawn(async move {
+                let lib = rhyolite::RayTracingPipeline::create_from_libraries(
+                    libs.iter().map(|a| a.deref()),
+                    &create_info,
+                    None,
+                    DeferredTaskPool::get().inner().clone(),
+                )
+                .await?;
+                Ok(Arc::new(lib))
+            });
 
         self.specialized_pipelines.insert(
             material_flag,
@@ -237,16 +242,19 @@ impl RayTracingPipelineManager {
         let layout = self.pipeline_characteristics.layout.clone();
         let create_info = self.pipeline_characteristics.create_info.clone();
         let pipeline_cache = self.pipeline_cache.clone();
-        let task = DeferredTaskPool::get().schedule(move |op| {
-            let (lib, result) = RayTracingPipelineLibrary::create_for_shaders(
-                layout,
-                &shaders,
-                &create_info,
-                pipeline_cache.as_ref().map(|a| a.as_ref()),
-                op,
-            );
-            (Arc::new(lib), result)
-        });
+
+        let task: bevy_tasks::Task<VkResult<Arc<RayTracingPipelineLibrary>>> =
+            AsyncComputeTaskPool::get().spawn(async move {
+                let lib = RayTracingPipelineLibrary::create_for_shaders(
+                    layout,
+                    &shaders,
+                    &create_info,
+                    pipeline_cache.as_ref().map(|a| a.as_ref()),
+                    DeferredTaskPool::get().inner().clone(),
+                )
+                .await?;
+                Ok(Arc::new(lib))
+            });
         self.pipeline_base_library = Some(task.into());
     }
     fn build_material_pipeline_library(
@@ -279,17 +287,20 @@ impl RayTracingPipelineManager {
             })
             .collect::<Vec<_>>();
         let layout = pipeline_characteristics.layout.clone();
-        let task = DeferredTaskPool::get().schedule(move |op| {
-            let (lib, result) = RayTracingPipelineLibrary::create_for_hitgroups(
-                layout,
-                hitgroups.into_iter(),
-                &create_info,
-                pipeline_cache.as_ref().map(|a| a.as_ref()),
-                op,
-                ty,
-            );
-            (Arc::new(lib), result)
-        });
+
+        let task: bevy_tasks::Task<VkResult<Arc<RayTracingPipelineLibrary>>> =
+            AsyncComputeTaskPool::get().spawn(async move {
+                let lib = RayTracingPipelineLibrary::create_for_hitgroups(
+                    layout,
+                    hitgroups.into_iter(),
+                    &create_info,
+                    ty,
+                    pipeline_cache.as_ref().map(|a| a.as_ref()),
+                    DeferredTaskPool::get().inner().clone(),
+                )
+                .await?;
+                Ok(Arc::new(lib))
+            });
         mat.pipeline_library = Some(task.into());
     }
 }

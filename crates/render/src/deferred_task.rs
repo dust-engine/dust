@@ -2,24 +2,17 @@ use std::sync::Arc;
 
 use bevy_tasks::AsyncComputeTaskPool;
 use once_cell::sync::OnceCell;
-use rhyolite::{
-    ash::{prelude::VkResult, vk},
-    DeferredOperation,
-};
+use rhyolite::ash::{prelude::VkResult, vk};
 
 static DEFERRED_TASK_POOL: OnceCell<DeferredTaskPool> = OnceCell::new();
 pub struct DeferredTaskPool {
-    device: Arc<rhyolite::Device>,
     dho: Arc<rhyolite::DeferredOperationTaskPool>,
-    compute_pool: &'static bevy_tasks::AsyncComputeTaskPool,
 }
 
 impl DeferredTaskPool {
     pub fn init(device: Arc<rhyolite::Device>) {
         DEFERRED_TASK_POOL.get_or_init(|| Self {
-            device: device.clone(),
             dho: Arc::new(rhyolite::DeferredOperationTaskPool::new(device)),
-            compute_pool: AsyncComputeTaskPool::get(),
         });
     }
     pub fn get() -> &'static Self {
@@ -28,27 +21,8 @@ impl DeferredTaskPool {
             DeferredTaskPool::init beforehand.",
         )
     }
-    pub fn schedule<T: Send + 'static>(
-        &self,
-        op: impl FnOnce(Option<&mut DeferredOperation>) -> (T, vk::Result) + Send + 'static,
-    ) -> bevy_tasks::Task<VkResult<T>> {
-        let mut deferred_operation = DeferredOperation::new(self.device.clone()).ok();
-        let dho = self.dho.clone();
-        self.compute_pool.spawn(async move {
-            let (value, code) = op(deferred_operation.as_mut());
-            match code {
-                vk::Result::SUCCESS => return Ok(value),
-                vk::Result::OPERATION_DEFERRED_KHR => {
-                    let deferred_operation = deferred_operation.unwrap();
-                    let result = dho.schedule_deferred_operation(deferred_operation).await;
-                    return result.result_with_success(value);
-                }
-                vk::Result::OPERATION_NOT_DEFERRED_KHR => {
-                    return Ok(value);
-                }
-                other => return Err(other),
-            }
-        })
+    pub fn inner(&self) -> &Arc<rhyolite::DeferredOperationTaskPool> {
+        &self.dho
     }
 }
 
