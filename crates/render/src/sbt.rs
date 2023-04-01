@@ -65,7 +65,7 @@ struct SbtLayout {
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct Entry {
     material_id: std::any::TypeId,
-    data: Box<[u8]>,
+    data: Box<[u8]>, // TODO: can we get rid of this Box?
 }
 
 pub struct SbtManager {
@@ -120,7 +120,8 @@ impl SbtManager {
             layout,
             buffer: ManagedBufferUnsized::new(
                 allocator.into_inner(),
-                vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR,
+                vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
+                    | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                 one_raytype,
             ),
             entries: Default::default(),
@@ -157,6 +158,7 @@ impl SbtManager {
                         .set((*index * self.total_raytype + raytype) as usize, &buffer);
                 }
             } else {
+                self.raytype_pipeline_handles[raytype as usize] = pipeline.pipeline().raw();
                 // Update all
                 for (entry, index) in self.entries.iter() {
                     let a = pipeline.get_sbt_handle_for_material(entry.material_id, raytype);
@@ -208,7 +210,7 @@ impl SbtManager {
                 _marker: PhantomData,
             }
         } else {
-            let i = self.buffer.len() as u32;
+            let i = (self.buffer.len() / self.total_raytype as usize) as u32;
             self.entries.insert(entry.clone(), i);
             self.update_list.push(entry);
             SbtIndex {
@@ -254,6 +256,7 @@ impl BufferLike for PipelineSbtManagerInfo {
 }
 impl PipelineSbtManagerInfo {
     pub fn rgen(&self, index: usize) -> vk::StridedDeviceAddressRegionKHR {
+        assert!(index < self.num_raygen as usize);
         let (offset, size) = self.offset_strides[index];
         vk::StridedDeviceAddressRegionKHR {
             device_address: self.buffer.device_address() + offset as u64,
@@ -262,6 +265,7 @@ impl PipelineSbtManagerInfo {
         }
     }
     pub fn miss(&self, index: Range<usize>) -> vk::StridedDeviceAddressRegionKHR {
+        assert!(index.end < self.num_miss as usize);
         let index = Range {
             start: index.start + self.num_raygen as usize,
             end: index.end + self.num_raygen as usize,
@@ -277,6 +281,7 @@ impl PipelineSbtManagerInfo {
         }
     }
     pub fn callable(&self, index: Range<usize>) -> vk::StridedDeviceAddressRegionKHR {
+        assert!(index.end < self.num_callable as usize);
         let index = Range {
             start: index.start + self.num_raygen as usize + self.num_miss as usize,
             end: index.end + self.num_raygen as usize + self.num_miss as usize,
@@ -359,6 +364,7 @@ impl PipelineSbtManager {
                 .shader_group_handle_alignment,
         );
         self.offset_strides.push((offset as u32, stride));
+        self.num_raygen += 1;
     }
     /// Push the `index`th miss shader in `pipeline` into the Sbt, with shader parameters P.
     pub fn push_miss<P>(
@@ -386,6 +392,7 @@ impl PipelineSbtManager {
                 .shader_group_handle_alignment,
         );
         self.offset_strides.push((offset as u32, stride));
+        self.num_miss += 1;
     }
     /// Push the `index`th callable shader in `pipeline` into the Sbt, with shader parameters P.
     pub fn push_callable<P>(
@@ -412,6 +419,7 @@ impl PipelineSbtManager {
                 .shader_group_handle_alignment,
         );
         self.offset_strides.push((offset as u32, stride));
+        self.num_callable += 1;
     }
 
     pub fn build(&mut self) -> impl GPUCommandFuture<Output = RenderRes<PipelineSbtManagerInfo>> {
@@ -449,14 +457,11 @@ impl PipelineSbtManager {
         };
         let upload_buffer = use_per_frame_state(&mut self.upload_buffer, create_upload_buffer)
             .reuse(|old| {
-                if old.size() != self.buffer.len() as u64 {
+                if old.size() < self.buffer.len() as u64 {
                     *old = create_upload_buffer();
                 }
             });
-        upload_buffer
-            .contents_mut()
-            .unwrap()
-            .copy_from_slice(&self.buffer);
+        upload_buffer.contents_mut().unwrap()[0..self.buffer.len()].copy_from_slice(&self.buffer);
 
         let device_buffer = if needs_copy {
             let device_buffer = use_shared_state(
