@@ -4,7 +4,7 @@ use std::{
 };
 
 use bevy_app::{Plugin, Update};
-use bevy_asset::{AssetEvent, Assets, Handle};
+use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
 use bevy_ecs::{
     prelude::{Entity, EventReader},
     query::Changed,
@@ -22,9 +22,9 @@ pub type MaterialType = rhyolite::RayTracingHitGroupType;
 pub trait Material: Send + Sync + 'static + TypeUuid {
     type Pipeline: RayTracingPipeline;
     const TYPE: MaterialType;
-    fn rahit_shader(ray_type: u32) -> Option<SpecializedShader>;
-    fn rchit_shader(ray_type: u32) -> Option<SpecializedShader>;
-    fn intersection_shader(ray_type: u32) -> Option<SpecializedShader>;
+    fn rahit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;
+    fn rchit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;
+    fn intersection_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;
     type ShaderParameters;
     fn parameters(&self, ray_type: u32) -> Self::ShaderParameters;
 }
@@ -41,11 +41,12 @@ impl<M: Material> Default for MaterialPlugin<M> {
 }
 impl<M: Material> Plugin for MaterialPlugin<M> {
     fn build(&self, app: &mut bevy_app::App) {
-        let pipeline_builder: &mut RayTracingPipelineBuilder<M::Pipeline> = &mut *app
-            .world
-            .get_resource_mut()
-            .expect("MaterialPlugin must be inserted after the RayTracingPipeline plugin");
-        pipeline_builder.register_material::<M>();
+        app.world
+            .resource_scope::<RayTracingPipelineBuilder<M::Pipeline>, ()>(
+                |world, mut pipeline_builder| {
+                    pipeline_builder.register_material::<M>(world.resource());
+                },
+            );
         app.add_systems(Update, material_system::<M>);
     }
 }

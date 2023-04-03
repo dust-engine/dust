@@ -5,7 +5,38 @@
 layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
 layout(set = 0, binding = 1) uniform accelerationStructureEXT accelerationStructure;
 
+layout(shaderRecordEXT) buffer sbt {
+    mat4 inv_projection;
+    mat4 inv_view;
+    vec3 origin;
+};
+layout(location = 0) rayPayloadEXT float payload;
+
 
 void main() {
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(1.0, 0.0, 0.0, 1.0));
+    vec2 px = gl_LaunchIDEXT.xy / gl_LaunchSizeEXT.xy; // The pixel position px in [0,1].
+
+    // The pixel position px in [-1,1], then placed at the near plane and turned into homogeneous coordinates.
+    vec4 pxNDC = vec4(2.0 * px - 1.0, -1.0, 1.0);
+    
+    vec4 dirEye = inv_projection * pxNDC;
+
+    // This is a direction, so the w component doesn't matter.
+    dirEye.w = 0.0;
+
+    vec3 dirWorld = normalize((inv_view * dirEye).xyz);
+
+    traceRayEXT(
+        accelerationStructure,
+        gl_RayFlagsOpaqueEXT , // RayFlags
+        0xFF, // CullMask
+        0, // SBT offset, ray type index
+        1, // SBT stride, number of ray types
+        0, // missIndex
+        origin, // origin
+        0.0, // tmin
+        dirWorld, // direction
+        100.0, // tmax
+        0 // payload
+    );
 }

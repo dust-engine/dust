@@ -163,6 +163,10 @@ impl<M: Component> Plugin for TLASPlugin<M> {
                 allocator.into_inner(),
                 vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                // VUID-vkCmdBuildAccelerationStructuresKHR-pInfos-03715
+                // For any element of pInfos[i].pGeometries with a geometryType of VK_GEOMETRY_TYPE_INSTANCES_KHR,
+                // if geometry.arrayOfPointers is VK_FALSE, geometry.data->deviceAddress must be aligned to 16 bytes
+                16,
             ),
             requires_rebuild: false,
             _marker: PhantomData,

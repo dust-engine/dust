@@ -34,7 +34,7 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
             _marker: PhantomData,
         }
     }
-    pub fn register_material<M: Material<Pipeline = P>>(&mut self) {
+    pub fn register_material<M: Material<Pipeline = P>>(&mut self, asset_server: &AssetServer) {
         let new_material_entry_layout = Layout::new::<M::ShaderParameters>();
         self.layout_size = self.layout_size.max(new_material_entry_layout.size());
         self.layout_align = self.layout_align.max(new_material_entry_layout.align());
@@ -46,9 +46,9 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
                 ty: M::TYPE,
                 shaders: (0..P::num_raytypes())
                     .map(|ray_type| {
-                        let rchit = M::rchit_shader(ray_type);
-                        let rint = M::intersection_shader(ray_type);
-                        let rahit = M::intersection_shader(ray_type);
+                        let rchit = M::rchit_shader(ray_type, asset_server);
+                        let rint = M::intersection_shader(ray_type, asset_server);
+                        let rahit = M::rahit_shader(ray_type, asset_server);
                         (rchit, rint, rahit)
                     })
                     .collect(),

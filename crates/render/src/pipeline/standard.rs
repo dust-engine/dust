@@ -5,6 +5,8 @@ use std::{
 
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::system::Resource;
+use bevy_math::{Mat4, Vec3};
+use bevy_transform::prelude::{GlobalTransform, Transform};
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
@@ -21,7 +23,8 @@ use rhyolite_bevy::Allocator;
 
 use crate::{
     sbt::{PipelineSbtManager, PipelineSbtManagerInfo, SbtManager},
-    RayTracingPipelineManagerSpecializedPipeline, ShaderModule, SpecializedShader,
+    CameraProjection, Projection, RayTracingPipelineManagerSpecializedPipeline, ShaderModule,
+    SpecializedShader,
 };
 
 use super::{RayTracingPipeline, RayTracingPipelineManager};
@@ -85,7 +88,10 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("primary.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                Vec::new(),
+                vec![SpecializedShader::for_shader(
+                    asset_server.load("miss.rmiss.spv"),
+                    vk::ShaderStageFlags::MISS_KHR,
+                )],
                 Vec::new(),
                 pipeline_cache,
             ),
@@ -107,12 +113,20 @@ impl RayTracingPipeline for StandardPipeline {
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
 }
 
+#[repr(C)]
+struct StandardPipelineCamera {
+    inv_projection_matrix: Mat4,
+    inv_view_matrix: Mat4,
+    position: Vec3,
+}
+
 impl StandardPipeline {
     pub fn render<'a>(
         &'a mut self,
         target: &'a mut RenderImage<impl ImageViewLike>,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         shader_store: &'a Assets<ShaderModule>,
+        camera: (&Projection, &GlobalTransform),
     ) -> Option<
         impl GPUCommandFuture<
                 Output = (),
@@ -126,8 +140,15 @@ impl StandardPipeline {
         let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer()?;
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
 
+        let camera = StandardPipelineCamera {
+            inv_projection_matrix: camera.0.get_projection_matrix().inverse(),
+            inv_view_matrix: camera.1.compute_matrix().inverse(),
+            position: camera.1.translation(),
+        };
+
         self.pipeline_sbt_manager
-            .push_raygen(primary_pipeline, (), 0);
+            .push_raygen(primary_pipeline, camera, 0);
+        self.pipeline_sbt_manager.push_miss(primary_pipeline, (), 0);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
         let fut = commands! { move
@@ -138,10 +159,12 @@ impl StandardPipeline {
                 target_image: target,
                 primary_pipeline,
                 desc_pool,
-                hitgroup_sbt_buffer,
+                hitgroup_sbt_buffer: &hitgroup_sbt_buffer,
                 hitgroup_stride,
-                pipeline_sbt_buffer
+                pipeline_sbt_buffer: &pipeline_sbt_buffer
             }.await;
+            retain!(hitgroup_sbt_buffer);
+            retain!(pipeline_sbt_buffer);
         };
         Some(fut)
     }
@@ -155,8 +178,8 @@ struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, HitgroupB
     target_image: &'a mut RenderImage<TargetImage>,
     primary_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
     desc_pool: &'a mut Retainer<DescriptorPool>,
-    hitgroup_sbt_buffer: RenderRes<HitgroupBuf>,
-    pipeline_sbt_buffer: RenderRes<PipelineSbtManagerInfo>,
+    hitgroup_sbt_buffer: &'a RenderRes<HitgroupBuf>,
+    pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
     hitgroup_stride: usize,
 }
 

@@ -15,6 +15,7 @@ bevy_ecs = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005
 bevy_hierarchy = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
 bevy_transform = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
 bevy_reflect = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
+bevy_math = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
 once_cell = "1.17"
 futures-lite = "1.11"
 crossbeam-channel = "^0.5"

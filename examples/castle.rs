@@ -3,8 +3,9 @@
 use bevy_app::{App, Plugin, Startup};
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
+use bevy_transform::prelude::GlobalTransform;
 use bevy_window::{PrimaryWindow, Window};
-use dust_render::{ShaderModule, StandardPipeline, TLASStore};
+use dust_render::{CameraBundle, Projection, ShaderModule, StandardPipeline, TLASStore};
 use pin_project::pin_project;
 use rhyolite::ash::vk;
 use rhyolite::clear_image;
@@ -72,7 +73,11 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         scene: asset_server.load("castle.vox"),
         ..Default::default()
     });
+    commands.spawn(CameraBundle::default()).insert(MainCamera);
 }
+
+#[derive(Component)]
+struct MainCamera;
 
 struct RenderSystem;
 impl Plugin for RenderSystem {
@@ -85,10 +90,14 @@ impl Plugin for RenderSystem {
              mut pipeline: ResMut<StandardPipeline>,
              shaders: Res<Assets<ShaderModule>>,
              mut recycled_state: Local<_>,
+             cameras: Query<(&Projection, &GlobalTransform), With<MainCamera>>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
-            return;
-        };
+                    return;
+                };
+                let Some(camera) = cameras.iter().next() else {
+                    return;
+                };
                 let accel_struct = tlas_store.accel_struct();
                 let graphics_queue = queue_router.of_type(QueueType::Graphics);
                 let swapchain_image = swapchain.acquire_next_image(queues.current_frame());
@@ -98,8 +107,7 @@ impl Plugin for RenderSystem {
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
                             let accel_struct = accel_struct.await;
-                            if let Some(render) = pipeline.render(&mut swapchain_image, &accel_struct, shaders.deref()) {
-                                println!("has pipeline");
+                            if let Some(render) = pipeline.render(&mut swapchain_image, &accel_struct, shaders.deref(), camera) {
                                 render.await;
                                 rendered = true;
                             }

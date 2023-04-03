@@ -154,8 +154,10 @@ impl SbtManager {
                             &entry.data[size_for_one * raytype as usize
                                 ..size_for_one * (raytype as usize + 1)],
                         );
-                    self.buffer
-                        .set((*index * self.total_raytype + raytype) as usize, &buffer);
+                    self.buffer.set(
+                        (*index * self.total_raytype + raytype) as usize,
+                        &buffer[..self.layout.handle_size + size_for_one],
+                    );
                 }
             } else {
                 self.raytype_pipeline_handles[raytype as usize] = pipeline.pipeline().raw();
@@ -170,8 +172,10 @@ impl SbtManager {
                             &entry.data[size_for_one * raytype as usize
                                 ..size_for_one * (raytype as usize + 1)],
                         );
-                    self.buffer
-                        .set((*index * self.total_raytype + raytype) as usize, &buffer);
+                    self.buffer.set(
+                        (*index * self.total_raytype + raytype) as usize,
+                        &buffer[..self.layout.handle_size + size_for_one],
+                    );
                 }
             }
         }
@@ -265,7 +269,7 @@ impl PipelineSbtManagerInfo {
         }
     }
     pub fn miss(&self, index: Range<usize>) -> vk::StridedDeviceAddressRegionKHR {
-        assert!(index.end < self.num_miss as usize);
+        assert!(index.end <= self.num_miss as usize);
         let index = Range {
             start: index.start + self.num_raygen as usize,
             end: index.end + self.num_raygen as usize,
@@ -281,7 +285,7 @@ impl PipelineSbtManagerInfo {
         }
     }
     pub fn callable(&self, index: Range<usize>) -> vk::StridedDeviceAddressRegionKHR {
-        assert!(index.end < self.num_callable as usize);
+        assert!(index.end <= self.num_callable as usize);
         let index = Range {
             start: index.start + self.num_raygen as usize + self.num_miss as usize,
             end: index.end + self.num_raygen as usize + self.num_miss as usize,

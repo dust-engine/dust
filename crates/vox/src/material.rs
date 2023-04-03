@@ -1,9 +1,9 @@
-use bevy_asset::Handle;
+use bevy_asset::{AssetServer, Handle};
 use dust_render::{MaterialType, StandardPipeline};
 
 use crate::VoxPalette;
 use dust_render::SpecializedShader;
-use rhyolite::ResidentBuffer;
+use rhyolite::{ash::vk, ResidentBuffer};
 
 #[derive(bevy_reflect::TypeUuid)]
 #[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0a"]
@@ -37,16 +37,25 @@ impl dust_render::Material for PaletteMaterial {
 
     const TYPE: MaterialType = MaterialType::Procedural;
 
-    fn rahit_shader(_ray_type: u32) -> Option<SpecializedShader> {
+    fn rahit_shader(_ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
         None
     }
 
-    fn rchit_shader(_ray_type: u32) -> Option<SpecializedShader> {
-        None
+    fn rchit_shader(_ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
+        Some(SpecializedShader::for_shader(
+            asset_server.load("hit.rchit.spv"),
+            vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+        ))
     }
 
-    fn intersection_shader(_ray_type: u32) -> Option<SpecializedShader> {
-        None
+    fn intersection_shader(
+        _ray_type: u32,
+        asset_server: &AssetServer,
+    ) -> Option<SpecializedShader> {
+        Some(SpecializedShader::for_shader(
+            asset_server.load("hit.rint.spv"),
+            vk::ShaderStageFlags::INTERSECTION_KHR,
+        ))
     }
 
     type ShaderParameters = PaletteMaterialShaderParams;
