@@ -1,22 +1,31 @@
-use bevy_asset::{AssetServer, Handle};
+use bevy_asset::{AssetServer, Assets, Handle};
+use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use dust_render::{MaterialType, StandardPipeline};
 
-use crate::VoxPalette;
+use crate::{VoxGeometry, VoxPalette};
 use dust_render::SpecializedShader;
-use rhyolite::{ash::vk, ResidentBuffer};
+use rhyolite::{ash::vk, BufferLike, ResidentBuffer};
 
 #[derive(bevy_reflect::TypeUuid)]
 #[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0a"]
 pub struct PaletteMaterial {
     palette: Handle<VoxPalette>,
-
+    pub(crate) geometry: Handle<VoxGeometry>,
     /// Compacted list of indexes into the palette array.
     data: ResidentBuffer,
 }
 
 impl PaletteMaterial {
-    pub fn new(palette: Handle<VoxPalette>, data: ResidentBuffer) -> Self {
-        Self { palette, data }
+    pub fn new(
+        geometry: Handle<VoxGeometry>,
+        palette: Handle<VoxPalette>,
+        data: ResidentBuffer,
+    ) -> Self {
+        Self {
+            palette,
+            data,
+            geometry,
+        }
     }
 }
 
@@ -59,12 +68,18 @@ impl dust_render::Material for PaletteMaterial {
     }
 
     type ShaderParameters = PaletteMaterialShaderParams;
-
-    fn parameters(&self, _ray_type: u32) -> Self::ShaderParameters {
+    type ShaderParameterParams = (SRes<Assets<VoxGeometry>>, SRes<Assets<VoxPalette>>);
+    fn parameters(
+        &self,
+        _ray_type: u32,
+        params: &mut SystemParamItem<Self::ShaderParameterParams>,
+    ) -> Self::ShaderParameters {
+        let (geometry_store, palette_store) = params;
+        let geometry = geometry_store.get(&self.geometry).unwrap();
         PaletteMaterialShaderParams {
-            geometry_ptr: 0,
-            material_ptr: 0,
-            palette_ptr: 0,
+            geometry_ptr: geometry.geometry_buffer().device_address(),
+            material_ptr: self.data.device_address(),
+            palette_ptr: 11,
         }
     }
 }

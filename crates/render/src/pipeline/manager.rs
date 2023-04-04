@@ -8,7 +8,7 @@ use bevy_asset::Assets;
 use bevy_tasks::AsyncComputeTaskPool;
 use rhyolite::{
     ash::prelude::VkResult, HasDevice, PipelineCache, PipelineLayout, RayTracingPipeline,
-    RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo, Task,
+    RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo,
 };
 
 use crate::{

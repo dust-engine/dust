@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use bevy_tasks::AsyncComputeTaskPool;
 use once_cell::sync::OnceCell;
 use rhyolite::ash::{prelude::VkResult, vk};
 

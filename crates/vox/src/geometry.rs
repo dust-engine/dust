@@ -48,6 +48,9 @@ struct GPUVoxNode {
 }
 
 impl VoxGeometry {
+    pub fn geometry_buffer(&self) -> &Arc<ResidentBuffer> {
+        &self.geometry_buffer
+    }
     pub fn from_tree(
         tree: Tree,
         size: [u8; 3],

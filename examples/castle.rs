@@ -3,29 +3,23 @@
 use bevy_app::{App, Plugin, Startup};
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
-use bevy_transform::prelude::GlobalTransform;
+use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
-use dust_render::{CameraBundle, Projection, ShaderModule, StandardPipeline, TLASStore};
-use pin_project::pin_project;
+use dust_render::{PinholeProjection, ShaderModule, StandardPipeline, TLASStore};
+
 use rhyolite::ash::vk;
 use rhyolite::clear_image;
-use rhyolite::future::{
-    use_per_frame_state, DisposeContainer, GPUCommandFutureExt, PerFrameContainer, PerFrameState,
-    RenderImage,
-};
-use rhyolite::macros::glsl_reflected;
-use rhyolite::utils::retainer::{Retainer, RetainerHandle};
+use rhyolite::future::GPUCommandFutureExt;
+
 use rhyolite::{
-    copy_buffer_to_image,
     macros::{commands, gpu},
-    ImageExt, QueueType,
+    QueueType,
 };
-use rhyolite::{cstr, ComputePipeline, HasDevice, ImageLike, ImageRequest, ImageViewLike};
+
 use rhyolite_bevy::{
-    Allocator, Device, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
+    Allocator, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
 };
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::ops::Deref;
 
 fn main() {
     let mut app = App::new();
@@ -45,6 +39,8 @@ fn main() {
         .add_plugin(bevy_time::TimePlugin::default())
         .add_plugin(bevy_scene::ScenePlugin::default())
         .add_plugin(bevy_diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
+        .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
         .add_plugin(RenderSystem);
     let main_window = app
@@ -73,7 +69,20 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         scene: asset_server.load("castle.vox"),
         ..Default::default()
     });
-    commands.spawn(CameraBundle::default()).insert(MainCamera);
+    commands
+        .spawn(PinholeProjection::default())
+        .insert(GlobalTransform::default())
+        .insert(Transform::default())
+        .insert(MainCamera)
+        .insert(smooth_bevy_cameras::controllers::fps::FpsCameraBundle::new(
+            smooth_bevy_cameras::controllers::fps::FpsCameraController {
+                translate_sensitivity: 100.0,
+                ..Default::default()
+            },
+            glam::Vec3::new(-2.0, 500.0, 5.0),
+            glam::Vec3::new(0., 0., 0.),
+            glam::Vec3::Y,
+        ));
 }
 
 #[derive(Component)]
@@ -86,11 +95,11 @@ impl Plugin for RenderSystem {
             |mut queues: ResMut<Queues>,
              queue_router: Res<QueuesRouter>,
              mut tlas_store: ResMut<TLASStore>,
-             allocator: Res<Allocator>,
+             _allocator: Res<Allocator>,
              mut pipeline: ResMut<StandardPipeline>,
              shaders: Res<Assets<ShaderModule>>,
              mut recycled_state: Local<_>,
-             cameras: Query<(&Projection, &GlobalTransform), With<MainCamera>>,
+             cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
                     return;

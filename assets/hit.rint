@@ -1,11 +1,131 @@
-
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+struct Block
+{
+    u16vec4 position;
+    uint64_t mask;
+    uint32_t material_ptr;
+    uint32_t reserved;
+};
+
+layout(buffer_reference, buffer_reference_align = 8, std430) buffer GeometryInfo {
+    Block blocks[];
+};
+
+layout(shaderRecordEXT) buffer sbt {
+    GeometryInfo geometryInfo;
+    uint64_t materialInfo;
+    uint64_t paletteInfo;
+};
+hitAttributeEXT uint8_t voxelId;
+
+vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
+    vec3 tMin = (box_min - origin) / dir;
+    vec3 tMax = (box_max - origin) / dir;
+    vec3 t1 = min(tMin, tMax);
+    vec3 t2 = max(tMin, tMax);
+    float t_min = max(max(t1.x, t1.y), t1.z);
+    float t_max = min(min(t2.x, t2.y), t2.z);
+    return vec2(t_min, t_max);
+}
+
+uint8_t encode_index(u8vec3 position){
+    return (position.x<<4) | (position.y << 2) | position.z;
+}
+
+/**
+  Intersects ray with a unix box with 4x4x4 voxels. A branchless implementation of
+  Amanatides, John & Woo, Andrew. (1987). A Fast Voxel Traversal Algorithm for Ray Tracing. Proceedings of EuroGraphics. 87.
+
+  @param(origin): The origin of the ray.
+  @param(dir):    The direction of the ray. Does not have to be normalized.
+  @param(grid):   The occupancy of the 64 voxels encoded in z-curve order.
+*/
+void dda(vec3 origin, vec3 dir, uint64_t grid, float scale) {
+    // Init phase
+
+    // The initialization phase begins by identifying the voxel in which the ray origin is found. If the ray
+    // origin is outside the grid, we find the point in which the ray enters the grid and take the adjacent voxel. 
+    // The integer variables `position` are initialized to the starting voxel coordinates.
+
+    // We assume that the AABB box is located in 0-1. We extend that to 0-4 so we match our DDAed unit box of 4x4x4.
+    vec2 initialIntersectionT = intersectAABB(origin, dir, vec3(0.0, 0.0, 0.0), vec3(4.0, 4.0, 4.0));
+    if (initialIntersectionT.x >= initialIntersectionT.y) {
+        return;
+    }
+    vec3 initialIntersectionPoint = origin + dir * initialIntersectionT.x;
+    i8vec3 position = i8vec3(clamp(ivec3(floor(initialIntersectionPoint)), 0, 3));
+
+    // In  addition, the variables stepX and stepY are initialized to either 1 or -1 indicating whether X and Y
+    // are incremented or decremented as theray crosses voxel boundaries (this is determined by the sign of the
+    // x and y components of v)
+    #define STEP sign(dir)
+
+    // Next, we determine the value of t at which the ray crosses the first vertical voxel boundary and
+    // store it in variable tMaxX. We perform a similar computation in y and store the result in tMaxY. The
+    // minimum of these two values will indicate how much we can travel along the ray and still remain in the
+    // current voxel.
+
+    // Neo's note: Define our ray as v = origin + t * dir, so t = (v - origin) / dir = v / dir - origin / dir.
+    // We assign t_coef = 1 / dir and t_bias = origin / dir such that t(v) = v * t_coef - t_bias.
+    vec3 t_coef = 1.0 / dir;
+    vec3 t_bias = t_coef * origin;
+    
+    vec3 tMax = (vec3(position) + max(STEP, 0.0)) * t_coef - t_bias;
+
+    // Finally, we compute tDeltaX and tDeltaY. TDeltaX indicates how far along the ray we must move
+    // (in units of t) for the horizontal component of such a movement to equal the width of a voxel. Similarly,
+    // we store in tDeltaY the amount of movement along the ray which has a vertical component equal to the
+    // height of a voxel.
+    vec3 tDelta = vec3(1.0, 1.0, 1.0) * t_coef * STEP;
+
+    // Intersection phase
+    uint8_t hit = encode_index(position);
+    float hitDistance = min(min(tMax.x, tMax.y), tMax.z);
+    while((grid & (uint64_t(1) << hit)) == 0) {
+        vec3 compResult = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
+        position += i8vec3(STEP * compResult);
+        if (hitDistance + 0.001 >= initialIntersectionT.y) {
+            return;
+        }
+        tMax += tDelta * compResult;
+        hitDistance = min(min(tMax.x, tMax.y), tMax.z);
+
+        hit = encode_index(position);
+    };
+
+    float realT = hitDistance / scale;
 
 
-void main() {
-    reportIntersectionEXT(
-        0.0, // hitT,
-        0 // hitKind
+    // Usually one would expect the `hitAttributeEXT` value in the closest hit shader to be the one set
+    // during the intersection shader invocation of the closest hit point. This is the case on NVIDIA GPUs.
+    // However, on my AMD GPU (6600XT), the `hitAttributeEXT` value seems to reflect the value set during
+    // the most recent intersection shader invocation instead.
+    // Meaning that if additional intersection tests were performed after the closest hit, wrong values
+    // would be reflected in the closest hit shader.
+    // Here, for NVIDIA GPUs we always set the voxelId. On AMD GPUs we manually make the comparison with gl_RayTmaxEXT.
+    if (realT <= gl_RayTmaxEXT) {
+        voxelId = hit;
+    }
+
+    reportIntersectionEXT(realT, 0);
+    return;
+}
+
+
+void main()
+{
+    Block block = geometryInfo.blocks[gl_PrimitiveID];
+    vec3 min = block.position.xyz;
+
+    dda(
+        gl_ObjectRayOriginEXT - min, // origin
+        gl_ObjectRayDirectionEXT, // dir
+        block.mask,
+        1.0
     );
 }

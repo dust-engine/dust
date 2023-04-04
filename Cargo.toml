@@ -34,4 +34,6 @@ bevy_asset = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b80
 bevy_scene = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a", default-features=false }
 bevy_diagnostic = { git = "https://github.com/Neo-Zhixing/bevy.git", rev = "08f898b8005f8549cdbe4225716442480354d93a" }
 image = "0.24"
+glam = "0.23"
 reqwest = { version = "*", features = ["blocking"] }
+smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras" }

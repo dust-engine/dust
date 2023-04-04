@@ -18,6 +18,7 @@ use rhyolite_bevy::{Allocator, RenderSystems};
 
 use crate::{
     blas::{build_blas_system, BLAS},
+    sbt::SbtIndex,
     Renderable,
 };
 use bevy_transform::components::GlobalTransform;
@@ -81,11 +82,17 @@ fn tlas_system<M: Component>(
     mut commands: Commands,
     mut store: ResMut<TLASStore<M>>,
     mut query: Query<
-        (Entity, &BLAS, &GlobalTransform, Option<&mut TLASIndex<M>>),
+        (
+            Entity,
+            &BLAS,
+            &SbtIndex<M>,
+            &GlobalTransform,
+            Option<&mut TLASIndex<M>>,
+        ),
         (Or<(Changed<BLAS>, Changed<GlobalTransform>)>, With<M>),
     >,
 ) {
-    for (entity, blas, global_transform, index) in query.iter_mut() {
+    for (entity, blas, sbt_index, global_transform, index) in query.iter_mut() {
         let Some(blas) = blas.blas.as_ref() else {
             // BLAS isn't ready yet
             continue;
@@ -103,7 +110,7 @@ fn tlas_system<M: Component>(
             transform,
             instance_custom_index_and_mask: vk::Packed24_8::new(0, u8::MAX),
             instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
-                0,
+                sbt_index.get_index(),
                 vk::GeometryInstanceFlagsKHR::empty().as_raw() as u8,
             ),
             acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {

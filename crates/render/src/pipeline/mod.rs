@@ -1,7 +1,10 @@
 use std::{alloc::Layout, collections::HashMap, sync::Arc};
 
 use bevy_asset::AssetServer;
-use bevy_ecs::{prelude::Component, system::Resource};
+use bevy_ecs::{
+    prelude::Component,
+    system::{Resource, SystemParamItem},
+};
 use rhyolite::PipelineLayout;
 use rhyolite_bevy::Allocator;
 mod builder;
@@ -60,7 +63,11 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
     /// 2. map from (material, raytype) to hitgroup index using the pipeline objects.
     /// hitgroup index needs to be adjusted by subpipeline
     /// 3. Call material instance add(material.parameters, hitgroup_index) on sbtmanager
-    fn material_instance_added<M: Material<Pipeline = Self>>(&mut self, material: &M) -> SbtIndex;
+    fn material_instance_added<M: Material<Pipeline = Self>>(
+        &mut self,
+        material: &M,
+        params: &mut SystemParamItem<M::ShaderParameterParams>,
+    ) -> SbtIndex;
     fn material_instance_removed<M: Material<Pipeline = Self>>(&mut self) {}
 
     fn new(

@@ -219,7 +219,7 @@ impl VoxLoader {
             .allocator
             .create_dynamic_asset_buffer_with_writer(
                 palette_indexes.len() as u64,
-                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                 |slice| {
                     for (src, dst) in palette_indexes.zip(slice.iter_mut()) {
                         *dst = src;
@@ -243,7 +243,10 @@ impl VoxLoader {
         let future_to_wait = material_buffer.join(geometry);
         future_to_wait.map(|(buffer, geometry)| {
             let buffer = buffer.into_inner();
-            (geometry, PaletteMaterial::new(palette, buffer))
+            (
+                geometry,
+                PaletteMaterial::new(Handle::default(), palette, buffer),
+            )
         })
     }
 }
@@ -303,11 +306,12 @@ impl AssetLoader for VoxLoader {
 
             let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>)>> =
                 vec![None; file.models.len()];
-            for (model_id, geometry, material) in geometry_materials.into_iter() {
+            for (model_id, geometry, mut material) in geometry_materials.into_iter() {
                 let geometry_handle = load_context.set_labeled_asset(
                     &format!("Geometry{}", model_id),
                     LoadedAsset::new(geometry),
                 );
+                material.geometry = geometry_handle.clone();
                 let material_handle = load_context.set_labeled_asset(
                     &format!("Material{}", model_id),
                     LoadedAsset::new(material),

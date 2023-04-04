@@ -8,7 +8,7 @@ use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
 use bevy_ecs::{
     prelude::{Entity, EventReader},
     query::Changed,
-    system::{Commands, Local, Query, Res, ResMut},
+    system::{Commands, Local, Query, Res, ResMut, SystemParam, SystemParamItem},
 };
 use bevy_reflect::TypeUuid;
 
@@ -25,8 +25,14 @@ pub trait Material: Send + Sync + 'static + TypeUuid {
     fn rahit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;
     fn rchit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;
     fn intersection_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;
+
     type ShaderParameters;
-    fn parameters(&self, ray_type: u32) -> Self::ShaderParameters;
+    type ShaderParameterParams: SystemParam;
+    fn parameters(
+        &self,
+        ray_type: u32,
+        params: &mut SystemParamItem<Self::ShaderParameterParams>,
+    ) -> Self::ShaderParameters;
 }
 
 pub struct MaterialPlugin<M: Material> {
@@ -71,6 +77,8 @@ fn material_system<T: Material>(
     materials: Res<Assets<T>>,
     mut events: EventReader<AssetEvent<T>>,
     query: Query<(Entity, &Handle<T>), Changed<Handle<T>>>,
+
+    mut params: bevy_ecs::system::StaticSystemParam<T::ShaderParameterParams>,
 ) {
     for (entity, handle) in query.iter() {
         store
@@ -83,7 +91,7 @@ fn material_system<T: Material>(
         match event {
             AssetEvent::Created { handle } | AssetEvent::Modified { handle } => {
                 let material = materials.get(handle).unwrap();
-                let sbt_index = pipeline.material_instance_added(material);
+                let sbt_index = pipeline.material_instance_added(material, &mut params);
                 // Now, for all entities with Handle<T>, add SbtIndex.
                 if let Some(old_sbt_index) = store.sbt_indices.get(handle) && old_sbt_index == &sbt_index {
 

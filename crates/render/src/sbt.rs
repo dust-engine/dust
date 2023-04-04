@@ -1,6 +1,8 @@
 use std::{alloc::Layout, collections::HashMap, marker::PhantomData, ops::Range, sync::Arc};
 
-use bevy_ecs::prelude::Component;
+use bevy_ecs::{prelude::Component, system::SystemParamItem};
+use crevice::std430::{AsStd430, Std430};
+
 use rhyolite::{
     ash::vk,
     copy_buffer,
@@ -19,11 +21,24 @@ use crate::{
     RayTracingPipelineManagerSpecializedPipeline, Renderable,
 };
 
+#[derive(Clone, Copy)]
+pub struct EmptyShaderRecords;
+unsafe impl crevice::internal::bytemuck::Zeroable for EmptyShaderRecords {}
+unsafe impl crevice::internal::bytemuck::Pod for EmptyShaderRecords {}
+unsafe impl Std430 for EmptyShaderRecords {
+    const ALIGNMENT: usize = 0;
+}
+
 // This is to be included on the component of entities.
 #[derive(Component)]
 pub struct SbtIndex<M = Renderable> {
     index: u32,
     _marker: PhantomData<M>,
+}
+impl<M> SbtIndex<M> {
+    pub fn get_index(&self) -> u32 {
+        self.index
+    }
 }
 
 impl<M> Clone for SbtIndex<M> {
@@ -189,12 +204,16 @@ impl SbtManager {
     pub fn hitgroup_stride(&self) -> usize {
         self.layout.one_entry.pad_to_align().size()
     }
-    pub fn add_instance<M: Material, A>(&mut self, material: &M) -> SbtIndex<A> {
+    pub fn add_instance<M: Material, A>(
+        &mut self,
+        material: &M,
+        params: &mut SystemParamItem<M::ShaderParameterParams>,
+    ) -> SbtIndex<A> {
         let mut data: Box<[u8]> =
             vec![0; self.total_raytype as usize * std::mem::size_of::<M::ShaderParameters>()]
                 .into_boxed_slice();
         for i in 0..self.total_raytype {
-            let params = material.parameters(i);
+            let params = material.parameters(i, params);
 
             let size = std::mem::size_of::<M::ShaderParameters>();
             data[size * i as usize..size * (i as usize + 1)].copy_from_slice(unsafe {
@@ -214,7 +233,7 @@ impl SbtManager {
                 _marker: PhantomData,
             }
         } else {
-            let i = (self.buffer.len() / self.total_raytype as usize) as u32;
+            let i = self.entries.len() as u32;
             self.entries.insert(entry.clone(), i);
             self.update_list.push(entry);
             SbtIndex {
@@ -339,7 +358,7 @@ impl PipelineSbtManager {
         }
     }
     /// Push the `index`th raygen shader in `pipeline` into the Sbt, with shader parameters P.
-    pub fn push_raygen<P>(
+    pub fn push_raygen<P: AsStd430>(
         &mut self,
         pipeline: RayTracingPipelineManagerSpecializedPipeline,
         param: P,
@@ -353,13 +372,9 @@ impl PipelineSbtManager {
 
         let handles_data = pipeline.pipeline().sbt_handles().rgen(index);
         self.buffer.extend(handles_data.iter().cloned());
+        self.buffer.extend(param.as_std430().as_bytes());
 
-        let params_data = unsafe {
-            std::slice::from_raw_parts(&param as *const _ as *const u8, std::mem::size_of::<P>())
-        };
-        self.buffer.extend(params_data.iter().cloned());
-
-        let stride = (handles_data.len() as u32 + params_data.len() as u32).next_multiple_of(
+        let stride = (handles_data.len() as u32 + P::std430_size_static() as u32).next_multiple_of(
             self.allocator
                 .device()
                 .physical_device()
@@ -371,7 +386,7 @@ impl PipelineSbtManager {
         self.num_raygen += 1;
     }
     /// Push the `index`th miss shader in `pipeline` into the Sbt, with shader parameters P.
-    pub fn push_miss<P>(
+    pub fn push_miss<P: AsStd430>(
         &mut self,
         pipeline: RayTracingPipelineManagerSpecializedPipeline,
         param: P,
@@ -383,11 +398,8 @@ impl PipelineSbtManager {
 
         let handles_data = pipeline.pipeline().sbt_handles().rmiss(index);
         self.buffer.extend(handles_data.iter().cloned());
-        let params_data = unsafe {
-            std::slice::from_raw_parts(&param as *const _ as *const u8, std::mem::size_of::<P>())
-        };
-        self.buffer.extend(params_data.iter().cloned());
-        let stride = (handles_data.len() as u32 + params_data.len() as u32).next_multiple_of(
+        self.buffer.extend(param.as_std430().as_bytes());
+        let stride = (handles_data.len() as u32 + P::std430_size_static() as u32).next_multiple_of(
             self.allocator
                 .device()
                 .physical_device()
@@ -399,7 +411,7 @@ impl PipelineSbtManager {
         self.num_miss += 1;
     }
     /// Push the `index`th callable shader in `pipeline` into the Sbt, with shader parameters P.
-    pub fn push_callable<P>(
+    pub fn push_callable<P: AsStd430>(
         &mut self,
         pipeline: RayTracingPipelineManagerSpecializedPipeline,
         param: P,
@@ -410,11 +422,8 @@ impl PipelineSbtManager {
 
         let handles_data = pipeline.pipeline().sbt_handles().callable(index);
         self.buffer.extend(handles_data.iter().cloned());
-        let params_data = unsafe {
-            std::slice::from_raw_parts(&param as *const _ as *const u8, std::mem::size_of::<P>())
-        };
-        self.buffer.extend(params_data.iter().cloned());
-        let stride = (handles_data.len() as u32 + params_data.len() as u32).next_multiple_of(
+        self.buffer.extend(param.as_std430().as_bytes());
+        let stride = (handles_data.len() as u32 + P::std430_size_static() as u32).next_multiple_of(
             self.allocator
                 .device()
                 .physical_device()
@@ -427,6 +436,7 @@ impl PipelineSbtManager {
     }
 
     pub fn build(&mut self) -> impl GPUCommandFuture<Output = RenderRes<PipelineSbtManagerInfo>> {
+        self.align(false);
         let base_alignment = self
             .allocator
             .device()

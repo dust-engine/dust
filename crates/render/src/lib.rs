@@ -4,6 +4,7 @@
 #![feature(alloc_layout_extra)]
 #![feature(int_roundings)]
 #![feature(associated_type_bounds)]
+#![feature(specialization)]
 
 use bevy_app::{Plugin, Update};
 mod blas;
@@ -75,6 +76,20 @@ impl Plugin for RenderPlugin {
                 v12: vk::PhysicalDeviceVulkan12Features {
                     timeline_semaphore: vk::TRUE,
                     buffer_device_address: vk::TRUE,
+                    shader_int8: vk::TRUE,
+                    storage_buffer8_bit_access: vk::TRUE,
+                    ..Default::default()
+                },
+                v11: vk::PhysicalDeviceVulkan11Features {
+                    storage_buffer16_bit_access: vk::TRUE,
+                    ..Default::default()
+                },
+                inner: vk::PhysicalDeviceFeatures2 {
+                    features: vk::PhysicalDeviceFeatures {
+                        shader_int16: vk::TRUE,
+                        shader_int64: vk::TRUE,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 acceleration_structure: vk::PhysicalDeviceAccelerationStructureFeaturesKHR {

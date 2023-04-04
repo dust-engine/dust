@@ -21,3 +21,4 @@ futures-lite = "1.11"
 crossbeam-channel = "^0.5"
 pin-project = "1"
 tracing = "0.1"
+crevice = { version = "0.13", features = ["glam"] }

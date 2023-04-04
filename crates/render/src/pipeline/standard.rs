@@ -4,9 +4,10 @@ use std::{
 };
 
 use bevy_asset::{AssetServer, Assets};
-use bevy_ecs::system::Resource;
-use bevy_math::{Mat4, Vec3};
-use bevy_transform::prelude::{GlobalTransform, Transform};
+use bevy_ecs::system::{Resource, SystemParamItem};
+use bevy_math::Vec3;
+use bevy_transform::prelude::GlobalTransform;
+use crevice::std430::AsStd430;
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
@@ -22,8 +23,8 @@ use rhyolite::{
 use rhyolite_bevy::Allocator;
 
 use crate::{
-    sbt::{PipelineSbtManager, PipelineSbtManagerInfo, SbtManager},
-    CameraProjection, Projection, RayTracingPipelineManagerSpecializedPipeline, ShaderModule,
+    sbt::{EmptyShaderRecords, PipelineSbtManager, PipelineSbtManagerInfo, SbtManager},
+    PinholeProjection, RayTracingPipelineManagerSpecializedPipeline, ShaderModule,
     SpecializedShader,
 };
 
@@ -47,7 +48,7 @@ impl HasDevice for StandardPipeline {
 impl RayTracingPipeline for StandardPipeline {
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
         let set1 = set_layout! {
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
             img_output: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
@@ -101,9 +102,10 @@ impl RayTracingPipeline for StandardPipeline {
     fn material_instance_added<M: crate::Material<Pipeline = Self>>(
         &mut self,
         material: &M,
+        params: &mut SystemParamItem<M::ShaderParameterParams>,
     ) -> crate::sbt::SbtIndex {
         self.primary_ray_pipeline.material_instance_added::<M>();
-        self.hitgroup_sbt_manager.add_instance(material)
+        self.hitgroup_sbt_manager.add_instance(material, params)
     }
 
     fn num_raytypes() -> u32 {
@@ -113,11 +115,16 @@ impl RayTracingPipeline for StandardPipeline {
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
 }
 
-#[repr(C)]
+#[derive(AsStd430)]
 struct StandardPipelineCamera {
-    inv_projection_matrix: Mat4,
-    inv_view_matrix: Mat4,
-    position: Vec3,
+    camera_view_col0: Vec3,
+    near: f32,
+    camera_view_col1: Vec3,
+    far: f32,
+    camera_view_col2: Vec3,
+    padding: f32,
+    camera_position: Vec3,
+    tan_half_fov: f32,
 }
 
 impl StandardPipeline {
@@ -126,7 +133,7 @@ impl StandardPipeline {
         target: &'a mut RenderImage<impl ImageViewLike>,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         shader_store: &'a Assets<ShaderModule>,
-        camera: (&Projection, &GlobalTransform),
+        camera: (&PinholeProjection, &GlobalTransform),
     ) -> Option<
         impl GPUCommandFuture<
                 Output = (),
@@ -141,14 +148,20 @@ impl StandardPipeline {
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
 
         let camera = StandardPipelineCamera {
-            inv_projection_matrix: camera.0.get_projection_matrix().inverse(),
-            inv_view_matrix: camera.1.compute_matrix().inverse(),
-            position: camera.1.translation(),
+            camera_view_col0: camera.1.affine().matrix3.x_axis.into(),
+            camera_view_col1: camera.1.affine().matrix3.y_axis.into(),
+            camera_view_col2: camera.1.affine().matrix3.z_axis.into(),
+            near: camera.0.near,
+            far: camera.0.far,
+            padding: 0.0,
+            camera_position: camera.1.translation(),
+            tan_half_fov: (camera.0.fov / 2.0).tan(),
         };
 
         self.pipeline_sbt_manager
             .push_raygen(primary_pipeline, camera, 0);
-        self.pipeline_sbt_manager.push_miss(primary_pipeline, (), 0);
+        self.pipeline_sbt_manager
+            .push_miss(primary_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
         let fut = commands! { move

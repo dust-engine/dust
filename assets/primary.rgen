@@ -1,30 +1,32 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-
-layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
 layout(set = 0, binding = 1) uniform accelerationStructureEXT accelerationStructure;
 
-layout(shaderRecordEXT) buffer sbt {
-    mat4 inv_projection;
-    mat4 inv_view;
-    vec3 origin;
-};
+layout(shaderRecordEXT) buffer Sbt {
+    vec3 camera_view_col0;
+    float near;
+    vec3 camera_view_col1;
+    float far;
+    vec3 camera_view_col2;
+    float _padding;
+    vec3 camera_position;
+    float tan_half_fov;
+} sbt;
 layout(location = 0) rayPayloadEXT float payload;
 
 
 void main() {
-    vec2 px = gl_LaunchIDEXT.xy / gl_LaunchSizeEXT.xy; // The pixel position px in [0,1].
+    const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
 
-    // The pixel position px in [-1,1], then placed at the near plane and turned into homogeneous coordinates.
-    vec4 pxNDC = vec4(2.0 * px - 1.0, -1.0, 1.0);
-    
-    vec4 dirEye = inv_projection * pxNDC;
+    vec2 pixelCamera = 2 * pixelNDC - 1;
+    pixelCamera.y *= -1;
+    pixelCamera.x *= float(gl_LaunchSizeEXT.x) / float(gl_LaunchSizeEXT.y);
+    pixelCamera *= sbt.tan_half_fov;
 
-    // This is a direction, so the w component doesn't matter.
-    dirEye.w = 0.0;
+    const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
 
-    vec3 dirWorld = normalize((inv_view * dirEye).xyz);
+    const vec3 pixelCameraWorld = rotationMatrix * vec3(pixelCamera, -1);
 
     traceRayEXT(
         accelerationStructure,
@@ -33,10 +35,10 @@ void main() {
         0, // SBT offset, ray type index
         1, // SBT stride, number of ray types
         0, // missIndex
-        origin, // origin
-        0.0, // tmin
-        dirWorld, // direction
-        100.0, // tmax
+        sbt.camera_position,     // ray origin
+        sbt.near,           // ray min range
+        pixelCameraWorld, // direction
+        sbt.far, // tmax
         0 // payload
     );
 }
