@@ -76,10 +76,11 @@ impl dust_render::Material for PaletteMaterial {
     ) -> Self::ShaderParameters {
         let (geometry_store, palette_store) = params;
         let geometry = geometry_store.get(&self.geometry).unwrap();
+        let palette = palette_store.get(&self.palette).unwrap();
         PaletteMaterialShaderParams {
             geometry_ptr: geometry.geometry_buffer().device_address(),
             material_ptr: self.data.device_address(),
-            palette_ptr: 11,
+            palette_ptr: palette.buffer.device_address(),
         }
     }
 }

@@ -27,7 +27,7 @@ layout(buffer_reference) buffer PaletteInfo {
 layout(shaderRecordEXT) buffer sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
-    uint64_t paletteInfo;
+    PaletteInfo paletteInfo;
 };
 //layout(set = 1, binding = 1, r8ui) uniform readonly uimage2D bindless_StorageImage[];
 
@@ -42,7 +42,13 @@ vec3 randomColorList[5] = {
 };
 
 void main() {
-    vec4 color;
-    color = vec4(1.0, 1.0, 1.0, 1.0);
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), color);
+    Block block = geometryInfo.blocks[gl_PrimitiveID];
+
+    u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << voxelId) - 1));
+    uint32_t voxelMemoryOffset = bitCount(masked.x) + bitCount(masked.y);
+
+    uint8_t palette_index = materialInfo.materials[block.material_ptr + voxelMemoryOffset];
+    u8vec4 color = paletteInfo.palette[palette_index];
+
+    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(color.rgb) / 255.0, 1.0));
 }
