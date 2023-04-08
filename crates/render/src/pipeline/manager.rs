@@ -37,6 +37,9 @@ pub struct RayTracingPipelineManagerSpecializedPipeline<'a> {
     /// Mapping from (material_index, ray_type) to hitgroup index
     /// hitgroup index = hitgroup_mapping[material_index] + ray_type
     hitgroup_mapping: &'a BTreeMap<u32, u32>,
+
+    /// A subset of all raytypes
+    raytypes: &'a [u32]
 }
 impl<'a> HasDevice for RayTracingPipelineManagerSpecializedPipeline<'a> {
     fn device(&self) -> &Arc<rhyolite::Device> {
@@ -57,7 +60,8 @@ impl<'a> RayTracingPipelineManagerSpecializedPipeline<'a> {
         raytype: u32,
     ) -> &[u8] {
         let material_index = *self.material_mapping.get(&material_type).unwrap() as u32;
-        let hitgroup_index = self.hitgroup_mapping[&material_index] + raytype;
+        let local_raytype = self.raytypes.iter().position(|a| *a == raytype).unwrap();
+        let hitgroup_index = self.hitgroup_mapping[&material_index] + local_raytype as u32;
         self.pipeline
             .sbt_handles()
             .hitgroup(hitgroup_index as usize)
@@ -65,6 +69,7 @@ impl<'a> RayTracingPipelineManagerSpecializedPipeline<'a> {
 }
 
 pub struct RayTracingPipelineManager {
+    raytypes: Vec<u32>,
     /// A pipeline library containing raygen, raymiss, callable shaders
     pipeline_base_library: Option<DeferredValue<Arc<RayTracingPipelineLibrary>>>,
     pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
@@ -83,6 +88,7 @@ impl RayTracingPipelineManager {
     }
     pub fn new(
         pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
+        raytypes: Vec<u32>,
         raygen_shader: SpecializedShader,
         miss_shaders: Vec<SpecializedShader>,
         callable_shaders: Vec<SpecializedShader>,
@@ -102,6 +108,7 @@ impl RayTracingPipelineManager {
             .chain(callable_shaders.into_iter())
             .collect();
         Self {
+            raytypes,
             pipeline_base_library: None,
             pipeline_characteristics,
             current_material_flag: 0,
@@ -155,7 +162,8 @@ impl RayTracingPipelineManager {
             return Some(RayTracingPipelineManagerSpecializedPipeline {
                 material_mapping: &self.pipeline_characteristics.material_to_index,
                 pipeline: p,
-                hitgroup_mapping: &pipeline.hitgroup_mapping
+                hitgroup_mapping: &pipeline.hitgroup_mapping,
+                raytypes: &self.raytypes
             });
         }
 
@@ -166,7 +174,8 @@ impl RayTracingPipelineManager {
             return Some(RayTracingPipelineManagerSpecializedPipeline {
                 material_mapping: &self.pipeline_characteristics.material_to_index,
                 pipeline: p,
-                hitgroup_mapping: &pipeline.hitgroup_mapping
+                hitgroup_mapping: &pipeline.hitgroup_mapping,
+                raytypes: &self.raytypes
             });
         }
 
@@ -207,7 +216,7 @@ impl RayTracingPipelineManager {
                 if let Some(pipeline_library) = pipeline_library.try_get() {
                     libs.push(pipeline_library.clone());
                     hitgroup_mapping.insert(i as u32, current_hitgroup);
-                    current_hitgroup += self.pipeline_characteristics.num_raytype;
+                    current_hitgroup += self.raytypes.len() as u32;
                 } else {
                     // Pipeline library is being built
                     return;
@@ -221,6 +230,7 @@ impl RayTracingPipelineManager {
                     self.pipeline_characteristics.create_info.clone(),
                     self.pipeline_cache.clone(),
                     shader_store,
+                    &self.raytypes
                 );
                 ready = false;
             };
@@ -294,6 +304,7 @@ impl RayTracingPipelineManager {
         create_info: RayTracingPipelineLibraryCreateInfo,
         pipeline_cache: Option<Arc<PipelineCache>>,
         shader_store: &Assets<ShaderModule>,
+        raytypes: &[u32]
     ) {
         let normalize_shader = |a: &SpecializedShader| {
             let shader = shader_store.get(&a.shader)?;
@@ -306,9 +317,8 @@ impl RayTracingPipelineManager {
             })
         };
         let ty = pipeline_characteristics.materials[material_index].ty;
-        let hitgroups = pipeline_characteristics.materials[material_index]
-            .shaders
-            .iter()
+        let hitgroups = raytypes.iter()
+        .map(|raytype| &pipeline_characteristics.materials[material_index].shaders[*raytype as usize])
             .map(|(rchit, rint, rahit)| {
                 let rchit = rchit.as_ref().and_then(normalize_shader);
                 let rint = rint.as_ref().and_then(normalize_shader);

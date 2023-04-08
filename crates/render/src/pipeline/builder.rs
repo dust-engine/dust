@@ -69,7 +69,7 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
             material_to_index: self.material_to_index,
             materials: self.materials,
             num_raytype: P::num_raytypes(),
-            create_info: Default::default(),
+            create_info: P::create_info(),
         };
         P::new(
             self.allocator,

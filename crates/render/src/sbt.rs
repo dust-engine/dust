@@ -152,11 +152,12 @@ impl SbtManager {
         &mut self,
         pipelines: &[RayTracingPipelineManagerSpecializedPipeline],
     ) {
+        assert_eq!(pipelines.len() as u32, self.total_raytype);
         let mut buffer: Box<[u8]> =
             vec![0; self.layout.one_raytype.pad_to_align().size()].into_boxed_slice();
 
-        for raytype in 0..self.total_raytype {
-            let pipeline = &pipelines[raytype as usize];
+        for (raytype, pipeline) in pipelines.iter().enumerate() {
+            let raytype = raytype as u32;
             if self.raytype_pipeline_handles[raytype as usize] == pipeline.pipeline().raw() {
                 for entry in self.update_list.iter() {
                     let index = self.entries.get(entry).unwrap();
@@ -202,7 +203,7 @@ impl SbtManager {
         self.buffer.buffer()
     }
     pub fn hitgroup_stride(&self) -> usize {
-        self.layout.one_entry.pad_to_align().size()
+        self.layout.one_raytype.pad_to_align().size()
     }
     pub fn add_instance<M: Material, A>(
         &mut self,
@@ -229,7 +230,7 @@ impl SbtManager {
         };
         if let Some(existing_index) = self.entries.get(&entry) {
             SbtIndex {
-                index: *existing_index,
+                index: *existing_index * self.total_raytype,
                 _marker: PhantomData,
             }
         } else {
@@ -237,7 +238,7 @@ impl SbtManager {
             self.entries.insert(entry.clone(), i);
             self.update_list.push(entry);
             SbtIndex {
-                index: i,
+                index: i * self.total_raytype,
                 _marker: PhantomData,
             }
         }
@@ -287,11 +288,10 @@ impl PipelineSbtManagerInfo {
             size: size as u64,
         }
     }
-    pub fn miss(&self, index: Range<usize>) -> vk::StridedDeviceAddressRegionKHR {
-        assert!(index.end <= self.num_miss as usize);
+    pub fn miss(&self) -> vk::StridedDeviceAddressRegionKHR {
         let index = Range {
-            start: index.start + self.num_raygen as usize,
-            end: index.end + self.num_raygen as usize,
+            start: self.num_raygen as usize,
+            end: self.num_miss as usize + self.num_raygen as usize,
         };
         let (offset, size) = self.offset_strides[index.start];
         for (_offset, stride) in self.offset_strides[index.clone()].iter() {
@@ -366,7 +366,7 @@ impl PipelineSbtManager {
     ) {
         assert_eq!(self.num_miss, 0);
         assert_eq!(self.num_callable, 0);
-        self.align(self.num_raygen == 0);
+        self.align(true);
 
         let offset = self.buffer.len();
 

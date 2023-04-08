@@ -244,20 +244,27 @@ impl VoxLoader {
                     buffer.set_name("Vox Material Buffer").unwrap();
                 })
             });
-
-        let geometry = VoxGeometry::from_tree(
+        
+        let (geometry, num_blocks) = VoxGeometry::from_tree(
             tree,
             [model.size.x as u8, model.size.z as u8, model.size.y as u8],
             1.0,
             &self.allocator,
         );
 
+
+        let photon_energy_buffer = self
+            .allocator
+            .create_device_buffer_uninit(num_blocks as u64 * 16, vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS)
+            .unwrap();
+
+
         let future_to_wait = material_buffer.join(geometry);
         future_to_wait.map(|(buffer, geometry)| {
             let buffer = buffer.into_inner();
             (
                 geometry,
-                PaletteMaterial::new(Handle::default(), palette, buffer),
+                PaletteMaterial::new(Handle::default(), palette, buffer, photon_energy_buffer),
             )
         })
     }

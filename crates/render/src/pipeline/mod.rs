@@ -70,6 +70,10 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
     ) -> SbtIndex;
     fn material_instance_removed<M: Material<Pipeline = Self>>(&mut self) {}
 
+    fn create_info() -> rhyolite::RayTracingPipelineLibraryCreateInfo {
+        Default::default()
+    }
+
     fn new(
         allocator: Allocator,
         pipeline_characteristic: RayTracingPipelineCharacteristics,

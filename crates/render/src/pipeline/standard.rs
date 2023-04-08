@@ -5,7 +5,7 @@ use std::{
 
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::system::{Resource, SystemParamItem};
-use bevy_math::Vec3;
+use bevy_math::{Vec3, Quat};
 use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rhyolite::{
@@ -33,6 +33,7 @@ use super::{RayTracingPipeline, RayTracingPipelineManager};
 #[derive(Resource)]
 pub struct StandardPipeline {
     primary_ray_pipeline: RayTracingPipelineManager,
+    photon_ray_pipeline: RayTracingPipelineManager,
     hitgroup_sbt_manager: SbtManager,
     pipeline_sbt_manager: PipelineSbtManager,
 
@@ -46,6 +47,12 @@ impl HasDevice for StandardPipeline {
 }
 
 impl RayTracingPipeline for StandardPipeline {
+    fn create_info() -> rhyolite::RayTracingPipelineLibraryCreateInfo {
+        rhyolite::RayTracingPipelineLibraryCreateInfo {
+            max_pipeline_ray_payload_size: 12,
+            ..Default::default()
+        }
+    }
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
         let set1 = set_layout! {
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
@@ -84,7 +91,8 @@ impl RayTracingPipeline for StandardPipeline {
             ),
             hitgroup_sbt_manager,
             primary_ray_pipeline: RayTracingPipelineManager::new(
-                pipeline_characteristics,
+                pipeline_characteristics.clone(),
+                vec![0],
                 SpecializedShader::for_shader(
                     asset_server.load("primary.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
@@ -93,6 +101,17 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("miss.rmiss.spv"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
+                Vec::new(),
+                pipeline_cache.as_ref().cloned(),
+            ),
+            photon_ray_pipeline: RayTracingPipelineManager::new(
+                pipeline_characteristics,
+                vec![1],
+                SpecializedShader::for_shader(
+                    asset_server.load("photon.rgen.spv"),
+                    vk::ShaderStageFlags::RAYGEN_KHR,
+                ),
+                vec![],
                 Vec::new(),
                 pipeline_cache,
             ),
@@ -105,11 +124,12 @@ impl RayTracingPipeline for StandardPipeline {
         params: &mut SystemParamItem<M::ShaderParameterParams>,
     ) -> crate::sbt::SbtIndex {
         self.primary_ray_pipeline.material_instance_added::<M>();
+        self.photon_ray_pipeline.material_instance_added::<M>();
         self.hitgroup_sbt_manager.add_instance(material, params)
     }
 
     fn num_raytypes() -> u32 {
-        1
+        2
     }
 
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
@@ -127,7 +147,21 @@ struct StandardPipelineCamera {
     tan_half_fov: f32,
 }
 
+#[derive(AsStd430)]
+struct StandardPipelinePhotonCamera {
+    camera_view_col0: Vec3,
+    near: f32,
+    camera_view_col1: Vec3,
+    far: f32,
+    camera_view_col2: Vec3,
+    strength: f32,
+    camera_position: Vec3,
+    padding: f32,
+}
+
 impl StandardPipeline {
+    pub const PRIMARY_RAYTYPE: u32 = 0;
+    pub const PHOTON_RAYTYPE: u32 = 1;
     pub fn render<'a>(
         &'a mut self,
         target: &'a mut RenderImage<impl ImageViewLike>,
@@ -142,8 +176,9 @@ impl StandardPipeline {
             > + 'a,
     > {
         let primary_pipeline = self.primary_ray_pipeline.get_pipeline(shader_store)?;
+        let photon_pipeline = self.photon_ray_pipeline.get_pipeline(shader_store)?;
         self.hitgroup_sbt_manager
-            .specify_pipelines(&[primary_pipeline]);
+            .specify_pipelines(&[primary_pipeline, photon_pipeline]);
         let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer()?;
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
 
@@ -158,8 +193,24 @@ impl StandardPipeline {
             tan_half_fov: (camera.0.fov / 2.0).tan(),
         };
 
+        let affine =  bevy_math::Affine3A::from_scale_rotation_translation(
+            Vec3::splat(50.0),
+            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2), Default::default());
+        let photon_camera = StandardPipelinePhotonCamera {
+            camera_view_col0: affine.matrix3.x_axis.into(),
+            camera_view_col1: affine.matrix3.y_axis.into(),
+            camera_view_col2: affine.matrix3.z_axis.into(),
+            near: 0.1,
+            far: 10000.0,
+            padding: 0.0,
+            camera_position: Vec3 { x: 0.0, y: 1000.0, z: 0.0 },
+            strength: 100.0
+        };
+
         self.pipeline_sbt_manager
             .push_raygen(primary_pipeline, camera, 0);
+        self.pipeline_sbt_manager
+            .push_raygen(photon_pipeline, photon_camera, 0);
         self.pipeline_sbt_manager
             .push_miss(primary_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
@@ -171,6 +222,7 @@ impl StandardPipeline {
                 accel_struct: tlas,
                 target_image: target,
                 primary_pipeline,
+                photon_pipeline,
                 desc_pool,
                 hitgroup_sbt_buffer: &hitgroup_sbt_buffer,
                 hitgroup_stride,
@@ -190,6 +242,7 @@ struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, HitgroupB
     accel_struct: &'a RenderRes<Arc<AccelerationStructure>>,
     target_image: &'a mut RenderImage<TargetImage>,
     primary_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
+    photon_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
     desc_pool: &'a mut Retainer<DescriptorPool>,
     hitgroup_sbt_buffer: &'a RenderRes<HitgroupBuf>,
     pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
@@ -264,11 +317,6 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
 
         ctx.record(|ctx, command_buffer| unsafe {
             let device = ctx.device();
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_KHR,
-                this.primary_pipeline.pipeline().raw(),
-            );
             device.cmd_bind_descriptor_sets(
                 command_buffer,
                 vk::PipelineBindPoint::RAY_TRACING_KHR,
@@ -277,10 +325,34 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
                 desc_set.as_slice(),
                 &[],
             );
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_KHR,
+                this.photon_pipeline.pipeline().raw(),
+            );
+            device.rtx_loader().cmd_trace_rays(
+                command_buffer,
+                &this.pipeline_sbt_buffer.inner().rgen(1),
+                &Default::default(),
+                &vk::StridedDeviceAddressRegionKHR {
+                    device_address: this.hitgroup_sbt_buffer.inner().device_address(),
+                    stride: *this.hitgroup_stride as u64,
+                    size: this.hitgroup_sbt_buffer.inner.size(),
+                },
+                &vk::StridedDeviceAddressRegionKHR::default(),
+                128,
+                128,
+                1,
+            );
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_KHR,
+                this.primary_pipeline.pipeline().raw(),
+            );
             device.rtx_loader().cmd_trace_rays(
                 command_buffer,
                 &this.pipeline_sbt_buffer.inner().rgen(0),
-                &this.pipeline_sbt_buffer.inner().miss(0..1),
+                &this.pipeline_sbt_buffer.inner().miss(),
                 &vk::StridedDeviceAddressRegionKHR {
                     device_address: this.hitgroup_sbt_buffer.inner().device_address(),
                     stride: *this.hitgroup_stride as u64,
