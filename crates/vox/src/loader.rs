@@ -11,7 +11,7 @@ use bevy_ecs::{
 use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, Rotation, SceneNode};
-use glam::{IVec3, UVec3, Vec3Swizzles, Vec3};
+use glam::{IVec3, UVec3, Vec3, Vec3Swizzles};
 use rayon::prelude::*;
 use rhyolite::future::RenderRes;
 use rhyolite::{
@@ -170,7 +170,10 @@ impl<'a> SceneGraphTraverser<'a> {
 }
 
 impl VoxLoader {
-    fn load_palette(&self, palette: &[dot_vox::Color]) -> impl GPUCommandFuture<Output = RenderRes<VoxPalette>> {
+    fn load_palette(
+        &self,
+        palette: &[dot_vox::Color],
+    ) -> impl GPUCommandFuture<Output = RenderRes<VoxPalette>> {
         unsafe {
             const LEN: usize = 255;
             let mem =
@@ -178,17 +181,19 @@ impl VoxLoader {
             let mut mem = Box::from_raw(mem);
             mem.copy_from_slice(&palette[0..LEN]);
 
-            let resident_buffer = self.allocator.create_device_buffer_with_data(   
-                std::slice::from_raw_parts(mem.as_ptr() as *const u8, mem.len() * 4),
-                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-            )
+            let resident_buffer = self
+                .allocator
+                .create_device_buffer_with_data(
+                    std::slice::from_raw_parts(mem.as_ptr() as *const u8, mem.len() * 4),
+                    vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                )
                 .unwrap();
-            resident_buffer.map(|buffer| buffer.map(|buffer| {
-                VoxPalette {
+            resident_buffer.map(|buffer| {
+                buffer.map(|buffer| VoxPalette {
                     colors: mem,
-                    buffer
-                }
-            }))
+                    buffer,
+                })
+            })
         }
     }
 
@@ -244,7 +249,7 @@ impl VoxLoader {
                     buffer.set_name("Vox Material Buffer").unwrap();
                 })
             });
-        
+
         let (geometry, num_blocks) = VoxGeometry::from_tree(
             tree,
             [model.size.x as u8, model.size.z as u8, model.size.y as u8],
@@ -252,12 +257,13 @@ impl VoxLoader {
             &self.allocator,
         );
 
-
         let photon_energy_buffer = self
             .allocator
-            .create_device_buffer_uninit(num_blocks as u64 * 16, vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS)
+            .create_device_buffer_uninit(
+                num_blocks as u64 * 16,
+                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            )
             .unwrap();
-
 
         let future_to_wait = material_buffer.join(geometry);
         future_to_wait.map(|(buffer, geometry)| {
@@ -279,13 +285,11 @@ impl AssetLoader for VoxLoader {
         Box::pin(async {
             let file = dot_vox::load_bytes(bytes).map_err(|str| anyhow::Error::msg(str))?;
 
-            let palette = self.load_palette(&file.palette)
-            .schedule_on_queue(self.transfer_queue);
-        
             let palette = self
-                .queues
-                .submit(palette, &mut Default::default())
-                .await;
+                .load_palette(&file.palette)
+                .schedule_on_queue(self.transfer_queue);
+
+            let palette = self.queues.submit(palette, &mut Default::default()).await;
 
             let palette_handle =
                 load_context.set_labeled_asset("palette", LoadedAsset::new(palette.into_inner()));

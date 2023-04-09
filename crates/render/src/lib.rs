@@ -5,12 +5,14 @@
 #![feature(int_roundings)]
 #![feature(associated_type_bounds)]
 #![feature(specialization)]
+#![feature(inherent_associated_types)]
 
 use bevy_app::{Plugin, Update};
 mod blas;
 mod deferred_task;
 mod geometry;
 mod material;
+mod noise;
 mod pipeline;
 mod projection;
 mod sbt;
@@ -23,6 +25,7 @@ use blas::{build_blas_system, BlasStore};
 use deferred_task::DeferredTaskPool;
 pub use geometry::*;
 pub use material::*;
+pub use noise::BlueNoise;
 pub use pipeline::*;
 pub use projection::*;
 use rhyolite::ash::vk;
@@ -67,6 +70,7 @@ impl Plugin for RenderPlugin {
                 rhyolite::ash::extensions::khr::AccelerationStructure::name(),
                 rhyolite::ash::extensions::khr::RayTracingPipeline::name(),
                 rhyolite::ash::vk::KhrPipelineLibraryFn::name(),
+                rhyolite::ash::vk::ExtShaderAtomicFloatFn::name(),
             ],
             enabled_device_features: Box::new(rhyolite::PhysicalDeviceFeatures {
                 v13: vk::PhysicalDeviceVulkan13Features {
@@ -100,6 +104,10 @@ impl Plugin for RenderPlugin {
                     ray_tracing_pipeline: vk::TRUE,
                     ..Default::default()
                 },
+                shader_atomics: vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT {
+                    shader_buffer_float32_atomic_add: vk::TRUE,
+                    ..Default::default()
+                },
                 ..Default::default()
             }),
             ..rhyolite_bevy::RenderPlugin::default()
@@ -107,7 +115,8 @@ impl Plugin for RenderPlugin {
         .register_type::<Renderable>()
         .add_systems(Update, build_blas_system.in_set(RenderSystems::SetUp))
         .init_resource::<BlasStore>()
-        .add_asset::<ShaderModule>();
+        .add_asset::<ShaderModule>()
+        .init_resource::<BlueNoise>();
 
         let device = app.world.resource::<rhyolite_bevy::Device>();
         DeferredTaskPool::init(device.inner().clone());

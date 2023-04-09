@@ -14,7 +14,7 @@ pub struct PaletteMaterial {
     /// Compacted list of indexes into the palette array.
     data: ResidentBuffer,
 
-    photon_energy: ResidentBuffer
+    photon_energy: ResidentBuffer,
 }
 
 impl PaletteMaterial {
@@ -22,13 +22,13 @@ impl PaletteMaterial {
         geometry: Handle<VoxGeometry>,
         palette: Handle<VoxPalette>,
         data: ResidentBuffer,
-        photon_energy: ResidentBuffer
+        photon_energy: ResidentBuffer,
     ) -> Self {
         Self {
             palette,
             data,
             geometry,
-            photon_energy
+            photon_energy,
         }
     }
 }
@@ -58,36 +58,29 @@ impl dust_render::Material for PaletteMaterial {
 
     fn rchit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
         match ray_type {
-            Self::Pipeline::PRIMARY_RAYTYPE => 
-                Some(SpecializedShader::for_shader(
-                    asset_server.load("hit.rchit.spv"),
-                    vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-                )),
-            Self::Pipeline::PHOTON_RAYTYPE => 
-                Some(SpecializedShader::for_shader(
-                    asset_server.load("photon.rchit.spv"),
-                    vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-                )),
-            _ => None
+            Self::Pipeline::PRIMARY_RAYTYPE => Some(SpecializedShader::for_shader(
+                asset_server.load("hit.rchit.spv"),
+                vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+            )),
+            Self::Pipeline::PHOTON_RAYTYPE => Some(SpecializedShader::for_shader(
+                asset_server.load("photon.rchit.spv"),
+                vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+            )),
+            _ => None,
         }
     }
 
-    fn intersection_shader(
-        ray_type: u32,
-        asset_server: &AssetServer,
-    ) -> Option<SpecializedShader> {
+    fn intersection_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
         match ray_type {
-            Self::Pipeline::PRIMARY_RAYTYPE => 
-                Some(SpecializedShader::for_shader(
-                    asset_server.load("hit.rint.spv"),
-                    vk::ShaderStageFlags::INTERSECTION_KHR,
-                )),
-            Self::Pipeline::PHOTON_RAYTYPE => 
-                Some(SpecializedShader::for_shader(
-                    asset_server.load("photon.rint.spv"),
-                    vk::ShaderStageFlags::INTERSECTION_KHR,
-                )),
-            _ => None
+            Self::Pipeline::PRIMARY_RAYTYPE => Some(SpecializedShader::for_shader(
+                asset_server.load("hit.rint.spv"),
+                vk::ShaderStageFlags::INTERSECTION_KHR,
+            )),
+            Self::Pipeline::PHOTON_RAYTYPE => Some(SpecializedShader::for_shader(
+                asset_server.load("photon.rint.spv"),
+                vk::ShaderStageFlags::INTERSECTION_KHR,
+            )),
+            _ => None,
         }
     }
 
@@ -105,7 +98,7 @@ impl dust_render::Material for PaletteMaterial {
             geometry_ptr: geometry.geometry_buffer().device_address(),
             material_ptr: self.data.device_address(),
             palette_ptr: palette.buffer.device_address(),
-            photon_energy_ptr: self.photon_energy.device_address()
+            photon_energy_ptr: self.photon_energy.device_address(),
         }
     }
 }

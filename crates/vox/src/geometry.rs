@@ -128,16 +128,17 @@ impl VoxGeometry {
                 })
         };
         let num_blocks = aabbs.len() as u32;
-        let future = aabb_buffer
-            .join(geometry_buffer)
-            .map(move |(aabb_buffer, geometry_buffer)| Self {
-                tree,
-                size,
-                unit_size,
-                aabb_buffer: Arc::new(aabb_buffer.into_inner()),
-                geometry_buffer: Arc::new(geometry_buffer.into_inner()),
-                num_blocks
-            });
+        let future =
+            aabb_buffer
+                .join(geometry_buffer)
+                .map(move |(aabb_buffer, geometry_buffer)| Self {
+                    tree,
+                    size,
+                    unit_size,
+                    aabb_buffer: Arc::new(aabb_buffer.into_inner()),
+                    geometry_buffer: Arc::new(geometry_buffer.into_inner()),
+                    num_blocks,
+                });
         (future, num_blocks)
     }
     pub fn set(&mut self, coords: UVec3, value: Option<bool>) {

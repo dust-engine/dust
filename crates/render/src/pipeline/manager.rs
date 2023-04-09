@@ -39,7 +39,7 @@ pub struct RayTracingPipelineManagerSpecializedPipeline<'a> {
     hitgroup_mapping: &'a BTreeMap<u32, u32>,
 
     /// A subset of all raytypes
-    raytypes: &'a [u32]
+    raytypes: &'a [u32],
 }
 impl<'a> HasDevice for RayTracingPipelineManagerSpecializedPipeline<'a> {
     fn device(&self) -> &Arc<rhyolite::Device> {
@@ -230,7 +230,7 @@ impl RayTracingPipelineManager {
                     self.pipeline_characteristics.create_info.clone(),
                     self.pipeline_cache.clone(),
                     shader_store,
-                    &self.raytypes
+                    &self.raytypes,
                 );
                 ready = false;
             };
@@ -304,7 +304,7 @@ impl RayTracingPipelineManager {
         create_info: RayTracingPipelineLibraryCreateInfo,
         pipeline_cache: Option<Arc<PipelineCache>>,
         shader_store: &Assets<ShaderModule>,
-        raytypes: &[u32]
+        raytypes: &[u32],
     ) {
         let normalize_shader = |a: &SpecializedShader| {
             let shader = shader_store.get(&a.shader)?;
@@ -317,8 +317,11 @@ impl RayTracingPipelineManager {
             })
         };
         let ty = pipeline_characteristics.materials[material_index].ty;
-        let hitgroups = raytypes.iter()
-        .map(|raytype| &pipeline_characteristics.materials[material_index].shaders[*raytype as usize])
+        let hitgroups = raytypes
+            .iter()
+            .map(|raytype| {
+                &pipeline_characteristics.materials[material_index].shaders[*raytype as usize]
+            })
             .map(|(rchit, rint, rahit)| {
                 let rchit = rchit.as_ref().and_then(normalize_shader);
                 let rint = rint.as_ref().and_then(normalize_shader);

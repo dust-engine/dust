@@ -3,9 +3,10 @@
 use bevy_app::{App, Plugin, Startup};
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParamItem;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
-use dust_render::{PinholeProjection, ShaderModule, StandardPipeline, TLASStore};
+use dust_render::{BlueNoise, PinholeProjection, ShaderModule, StandardPipeline, TLASStore};
 
 use rhyolite::ash::vk;
 use rhyolite::clear_image;
@@ -17,7 +18,7 @@ use rhyolite::{
 };
 
 use rhyolite_bevy::{
-    Allocator, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
+    Allocator, Image, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
 };
 use std::ops::Deref;
 
@@ -64,7 +65,15 @@ fn main() {
     app.run();
 }
 
+#[derive(Resource)]
+pub struct NoiseResource {
+    noise: bevy_asset::Handle<Image>,
+}
+
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(NoiseResource {
+        noise: asset_server.load("stbn_unitvec3_cosine_2Dx1D_128x128x64.png"),
+    });
     commands.spawn(bevy_scene::SceneBundle {
         scene: asset_server.load("castle.vox"),
         ..Default::default()
@@ -95,10 +104,9 @@ impl Plugin for RenderSystem {
             |mut queues: ResMut<Queues>,
              queue_router: Res<QueuesRouter>,
              mut tlas_store: ResMut<TLASStore>,
-             _allocator: Res<Allocator>,
              mut pipeline: ResMut<StandardPipeline>,
-             shaders: Res<Assets<ShaderModule>>,
              mut recycled_state: Local<_>,
+             mut render_params: SystemParamItem<StandardPipeline::RenderParams>,
              cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
@@ -116,7 +124,7 @@ impl Plugin for RenderSystem {
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
                             let accel_struct = accel_struct.await;
-                            if let Some(render) = pipeline.render(&mut swapchain_image, &accel_struct, shaders.deref(), camera) {
+                            if let Some(render) = pipeline.render(&mut swapchain_image, &accel_struct, &mut render_params, camera) {
                                 render.await;
                                 rendered = true;
                             }

@@ -23,11 +23,22 @@ layout(buffer_reference, buffer_reference_align = 1, scalar) buffer MaterialInfo
 layout(buffer_reference) buffer PaletteInfo {
     u8vec4 palette[];
 };
+struct PhotonEnergy {
+    vec3 energy;
+    uint count;
+};
+
+layout(buffer_reference) buffer PhotonEnergyInfo {
+    // Indexed by block id
+    PhotonEnergy blocks[];
+};
+
 
 layout(shaderRecordEXT) buffer sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
     PaletteInfo paletteInfo;
+    PhotonEnergyInfo photon_energy_info;
 };
 //layout(set = 1, binding = 1, r8ui) uniform readonly uimage2D bindless_StorageImage[];
 
@@ -50,5 +61,8 @@ void main() {
     uint8_t palette_index = materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = paletteInfo.palette[palette_index];
 
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(color.rgb) / 255.0, 1.0));
+    PhotonEnergy energy = photon_energy_info.blocks[gl_PrimitiveID];
+    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(energy.energy / float(energy.count) / 100.0, 1.0));
+
+    //imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(color.rgb) / 255.0, 1.0));
 }

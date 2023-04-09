@@ -4,8 +4,8 @@ use std::{
 };
 
 use bevy_asset::{AssetServer, Assets};
-use bevy_ecs::system::{Resource, SystemParamItem};
-use bevy_math::{Vec3, Quat};
+use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
+use bevy_math::{Quat, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rhyolite::{
@@ -18,13 +18,13 @@ use rhyolite::{
     },
     macros::{commands, set_layout},
     utils::retainer::{Retainer, RetainerHandle},
-    BufferLike, HasDevice, ImageLike, ImageViewLike,
+    BufferLike, HasDevice, ImageLike, ImageViewLike, Sampler,
 };
-use rhyolite_bevy::Allocator;
+use rhyolite_bevy::{Allocator, Image, SlicedImageArray};
 
 use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, PipelineSbtManagerInfo, SbtManager},
-    PinholeProjection, RayTracingPipelineManagerSpecializedPipeline, ShaderModule,
+    BlueNoise, PinholeProjection, RayTracingPipelineManagerSpecializedPipeline, ShaderModule,
     SpecializedShader,
 };
 
@@ -49,20 +49,39 @@ impl HasDevice for StandardPipeline {
 impl RayTracingPipeline for StandardPipeline {
     fn create_info() -> rhyolite::RayTracingPipelineLibraryCreateInfo {
         rhyolite::RayTracingPipelineLibraryCreateInfo {
-            max_pipeline_ray_payload_size: 12,
+            max_pipeline_ray_payload_size: 16,
             ..Default::default()
         }
     }
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
-        let set1 = set_layout! {
+        let mut set1 = set_layout! {
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
             img_output: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-        }
-        .build(device.clone())
-        .unwrap();
+
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
+            noise_unitvec3_cosine: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        };
+        set1.bindings[2].immutable_samplers = vec![Arc::new(
+            Sampler::new(
+                device.clone(),
+                &vk::SamplerCreateInfo {
+                    mag_filter: vk::Filter::NEAREST,
+                    min_filter: vk::Filter::NEAREST,
+                    mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+                    address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                    address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                    address_mode_w: vk::SamplerAddressMode::REPEAT,
+                    unnormalized_coordinates: vk::TRUE,
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        )];
+
+        let set1 = set1.build(device.clone()).unwrap();
         Arc::new(
             rhyolite::PipelineLayout::new(
                 device.clone(),
@@ -162,11 +181,17 @@ struct StandardPipelinePhotonCamera {
 impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
     pub const PHOTON_RAYTYPE: u32 = 1;
+
+    pub type RenderParams = (
+        SRes<Assets<ShaderModule>>,
+        SRes<Assets<SlicedImageArray>>,
+        SRes<BlueNoise>,
+    );
     pub fn render<'a>(
         &'a mut self,
         target: &'a mut RenderImage<impl ImageViewLike>,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
-        shader_store: &'a Assets<ShaderModule>,
+        params: &'a mut SystemParamItem<Self::RenderParams>,
         camera: (&PinholeProjection, &GlobalTransform),
     ) -> Option<
         impl GPUCommandFuture<
@@ -175,8 +200,10 @@ impl StandardPipeline {
                 RecycledState: 'static + Default,
             > + 'a,
     > {
+        let (shader_store, image_store, blue_noise) = params;
         let primary_pipeline = self.primary_ray_pipeline.get_pipeline(shader_store)?;
         let photon_pipeline = self.photon_ray_pipeline.get_pipeline(shader_store)?;
+        let noise_img = image_store.get(&blue_noise.unitvec3_cosine)?;
         self.hitgroup_sbt_manager
             .specify_pipelines(&[primary_pipeline, photon_pipeline]);
         let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer()?;
@@ -193,9 +220,15 @@ impl StandardPipeline {
             tan_half_fov: (camera.0.fov / 2.0).tan(),
         };
 
-        let affine =  bevy_math::Affine3A::from_scale_rotation_translation(
-            Vec3::splat(50.0),
-            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2), Default::default());
+        let affine = bevy_math::Affine3A::from_scale_rotation_translation(
+            Vec3::splat(500.0),
+            Quat::from_rotation_x(-2.5),
+            Vec3 {
+                x: 0.0,
+                y: 1000.0,
+                z: -500.0,
+            },
+        );
         let photon_camera = StandardPipelinePhotonCamera {
             camera_view_col0: affine.matrix3.x_axis.into(),
             camera_view_col1: affine.matrix3.y_axis.into(),
@@ -203,8 +236,8 @@ impl StandardPipeline {
             near: 0.1,
             far: 10000.0,
             padding: 0.0,
-            camera_position: Vec3 { x: 0.0, y: 1000.0, z: 0.0 },
-            strength: 100.0
+            camera_position: affine.translation.into(),
+            strength: 100.0,
         };
 
         self.pipeline_sbt_manager
@@ -226,7 +259,8 @@ impl StandardPipeline {
                 desc_pool,
                 hitgroup_sbt_buffer: &hitgroup_sbt_buffer,
                 hitgroup_stride,
-                pipeline_sbt_buffer: &pipeline_sbt_buffer
+                pipeline_sbt_buffer: &pipeline_sbt_buffer,
+                noise_img
             }.await;
             retain!(hitgroup_sbt_buffer);
             retain!(pipeline_sbt_buffer);
@@ -246,6 +280,7 @@ struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, HitgroupB
     desc_pool: &'a mut Retainer<DescriptorPool>,
     hitgroup_sbt_buffer: &'a RenderRes<HitgroupBuf>,
     pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
+    noise_img: &'a rhyolite_bevy::SlicedImageArray,
     hitgroup_stride: usize,
 }
 
@@ -260,7 +295,7 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
         PerFrameContainer<Vec<vk::DescriptorSet>>,
     )>;
 
-    type RecycledState = PerFrameState<Vec<vk::DescriptorSet>>;
+    type RecycledState = (PerFrameState<Vec<vk::DescriptorSet>>, usize);
 
     fn init(
         self: std::pin::Pin<&mut Self>,
@@ -272,9 +307,18 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
     fn record(
         self: std::pin::Pin<&mut Self>,
         ctx: &mut rhyolite::future::CommandBufferRecordContext,
-        state_desc_sets: &mut Self::RecycledState,
+        recycled_state: &mut Self::RecycledState,
     ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
+        let (state_desc_sets, noise_texture_index) = recycled_state;
         let this = self.project();
+        let noise_texture_index = {
+            let index = *noise_texture_index;
+            *noise_texture_index += 1;
+            if *noise_texture_index as u32 >= this.noise_img.subresource_range().layer_count {
+                *noise_texture_index = 0;
+            }
+            index
+        };
         let desc_set = use_per_frame_state(state_desc_sets, || {
             this.desc_pool
                 .allocate_for_pipeline_layout(this.primary_pipeline.layout())
@@ -309,6 +353,18 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
                         descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
                         ..Default::default()
                     },
+                    vk::WriteDescriptorSet {
+                        dst_set: desc_set[0],
+                        dst_binding: 2,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            sampler: vk::Sampler::null(),
+                            image_view: this.noise_img.slice(noise_texture_index).raw_image_view(),
+                            image_layout: vk::ImageLayout::GENERAL,
+                        },
+                        ..Default::default()
+                    },
                 ],
                 &[],
             );
@@ -333,7 +389,7 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
             device.rtx_loader().cmd_trace_rays(
                 command_buffer,
                 &this.pipeline_sbt_buffer.inner().rgen(1),
-                &Default::default(),
+                &this.pipeline_sbt_buffer.inner().miss(),
                 &vk::StridedDeviceAddressRegionKHR {
                     device_address: this.hitgroup_sbt_buffer.inner().device_address(),
                     stride: *this.hitgroup_stride as u64,
