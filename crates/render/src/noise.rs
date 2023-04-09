@@ -1,4 +1,3 @@
-use bevy_app::Plugin;
 use bevy_asset::AssetServer;
 use bevy_ecs::world::FromWorld;
 use rhyolite_bevy::SlicedImageArray;

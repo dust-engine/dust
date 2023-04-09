@@ -48,6 +48,7 @@ layout(shaderRecordEXT) buffer Sbt {
     PaletteInfo paletteInfo;
     PhotonEnergyInfo photon_energy_info;
 } sbt;
+hitAttributeEXT uint8_t voxelId;
 
 
 void main() {
@@ -56,6 +57,8 @@ void main() {
     atomicAdd(sbt.photon_energy_info.blocks[gl_PrimitiveID].energy.y, photon.energy.y);
     atomicAdd(sbt.photon_energy_info.blocks[gl_PrimitiveID].energy.z, photon.energy.z);
 
-
+    photon.energy *= 0.5;
     photon.hitT = gl_HitTEXT;
 }
+// TODO: use atomic swap on frame index, use weighted average function for irradiance cache
+// This makes photon mapping nearly free by avoiding resets and just storing a timestamp

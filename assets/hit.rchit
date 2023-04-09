@@ -63,6 +63,4 @@ void main() {
 
     PhotonEnergy energy = photon_energy_info.blocks[gl_PrimitiveID];
     imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(energy.energy / float(energy.count) / 100.0, 1.0));
-
-    //imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(color.rgb) / 255.0, 1.0));
 }

@@ -8,19 +8,20 @@ use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
 use bevy_math::{Quat, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
+use rand::Rng;
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
-    descriptor::DescriptorPool,
+    descriptor::{DescriptorPool, PushConstants},
     future::{
         use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, PerFrameContainer,
         PerFrameState, RenderImage, RenderRes,
     },
     macros::{commands, set_layout},
     utils::retainer::{Retainer, RetainerHandle},
-    BufferLike, HasDevice, ImageLike, ImageViewLike, Sampler,
+    BufferLike, HasDevice, ImageLike, ImageViewLike,
 };
-use rhyolite_bevy::{Allocator, Image, SlicedImageArray};
+use rhyolite_bevy::{Allocator, SlicedImageArray};
 
 use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, PipelineSbtManagerInfo, SbtManager},
@@ -54,32 +55,16 @@ impl RayTracingPipeline for StandardPipeline {
         }
     }
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
-        let mut set1 = set_layout! {
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
+        let set1 = set_layout! {
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
             img_output: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
-            noise_unitvec3_cosine: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            noise_unitvec3_cosine: vk::DescriptorType::SAMPLED_IMAGE,
         };
-        set1.bindings[2].immutable_samplers = vec![Arc::new(
-            Sampler::new(
-                device.clone(),
-                &vk::SamplerCreateInfo {
-                    mag_filter: vk::Filter::NEAREST,
-                    min_filter: vk::Filter::NEAREST,
-                    mipmap_mode: vk::SamplerMipmapMode::NEAREST,
-                    address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-                    address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-                    address_mode_w: vk::SamplerAddressMode::REPEAT,
-                    unnormalized_coordinates: vk::TRUE,
-                    ..Default::default()
-                },
-            )
-            .unwrap(),
-        )];
 
         let set1 = set1.build(device.clone()).unwrap();
         Arc::new(
@@ -175,7 +160,17 @@ struct StandardPipelinePhotonCamera {
     camera_view_col2: Vec3,
     strength: f32,
     camera_position: Vec3,
-    padding: f32,
+    rand: u32,
+}
+#[derive(AsStd430, Default, PushConstants)]
+struct StandardPipelinePushConstant {
+    #[stage(vk::ShaderStageFlags::RAYGEN_KHR)]
+    rand: u32,
+    #[stage(
+        vk::ShaderStageFlags::RAYGEN_KHR,
+        vk::ShaderStageFlags::CLOSEST_HIT_KHR
+    )]
+    frame_index: u32,
 }
 
 impl StandardPipeline {
@@ -235,7 +230,7 @@ impl StandardPipeline {
             camera_view_col2: affine.matrix3.z_axis.into(),
             near: 0.1,
             far: 10000.0,
-            padding: 0.0,
+            rand: rand::thread_rng().gen(),
             camera_position: affine.translation.into(),
             strength: 100.0,
         };
@@ -357,11 +352,11 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
                         dst_set: desc_set[0],
                         dst_binding: 2,
                         descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
                             sampler: vk::Sampler::null(),
                             image_view: this.noise_img.slice(noise_texture_index).raw_image_view(),
-                            image_layout: vk::ImageLayout::GENERAL,
+                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                         },
                         ..Default::default()
                     },

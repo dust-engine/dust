@@ -21,7 +21,7 @@ pub struct PinholeProjection {
 impl Default for PinholeProjection {
     fn default() -> Self {
         Self {
-            fov: std::f32::consts::FRAC_PI_2,
+            fov: std::f32::consts::FRAC_PI_4,
             near: 0.1,
             far: 1000.0,
         }

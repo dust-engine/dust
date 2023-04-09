@@ -1,12 +1,12 @@
 #![feature(generators)]
 #![feature(int_roundings)]
 use bevy_app::{App, Plugin, Startup};
-use bevy_asset::{AssetServer, Assets};
+use bevy_asset::{AssetServer};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
-use dust_render::{BlueNoise, PinholeProjection, ShaderModule, StandardPipeline, TLASStore};
+use dust_render::{PinholeProjection, StandardPipeline, TLASStore};
 
 use rhyolite::ash::vk;
 use rhyolite::clear_image;
@@ -18,9 +18,9 @@ use rhyolite::{
 };
 
 use rhyolite_bevy::{
-    Allocator, Image, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
+    Image, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
 };
-use std::ops::Deref;
+
 
 fn main() {
     let mut app = App::new();
