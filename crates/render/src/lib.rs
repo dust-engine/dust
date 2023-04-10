@@ -6,6 +6,7 @@
 #![feature(associated_type_bounds)]
 #![feature(specialization)]
 #![feature(inherent_associated_types)]
+#![feature(btree_drain_filter)]
 
 use bevy_app::{Plugin, Update};
 mod blas;

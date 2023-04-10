@@ -13,6 +13,7 @@ impl ShaderModule {
     }
 }
 
+#[derive(Clone)]
 pub struct SpecializedShader {
     pub stage: vk::ShaderStageFlags,
     pub flags: vk::PipelineShaderStageCreateFlags,

@@ -1,6 +1,6 @@
 use std::{alloc::Layout, collections::HashMap, sync::Arc};
 
-use bevy_asset::AssetServer;
+use bevy_asset::{AssetServer, Handle};
 use bevy_ecs::{
     prelude::Component,
     system::{Resource, SystemParamItem},
@@ -12,13 +12,14 @@ mod manager;
 mod plugin;
 mod standard;
 
-use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable};
+use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable, ShaderModule};
 pub use builder::RayTracingPipelineBuilder;
 pub use manager::{RayTracingPipelineManager, RayTracingPipelineManagerSpecializedPipeline};
 
 pub use plugin::RayTracingPipelinePlugin;
 pub use standard::StandardPipeline;
 
+#[derive(Clone)]
 struct RayTracingPipelineCharacteristicsMaterialInfo {
     ty: rhyolite::RayTracingHitGroupType,
     /// Pipeline library containing n hitgroups, where n = number of ray types.
@@ -34,6 +35,7 @@ impl RayTracingPipelineCharacteristics {
     }
 }
 
+#[derive(Clone)]
 pub struct RayTracingPipelineCharacteristics {
     pub num_frame_in_flight: u32,
     layout: Arc<PipelineLayout>,
@@ -69,6 +71,10 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
         params: &mut SystemParamItem<M::ShaderParameterParams>,
     ) -> SbtIndex;
     fn material_instance_removed<M: Material<Pipeline = Self>>(&mut self) {}
+
+    /// Implementation need to call shader_updated on each contained RayTracingPipelineManager
+    /// Optional; useful for shader hot-reloading.
+    fn shader_updated(&mut self, _shader: &Handle<ShaderModule>){}
 
     fn create_info() -> rhyolite::RayTracingPipelineLibraryCreateInfo {
         Default::default()

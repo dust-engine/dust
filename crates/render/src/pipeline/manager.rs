@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use bevy_asset::Assets;
+use bevy_asset::{Assets, Handle};
 use bevy_tasks::AsyncComputeTaskPool;
 use rhyolite::{
     ash::prelude::VkResult, HasDevice, PipelineCache, PipelineLayout, RayTracingPipeline,
@@ -79,6 +79,7 @@ pub struct RayTracingPipelineManager {
 
     pipeline_cache: Option<Arc<PipelineCache>>,
 
+    /// Raygen shaders, miss shaders, callable shaders
     shaders: Vec<SpecializedShader>,
 }
 
@@ -131,6 +132,27 @@ impl RayTracingPipelineManager {
         self.materials[id].instance_count -= 1;
         if self.materials[id].instance_count == 0 {
             self.current_material_flag &= !(1 << id); // toggle flag
+        }
+    }
+    pub fn shader_updated(&mut self, shader: &Handle<ShaderModule>) {
+        for s in self.shaders.iter() {
+            if &s.shader == shader {
+                self.pipeline_base_library = None;
+                self.specialized_pipelines.clear();
+            }
+        }
+        'outer: for (material_id, material) in self.pipeline_characteristics.materials.iter().enumerate() {
+            for s in material.shaders
+            .iter()
+            .flat_map(|a| [&a.0, &a.1, &a.2]) {
+                if let Some(s) = s && &s.shader == shader {
+                    self.materials[material_id].pipeline_library = None;
+                    self.specialized_pipelines.drain_filter(|material_mask, _| {
+                        *material_mask & (1 << material_id) != 0
+                    });
+                    continue 'outer;
+                }
+            }
         }
     }
     pub fn get_pipeline(

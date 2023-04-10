@@ -35,7 +35,10 @@ fn main() {
         .add_plugin(bevy_window::WindowPlugin::default())
         .add_plugin(bevy_a11y::AccessibilityPlugin)
         .add_plugin(bevy_winit::WinitPlugin::default())
-        .add_plugin(bevy_asset::AssetPlugin::default())
+        .add_plugin(bevy_asset::AssetPlugin {
+            watch_for_changes: true,
+            ..Default::default()
+        })
         .add_plugin(dust_render::RenderPlugin::default())
         .add_plugin(bevy_time::TimePlugin::default())
         .add_plugin(bevy_scene::ScenePlugin::default())
