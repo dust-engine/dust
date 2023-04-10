@@ -25,7 +25,7 @@ layout(buffer_reference) buffer PaletteInfo {
 };
 struct PhotonEnergy {
     vec3 energy;
-    uint count;
+    uint lastAccessedFrame;
 };
 
 layout(buffer_reference) buffer PhotonEnergyInfo {
@@ -62,5 +62,5 @@ void main() {
     u8vec4 color = paletteInfo.palette[palette_index];
 
     PhotonEnergy energy = photon_energy_info.blocks[gl_PrimitiveID];
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(energy.energy / float(energy.count) / 100.0, 1.0));
+    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(energy.energy / 150.0 + (vec3(color) / 500.0), 1.0));
 }

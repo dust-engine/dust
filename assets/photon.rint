@@ -31,7 +31,13 @@ vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
     float t_max = min(min(t2.x, t2.y), t2.z);
     return vec2(t_min, t_max);
 }
+hitAttributeEXT vec3 normal;
 
+vec3 CubedNormalize(vec3 dir) {
+    vec3 dir_abs = abs(dir);
+    float max_element = max(dir_abs.x, max(dir_abs.y, dir_abs.z));
+    return -sign(dir) * step(max_element, dir_abs);
+}
 
 void main()
 {
@@ -46,5 +52,9 @@ void main()
     if (initialIntersectionT.x >= initialIntersectionT.y) {
         return;
     }
+
+    vec3 boxCenter = block.position.xyz + vec3(2.0, 2.0, 2.0);
+    vec3 hitPoint = gl_ObjectRayOriginEXT + gl_ObjectRayDirectionEXT * initialIntersectionT.x;
+    normal = CubedNormalize(hitPoint - boxCenter);
     reportIntersectionEXT(initialIntersectionT.x, 0);
 }

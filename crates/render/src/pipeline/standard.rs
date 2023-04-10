@@ -50,7 +50,8 @@ impl HasDevice for StandardPipeline {
 impl RayTracingPipeline for StandardPipeline {
     fn create_info() -> rhyolite::RayTracingPipelineLibraryCreateInfo {
         rhyolite::RayTracingPipelineLibraryCreateInfo {
-            max_pipeline_ray_payload_size: 16,
+            max_pipeline_ray_payload_size: 32,
+            max_pipeline_ray_hit_attribute_size: 32,
             ..Default::default()
         }
     }
@@ -62,7 +63,7 @@ impl RayTracingPipeline for StandardPipeline {
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
 
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
             noise_unitvec3_cosine: vk::DescriptorType::SAMPLED_IMAGE,
         };
 
@@ -71,6 +72,7 @@ impl RayTracingPipeline for StandardPipeline {
             rhyolite::PipelineLayout::new(
                 device.clone(),
                 vec![Arc::new(set1)],
+                StandardPipelinePushConstant::ranges().as_slice(),
                 vk::PipelineLayoutCreateFlags::empty(),
             )
             .unwrap(),
@@ -122,6 +124,10 @@ impl RayTracingPipeline for StandardPipeline {
             pipeline_sbt_manager,
         }
     }
+    fn shader_updated(&mut self, shader: &bevy_asset::Handle<ShaderModule>) {
+        self.primary_ray_pipeline.shader_updated(shader);
+        self.photon_ray_pipeline.shader_updated(shader);
+    }
     fn material_instance_added<M: crate::Material<Pipeline = Self>>(
         &mut self,
         material: &M,
@@ -160,11 +166,12 @@ struct StandardPipelinePhotonCamera {
     camera_view_col2: Vec3,
     strength: f32,
     camera_position: Vec3,
-    rand: u32,
+    padding: u32,
 }
 #[derive(AsStd430, Default, PushConstants)]
 struct StandardPipelinePushConstant {
-    #[stage(vk::ShaderStageFlags::RAYGEN_KHR)]
+    #[stage(vk::ShaderStageFlags::RAYGEN_KHR, 
+        vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
     rand: u32,
     #[stage(
         vk::ShaderStageFlags::RAYGEN_KHR,
@@ -230,7 +237,7 @@ impl StandardPipeline {
             camera_view_col2: affine.matrix3.z_axis.into(),
             near: 0.1,
             far: 10000.0,
-            rand: rand::thread_rng().gen(),
+            padding: 0,
             camera_position: affine.translation.into(),
             strength: 100.0,
         };
@@ -286,11 +293,12 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
 
     type RetainedState = DisposeContainer<(
         Arc<rhyolite::RayTracingPipeline>,
+        Arc<rhyolite::RayTracingPipeline>,
         RetainerHandle<DescriptorPool>,
         PerFrameContainer<Vec<vk::DescriptorSet>>,
     )>;
 
-    type RecycledState = (PerFrameState<Vec<vk::DescriptorSet>>, usize);
+    type RecycledState = (PerFrameState<Vec<vk::DescriptorSet>>, u32);
 
     fn init(
         self: std::pin::Pin<&mut Self>,
@@ -304,16 +312,9 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
         ctx: &mut rhyolite::future::CommandBufferRecordContext,
         recycled_state: &mut Self::RecycledState,
     ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
-        let (state_desc_sets, noise_texture_index) = recycled_state;
+        let (state_desc_sets, frame_index) = recycled_state;
         let this = self.project();
-        let noise_texture_index = {
-            let index = *noise_texture_index;
-            *noise_texture_index += 1;
-            if *noise_texture_index as u32 >= this.noise_img.subresource_range().layer_count {
-                *noise_texture_index = 0;
-            }
-            index
-        };
+        let noise_texture_index = *frame_index % this.noise_img.subresource_range().layer_count;
         let desc_set = use_per_frame_state(state_desc_sets, || {
             this.desc_pool
                 .allocate_for_pipeline_layout(this.primary_pipeline.layout())
@@ -355,7 +356,7 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
                             sampler: vk::Sampler::null(),
-                            image_view: this.noise_img.slice(noise_texture_index).raw_image_view(),
+                            image_view: this.noise_img.slice(noise_texture_index as usize).raw_image_view(),
                             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                         },
                         ..Default::default()
@@ -368,6 +369,25 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
 
         ctx.record(|ctx, command_buffer| unsafe {
             let device = ctx.device();
+            let rand: u32 = rand::thread_rng().gen();
+            device.cmd_push_constants(
+                command_buffer,
+                this.primary_pipeline.layout().raw(),
+                vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                0,
+                {
+                    std::slice::from_raw_parts(&rand as *const _ as *const u8, 4)
+                }
+            );
+            device.cmd_push_constants(
+                command_buffer,
+                this.primary_pipeline.layout().raw(),
+                vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                4,
+                {
+                    std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4)
+                }
+            );
             device.cmd_bind_descriptor_sets(
                 command_buffer,
                 vk::PipelineBindPoint::RAY_TRACING_KHR,
@@ -415,10 +435,12 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
                 extent.depth,
             );
         });
+        *frame_index += 1;
         std::task::Poll::Ready((
             (),
             DisposeContainer::new((
                 this.primary_pipeline.pipeline().clone(),
+                this.photon_pipeline.pipeline().clone(),
                 this.desc_pool.handle(),
                 desc_set,
             )),
