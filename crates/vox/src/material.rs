@@ -13,8 +13,13 @@ pub struct PaletteMaterial {
     pub(crate) geometry: Handle<VoxGeometry>,
     /// Compacted list of indexes into the palette array.
     data: ResidentBuffer,
+}
 
-    photon_energy: ResidentBuffer,
+#[derive(bevy_reflect::TypeUuid)]
+#[uuid = "a830cefc-beee-4ea9-89af-3436c0eefe0a"]
+pub struct LightedPaletteMaterial {
+    pub material: Handle<PaletteMaterial>,
+    pub photon_energy: ResidentBuffer,
 }
 
 impl PaletteMaterial {
@@ -22,13 +27,11 @@ impl PaletteMaterial {
         geometry: Handle<VoxGeometry>,
         palette: Handle<VoxPalette>,
         data: ResidentBuffer,
-        photon_energy: ResidentBuffer,
     ) -> Self {
         Self {
             palette,
             data,
             geometry,
-            photon_energy,
         }
     }
 }
@@ -47,7 +50,7 @@ pub struct PaletteMaterialShaderParams {
     photon_energy_ptr: u64,
 }
 
-impl dust_render::Material for PaletteMaterial {
+impl dust_render::Material for LightedPaletteMaterial {
     type Pipeline = StandardPipeline;
 
     const TYPE: MaterialType = MaterialType::Procedural;
@@ -85,18 +88,19 @@ impl dust_render::Material for PaletteMaterial {
     }
 
     type ShaderParameters = PaletteMaterialShaderParams;
-    type ShaderParameterParams = (SRes<Assets<VoxGeometry>>, SRes<Assets<VoxPalette>>);
+    type ShaderParameterParams = (SRes<Assets<VoxGeometry>>, SRes<Assets<VoxPalette>>, SRes<Assets<PaletteMaterial>>);
     fn parameters(
         &self,
         _ray_type: u32,
         params: &mut SystemParamItem<Self::ShaderParameterParams>,
     ) -> Self::ShaderParameters {
-        let (geometry_store, palette_store) = params;
-        let geometry = geometry_store.get(&self.geometry).unwrap();
-        let palette = palette_store.get(&self.palette).unwrap();
+        let (geometry_store, palette_store, material_store) = params;
+        let material = material_store.get(&self.material).unwrap();
+        let geometry = geometry_store.get(&material.geometry).unwrap();
+        let palette = palette_store.get(&material.palette).unwrap();
         PaletteMaterialShaderParams {
             geometry_ptr: geometry.geometry_buffer().device_address(),
-            material_ptr: self.data.device_address(),
+            material_ptr: material.data.device_address(),
             palette_ptr: palette.buffer.device_address(),
             photon_energy_ptr: self.photon_energy.device_address(),
         }

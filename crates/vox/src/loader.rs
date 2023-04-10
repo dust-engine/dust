@@ -22,10 +22,10 @@ use rhyolite::{
     QueueRef,
 };
 
-use bevy_asset::{AssetLoader, Handle, LoadedAsset};
+use bevy_asset::{AssetLoader, Handle, LoadedAsset, Assets};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter};
 
-use crate::material::PaletteMaterial;
+use crate::material::{PaletteMaterial, LightedPaletteMaterial};
 
 pub struct VoxLoader {
     allocator: rhyolite_bevy::Allocator,
@@ -250,27 +250,19 @@ impl VoxLoader {
                 })
             });
 
-        let (geometry, num_blocks) = VoxGeometry::from_tree(
+        let geometry = VoxGeometry::from_tree(
             tree,
             [model.size.x as u8, model.size.z as u8, model.size.y as u8],
             1.0,
             &self.allocator,
         );
 
-        let photon_energy_buffer = self
-            .allocator
-            .create_device_buffer_uninit(
-                num_blocks as u64 * 16,
-                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-            )
-            .unwrap();
-
         let future_to_wait = material_buffer.join(geometry);
         future_to_wait.map(|(buffer, geometry)| {
             let buffer = buffer.into_inner();
             (
                 geometry,
-                PaletteMaterial::new(Handle::default(), palette, buffer, photon_energy_buffer),
+                PaletteMaterial::new(Handle::default(), palette, buffer),
             )
         })
     }
@@ -333,9 +325,10 @@ impl AssetLoader for VoxLoader {
                 .submit(geometry_materials, &mut Default::default())
                 .await;
 
-            let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>)>> =
+            let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>, u32)>> =
                 vec![None; file.models.len()];
             for (model_id, geometry, mut material) in geometry_materials.into_iter() {
+                let num_blocks = geometry.num_blocks;
                 let geometry_handle = load_context.set_labeled_asset(
                     &format!("Geometry{}", model_id),
                     LoadedAsset::new(geometry),
@@ -345,14 +338,28 @@ impl AssetLoader for VoxLoader {
                     &format!("Material{}", model_id),
                     LoadedAsset::new(material),
                 );
-                models[model_id as usize] = Some((geometry_handle, material_handle));
+                models[model_id as usize] = Some((geometry_handle, material_handle, num_blocks));
             }
-            for (model_id, entity) in traverser.instances.iter() {
-                let mut entity = world.entity_mut(*entity);
-                let (geometry_handle, material_handle) =
+            for (i, (model_id, entity)) in traverser.instances.iter().enumerate() {
+                let (geometry_handle, material_handle, num_blocks) =
                     models[*model_id as usize].as_ref().unwrap();
+
+                let lighted_material_handle = load_context.set_labeled_asset(
+                    &format!("LightedMaterial{}", i),
+                    LoadedAsset::new(LightedPaletteMaterial {
+                    material: material_handle.clone(),
+                    photon_energy: self
+                    .allocator
+                    .create_device_buffer_uninit(
+                        *num_blocks as u64 * 16,
+                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    )
+                    .unwrap(),
+                }));
+
+                let mut entity = world.entity_mut(*entity);
                 *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry_handle.clone();
-                *entity.get_mut::<Handle<PaletteMaterial>>().unwrap() = material_handle.clone();
+                *entity.get_mut::<Handle<LightedPaletteMaterial>>().unwrap() = lighted_material_handle;
             }
 
             let scene = bevy_scene::Scene::new(world);

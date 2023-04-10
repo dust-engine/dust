@@ -16,7 +16,7 @@ use rhyolite_bevy::Allocator;
 pub struct VoxGeometry {
     tree: Tree,
     size: [u8; 3],
-    num_blocks: u32,
+    pub num_blocks: u32,
     pub unit_size: f32,
 
     /// Array of AABBs, used as Acceleration Strucutre Build Input
@@ -57,7 +57,7 @@ impl VoxGeometry {
         size: [u8; 3],
         unit_size: f32,
         allocator: &Allocator,
-    ) -> (impl GPUCommandFuture<Output = Self>, u32) {
+    ) -> impl GPUCommandFuture<Output = Self> {
         let leaf_extent_int = <<TreeRoot as Node>::LeafType as Node>::EXTENT;
         let leaf_extent: Vec3A = leaf_extent_int.as_vec3a();
         let leaf_extent: Vec3A = unit_size * leaf_extent;
@@ -139,7 +139,7 @@ impl VoxGeometry {
                     geometry_buffer: Arc::new(geometry_buffer.into_inner()),
                     num_blocks,
                 });
-        (future, num_blocks)
+        future
     }
     pub fn set(&mut self, coords: UVec3, value: Option<bool>) {
         self.tree.set_value(coords, value)
