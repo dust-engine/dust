@@ -6,6 +6,7 @@
 #extension GL_EXT_scalar_block_layout : require
 
 layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
+layout(set = 0, binding = 1) uniform writeonly image2D u_diffuseOutput;
 struct Block
 {
     u16vec4 position;
@@ -40,7 +41,7 @@ layout(shaderRecordEXT) buffer sbt {
     PaletteInfo paletteInfo;
     PhotonEnergyInfo photon_energy_info;
 };
-//layout(set = 1, binding = 1, r8ui) uniform readonly uimage2D bindless_StorageImage[];
+layout(location = 0) rayPayloadInEXT float hitT;
 
 hitAttributeEXT uint8_t voxelId;
 
@@ -62,5 +63,13 @@ void main() {
     u8vec4 color = paletteInfo.palette[palette_index];
 
     PhotonEnergy energy = photon_energy_info.blocks[gl_PrimitiveID];
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(energy.energy / 150.0 + (vec3(color) / 500.0), 1.0));
+
+    vec3 diffuseColor = vec3(color) / 255.0;
+    // The parameter 0.01 was derived from the 0.99 retention factor. It's not arbitrary.
+    vec3 indirectContribution = 0.01 * energy.energy * diffuseColor;
+
+    // Store the contribution from photon maps
+    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(indirectContribution + diffuseColor * 0.2, 1.0));
+    imageStore(u_diffuseOutput, ivec2(gl_LaunchIDEXT.xy), vec4(diffuseColor, 1.0));
+    hitT = gl_HitTEXT;
 }

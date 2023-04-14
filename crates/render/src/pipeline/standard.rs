@@ -60,6 +60,9 @@ impl RayTracingPipeline for StandardPipeline {
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
             img_output: vk::DescriptorType::STORAGE_IMAGE,
 
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            diffuse_color: vk::DescriptorType::STORAGE_IMAGE,
+
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
 
@@ -103,10 +106,16 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("primary.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                vec![SpecializedShader::for_shader(
-                    asset_server.load("miss.rmiss.spv"),
-                    vk::ShaderStageFlags::MISS_KHR,
-                )],
+                vec![
+                    SpecializedShader::for_shader(
+                        asset_server.load("miss.rmiss.spv"),
+                        vk::ShaderStageFlags::MISS_KHR,
+                    ),
+                    SpecializedShader::for_shader(
+                        asset_server.load("shadow.rmiss.spv"),
+                        vk::ShaderStageFlags::MISS_KHR,
+                    ),
+                ],
                 Vec::new(),
                 pipeline_cache.as_ref().cloned(),
             ),
@@ -192,6 +201,7 @@ impl StandardPipeline {
     pub fn render<'a>(
         &'a mut self,
         target: &'a mut RenderImage<impl ImageViewLike>,
+        diffuse_img: &'a mut RenderImage<impl ImageViewLike>,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         params: &'a mut SystemParamItem<Self::RenderParams>,
         camera: (&PinholeProjection, &GlobalTransform),
@@ -231,6 +241,7 @@ impl StandardPipeline {
                 z: -500.0,
             },
         );
+        let light_dir = affine.matrix3 * Vec3::new(0.0, -1.0, 0.0);
         let photon_camera = StandardPipelinePhotonCamera {
             camera_view_col0: affine.matrix3.x_axis.into(),
             camera_view_col1: affine.matrix3.y_axis.into(),
@@ -239,7 +250,7 @@ impl StandardPipeline {
             far: 10000.0,
             padding: 0,
             camera_position: affine.translation.into(),
-            strength: 100.0,
+            strength: 0.7,
         };
 
         self.pipeline_sbt_manager
@@ -248,6 +259,8 @@ impl StandardPipeline {
             .push_raygen(photon_pipeline, photon_camera, 0);
         self.pipeline_sbt_manager
             .push_miss(primary_pipeline, EmptyShaderRecords, 0);
+        self.pipeline_sbt_manager
+            .push_miss(primary_pipeline, EmptyShaderRecords, 1);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
         let fut = commands! { move
@@ -256,6 +269,7 @@ impl StandardPipeline {
             StandardPipelineRenderingFuture {
                 accel_struct: tlas,
                 target_image: target,
+                diffuse_image: diffuse_img,
                 primary_pipeline,
                 photon_pipeline,
                 desc_pool,
@@ -274,9 +288,10 @@ impl StandardPipeline {
 use pin_project::pin_project;
 
 #[pin_project]
-struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> {
+struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike> {
     accel_struct: &'a RenderRes<Arc<AccelerationStructure>>,
     target_image: &'a mut RenderImage<TargetImage>,
+    diffuse_image: &'a mut RenderImage<DiffuseImage>,
     primary_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
     photon_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
     desc_pool: &'a mut Retainer<DescriptorPool>,
@@ -286,8 +301,8 @@ struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, HitgroupB
     hitgroup_stride: usize,
 }
 
-impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::GPUCommandFuture
-    for StandardPipelineRenderingFuture<'a, TargetImage, HitgroupBuf>
+impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::GPUCommandFuture
+    for StandardPipelineRenderingFuture<'a, TargetImage, DiffuseImage, HitgroupBuf>
 {
     type Output = ();
 
@@ -332,26 +347,30 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
                     vk::WriteDescriptorSet {
                         dst_set: desc_set[0],
                         dst_binding: 0,
-                        descriptor_count: 1,
+                        descriptor_count: 2,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                        p_image_info: &vk::DescriptorImageInfo {
+                        p_image_info: [vk::DescriptorImageInfo {
                             sampler: vk::Sampler::null(),
                             image_view: this.target_image.inner().raw_image_view(),
                             image_layout: vk::ImageLayout::GENERAL,
-                        },
+                        }, vk::DescriptorImageInfo {
+                            sampler: vk::Sampler::null(),
+                            image_view: this.diffuse_image.inner().raw_image_view(),
+                            image_layout: vk::ImageLayout::GENERAL
+                        }].as_ptr(),
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
                         p_next: &acceleration_structure_write as *const _ as *const _,
                         dst_set: desc_set[0],
-                        dst_binding: 1,
+                        dst_binding: 2,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
                         dst_set: desc_set[0],
-                        dst_binding: 2,
+                        dst_binding: 3,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
@@ -411,8 +430,8 @@ impl<'a, TargetImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::
                     size: this.hitgroup_sbt_buffer.inner.size(),
                 },
                 &vk::StridedDeviceAddressRegionKHR::default(),
-                128,
-                128,
+                256,
+                256,
                 1,
             );
             device.cmd_bind_pipeline(

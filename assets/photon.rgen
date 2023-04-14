@@ -3,8 +3,8 @@
 #extension GL_EXT_samplerless_texture_functions : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 
-layout(set = 0, binding = 1) uniform accelerationStructureEXT accelerationStructure;
-layout(set = 0, binding = 2) uniform texture2D blue_noise;
+layout(set = 0, binding = 2) uniform accelerationStructureEXT accelerationStructure;
+layout(set = 0, binding = 3) uniform texture2D blue_noise;
 
 layout(shaderRecordEXT) buffer Sbt {
     vec3 camera_view_col0;
@@ -32,32 +32,31 @@ layout(push_constant) uniform PushConstants {
 
 
 void main() {
-    //const vec2 jitter = vec2(0.31, 0.69);
     const vec2 jitter = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy - uvec2(16, 44) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xy;
     const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + jitter) / vec2(gl_LaunchSizeEXT.xy);
     const vec3 direction = vec3(0.0, 0.0, -1.0);
 
     const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
-    photon.energy = vec3(sbt.strength);
 
+    photon.energy = vec3(sbt.strength);
+    photon.hitT = 0.0;
+    traceRayEXT(
+        accelerationStructure,
+        gl_RayFlagsOpaqueEXT, // RayFlags
+        0xFF, // CullMask
+        1, // SBT offset, ray type index
+        2, // SBT stride, number of ray types
+        -1, // missIndex
+        rotationMatrix * vec3(pixelNDC, 0.0) + sbt.camera_position,     // ray origin
+        sbt.near,           // ray min range
+        rotationMatrix * direction, // direction
+        sbt.far, // tmax
+        0 // payload
+    );
 
     vec3 currentDir = rotationMatrix * direction; // Initial direction
     vec3 currentOrigin = rotationMatrix * vec3(pixelNDC, 0.0) + sbt.camera_position; // Initial origin
-    for (int i = 0; i < 5; i++) {
-        traceRayEXT(
-            accelerationStructure,
-            gl_RayFlagsOpaqueEXT , // RayFlags
-            0xFF, // CullMask
-            1, // SBT offset, ray type index
-            2, // SBT stride, number of ray types
-            1, // missIndex
-            currentOrigin,     // ray origin
-            sbt.near,           // ray min range
-            currentDir, // direction
-            sbt.far, // tmax
-            0 // payload
-        );
-
+    for (int i = 0; i < 2; i++) {
         vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(12, 24) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;
         // noiseSample is weighted on the z axis
         noiseSample = noiseSample * 2.0 - 1.0;
@@ -68,11 +67,24 @@ void main() {
         const vec3 crossed = cross(k, noiseSample);
         vec3 rotatedNoiseSample = noiseSample * cosTheta + crossed * sinTheta + k * dot(k, noiseSample) * (1.0 - cosTheta);
 
-        float d = dot(rotatedNoiseSample, vec3(photon.normal));
-        if (d < 0.0) {
+        if (dot(rotatedNoiseSample, vec3(photon.normal)) < 0.0) {
             rotatedNoiseSample = -rotatedNoiseSample;
         }
-        currentOrigin = currentOrigin + currentDir * (photon.hitT * 0.99);
-        currentDir = rotatedNoiseSample;
+        vec3 currentOrigin = currentOrigin + currentDir * (photon.hitT * 0.99);
+        vec3 currentDir = rotatedNoiseSample;
+        
+        traceRayEXT(
+            accelerationStructure,
+            gl_RayFlagsOpaqueEXT , // RayFlags
+            0xFF, // CullMask
+            1, // SBT offset, ray type index
+            2, // SBT stride, number of ray types
+            -1, // missIndex
+            currentOrigin,     // ray origin
+            sbt.near,           // ray min range
+            currentDir, // direction
+            sbt.far, // tmax
+            0 // payload
+        );
     }
 }

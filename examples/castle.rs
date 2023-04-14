@@ -9,8 +9,8 @@ use bevy_window::{PrimaryWindow, Window};
 use dust_render::{PinholeProjection, StandardPipeline, TLASStore};
 
 use rhyolite::ash::vk;
-use rhyolite::clear_image;
-use rhyolite::future::GPUCommandFutureExt;
+use rhyolite::{clear_image, ImageRequest, ImageLike, ImageExt};
+use rhyolite::future::{GPUCommandFutureExt, RenderImage};
 
 use rhyolite::{
     macros::{commands, gpu},
@@ -46,7 +46,8 @@ fn main() {
         .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
         .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
-        .add_plugin(RenderSystem);
+        .add_plugin(RenderSystem)
+        .add_systems(bevy_app::Update, print_position);
     let main_window = app
         .world
         .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -56,7 +57,8 @@ fn main() {
     app.world
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
-            image_format: vk::Format::B8G8R8A8_UNORM,
+            image_format: vk::Format::A2B10G10R10_UNORM_PACK32,
+            image_color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
             ..Default::default()
         });
@@ -91,7 +93,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 translate_sensitivity: 100.0,
                 ..Default::default()
             },
-            glam::Vec3::new(-2.0, 500.0, 5.0),
+            glam::Vec3::new(122.0, 166.61, 54.45),
             glam::Vec3::new(0., 0., 0.),
             glam::Vec3::Y,
         ));
@@ -107,6 +109,7 @@ impl Plugin for RenderSystem {
             |mut queues: ResMut<Queues>,
              queue_router: Res<QueuesRouter>,
              mut tlas_store: ResMut<TLASStore>,
+             allocator: Res<rhyolite_bevy::Allocator>,
              mut pipeline: ResMut<StandardPipeline>,
              mut recycled_state: Local<_>,
              mut render_params: SystemParamItem<StandardPipeline::RenderParams>,
@@ -124,15 +127,42 @@ impl Plugin for RenderSystem {
                 let future = gpu! {
                     let mut swapchain_image = swapchain_image.await;
                     commands! {
+                        let diffuse_color_image = rhyolite::future::use_shared_state(using!(), |_| {
+                            allocator
+                            .create_device_image_uninit(
+                                &ImageRequest {
+                                    usage: vk::ImageUsageFlags::STORAGE,
+                                    extent: swapchain_image.inner().extent(),
+                                    ..Default::default()
+                                }
+                            ).unwrap().as_2d_view().unwrap()
+                        }, |image| swapchain_image.inner().extent() != image.extent());
+                        let mut diffuse_color_image = RenderImage::new(diffuse_color_image, vk::ImageLayout::UNDEFINED);
+                        let radiance_image = rhyolite::future::use_shared_state(using!(), |_| {
+                            allocator
+                            .create_device_image_uninit(
+                                &ImageRequest {
+                                    format: vk::Format::R32G32B32A32_SFLOAT,
+                                    usage: vk::ImageUsageFlags::STORAGE,
+                                    extent: swapchain_image.inner().extent(),
+                                    ..Default::default()
+                                }
+                            ).unwrap().as_2d_view().unwrap()
+                        }, |image| swapchain_image.inner().extent() != image.extent());
+                        let mut radiance_image = RenderImage::new(radiance_image, vk::ImageLayout::UNDEFINED);
+
+
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
                             let accel_struct = accel_struct.await;
-                            if let Some(render) = pipeline.render(&mut swapchain_image, &accel_struct, &mut render_params, camera) {
+                            if let Some(render) = pipeline.render(&mut swapchain_image, &mut diffuse_color_image, &accel_struct, &mut render_params, camera) {
                                 render.await;
                                 rendered = true;
                             }
                             retain!(accel_struct);
                         }
+                        retain!(radiance_image);
+                        retain!(diffuse_color_image);
                         if !rendered {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]
@@ -146,4 +176,9 @@ impl Plugin for RenderSystem {
             };
         app.add_system(sys.in_set(RenderSystems::Render));
     }
+}
+
+fn print_position(a: Query<&GlobalTransform, With<MainCamera>>) {
+    let transform = a.iter().next().unwrap();
+    println!("{:?}", transform);
 }
