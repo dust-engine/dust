@@ -11,7 +11,9 @@ mod builder;
 mod manager;
 mod plugin;
 mod standard;
+mod tone_mapping;
 
+pub use tone_mapping::ToneMappingPipeline;
 use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable, ShaderModule};
 pub use builder::RayTracingPipelineBuilder;
 pub use manager::{RayTracingPipelineManager, RayTracingPipelineManagerSpecializedPipeline};

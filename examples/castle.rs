@@ -6,7 +6,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
-use dust_render::{PinholeProjection, StandardPipeline, TLASStore};
+use dust_render::{PinholeProjection, StandardPipeline, TLASStore, ToneMappingPipeline};
 
 use rhyolite::ash::vk;
 use rhyolite::{clear_image, ImageRequest, ImageLike, ImageExt};
@@ -47,7 +47,8 @@ fn main() {
         .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
         .add_plugin(RenderSystem)
-        .add_systems(bevy_app::Update, print_position);
+        .add_systems(bevy_app::Update, print_position)
+        .init_resource::<ToneMappingPipeline>();
     let main_window = app
         .world
         .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -112,6 +113,7 @@ impl Plugin for RenderSystem {
              allocator: Res<rhyolite_bevy::Allocator>,
              mut pipeline: ResMut<StandardPipeline>,
              mut recycled_state: Local<_>,
+             mut tone_mapping_pipeline: ResMut<ToneMappingPipeline>,
              mut render_params: SystemParamItem<StandardPipeline::RenderParams>,
              cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
@@ -155,9 +157,12 @@ impl Plugin for RenderSystem {
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
                             let accel_struct = accel_struct.await;
-                            if let Some(render) = pipeline.render(&mut swapchain_image, &mut diffuse_color_image, &accel_struct, &mut render_params, camera) {
+                            if let Some(render) = pipeline.render(&mut radiance_image, &mut diffuse_color_image, &accel_struct, &mut render_params, camera) {
                                 render.await;
                                 rendered = true;
+                            }
+                            if rendered {
+                                tone_mapping_pipeline.render(&radiance_image, &mut swapchain_image).await;
                             }
                             retain!(accel_struct);
                         }
@@ -180,5 +185,5 @@ impl Plugin for RenderSystem {
 
 fn print_position(a: Query<&GlobalTransform, With<MainCamera>>) {
     let transform = a.iter().next().unwrap();
-    println!("{:?}", transform);
+    //println!("{:?}", transform);
 }

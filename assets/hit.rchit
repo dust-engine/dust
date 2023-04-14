@@ -69,7 +69,7 @@ void main() {
     vec3 indirectContribution = 0.01 * energy.energy * diffuseColor;
 
     // Store the contribution from photon maps
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(indirectContribution + diffuseColor * 0.2, 1.0));
+    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(indirectContribution, 1.0));
     imageStore(u_diffuseOutput, ivec2(gl_LaunchIDEXT.xy), vec4(diffuseColor, 1.0));
     hitT = gl_HitTEXT;
 }

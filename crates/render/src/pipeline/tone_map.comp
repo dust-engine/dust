@@ -1,0 +1,28 @@
+#version 460
+
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(rgba8, set = 0, binding = 0) uniform readonly image2D u_src_img;
+layout(rgba8, set = 0, binding = 1) uniform writeonly image2D u_dst_img;
+
+layout(push_constant) uniform constants
+{
+    uint kernal_size;
+} PushConstants;
+
+
+vec3 aces(vec3 x) {
+  const float a = 2.51;
+  const float b = 0.03;
+  const float c = 2.43;
+  const float d = 0.59;
+  const float e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+void main() {
+    vec4 in_value = imageLoad(u_src_img, ivec2(gl_GlobalInvocationID.xy));
+    vec4 out_value = vec4(aces(in_value.rgb), in_value.a);
+    imageStore(u_dst_img, ivec2(gl_GlobalInvocationID.xy), out_value);
+}

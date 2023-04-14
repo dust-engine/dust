@@ -56,7 +56,7 @@ void main() {
 
     vec3 currentDir = rotationMatrix * direction; // Initial direction
     vec3 currentOrigin = rotationMatrix * vec3(pixelNDC, 0.0) + sbt.camera_position; // Initial origin
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 5; i++) {
         vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(12, 24) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;
         // noiseSample is weighted on the z axis
         noiseSample = noiseSample * 2.0 - 1.0;
