@@ -34,22 +34,10 @@ struct PhotonRayPayload {
 };
 layout(location = 0) rayPayloadInEXT PhotonRayPayload photon;
 
-
-struct PhotonEnergy {
-    vec3 energy;
-    uint lastAccessedFrame;
-};
-
-layout(buffer_reference) buffer PhotonEnergyInfo {
-    // Indexed by block id
-    PhotonEnergy blocks[];
-};
-
 layout(shaderRecordEXT) buffer Sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
     PaletteInfo paletteInfo;
-    PhotonEnergyInfo photon_energy_info;
 } sbt;
 
 layout(push_constant) uniform PushConstants {
@@ -58,7 +46,7 @@ layout(push_constant) uniform PushConstants {
     uint frameIndex;
 } pushConstants;
 
-hitAttributeEXT vec3 normal;
+hitAttributeEXT uint voxelId;
 
 vec3 CubedNormalize(vec3 dir) {
     vec3 dir_abs = abs(dir);
@@ -66,22 +54,58 @@ vec3 CubedNormalize(vec3 dir) {
     return sign(dir) * step(max_element, dir_abs);
 }
 
+
+
+struct RadianceHashMapEntry {
+    vec3 energy;
+    uint32_t lastAccessedFrameIndex;
+};
+layout(set = 0, binding = 4) buffer RadianceHashMap {
+    uint num_entries;
+    RadianceHashMapEntry[] entries;
+} radianceCache;
+
+uvec3 pcg3d(uvec3 v)
+{
+    v = v * 1664525 + 1013904223;
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+
+    v = v ^ (v >> 16);
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+    return v;
+}
+uint hashPayload(
+    uint instanceId,
+    uint primitiveId,
+    uint voxelId,
+    uint faceId
+) {
+    uvec3 result = pcg3d(uvec3(instanceId, primitiveId, voxelId << 16 | faceId));
+    return result.x + result.y + result.z;
+}
+
+
 void main() {
     if (photon.hitT != 0.0) {
-        const uint lastAccessedFrame = atomicExchange(sbt.photon_energy_info.blocks[gl_PrimitiveID].lastAccessedFrame, pushConstants.frameIndex);
+        uint hash = hashPayload(gl_InstanceID, gl_PrimitiveID, voxelId, 0) % radianceCache.num_entries;
+        const uint lastAccessedFrame = atomicExchange(radianceCache.entries[hash].lastAccessedFrameIndex, pushConstants.frameIndex);
 
         const uint frameDifference = pushConstants.frameIndex - lastAccessedFrame;
 
         if (frameDifference > 0) {
-            vec3 prevEnergy = sbt.photon_energy_info.blocks[gl_PrimitiveID].energy;
+            vec3 prevEnergy = radianceCache.entries[hash].energy;
             vec3 nextEnergy = prevEnergy * pow(0.99, frameDifference) + photon.energy;
 
-            sbt.photon_energy_info.blocks[gl_PrimitiveID].energy = nextEnergy;
+           radianceCache.entries[hash].energy = nextEnergy;
         }
         if (frameDifference == 0) {
-            atomicAdd(sbt.photon_energy_info.blocks[gl_PrimitiveID].energy.x, photon.energy.x);
-            atomicAdd(sbt.photon_energy_info.blocks[gl_PrimitiveID].energy.y, photon.energy.y);
-            atomicAdd(sbt.photon_energy_info.blocks[gl_PrimitiveID].energy.z, photon.energy.z);
+            atomicAdd(radianceCache.entries[hash].energy.x, photon.energy.x);
+            atomicAdd(radianceCache.entries[hash].energy.y, photon.energy.y);
+            atomicAdd(radianceCache.entries[hash].energy.z, photon.energy.z);
         }
     }
     

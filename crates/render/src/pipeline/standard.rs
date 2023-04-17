@@ -10,16 +10,19 @@ use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
 use rhyolite::{
+    update_buffer,
     accel_struct::AccelerationStructure,
     ash::vk,
+    future::GPUCommandFutureExt,
     descriptor::{DescriptorPool, PushConstants},
     future::{
+        use_shared_state_initialized,
         use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, PerFrameContainer,
-        PerFrameState, RenderImage, RenderRes,
+        PerFrameState, RenderImage, RenderRes, SharedDeviceState,
     },
     macros::{commands, set_layout},
     utils::retainer::{Retainer, RetainerHandle},
-    BufferLike, HasDevice, ImageLike, ImageViewLike,
+    BufferLike, HasDevice, ImageLike, ImageViewLike, ResidentBuffer,
 };
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 
@@ -68,6 +71,10 @@ impl RayTracingPipeline for StandardPipeline {
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
             noise_unitvec3_cosine: vk::DescriptorType::SAMPLED_IMAGE,
+
+
+            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
+            radiance_hashmap: vk::DescriptorType::STORAGE_BUFFER
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -196,6 +203,7 @@ impl StandardPipeline {
     pub type RenderParams = (
         SRes<Assets<ShaderModule>>,
         SRes<Assets<SlicedImageArray>>,
+        SRes<Allocator>,
         SRes<BlueNoise>,
     );
     pub fn render<'a>(
@@ -212,7 +220,7 @@ impl StandardPipeline {
                 RecycledState: 'static + Default,
             > + 'a,
     > {
-        let (shader_store, image_store, blue_noise) = params;
+        let (shader_store, image_store, allocator, blue_noise) = params;
         let primary_pipeline = self.primary_ray_pipeline.get_pipeline(shader_store)?;
         let photon_pipeline = self.photon_ray_pipeline.get_pipeline(shader_store)?;
         let noise_img = image_store.get(&blue_noise.unitvec3_cosine)?;
@@ -263,9 +271,29 @@ impl StandardPipeline {
             .push_miss(primary_pipeline, EmptyShaderRecords, 1);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
+
+        let allocator = allocator.clone();
         let fut = commands! { move
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
+            let a = using!();
+            let radiance_cache_buffer = use_shared_state_initialized(
+                a,
+                move |_| unsafe {
+                    let len: u32 = 16*10000;
+                    let buffer = allocator.create_device_buffer_uninit(
+                        len as u64 + 4,
+                        vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                    ).unwrap();
+                    let mut buffer = RenderRes::new(buffer);
+                    let len_data: [u8; 4] = std::mem::transmute(len);
+                    commands! { move
+                        update_buffer(&mut buffer, len_data).await;
+                        buffer
+                    }
+                },
+                |_| false,
+            ).await;
             StandardPipelineRenderingFuture {
                 accel_struct: tlas,
                 target_image: target,
@@ -276,10 +304,12 @@ impl StandardPipeline {
                 hitgroup_sbt_buffer: &hitgroup_sbt_buffer,
                 hitgroup_stride,
                 pipeline_sbt_buffer: &pipeline_sbt_buffer,
-                noise_img
+                noise_img,
+                radiance_hashmap: &radiance_cache_buffer
             }.await;
             retain!(hitgroup_sbt_buffer);
             retain!(pipeline_sbt_buffer);
+            retain!(radiance_cache_buffer);
         };
         Some(fut)
     }
@@ -299,6 +329,7 @@ struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, DiffuseIm
     pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
     noise_img: &'a rhyolite_bevy::SlicedImageArray,
     hitgroup_stride: usize,
+    radiance_hashmap: &'a RenderRes<SharedDeviceState<ResidentBuffer>>
 }
 
 impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::GPUCommandFuture

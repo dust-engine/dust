@@ -24,34 +24,50 @@ layout(buffer_reference, buffer_reference_align = 1, scalar) buffer MaterialInfo
 layout(buffer_reference) buffer PaletteInfo {
     u8vec4 palette[];
 };
-struct PhotonEnergy {
-    vec3 energy;
-    uint lastAccessedFrame;
-};
-
-layout(buffer_reference) buffer PhotonEnergyInfo {
-    // Indexed by block id
-    PhotonEnergy blocks[];
-};
-
 
 layout(shaderRecordEXT) buffer sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
     PaletteInfo paletteInfo;
-    PhotonEnergyInfo photon_energy_info;
 };
 layout(location = 0) rayPayloadInEXT float hitT;
 
 hitAttributeEXT uint8_t voxelId;
 
-vec3 randomColorList[5] = {
-    vec3(0.976, 0.906, 0.906),
-    vec3(0.871, 0.839, 0.839),
-    vec3(0.824, 0.796, 0.796),
-    vec3(0.678, 0.627, 0.651),
-    vec3(0.49, 0.576, 0.541),
+
+struct RadianceHashMapEntry {
+    vec3 energy;
+    uint32_t lastAccessedFrameIndex;
 };
+layout(set = 0, binding = 4) buffer RadianceHashMap {
+    uint num_entries;
+    RadianceHashMapEntry[] entries;
+} radianceCache;
+
+uvec3 pcg3d(uvec3 v)
+{
+    v = v * 1664525 + 1013904223;
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+
+    v = v ^ (v >> 16);
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+    return v;
+}
+uint hashPayload(
+    uint instanceId,
+    uint primitiveId,
+    uint voxelId,
+    uint faceId
+) {
+    uvec3 result = pcg3d(uvec3(instanceId, primitiveId, voxelId << 16 | faceId));
+    return result.x + result.y + result.z;
+}
+
+
 
 void main() {
     Block block = geometryInfo.blocks[gl_PrimitiveID];
@@ -62,11 +78,12 @@ void main() {
     uint8_t palette_index = materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = paletteInfo.palette[palette_index];
 
-    PhotonEnergy energy = photon_energy_info.blocks[gl_PrimitiveID];
+    uint hash = hashPayload(gl_InstanceID, gl_PrimitiveID, voxelId, 0) % radianceCache.num_entries;
+    vec3 energy = radianceCache.entries[hash].energy;
 
     vec3 diffuseColor = vec3(color) / 255.0;
     // The parameter 0.01 was derived from the 0.99 retention factor. It's not arbitrary.
-    vec3 indirectContribution = 0.01 * energy.energy * diffuseColor;
+    vec3 indirectContribution = 0.01 * energy * diffuseColor;
 
     // Store the contribution from photon maps
     imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(indirectContribution, 1.0));
