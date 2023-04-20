@@ -105,10 +105,6 @@ impl Plugin for RenderPlugin {
                     ray_tracing_pipeline: vk::TRUE,
                     ..Default::default()
                 },
-                shader_atomics: vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT {
-                    shader_buffer_float32_atomic_add: vk::TRUE,
-                    ..Default::default()
-                },
                 ..Default::default()
             }),
             ..rhyolite_bevy::RenderPlugin::default()

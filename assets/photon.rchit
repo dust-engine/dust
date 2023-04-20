@@ -103,9 +103,7 @@ void main() {
            radianceCache.entries[hash].energy = nextEnergy;
         }
         if (frameDifference == 0) {
-            atomicAdd(radianceCache.entries[hash].energy.x, photon.energy.x);
-            atomicAdd(radianceCache.entries[hash].energy.y, photon.energy.y);
-            atomicAdd(radianceCache.entries[hash].energy.z, photon.energy.z);
+            radianceCache.entries[hash].energy += photon.energy;
         }
     }
     
