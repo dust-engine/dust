@@ -13,10 +13,12 @@ mod plugin;
 mod standard;
 mod tone_mapping;
 
-pub use tone_mapping::ToneMappingPipeline;
-use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable, ShaderModule};
+use crate::{
+    material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable, ShaderModule,
+};
 pub use builder::RayTracingPipelineBuilder;
 pub use manager::{RayTracingPipelineManager, RayTracingPipelineManagerSpecializedPipeline};
+pub use tone_mapping::ToneMappingPipeline;
 
 pub use plugin::RayTracingPipelinePlugin;
 pub use standard::StandardPipeline;
@@ -76,7 +78,7 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
 
     /// Implementation need to call shader_updated on each contained RayTracingPipelineManager
     /// Optional; useful for shader hot-reloading.
-    fn shader_updated(&mut self, _shader: &Handle<ShaderModule>){}
+    fn shader_updated(&mut self, _shader: &Handle<ShaderModule>) {}
 
     fn create_info() -> rhyolite::RayTracingPipelineLibraryCreateInfo {
         Default::default()

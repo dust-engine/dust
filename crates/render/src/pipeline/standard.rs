@@ -10,17 +10,17 @@ use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
 use rhyolite::{
-    update_buffer,
     accel_struct::AccelerationStructure,
     ash::vk,
-    future::GPUCommandFutureExt,
     descriptor::{DescriptorPool, PushConstants},
+    future::GPUCommandFutureExt,
     future::{
-        use_shared_state_initialized,
-        use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, PerFrameContainer,
-        PerFrameState, RenderImage, RenderRes, SharedDeviceState,
+        use_per_frame_state, use_shared_state_initialized, Disposable, DisposeContainer,
+        GPUCommandFuture, PerFrameContainer, PerFrameState, RenderImage, RenderRes,
+        SharedDeviceState,
     },
     macros::{commands, set_layout},
+    update_buffer,
     utils::retainer::{Retainer, RetainerHandle},
     BufferLike, HasDevice, ImageLike, ImageViewLike, ResidentBuffer,
 };
@@ -186,8 +186,10 @@ struct StandardPipelinePhotonCamera {
 }
 #[derive(AsStd430, Default, PushConstants)]
 struct StandardPipelinePushConstant {
-    #[stage(vk::ShaderStageFlags::RAYGEN_KHR, 
-        vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
+    #[stage(
+        vk::ShaderStageFlags::RAYGEN_KHR,
+        vk::ShaderStageFlags::CLOSEST_HIT_KHR
+    )]
     rand: u32,
     #[stage(
         vk::ShaderStageFlags::RAYGEN_KHR,
@@ -318,7 +320,12 @@ impl StandardPipeline {
 use pin_project::pin_project;
 
 #[pin_project]
-struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike> {
+struct StandardPipelineRenderingFuture<
+    'a,
+    TargetImage: ImageViewLike,
+    DiffuseImage: ImageViewLike,
+    HitgroupBuf: BufferLike,
+> {
     accel_struct: &'a RenderRes<Arc<AccelerationStructure>>,
     target_image: &'a mut RenderImage<TargetImage>,
     diffuse_image: &'a mut RenderImage<DiffuseImage>,
@@ -329,10 +336,11 @@ struct StandardPipelineRenderingFuture<'a, TargetImage: ImageViewLike, DiffuseIm
     pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
     noise_img: &'a rhyolite_bevy::SlicedImageArray,
     hitgroup_stride: usize,
-    radiance_hashmap: &'a RenderRes<SharedDeviceState<ResidentBuffer>>
+    radiance_hashmap: &'a RenderRes<SharedDeviceState<ResidentBuffer>>,
 }
 
-impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike> rhyolite::future::GPUCommandFuture
+impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike>
+    rhyolite::future::GPUCommandFuture
     for StandardPipelineRenderingFuture<'a, TargetImage, DiffuseImage, HitgroupBuf>
 {
     type Output = ();
@@ -380,15 +388,19 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                         dst_binding: 0,
                         descriptor_count: 2,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                        p_image_info: [vk::DescriptorImageInfo {
-                            sampler: vk::Sampler::null(),
-                            image_view: this.target_image.inner().raw_image_view(),
-                            image_layout: vk::ImageLayout::GENERAL,
-                        }, vk::DescriptorImageInfo {
-                            sampler: vk::Sampler::null(),
-                            image_view: this.diffuse_image.inner().raw_image_view(),
-                            image_layout: vk::ImageLayout::GENERAL
-                        }].as_ptr(),
+                        p_image_info: [
+                            vk::DescriptorImageInfo {
+                                sampler: vk::Sampler::null(),
+                                image_view: this.target_image.inner().raw_image_view(),
+                                image_layout: vk::ImageLayout::GENERAL,
+                            },
+                            vk::DescriptorImageInfo {
+                                sampler: vk::Sampler::null(),
+                                image_view: this.diffuse_image.inner().raw_image_view(),
+                                image_layout: vk::ImageLayout::GENERAL,
+                            },
+                        ]
+                        .as_ptr(),
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
@@ -406,7 +418,10 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
                             sampler: vk::Sampler::null(),
-                            image_view: this.noise_img.slice(noise_texture_index as usize).raw_image_view(),
+                            image_view: this
+                                .noise_img
+                                .slice(noise_texture_index as usize)
+                                .raw_image_view(),
                             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                         },
                         ..Default::default()
@@ -425,18 +440,14 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                 this.primary_pipeline.layout().raw(),
                 vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
                 0,
-                {
-                    std::slice::from_raw_parts(&rand as *const _ as *const u8, 4)
-                }
+                { std::slice::from_raw_parts(&rand as *const _ as *const u8, 4) },
             );
             device.cmd_push_constants(
                 command_buffer,
                 this.primary_pipeline.layout().raw(),
                 vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
                 4,
-                {
-                    std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4)
-                }
+                { std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4) },
             );
             device.cmd_bind_descriptor_sets(
                 command_buffer,

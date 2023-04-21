@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use bevy_app::Plugin;
-use bevy_asset::{AssetServer, AssetEvent};
+use bevy_asset::{AssetEvent, AssetServer};
 use bevy_ecs::{prelude::EventReader, system::ResMut};
 
 use crate::{RayTracingPipeline, RayTracingPipelineBuilder, ShaderModule};
@@ -19,7 +19,7 @@ impl<P: RayTracingPipeline> Default for RayTracingPipelinePlugin<P> {
 impl<P: RayTracingPipeline> Plugin for RayTracingPipelinePlugin<P> {
     fn build(&self, app: &mut bevy_app::App) {
         app.insert_resource(RayTracingPipelineBuilder::<P>::new(&app.world))
-        .add_systems(bevy_app::Update, shader_update_system::<P>);
+            .add_systems(bevy_app::Update, shader_update_system::<P>);
     }
     fn setup(&self, app: &mut bevy_app::App) {
         let builder = app
@@ -36,13 +36,16 @@ impl<P: RayTracingPipeline> Plugin for RayTracingPipelinePlugin<P> {
     }
 }
 
-fn shader_update_system<P: RayTracingPipeline>(mut events: EventReader<AssetEvent<ShaderModule>>, mut pipeline: ResMut<P>) {
+fn shader_update_system<P: RayTracingPipeline>(
+    mut events: EventReader<AssetEvent<ShaderModule>>,
+    mut pipeline: ResMut<P>,
+) {
     for event in events.iter() {
         match event {
             AssetEvent::Modified { handle } => {
                 pipeline.shader_updated(handle);
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
 }

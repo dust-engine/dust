@@ -141,10 +141,10 @@ impl RayTracingPipelineManager {
                 self.specialized_pipelines.clear();
             }
         }
-        'outer: for (material_id, material) in self.pipeline_characteristics.materials.iter().enumerate() {
-            for s in material.shaders
-            .iter()
-            .flat_map(|a| [&a.0, &a.1, &a.2]) {
+        'outer: for (material_id, material) in
+            self.pipeline_characteristics.materials.iter().enumerate()
+        {
+            for s in material.shaders.iter().flat_map(|a| [&a.0, &a.1, &a.2]) {
                 if let Some(s) = s && &s.shader == shader {
                     self.materials[material_id].pipeline_library = None;
                     self.specialized_pipelines.drain_filter(|material_mask, _| {
@@ -209,6 +209,90 @@ impl RayTracingPipelineManager {
         material_filter: impl Fn(&RayTracingPipelineManagerMaterialInfo) -> bool,
         shader_store: &Assets<ShaderModule>,
     ) {
+        self.build_specialized_pipeline_native(material_flag, material_filter, shader_store);
+    }
+    fn build_specialized_pipeline_native(
+        &mut self,
+        material_flag: u64,
+        material_filter: impl Fn(&RayTracingPipelineManagerMaterialInfo) -> bool,
+        shader_store: &Assets<ShaderModule>,
+    ) {
+        let normalize_shader = |a: &SpecializedShader| {
+            let shader = shader_store.get(&a.shader)?;
+            Some(rhyolite::shader::SpecializedShader {
+                stage: a.stage,
+                flags: a.flags,
+                shader: shader.inner().clone(),
+                specialization_info: a.specialization_info.clone(),
+                entry_point: a.entry_point,
+            })
+        };
+        let base_shaders: Option<Vec<rhyolite::shader::SpecializedShader<'_, _>>> =
+            self.shaders.iter().map(normalize_shader).collect();
+        let Some(base_shaders) = base_shaders else {
+            return
+        };
+
+        let mut hitgroup_mapping: BTreeMap<u32, u32> = BTreeMap::new();
+        let mut current_hitgroup: u32 = 0;
+        let mut hitgroups = Vec::new();
+        for (material_index, material) in self
+            .materials
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, material)| material_filter(&material))
+        {
+            hitgroup_mapping.insert(material_index as u32, current_hitgroup);
+            current_hitgroup += self.raytypes.len() as u32;
+            let ty = self.pipeline_characteristics.materials[material_index].ty;
+
+            let material_hitgroups = self
+                .raytypes
+                .iter()
+                .map(|raytype| {
+                    &self.pipeline_characteristics.materials[material_index].shaders
+                        [*raytype as usize]
+                })
+                .map(|(rchit, rint, rahit)| {
+                    let rchit = rchit.as_ref().and_then(normalize_shader);
+                    let rint = rint.as_ref().and_then(normalize_shader);
+                    let rahit = rahit.as_ref().and_then(normalize_shader);
+                    (rchit, rint, rahit, ty)
+                });
+            hitgroups.extend(material_hitgroups);
+        }
+
+        let layout = self.pipeline_characteristics.layout.clone();
+        let pipeline_cache = self.pipeline_cache.clone();
+        let create_info = self.pipeline_characteristics.create_info.clone();
+        let pipeline: bevy_tasks::Task<VkResult<Arc<RayTracingPipeline>>> =
+            AsyncComputeTaskPool::get().spawn(async move {
+                let pipeline = rhyolite::RayTracingPipeline::create_for_shaders(
+                    layout,
+                    base_shaders.as_slice(),
+                    hitgroups.into_iter(),
+                    &create_info,
+                    pipeline_cache.as_ref().map(|a| a.as_ref()),
+                    DeferredTaskPool::get().inner().clone(),
+                )
+                .await?;
+                Ok(Arc::new(pipeline))
+            });
+
+        self.specialized_pipelines.insert(
+            material_flag,
+            RayTracingPipelineManagerSpecializedPipelineDeferred {
+                pipeline: pipeline.into(),
+                hitgroup_mapping,
+            },
+        );
+    }
+    fn build_specialized_pipeline_with_libs(
+        &mut self,
+        material_flag: u64,
+        material_filter: impl Fn(&RayTracingPipelineManagerMaterialInfo) -> bool,
+        shader_store: &Assets<ShaderModule>,
+    ) {
         let mut libs: Vec<Arc<RayTracingPipelineLibrary>> =
             Vec::with_capacity(self.materials.len() + 1);
 
@@ -261,12 +345,13 @@ impl RayTracingPipelineManager {
             return;
         }
         let create_info = self.pipeline_characteristics.create_info.clone();
+        let pipeline_cache = self.pipeline_cache.clone();
         let pipeline: bevy_tasks::Task<VkResult<Arc<RayTracingPipeline>>> =
             AsyncComputeTaskPool::get().spawn(async move {
                 let lib = rhyolite::RayTracingPipeline::create_from_libraries(
                     libs.iter().map(|a| a.deref()),
                     &create_info,
-                    None,
+                    pipeline_cache.as_ref().map(|a| a.as_ref()),
                     DeferredTaskPool::get().inner().clone(),
                 )
                 .await?;
@@ -348,7 +433,7 @@ impl RayTracingPipelineManager {
                 let rchit = rchit.as_ref().and_then(normalize_shader);
                 let rint = rint.as_ref().and_then(normalize_shader);
                 let rahit = rahit.as_ref().and_then(normalize_shader);
-                (rchit, rint, rahit)
+                (rchit, rint, rahit, ty)
             })
             .collect::<Vec<_>>();
         let layout = pipeline_characteristics.layout.clone();
@@ -359,7 +444,6 @@ impl RayTracingPipelineManager {
                     layout,
                     hitgroups.into_iter(),
                     &create_info,
-                    ty,
                     pipeline_cache.as_ref().map(|a| a.as_ref()),
                     DeferredTaskPool::get().inner().clone(),
                 )

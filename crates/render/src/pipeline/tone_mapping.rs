@@ -1,16 +1,32 @@
-use std::{sync::Arc, ops::{Deref, DerefMut}};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
-use bevy_ecs::{world::{FromWorld, World}, system::Resource};
+use bevy_ecs::{
+    system::Resource,
+    world::{FromWorld, World},
+};
 use pin_project::pin_project;
-use rhyolite::{ComputePipeline, utils::retainer::{Retainer, RetainerHandle}, descriptor::DescriptorPool, macros::glsl_reflected, cstr, ImageViewLike, future::{RenderImage, GPUCommandFuture, DisposeContainer, PerFrameContainer, PerFrameState, use_per_frame_state}, ash::vk, HasDevice};
-use rhyolite_bevy::{Queues, Device};
+use rhyolite::{
+    ash::vk,
+    cstr,
+    descriptor::DescriptorPool,
+    future::{
+        use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer, PerFrameState,
+        RenderImage,
+    },
+    macros::glsl_reflected,
+    utils::retainer::{Retainer, RetainerHandle},
+    ComputePipeline, HasDevice, ImageViewLike,
+};
+use rhyolite_bevy::{Device, Queues};
 
 #[derive(Resource)]
 pub struct ToneMappingPipeline {
     pipeline: Arc<ComputePipeline>,
     desc_pool: Retainer<DescriptorPool>,
 }
-
 
 impl FromWorld for ToneMappingPipeline {
     fn from_world(world: &mut World) -> Self {
@@ -29,39 +45,53 @@ impl FromWorld for ToneMappingPipeline {
             num_frame_in_flight,
         )
         .unwrap();
-    ToneMappingPipeline {
+        ToneMappingPipeline {
             pipeline: Arc::new(pipeline),
             desc_pool: Retainer::new(desc_pool),
         }
     }
 }
 impl ToneMappingPipeline {
-    pub fn render<'a,
-    S: ImageViewLike, SRef: Deref<Target = RenderImage<S>>,
-    T: ImageViewLike, TRef: DerefMut<Target = RenderImage<T>>
-    >(&mut self, src: SRef, dst: TRef) -> ToneMappingFuture<S, SRef, T, TRef>{
+    pub fn render<
+        'a,
+        S: ImageViewLike,
+        SRef: Deref<Target = RenderImage<S>>,
+        T: ImageViewLike,
+        TRef: DerefMut<Target = RenderImage<T>>,
+    >(
+        &mut self,
+        src: SRef,
+        dst: TRef,
+    ) -> ToneMappingFuture<S, SRef, T, TRef> {
         ToneMappingFuture {
             src_img: src,
             dst_img: dst,
-            pipeline: self
+            pipeline: self,
         }
     }
 }
 
 #[pin_project]
-pub struct ToneMappingFuture<'a,
-S: ImageViewLike, SRef: Deref<Target = RenderImage<S>>,
-T: ImageViewLike, TRef: DerefMut<Target = RenderImage<T>>
+pub struct ToneMappingFuture<
+    'a,
+    S: ImageViewLike,
+    SRef: Deref<Target = RenderImage<S>>,
+    T: ImageViewLike,
+    TRef: DerefMut<Target = RenderImage<T>>,
 > {
     src_img: SRef,
     dst_img: TRef,
-    pipeline: &'a mut ToneMappingPipeline
+    pipeline: &'a mut ToneMappingPipeline,
 }
 
-impl<'a,
-S: ImageViewLike, SRef: Deref<Target = RenderImage<S>>,
-T: ImageViewLike, TRef: DerefMut<Target = RenderImage<T>>
-> GPUCommandFuture for ToneMappingFuture<'a, S, SRef, T, TRef> {
+impl<
+        'a,
+        S: ImageViewLike,
+        SRef: Deref<Target = RenderImage<S>>,
+        T: ImageViewLike,
+        TRef: DerefMut<Target = RenderImage<T>>,
+    > GPUCommandFuture for ToneMappingFuture<'a, S, SRef, T, TRef>
+{
     type Output = ();
 
     type RetainedState = DisposeContainer<(
