@@ -138,6 +138,7 @@ impl SbtManager {
                 vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                 one_raytype,
+                rtx_properties.shader_group_base_alignment as usize
             ),
             entries: Default::default(),
             raytype_pipeline_handles: vec![

@@ -279,12 +279,12 @@ impl StandardPipeline {
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
             let a = using!();
-            let radiance_cache_buffer = use_shared_state_initialized(
+            let mut radiance_cache_buffer = use_shared_state_initialized(
                 a,
                 move |_| unsafe {
-                    let len: u32 = 16*10000;
+                    let len: u32 = 100000;
                     let buffer = allocator.create_device_buffer_uninit(
-                        len as u64 + 4,
+                        16 * len as u64 + 4,
                         vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                     ).unwrap();
                     let mut buffer = RenderRes::new(buffer);
@@ -307,7 +307,7 @@ impl StandardPipeline {
                 hitgroup_stride,
                 pipeline_sbt_buffer: &pipeline_sbt_buffer,
                 noise_img,
-                radiance_hashmap: &radiance_cache_buffer
+                radiance_hashmap: &mut radiance_cache_buffer
             }.await;
             retain!(hitgroup_sbt_buffer);
             retain!(pipeline_sbt_buffer);
@@ -336,7 +336,7 @@ struct StandardPipelineRenderingFuture<
     pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
     noise_img: &'a rhyolite_bevy::SlicedImageArray,
     hitgroup_stride: usize,
-    radiance_hashmap: &'a RenderRes<SharedDeviceState<ResidentBuffer>>,
+    radiance_hashmap: &'a mut RenderRes<SharedDeviceState<ResidentBuffer>>,
 }
 
 impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike>
@@ -426,6 +426,18 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                         },
                         ..Default::default()
                     },
+                    vk::WriteDescriptorSet {
+                        dst_set: desc_set[0],
+                        dst_binding: 4,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: this.radiance_hashmap.inner.raw_buffer(),
+                            offset: 0,
+                            range: vk::WHOLE_SIZE,
+                        },
+                        ..Default::default()
+                    },
                 ],
                 &[],
             );
@@ -509,12 +521,22 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
     }
 
     fn context(self: std::pin::Pin<&mut Self>, ctx: &mut rhyolite::future::StageContext) {
-        let this = self.project();
+        let mut this = self.project();
         ctx.write_image(
             this.target_image.deref_mut(),
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             vk::AccessFlags2::SHADER_STORAGE_WRITE,
             vk::ImageLayout::GENERAL,
+        );
+        ctx.read(
+            this.radiance_hashmap.deref(),
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            vk::AccessFlags2::SHADER_READ,
+        );
+        ctx.write(
+            this.radiance_hashmap.deref_mut(),
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            vk::AccessFlags2::SHADER_WRITE,
         );
         ctx.read(
             this.hitgroup_sbt_buffer.deref(),
