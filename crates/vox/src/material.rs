@@ -15,13 +15,6 @@ pub struct PaletteMaterial {
     data: ResidentBuffer,
 }
 
-#[derive(bevy_reflect::TypeUuid)]
-#[uuid = "a830cefc-beee-4ea9-89af-3436c0eefe0a"]
-pub struct LightedPaletteMaterial {
-    pub material: Handle<PaletteMaterial>,
-    pub photon_energy: ResidentBuffer,
-}
-
 impl PaletteMaterial {
     pub fn new(
         geometry: Handle<VoxGeometry>,
@@ -46,11 +39,9 @@ pub struct PaletteMaterialShaderParams {
 
     /// Pointer to a list of 256 u8 colors
     palette_ptr: u64,
-
-    photon_energy_ptr: u64,
 }
 
-impl dust_render::Material for LightedPaletteMaterial {
+impl dust_render::Material for PaletteMaterial {
     type Pipeline = StandardPipeline;
 
     const TYPE: MaterialType = MaterialType::Procedural;
@@ -74,35 +65,26 @@ impl dust_render::Material for LightedPaletteMaterial {
     }
 
     fn intersection_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
-        match ray_type {
-            Self::Pipeline::PRIMARY_RAYTYPE => Some(SpecializedShader::for_shader(
-                asset_server.load("hit.rint.spv"),
-                vk::ShaderStageFlags::INTERSECTION_KHR,
-            )),
-            Self::Pipeline::PHOTON_RAYTYPE => Some(SpecializedShader::for_shader(
-                asset_server.load("photon.rint.spv"),
-                vk::ShaderStageFlags::INTERSECTION_KHR,
-            )),
-            _ => None,
-        }
+        Some(SpecializedShader::for_shader(
+            asset_server.load("hit.rint.spv"),
+            vk::ShaderStageFlags::INTERSECTION_KHR,
+        ))
     }
 
     type ShaderParameters = PaletteMaterialShaderParams;
-    type ShaderParameterParams = (SRes<Assets<VoxGeometry>>, SRes<Assets<VoxPalette>>, SRes<Assets<PaletteMaterial>>);
+    type ShaderParameterParams = (SRes<Assets<VoxGeometry>>, SRes<Assets<VoxPalette>>);
     fn parameters(
         &self,
         _ray_type: u32,
         params: &mut SystemParamItem<Self::ShaderParameterParams>,
     ) -> Self::ShaderParameters {
-        let (geometry_store, palette_store, material_store) = params;
-        let material = material_store.get(&self.material).unwrap();
-        let geometry = geometry_store.get(&material.geometry).unwrap();
-        let palette = palette_store.get(&material.palette).unwrap();
+        let (geometry_store, palette_store) = params;
+        let geometry = geometry_store.get(&self.geometry).unwrap();
+        let palette = palette_store.get(&self.palette).unwrap();
         PaletteMaterialShaderParams {
             geometry_ptr: geometry.geometry_buffer().device_address(),
-            material_ptr: material.data.device_address(),
+            material_ptr: self.data.device_address(),
             palette_ptr: palette.buffer.device_address(),
-            photon_energy_ptr: self.photon_energy.device_address(),
         }
     }
 }

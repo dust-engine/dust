@@ -25,7 +25,7 @@ use rhyolite::{
 use bevy_asset::{AssetLoader, Handle, LoadedAsset, Assets};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter};
 
-use crate::material::{PaletteMaterial, LightedPaletteMaterial};
+use crate::material::{PaletteMaterial};
 
 pub struct VoxLoader {
     allocator: rhyolite_bevy::Allocator,
@@ -344,22 +344,9 @@ impl AssetLoader for VoxLoader {
                 let (geometry_handle, material_handle, num_blocks) =
                     models[*model_id as usize].as_ref().unwrap();
 
-                let lighted_material_handle = load_context.set_labeled_asset(
-                    &format!("LightedMaterial{}", i),
-                    LoadedAsset::new(LightedPaletteMaterial {
-                    material: material_handle.clone(),
-                    photon_energy: self
-                    .allocator
-                    .create_device_buffer_uninit(
-                        *num_blocks as u64 * 16,
-                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                    )
-                    .unwrap(),
-                }));
-
                 let mut entity = world.entity_mut(*entity);
                 *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry_handle.clone();
-                *entity.get_mut::<Handle<LightedPaletteMaterial>>().unwrap() = lighted_material_handle;
+                *entity.get_mut::<Handle<PaletteMaterial>>().unwrap() = material_handle.clone();
             }
 
             let scene = bevy_scene::Scene::new(world);

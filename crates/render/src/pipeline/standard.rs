@@ -10,17 +10,18 @@ use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
 use rhyolite::{
+    update_buffer, fill_buffer,
     accel_struct::AccelerationStructure,
     ash::vk,
-    descriptor::{DescriptorPool, PushConstants},
+    BufferExt,
     future::GPUCommandFutureExt,
+    descriptor::{DescriptorPool, PushConstants},
     future::{
-        use_per_frame_state, use_shared_state_initialized, Disposable, DisposeContainer,
-        GPUCommandFuture, PerFrameContainer, PerFrameState, RenderImage, RenderRes,
-        SharedDeviceState,
+        use_shared_state_initialized,
+        use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, PerFrameContainer,
+        PerFrameState, RenderImage, RenderRes, SharedDeviceState,
     },
     macros::{commands, set_layout},
-    update_buffer,
     utils::retainer::{Retainer, RetainerHandle},
     BufferLike, HasDevice, ImageLike, ImageViewLike, ResidentBuffer,
 };
@@ -257,7 +258,7 @@ impl StandardPipeline {
             camera_view_col1: affine.matrix3.y_axis.into(),
             camera_view_col2: affine.matrix3.z_axis.into(),
             near: 0.1,
-            far: 10000.0,
+            far: 100000.0,
             padding: 0,
             camera_position: affine.translation.into(),
             strength: 0.7,
@@ -281,17 +282,21 @@ impl StandardPipeline {
             let a = using!();
             let mut radiance_cache_buffer = use_shared_state_initialized(
                 a,
-                move |_| unsafe {
-                    let len: u32 = 100000;
-                    let buffer = allocator.create_device_buffer_uninit(
-                        16 * len as u64 + 4,
+                move |_| {
+                    let len: u32 = 1000000;
+                    let mut buffer = allocator.create_device_buffer_uninit(
+                        len as u64 * 16 + 4,
                         vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                     ).unwrap();
-                    let mut buffer = RenderRes::new(buffer);
-                    let len_data: [u8; 4] = std::mem::transmute(len);
+                    let len_data: [u8; 4] = unsafe{std::mem::transmute(len)};
                     commands! { move
-                        update_buffer(&mut buffer, len_data).await;
-                        buffer
+                        let (head, body) = buffer.split_at_mut(4);
+                        let mut head = RenderRes::new(head);
+                        let mut body = RenderRes::new(body);
+                        
+                        update_buffer(&mut head, len_data).await;
+                        //fill_buffer(&mut body, 0).await;
+                        head.merge(body).map(|_| ()).map(|_| buffer)
                     }
                 },
                 |_| false,
@@ -433,8 +438,8 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                         descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
                         p_buffer_info: &vk::DescriptorBufferInfo {
                             buffer: this.radiance_hashmap.inner.raw_buffer(),
-                            offset: 0,
-                            range: vk::WHOLE_SIZE,
+                            offset: this.radiance_hashmap.inner.offset(),
+                            range: this.radiance_hashmap.inner.size(),
                         },
                         ..Default::default()
                     },
@@ -484,8 +489,8 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                     size: this.hitgroup_sbt_buffer.inner.size(),
                 },
                 &vk::StridedDeviceAddressRegionKHR::default(),
-                256,
-                256,
+                512,
+                512,
                 1,
             );
             device.cmd_bind_pipeline(
@@ -547,6 +552,17 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
             this.pipeline_sbt_buffer.deref(),
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+        );
+        
+        ctx.read(
+            this.radiance_hashmap.deref(),
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            vk::AccessFlags2::SHADER_STORAGE_READ,
+        );
+        ctx.write(
+            this.radiance_hashmap.deref_mut(),
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            vk::AccessFlags2::SHADER_STORAGE_WRITE,
         );
         ctx.read_others(
             this.accel_struct.deref(),

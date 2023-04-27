@@ -13,7 +13,6 @@ use dust_render::{GeometryPlugin, MaterialPlugin, Renderable};
 use dust_vdb::hierarchy;
 pub use geometry::VoxGeometry;
 pub use loader::*;
-use material::LightedPaletteMaterial;
 pub use material::PaletteMaterial;
 pub use palette::VoxPalette;
 
@@ -28,9 +27,8 @@ impl bevy_app::Plugin for VoxPlugin {
             .add_asset::<VoxPalette>()
             .add_asset::<VoxGeometry>()
             .add_asset::<PaletteMaterial>()
-            .add_asset::<LightedPaletteMaterial>()
             .add_plugin(GeometryPlugin::<VoxGeometry>::default())
-            .add_plugin(MaterialPlugin::<LightedPaletteMaterial>::default());
+            .add_plugin(MaterialPlugin::<PaletteMaterial>::default());
     }
 }
 
@@ -39,13 +37,13 @@ pub struct VoxBundle {
     transform: bevy_transform::prelude::Transform,
     global_transform: bevy_transform::prelude::GlobalTransform,
     geometry_handle: Handle<VoxGeometry>,
-    material_handle: Handle<LightedPaletteMaterial>,
+    material_handle: Handle<PaletteMaterial>,
     renderable: Renderable,
 }
 impl VoxBundle {
     pub fn from_geometry_material(
         geometry: Handle<VoxGeometry>,
-        material: Handle<LightedPaletteMaterial>,
+        material: Handle<PaletteMaterial>,
     ) -> Self {
         VoxBundle {
             transform: bevy_transform::prelude::Transform::default(),

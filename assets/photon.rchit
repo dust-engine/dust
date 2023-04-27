@@ -45,8 +45,10 @@ layout(push_constant) uniform PushConstants {
     uint rand;
     uint frameIndex;
 } pushConstants;
-
-hitAttributeEXT uint voxelId;
+hitAttributeEXT HitAttribute {
+    uint8_t voxelId;
+    uint8_t faceId;
+} hitAttributes;
 
 vec3 CubedNormalize(vec3 dir) {
     vec3 dir_abs = abs(dir);
@@ -65,41 +67,35 @@ layout(set = 0, binding = 4) buffer RadianceHashMap {
     RadianceHashMapEntry[] entries;
 } radianceCache;
 
-uvec3 pcg3d(uvec3 v)
+uint pcg_hash(uint in_data)
 {
-    v = v * 1664525 + 1013904223;
-    v.x += v.y*v.z;
-    v.y += v.z*v.x;
-    v.z += v.x*v.y;
-
-    v = v ^ (v >> 16);
-    v.x += v.y*v.z;
-    v.y += v.z*v.x;
-    v.z += v.x*v.y;
-    return v;
+    uint state = in_data * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
+
 uint hashPayload(
     uint instanceId,
     uint primitiveId,
     uint voxelId,
     uint faceId
 ) {
-    uvec3 result = pcg3d(uvec3(instanceId, primitiveId, voxelId << 16 | faceId));
-    return result.x + result.y + result.z;
+    uint id1 = instanceId * 70297021 + primitiveId * 256 + voxelId * 4 + faceId;
+    return pcg_hash(id1);
 }
+
 
 
 void main() {
     if (photon.hitT != 0.0) {
-        uint hash = hashPayload(gl_InstanceID, gl_PrimitiveID, voxelId, 0) % radianceCache.num_entries;
+        uint hash = hashPayload(gl_InstanceID, gl_PrimitiveID, hitAttributes.voxelId, hitAttributes.faceId) % radianceCache.num_entries;
         const uint lastAccessedFrame = atomicExchange(radianceCache.entries[hash].lastAccessedFrameIndex, pushConstants.frameIndex);
 
         const uint frameDifference = pushConstants.frameIndex - lastAccessedFrame;
 
         if (frameDifference > 0) {
             vec3 prevEnergy = radianceCache.entries[hash].energy;
-            vec3 nextEnergy = prevEnergy * pow(0.99, frameDifference) + photon.energy;
-
+            vec3 nextEnergy = prevEnergy * pow(0.999, frameDifference) + photon.energy;
            radianceCache.entries[hash].energy = nextEnergy;
         }
         if (frameDifference == 0) {

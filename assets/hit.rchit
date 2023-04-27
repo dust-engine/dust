@@ -24,6 +24,11 @@ layout(buffer_reference, buffer_reference_align = 1, scalar) buffer MaterialInfo
 layout(buffer_reference) buffer PaletteInfo {
     u8vec4 palette[];
 };
+layout(push_constant) uniform PushConstants {
+    // Indexed by block id
+    uint rand;
+    uint frameIndex;
+} pushConstants;
 
 layout(shaderRecordEXT) buffer sbt {
     GeometryInfo geometryInfo;
@@ -31,9 +36,10 @@ layout(shaderRecordEXT) buffer sbt {
     PaletteInfo paletteInfo;
 };
 layout(location = 0) rayPayloadInEXT float hitT;
-
-hitAttributeEXT uint8_t voxelId;
-
+hitAttributeEXT HitAttribute {
+    uint8_t voxelId;
+    uint8_t faceId;
+} hitAttributes;
 
 struct RadianceHashMapEntry {
     vec3 energy;
@@ -44,46 +50,41 @@ layout(set = 0, binding = 4) buffer RadianceHashMap {
     RadianceHashMapEntry[] entries;
 } radianceCache;
 
-uvec3 pcg3d(uvec3 v)
+uint pcg_hash(uint in_data)
 {
-    v = v * 1664525 + 1013904223;
-    v.x += v.y*v.z;
-    v.y += v.z*v.x;
-    v.z += v.x*v.y;
-
-    v = v ^ (v >> 16);
-    v.x += v.y*v.z;
-    v.y += v.z*v.x;
-    v.z += v.x*v.y;
-    return v;
+    uint state = in_data * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
+
+
 uint hashPayload(
     uint instanceId,
     uint primitiveId,
     uint voxelId,
     uint faceId
 ) {
-    uvec3 result = pcg3d(uvec3(instanceId, primitiveId, voxelId << 16 | faceId));
-    return result.x + result.y + result.z;
+    uint id1 = instanceId * 70297021 + primitiveId * 256 + voxelId * 4 + faceId;
+    return pcg_hash(id1);
 }
-
 
 
 void main() {
     Block block = geometryInfo.blocks[gl_PrimitiveID];
 
-    u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << voxelId) - 1));
+    u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << hitAttributes.voxelId) - 1));
     uint32_t voxelMemoryOffset = bitCount(masked.x) + bitCount(masked.y);
 
     uint8_t palette_index = materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = paletteInfo.palette[palette_index];
 
-    uint hash = hashPayload(gl_InstanceID, gl_PrimitiveID, voxelId, 0) % radianceCache.num_entries;
-    vec3 energy = radianceCache.entries[hash].energy;
+    uint hash = hashPayload(gl_InstanceID, gl_PrimitiveID, hitAttributes.voxelId, hitAttributes.faceId) % radianceCache.num_entries;
+    RadianceHashMapEntry hashEntry = radianceCache.entries[hash];
+    vec3 energy = hashEntry.energy * pow(0.999, pushConstants.frameIndex - hashEntry.lastAccessedFrameIndex);
 
     vec3 diffuseColor = vec3(color) / 255.0;
-    // The parameter 0.01 was derived from the 0.99 retention factor. It's not arbitrary.
-    vec3 indirectContribution = 0.01 * energy * diffuseColor;
+    // The parameter 0.01 was derived from the 0.999 retention factor. It's not arbitrary.
+    vec3 indirectContribution = 0.002 * energy * diffuseColor;
 
     // Store the contribution from photon maps
     imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(indirectContribution, 1.0));
