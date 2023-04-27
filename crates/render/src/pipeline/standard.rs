@@ -295,7 +295,7 @@ impl StandardPipeline {
                         let mut body = RenderRes::new(body);
                         
                         update_buffer(&mut head, len_data).await;
-                        //fill_buffer(&mut body, 0).await;
+                        fill_buffer(&mut body, 0).await;
                         head.merge(body).map(|_| ()).map(|_| buffer)
                     }
                 },

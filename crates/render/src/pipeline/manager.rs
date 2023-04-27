@@ -209,7 +209,7 @@ impl RayTracingPipelineManager {
         material_filter: impl Fn(&RayTracingPipelineManagerMaterialInfo) -> bool,
         shader_store: &Assets<ShaderModule>,
     ) {
-        self.build_specialized_pipeline_with_libs(material_flag, material_filter, shader_store);
+        self.build_specialized_pipeline_native(material_flag, material_filter, shader_store);
     }
     fn build_specialized_pipeline_native(
         &mut self,
