@@ -35,11 +35,13 @@ layout(shaderRecordEXT) buffer sbt {
     MaterialInfo materialInfo;
     PaletteInfo paletteInfo;
 };
-layout(location = 0) rayPayloadInEXT float hitT;
+
+layout(location = 0) rayPayloadInEXT vec3 hitLocation;
 hitAttributeEXT HitAttribute {
     uint8_t voxelId;
     uint8_t faceId;
 } hitAttributes;
+
 
 struct RadianceHashMapEntry {
     vec3 energy;
@@ -67,7 +69,29 @@ uint hashPayload(
     uint id1 = instanceId * 70297021 + primitiveId * 256 + voxelId * 4 + faceId;
     return pcg_hash(id1);
 }
+vec3 CubedNormalize(vec3 dir) {
+    vec3 dir_abs = abs(dir);
+    float max_element = max(dir_abs.x, max(dir_abs.y, dir_abs.z));
+    return sign(dir) * step(max_element, dir_abs);
+}
 
+// Normal points outward for rays exiting the surface, else is flipped.
+vec3 OffsetRay(vec3 p, vec3 n) {
+    const float int_scale = 256.0;
+    i8vec3 of_i = i8vec3(int_scale * n);
+    vec3 p_i = intBitsToFloat(floatBitsToInt(p) + i32vec3(
+        (p.x < 0) ? -of_i.x : of_i.x,
+        (p.y < 0) ? -of_i.y : of_i.y,
+        (p.z < 0) ? -of_i.z : of_i.z
+    ));
+    const float origin = 1.0 / 32.0;
+    const float float_scale = 1.0 / 65536.0;
+    return vec3(
+        abs(p.x) < origin ? p.x + float_scale * n.x : p_i.x,
+        abs(p.y) < origin ? p.y + float_scale * n.y : p_i.y,
+        abs(p.z) < origin ? p.z + float_scale * n.z : p_i.z
+    );
+}
 
 void main() {
     Block block = geometryInfo.blocks[gl_PrimitiveID];
@@ -87,7 +111,13 @@ void main() {
     vec3 indirectContribution = 0.002 * energy * diffuseColor;
 
     // Store the contribution from photon maps
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(indirectContribution, 1.0));
+    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(diffuseColor * 0.2, 1.0));
     imageStore(u_diffuseOutput, ivec2(gl_LaunchIDEXT.xy), vec4(diffuseColor, 1.0));
-    hitT = gl_HitTEXT;
+    
+    vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
+    vec3 offsetInBox = vec3(hitAttributes.voxelId >> 4, (hitAttributes.voxelId >> 2) & 3, hitAttributes.voxelId & 3);
+    vec3 boxCenterObject = block.position.xyz + offsetInBox + vec3(0.5);
+    vec3 normalObject = CubedNormalize(hitPointObject - boxCenterObject);
+    vec3 normalWorld = gl_ObjectToWorldEXT * vec4(normalObject, 0.0);
+    hitLocation = gl_HitTEXT * gl_WorldRayDirectionEXT + gl_WorldRayOriginEXT + normalWorld * 0.01;
 }

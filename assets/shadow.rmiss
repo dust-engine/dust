@@ -8,6 +8,6 @@ void main() {
     vec3 environmentColor = imageLoad(u_imgOutput, ivec2(gl_LaunchIDEXT.xy)).xyz;
     vec3 diffuseColor = imageLoad(u_diffuseColor, ivec2(gl_LaunchIDEXT.xy)).xyz;
 
-    vec3 mixedColor = environmentColor;
+    vec3 mixedColor = diffuseColor * 0.5;
     imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(mixedColor, 1.0));
 }

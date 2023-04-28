@@ -13,7 +13,7 @@ layout(shaderRecordEXT) buffer Sbt {
     vec3 camera_position;
     float tan_half_fov;
 } sbt;
-layout(location = 0) rayPayloadEXT float hitT;
+layout(location = 0) rayPayloadEXT vec3 hitLocation;
 
 
 void main() {
@@ -27,7 +27,7 @@ void main() {
     const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
 
     const vec3 pixelCameraWorld = rotationMatrix * vec3(pixelCamera, -1);
-    hitT = 0.0;
+    hitLocation = vec3(0.0);
     traceRayEXT(
         accelerationStructure,
         gl_RayFlagsOpaqueEXT , // RayFlags
@@ -41,7 +41,7 @@ void main() {
         sbt.far, // tmax
         0 // payload
     );
-    if (hitT == 0.0) {
+    if (hitLocation.x == 0.0) {
         return;
     }
 
@@ -54,8 +54,8 @@ void main() {
         0, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
         2, // SBT stride, number of ray types
         1, // missIndex
-        sbt.camera_position + (hitT - 2.0) * pixelCameraWorld,     // ray origin
-        sbt.near,           // ray min range
+        hitLocation,     // ray origin
+        0.0,           // ray min range
         sunDir, // direction
         sbt.far, // tmax
         0 // payload
