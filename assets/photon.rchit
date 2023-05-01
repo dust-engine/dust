@@ -27,6 +27,19 @@ layout(buffer_reference) buffer PaletteInfo {
     u8vec4 palette[];
 };
 
+struct IrradianceCacheFace {
+    f16vec3 irradiance;
+    uint16_t mask;
+};
+struct IrradianceCacheEntry {
+    IrradianceCacheFace faces[6];
+    uint16_t lastAccessedFrameIndex[6];
+    uint32_t _reerved;
+};
+layout(buffer_reference, scalar) buffer IrradianceCache {
+    IrradianceCacheEntry entries[];
+};
+
 struct PhotonRayPayload {
     vec3 energy;
     float hitT;
@@ -38,6 +51,7 @@ layout(shaderRecordEXT) buffer Sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
     PaletteInfo paletteInfo;
+    IrradianceCache irradianceCache;
 } sbt;
 
 layout(push_constant) uniform PushConstants {
@@ -56,54 +70,41 @@ vec3 CubedNormalize(vec3 dir) {
     return sign(dir) * step(max_element, dir_abs);
 }
 
-
-
-struct RadianceHashMapEntry {
-    vec3 energy;
-    uint32_t lastAccessedFrameIndex;
-};
-layout(set = 0, binding = 4) buffer RadianceHashMap {
-    uint num_entries;
-    RadianceHashMapEntry[] entries;
-} radianceCache;
-
-uint pcg_hash(uint in_data)
-{
-    uint state = in_data * 747796405u + 2891336453u;
-    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
-}
-
-uint hashPayload(
-    uint instanceId,
-    uint primitiveId,
-    uint voxelId,
-    uint faceId
-) {
-    uint id1 = instanceId * 70297021 + primitiveId * 256 + voxelId * 4 + faceId;
-    return pcg_hash(id1);
-}
-
-
-
 void main() {
-    if (photon.hitT != 0.0) {
-        uint hash = hashPayload(gl_InstanceID, gl_PrimitiveID, hitAttributes.voxelId, hitAttributes.faceId) % radianceCache.num_entries;
-        const uint lastAccessedFrame = atomicExchange(radianceCache.entries[hash].lastAccessedFrameIndex, pushConstants.frameIndex);
-
-        const uint frameDifference = pushConstants.frameIndex - lastAccessedFrame;
-
-        if (frameDifference > 0) {
-            vec3 prevEnergy = radianceCache.entries[hash].energy;
-            vec3 nextEnergy = prevEnergy * pow(0.999, frameDifference) + photon.energy;
-           radianceCache.entries[hash].energy = nextEnergy;
-        }
-        if (frameDifference == 0) {
-            radianceCache.entries[hash].energy += photon.energy;
-        }
-    }
-    
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
+
+    // Calculate normal
+    vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT - block.position.xyz;
+    vec3 offsetInBox = vec3(hitAttributes.voxelId >> 4, (hitAttributes.voxelId >> 2) & 3, hitAttributes.voxelId & 3);
+    vec3 normalObject = CubedNormalize(hitPointObject - offsetInBox - vec3(0.5));
+    photon.normal = gl_ObjectToWorldEXT * vec4(normalObject, 0.0);
+
+    // Accumulate energy
+    const uint16_t lastAccessedFrame = sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[hitAttributes.faceId];
+    sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[hitAttributes.faceId] = uint16_t(pushConstants.frameIndex);
+
+    const uint16_t frameDifference = uint16_t(pushConstants.frameIndex) - lastAccessedFrame;
+
+    if (frameDifference > 0) {
+        f16vec3 prevEnergy = sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].irradiance;
+        f16vec3 nextEnergy = prevEnergy * float16_t(pow(0.999, frameDifference)) + f16vec3(photon.energy);
+        sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].irradiance = nextEnergy;
+    } else {
+        sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].irradiance += f16vec3(photon.energy);
+    }
+
+    // Calculate projected 2d hitpoint
+    vec3 absNormal = abs(normalObject);
+    vec2 hitPointSurface = vec2(
+        mix(hitPointObject.y, hitPointObject.x, absNormal[1] + absNormal[2]),
+        mix(hitPointObject.z, hitPointObject.y, absNormal[2])
+    ); // range: 0-4
+    u8vec2 hitPointCoords = min(u8vec2(floor(hitPointSurface)), u8vec2(3)); // range: 0, 1, 2, 3.
+    uint8_t hitPointCoord = hitPointCoords.x * uint8_t(4) + hitPointCoords.y; // range: 0 - 15
+    //sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].mask = uint16_t(1);
+    sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].mask |= uint16_t(1) << hitPointCoord;
+    
+    
     u32vec2 blockMask = unpack32(block.mask);
     uint32_t numVoxelInBlock = bitCount(blockMask.x) + bitCount(blockMask.y);
     uint32_t randomVoxelId = pushConstants.rand % numVoxelInBlock;
@@ -113,11 +114,6 @@ void main() {
 
     uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = sbt.paletteInfo.palette[palette_index];
-
-
-    vec3 boxCenter = gl_ObjectToWorldEXT * vec4(block.position.xyz + vec3(2.0, 2.0, 2.0), 1.0);
-    vec3 hitPoint = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
-    photon.normal = CubedNormalize(hitPoint - boxCenter);
 
     photon.energy *= vec3(color.xyz) / 255.0;
     photon.hitT = gl_HitTEXT;

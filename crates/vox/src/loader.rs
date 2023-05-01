@@ -25,7 +25,7 @@ use rhyolite::{
 use bevy_asset::{AssetLoader, Handle, LoadedAsset, Assets};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter};
 
-use crate::material::{PaletteMaterial};
+use crate::material::{PaletteMaterial, DiffuseMaterial, DiffuseMaterialIrradianceCacheEntry};
 
 pub struct VoxLoader {
     allocator: rhyolite_bevy::Allocator,
@@ -346,7 +346,15 @@ impl AssetLoader for VoxLoader {
 
                 let mut entity = world.entity_mut(*entity);
                 *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry_handle.clone();
-                *entity.get_mut::<Handle<PaletteMaterial>>().unwrap() = material_handle.clone();
+                let diffuse_material = DiffuseMaterial::new(
+                    material_handle.clone(),
+                    self.allocator.create_device_buffer_uninit(
+                        (*num_blocks as usize * std::mem::size_of::<DiffuseMaterialIrradianceCacheEntry>()) as u64,
+                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                    ).unwrap(),
+                );
+                let diffuse_material_handle = load_context.set_labeled_asset(&format!("DiffuseMaterial{}", i), LoadedAsset::new(diffuse_material));
+                *entity.get_mut::<Handle<DiffuseMaterial>>().unwrap() = diffuse_material_handle;
             }
 
             let scene = bevy_scene::Scene::new(world);

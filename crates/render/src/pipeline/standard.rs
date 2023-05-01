@@ -72,10 +72,6 @@ impl RayTracingPipeline for StandardPipeline {
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
             noise_unitvec3_cosine: vk::DescriptorType::SAMPLED_IMAGE,
-
-
-            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
-            radiance_hashmap: vk::DescriptorType::STORAGE_BUFFER
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -279,28 +275,6 @@ impl StandardPipeline {
         let fut = commands! { move
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
-            let a = using!();
-            let mut radiance_cache_buffer = use_shared_state_initialized(
-                a,
-                move |_| {
-                    let len: u32 = 1000000;
-                    let mut buffer = allocator.create_device_buffer_uninit(
-                        len as u64 * 16 + 4,
-                        vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-                    ).unwrap();
-                    let len_data: [u8; 4] = unsafe{std::mem::transmute(len)};
-                    commands! { move
-                        let (head, body) = buffer.split_at_mut(4);
-                        let mut head = RenderRes::new(head);
-                        let mut body = RenderRes::new(body);
-                        
-                        update_buffer(&mut head, len_data).await;
-                        fill_buffer(&mut body, 0).await;
-                        head.merge(body).map(|_| ()).map(|_| buffer)
-                    }
-                },
-                |_| false,
-            ).await;
             StandardPipelineRenderingFuture {
                 accel_struct: tlas,
                 target_image: target,
@@ -312,11 +286,9 @@ impl StandardPipeline {
                 hitgroup_stride,
                 pipeline_sbt_buffer: &pipeline_sbt_buffer,
                 noise_img,
-                radiance_hashmap: &mut radiance_cache_buffer
             }.await;
             retain!(hitgroup_sbt_buffer);
             retain!(pipeline_sbt_buffer);
-            retain!(radiance_cache_buffer);
         };
         Some(fut)
     }
@@ -341,7 +313,6 @@ struct StandardPipelineRenderingFuture<
     pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
     noise_img: &'a rhyolite_bevy::SlicedImageArray,
     hitgroup_stride: usize,
-    radiance_hashmap: &'a mut RenderRes<SharedDeviceState<ResidentBuffer>>,
 }
 
 impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike>
@@ -431,18 +402,6 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                         },
                         ..Default::default()
                     },
-                    vk::WriteDescriptorSet {
-                        dst_set: desc_set[0],
-                        dst_binding: 4,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                        p_buffer_info: &vk::DescriptorBufferInfo {
-                            buffer: this.radiance_hashmap.inner.raw_buffer(),
-                            offset: this.radiance_hashmap.inner.offset(),
-                            range: this.radiance_hashmap.inner.size(),
-                        },
-                        ..Default::default()
-                    },
                 ],
                 &[],
             );
@@ -526,22 +485,12 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
     }
 
     fn context(self: std::pin::Pin<&mut Self>, ctx: &mut rhyolite::future::StageContext) {
-        let mut this = self.project();
+        let this = self.project();
         ctx.write_image(
             this.target_image.deref_mut(),
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             vk::AccessFlags2::SHADER_STORAGE_WRITE,
             vk::ImageLayout::GENERAL,
-        );
-        ctx.read(
-            this.radiance_hashmap.deref(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_READ,
-        );
-        ctx.write(
-            this.radiance_hashmap.deref_mut(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_WRITE,
         );
         ctx.read(
             this.hitgroup_sbt_buffer.deref(),
@@ -552,17 +501,6 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
             this.pipeline_sbt_buffer.deref(),
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
-        );
-        
-        ctx.read(
-            this.radiance_hashmap.deref(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_STORAGE_READ,
-        );
-        ctx.write(
-            this.radiance_hashmap.deref_mut(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_STORAGE_WRITE,
         );
         ctx.read_others(
             this.accel_struct.deref(),
