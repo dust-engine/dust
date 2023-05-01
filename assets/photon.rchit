@@ -61,7 +61,6 @@ layout(push_constant) uniform PushConstants {
 } pushConstants;
 hitAttributeEXT HitAttribute {
     uint8_t voxelId;
-    uint8_t faceId;
 } hitAttributes;
 
 vec3 CubedNormalize(vec3 dir) {
@@ -79,18 +78,20 @@ void main() {
     vec3 normalObject = CubedNormalize(hitPointObject - offsetInBox - vec3(0.5));
     photon.normal = gl_ObjectToWorldEXT * vec4(normalObject, 0.0);
 
+    int8_t faceId = int8_t(normalObject.x) * int8_t(3) + int8_t(normalObject.y) * int8_t(2) + int8_t(normalObject.z);
+    uint8_t faceIdU = uint8_t(min((faceId > 0 ? (faceId-1) : (6 + faceId)), 5));
     // Accumulate energy
-    const uint16_t lastAccessedFrame = sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[hitAttributes.faceId];
-    sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[hitAttributes.faceId] = uint16_t(pushConstants.frameIndex);
+    const uint16_t lastAccessedFrame = sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[faceIdU];
+    sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[faceIdU] = uint16_t(pushConstants.frameIndex);
 
     const uint16_t frameDifference = uint16_t(pushConstants.frameIndex) - lastAccessedFrame;
 
     if (frameDifference > 0) {
-        f16vec3 prevEnergy = sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].irradiance;
+        f16vec3 prevEnergy = sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance;
         f16vec3 nextEnergy = prevEnergy * float16_t(pow(0.999, frameDifference)) + f16vec3(photon.energy);
-        sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].irradiance = nextEnergy;
+        sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance = nextEnergy;
     } else {
-        sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].irradiance += f16vec3(photon.energy);
+        sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance += f16vec3(photon.energy);
     }
 
     // Calculate projected 2d hitpoint
@@ -102,7 +103,7 @@ void main() {
     u8vec2 hitPointCoords = min(u8vec2(floor(hitPointSurface)), u8vec2(3)); // range: 0, 1, 2, 3.
     uint8_t hitPointCoord = hitPointCoords.x * uint8_t(4) + hitPointCoords.y; // range: 0 - 15
     //sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].mask = uint16_t(1);
-    sbt.irradianceCache.entries[gl_PrimitiveID].faces[hitAttributes.faceId].mask |= uint16_t(1) << hitPointCoord;
+    sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].mask |= uint16_t(1) << hitPointCoord;
     
     
     u32vec2 blockMask = unpack32(block.mask);

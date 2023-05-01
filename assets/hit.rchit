@@ -55,7 +55,6 @@ layout(shaderRecordEXT) buffer Sbt {
 layout(location = 0) rayPayloadInEXT vec3 hitLocation;
 hitAttributeEXT HitAttribute {
     uint8_t voxelId;
-    uint8_t faceId;
 } hitAttributes;
 
 
