@@ -83,6 +83,7 @@ impl Plugin for RenderPlugin {
                     buffer_device_address: vk::TRUE,
                     shader_int8: vk::TRUE,
                     storage_buffer8_bit_access: vk::TRUE,
+                    shader_float16: vk::TRUE,
                     ..Default::default()
                 },
                 v11: vk::PhysicalDeviceVulkan11Features {

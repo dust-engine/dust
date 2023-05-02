@@ -492,6 +492,12 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
             vk::AccessFlags2::SHADER_STORAGE_WRITE,
             vk::ImageLayout::GENERAL,
         );
+        ctx.write_image(
+            this.diffuse_image.deref_mut(),
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            vk::ImageLayout::GENERAL,
+        );
         ctx.read(
             this.hitgroup_sbt_buffer.deref(),
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,

@@ -58,8 +58,7 @@ fn main() {
     app.world
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
-            image_format: vk::Format::A2B10G10R10_UNORM_PACK32,
-            image_color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
+            image_format: vk::Format::R8G8B8A8_UNORM,
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
             ..Default::default()
         });
