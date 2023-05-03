@@ -1,43 +1,5 @@
 #version 460
-#extension GL_EXT_ray_tracing : require
-#extension GL_EXT_shader_explicit_arithmetic_types : require
-#extension GL_EXT_nonuniform_qualifier : require
-#extension GL_EXT_buffer_reference : require
-#extension GL_EXT_scalar_block_layout : require
-
-layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
-layout(set = 0, binding = 1) uniform writeonly image2D u_diffuseOutput;
-struct Block
-{
-    u16vec4 position;
-    uint64_t mask;
-    uint32_t material_ptr;
-    uint32_t reserved;
-};
-
-layout(buffer_reference, buffer_reference_align = 8, scalar) buffer GeometryInfo {
-    Block blocks[];
-};
-layout(buffer_reference, buffer_reference_align = 1, scalar) buffer MaterialInfo {
-    uint8_t materials[];
-};
-layout(buffer_reference) buffer PaletteInfo {
-    u8vec4 palette[];
-};
-
-struct IrradianceCacheFace {
-    f16vec3 irradiance;
-    uint16_t mask;
-};
-struct IrradianceCacheEntry {
-    IrradianceCacheFace faces[6];
-    uint16_t lastAccessedFrameIndex[6];
-    uint32_t _reerved;
-};
-layout(buffer_reference, scalar) buffer IrradianceCache {
-    IrradianceCacheEntry entries[];
-};
-
+#include "standard.glsl"
 
 layout(push_constant) uniform PushConstants {
     // Indexed by block id
@@ -58,29 +20,6 @@ hitAttributeEXT HitAttribute {
 } hitAttributes;
 
 
-vec3 CubedNormalize(vec3 dir) {
-    vec3 dir_abs = abs(dir);
-    float max_element = max(dir_abs.x, max(dir_abs.y, dir_abs.z));
-    return sign(dir) * step(max_element, dir_abs);
-}
-
-// Normal points outward for rays exiting the surface, else is flipped.
-vec3 OffsetRay(vec3 p, vec3 n) {
-    const float int_scale = 256.0;
-    i8vec3 of_i = i8vec3(int_scale * n);
-    vec3 p_i = intBitsToFloat(floatBitsToInt(p) + i32vec3(
-        (p.x < 0) ? -of_i.x : of_i.x,
-        (p.y < 0) ? -of_i.y : of_i.y,
-        (p.z < 0) ? -of_i.z : of_i.z
-    ));
-    const float origin = 1.0 / 32.0;
-    const float float_scale = 1.0 / 65536.0;
-    return vec3(
-        abs(p.x) < origin ? p.x + float_scale * n.x : p_i.x,
-        abs(p.y) < origin ? p.y + float_scale * n.y : p_i.y,
-        abs(p.z) < origin ? p.z + float_scale * n.z : p_i.z
-    );
-}
 
 void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
@@ -109,11 +48,12 @@ void main() {
     u8vec4 color = sbt.paletteInfo.palette[palette_index];
 
 
-    vec3 diffuseColor = color.xyz / 255.0;
+    vec3 albedo = color.xyz / 255.0;
     // The parameter 0.01 was derived from the 0.999 retention factor. It's not arbitrary.
-    vec3 indirectContribution = 0.01 * radiance * diffuseColor;
+    vec3 indirectContribution = 0.01 * radiance * albedo;
 
     // Store the contribution from photon maps
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(indirectContribution, 1.0));
-    imageStore(u_diffuseOutput, ivec2(gl_LaunchIDEXT.xy), vec4(diffuseColor, 1.0));
+    imageStore(u_depth, ivec2(gl_LaunchIDEXT.xy), vec4(gl_HitTEXT));
+    imageStore(u_normal, ivec2(gl_LaunchIDEXT.xy), vec4(normal_to_gbuffer(normalWorld), 0.0, 1.0));
+    imageStore(u_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(albedo, 1.0));
 }

@@ -58,7 +58,8 @@ fn main() {
     app.world
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
-            image_format: vk::Format::R8G8B8A8_UNORM,
+            image_format: vk::Format::A2B10G10R10_UNORM_PACK32,
+            image_color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
             ..Default::default()
         });
@@ -128,17 +129,48 @@ impl Plugin for RenderSystem {
                 let future = gpu! {
                     let mut swapchain_image = swapchain_image.await;
                     commands! {
-                        let diffuse_color_image = rhyolite::future::use_shared_state(using!(), |_| {
+                        let albedo_image = rhyolite::future::use_shared_state(using!(), |_| {
                             allocator
                             .create_device_image_uninit(
                                 &ImageRequest {
+                                    format: vk::Format::A2B10G10R10_UNORM_PACK32, // TODO: try bgr?
                                     usage: vk::ImageUsageFlags::STORAGE,
                                     extent: swapchain_image.inner().extent(),
                                     ..Default::default()
                                 }
                             ).unwrap().as_2d_view().unwrap()
                         }, |image| swapchain_image.inner().extent() != image.extent());
-                        let mut diffuse_color_image = RenderImage::new(diffuse_color_image, vk::ImageLayout::UNDEFINED);
+                        let mut albedo_image = RenderImage::new(albedo_image, vk::ImageLayout::UNDEFINED);
+
+                        
+                        let depth_image = rhyolite::future::use_shared_state(using!(), |_| {
+                            allocator
+                            .create_device_image_uninit(
+                                &ImageRequest {
+                                    format: vk::Format::R32_SFLOAT,
+                                    usage: vk::ImageUsageFlags::STORAGE,
+                                    extent: swapchain_image.inner().extent(),
+                                    ..Default::default()
+                                }
+                            ).unwrap().as_2d_view().unwrap()
+                        }, |image| swapchain_image.inner().extent() != image.extent());
+                        let mut depth_image = RenderImage::new(depth_image, vk::ImageLayout::UNDEFINED);
+
+                        
+                        let normal_image = rhyolite::future::use_shared_state(using!(), |_| {
+                            allocator
+                            .create_device_image_uninit(
+                                &ImageRequest {
+                                    format: vk::Format::R16G16_SNORM,
+                                    usage: vk::ImageUsageFlags::STORAGE,
+                                    extent: swapchain_image.inner().extent(),
+                                    ..Default::default()
+                                }
+                            ).unwrap().as_2d_view().unwrap()
+                        }, |image| swapchain_image.inner().extent() != image.extent());
+                        let mut normal_image = RenderImage::new(normal_image, vk::ImageLayout::UNDEFINED);
+
+
                         let radiance_image = rhyolite::future::use_shared_state(using!(), |_| {
                             allocator
                             .create_device_image_uninit(
@@ -156,7 +188,21 @@ impl Plugin for RenderSystem {
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
                             let accel_struct = accel_struct.await;
-                            if let Some(render) = pipeline.render(&mut radiance_image, &mut diffuse_color_image, &accel_struct, &mut render_params, camera) {
+                            clear_image(&mut depth_image, vk::ClearColorValue {
+                                float32: [0.0, 0.0, 0.0, 0.0]
+                            }).await;
+                            clear_image(&mut radiance_image, vk::ClearColorValue {
+                                float32: [0.0, 0.0, 0.0, 0.0]
+                            }).await;
+                            if let Some(render) = pipeline.render(
+                                &mut radiance_image,
+                                &mut albedo_image,
+                                &mut normal_image,
+                                &mut depth_image,
+                                &accel_struct,
+                                &mut render_params,
+                                camera
+                            ) {
                                 render.await;
                                 rendered = true;
                             }
@@ -165,8 +211,7 @@ impl Plugin for RenderSystem {
                             }
                             retain!(accel_struct);
                         }
-                        retain!(radiance_image);
-                        retain!(diffuse_color_image);
+                        retain!((radiance_image, albedo_image, normal_image, depth_image));
                         if !rendered {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]

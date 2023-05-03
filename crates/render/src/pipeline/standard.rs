@@ -39,6 +39,7 @@ use super::{RayTracingPipeline, RayTracingPipelineManager};
 pub struct StandardPipeline {
     primary_ray_pipeline: RayTracingPipelineManager,
     photon_ray_pipeline: RayTracingPipelineManager,
+    shadow_ray_pipeline: RayTracingPipelineManager,
     hitgroup_sbt_manager: SbtManager,
     pipeline_sbt_manager: PipelineSbtManager,
 
@@ -65,7 +66,11 @@ impl RayTracingPipeline for StandardPipeline {
             img_output: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            diffuse_color: vk::DescriptorType::STORAGE_IMAGE,
+            img_albedo: vk::DescriptorType::STORAGE_IMAGE,
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            img_normal: vk::DescriptorType::STORAGE_IMAGE,
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            img_depth: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
@@ -115,22 +120,33 @@ impl RayTracingPipeline for StandardPipeline {
                         asset_server.load("miss.rmiss.spv"),
                         vk::ShaderStageFlags::MISS_KHR,
                     ),
-                    SpecializedShader::for_shader(
-                        asset_server.load("shadow.rmiss.spv"),
-                        vk::ShaderStageFlags::MISS_KHR,
-                    ),
                 ],
                 Vec::new(),
                 pipeline_cache.as_ref().cloned(),
             ),
             photon_ray_pipeline: RayTracingPipelineManager::new(
-                pipeline_characteristics,
+                pipeline_characteristics.clone(),
                 vec![1],
                 SpecializedShader::for_shader(
                     asset_server.load("photon.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
                 vec![],
+                Vec::new(),
+                pipeline_cache.as_ref().cloned(),
+            ),
+            shadow_ray_pipeline: RayTracingPipelineManager::new(
+                pipeline_characteristics,
+                vec![],
+                SpecializedShader::for_shader(
+                    asset_server.load("shadow.rgen.spv"),
+                    vk::ShaderStageFlags::RAYGEN_KHR,
+                ),
+                vec![
+                    SpecializedShader::for_shader(
+                        asset_server.load("shadow.rmiss.spv"),
+                        vk::ShaderStageFlags::MISS_KHR,
+                    ),],
                 Vec::new(),
                 pipeline_cache,
             ),
@@ -158,7 +174,7 @@ impl RayTracingPipeline for StandardPipeline {
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
 }
 
-#[derive(AsStd430)]
+#[derive(AsStd430, Clone)]
 struct StandardPipelineCamera {
     camera_view_col0: Vec3,
     near: f32,
@@ -207,8 +223,10 @@ impl StandardPipeline {
     );
     pub fn render<'a>(
         &'a mut self,
-        target: &'a mut RenderImage<impl ImageViewLike>,
-        diffuse_img: &'a mut RenderImage<impl ImageViewLike>,
+        target_image: &'a mut RenderImage<impl ImageViewLike>,
+        albedo_image: &'a mut RenderImage<impl ImageViewLike>,
+        normal_image: &'a mut RenderImage<impl ImageViewLike>,
+        depth_image: &'a mut RenderImage<impl ImageViewLike>,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         params: &'a mut SystemParamItem<Self::RenderParams>,
         camera: (&PinholeProjection, &GlobalTransform),
@@ -222,6 +240,7 @@ impl StandardPipeline {
         let (shader_store, image_store, allocator, blue_noise) = params;
         let primary_pipeline = self.primary_ray_pipeline.get_pipeline(shader_store)?;
         let photon_pipeline = self.photon_ray_pipeline.get_pipeline(shader_store)?;
+        let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(shader_store)?;
         let noise_img = image_store.get(&blue_noise.unitvec3_cosine)?;
         self.hitgroup_sbt_manager
             .specify_pipelines(&[primary_pipeline, photon_pipeline]);
@@ -261,13 +280,15 @@ impl StandardPipeline {
         };
 
         self.pipeline_sbt_manager
-            .push_raygen(primary_pipeline, camera, 0);
+            .push_raygen(primary_pipeline, camera.clone(), 0);
         self.pipeline_sbt_manager
             .push_raygen(photon_pipeline, photon_camera, 0);
         self.pipeline_sbt_manager
+            .push_raygen(shadow_pipeline, camera, 0);
+        self.pipeline_sbt_manager
             .push_miss(primary_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
-            .push_miss(primary_pipeline, EmptyShaderRecords, 1);
+            .push_miss(shadow_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
 
@@ -277,9 +298,12 @@ impl StandardPipeline {
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
             StandardPipelineRenderingFuture {
                 accel_struct: tlas,
-                target_image: target,
-                diffuse_image: diffuse_img,
+                target_image,
+                albedo_image,
+                depth_image,
+                normal_image,
                 primary_pipeline,
+                shadow_pipeline,
                 photon_pipeline,
                 desc_pool,
                 hitgroup_sbt_buffer: &hitgroup_sbt_buffer,
@@ -300,14 +324,19 @@ use pin_project::pin_project;
 struct StandardPipelineRenderingFuture<
     'a,
     TargetImage: ImageViewLike,
-    DiffuseImage: ImageViewLike,
+    AlbedoImage: ImageViewLike,
+    DepthImage: ImageViewLike,
+    NormalImage: ImageViewLike,
     HitgroupBuf: BufferLike,
 > {
     accel_struct: &'a RenderRes<Arc<AccelerationStructure>>,
     target_image: &'a mut RenderImage<TargetImage>,
-    diffuse_image: &'a mut RenderImage<DiffuseImage>,
+    albedo_image: &'a mut RenderImage<AlbedoImage>,
+    depth_image: &'a mut RenderImage<DepthImage>,
+    normal_image: &'a mut RenderImage<NormalImage>,
     primary_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
     photon_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
+    shadow_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
     desc_pool: &'a mut Retainer<DescriptorPool>,
     hitgroup_sbt_buffer: &'a RenderRes<HitgroupBuf>,
     pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
@@ -315,9 +344,12 @@ struct StandardPipelineRenderingFuture<
     hitgroup_stride: usize,
 }
 
-impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: BufferLike>
+impl<'a, TargetImage: ImageViewLike, 
+AlbedoImage: ImageViewLike,
+DepthImage: ImageViewLike,
+NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
     rhyolite::future::GPUCommandFuture
-    for StandardPipelineRenderingFuture<'a, TargetImage, DiffuseImage, HitgroupBuf>
+    for StandardPipelineRenderingFuture<'a, TargetImage, AlbedoImage, DepthImage, NormalImage, HitgroupBuf>
 {
     type Output = ();
 
@@ -362,7 +394,7 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                     vk::WriteDescriptorSet {
                         dst_set: desc_set[0],
                         dst_binding: 0,
-                        descriptor_count: 2,
+                        descriptor_count: 4,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                         p_image_info: [
                             vk::DescriptorImageInfo {
@@ -372,7 +404,17 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                             },
                             vk::DescriptorImageInfo {
                                 sampler: vk::Sampler::null(),
-                                image_view: this.diffuse_image.inner().raw_image_view(),
+                                image_view: this.albedo_image.inner().raw_image_view(),
+                                image_layout: vk::ImageLayout::GENERAL,
+                            },
+                            vk::DescriptorImageInfo {
+                                sampler: vk::Sampler::null(),
+                                image_view: this.normal_image.inner().raw_image_view(),
+                                image_layout: vk::ImageLayout::GENERAL,
+                            },
+                            vk::DescriptorImageInfo {
+                                sampler: vk::Sampler::null(),
+                                image_view: this.depth_image.inner().raw_image_view(),
                                 image_layout: vk::ImageLayout::GENERAL,
                             },
                         ]
@@ -382,14 +424,14 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                     vk::WriteDescriptorSet {
                         p_next: &acceleration_structure_write as *const _ as *const _,
                         dst_set: desc_set[0],
-                        dst_binding: 2,
+                        dst_binding: 4,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
                         dst_set: desc_set[0],
-                        dst_binding: 3,
+                        dst_binding: 5,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
@@ -471,6 +513,25 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
                 extent.height,
                 extent.depth,
             );
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_KHR,
+                this.shadow_pipeline.pipeline().raw(),
+            );
+            device.rtx_loader().cmd_trace_rays(
+                command_buffer,
+                &this.pipeline_sbt_buffer.inner().rgen(2),
+                &this.pipeline_sbt_buffer.inner().miss(),
+                &vk::StridedDeviceAddressRegionKHR {
+                    device_address: this.hitgroup_sbt_buffer.inner().device_address(),
+                    stride: *this.hitgroup_stride as u64,
+                    size: this.hitgroup_sbt_buffer.inner.size(),
+                },
+                &vk::StridedDeviceAddressRegionKHR::default(),
+                extent.width,
+                extent.height,
+                extent.depth,
+            );
         });
         *frame_index += 1;
         std::task::Poll::Ready((
@@ -493,7 +554,19 @@ impl<'a, TargetImage: ImageViewLike, DiffuseImage: ImageViewLike, HitgroupBuf: B
             vk::ImageLayout::GENERAL,
         );
         ctx.write_image(
-            this.diffuse_image.deref_mut(),
+            this.albedo_image.deref_mut(),
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            vk::ImageLayout::GENERAL,
+        );
+        ctx.write_image(
+            this.depth_image.deref_mut(),
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            vk::ImageLayout::GENERAL,
+        );
+        ctx.write_image(
+            this.normal_image.deref_mut(),
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             vk::AccessFlags2::SHADER_STORAGE_WRITE,
             vk::ImageLayout::GENERAL,

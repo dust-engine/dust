@@ -1,4 +1,6 @@
 {
     "shaderc-lint.glslcArgs": "--target-env=vulkan1.3 -O -g",
     "shaderc-lint.buildOnSave": true,
+    "shaderc-lint.includeSupport": true,
+    "shaderc-lint.defaultGLSLVersion": "460"
 }

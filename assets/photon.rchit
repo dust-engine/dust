@@ -1,45 +1,5 @@
 #version 460
-#extension GL_EXT_ray_tracing : require
-#extension GL_EXT_shader_explicit_arithmetic_types : require
-#extension GL_EXT_nonuniform_qualifier : require
-#extension GL_EXT_buffer_reference : require
-#extension GL_EXT_scalar_block_layout : require
-#extension GL_EXT_shader_atomic_float : require
-#extension GL_EXT_samplerless_texture_functions: require
-
-layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
-layout(set = 0, binding = 3) uniform texture2D blue_noise;
-struct Block
-{
-    u16vec4 position;
-    uint64_t mask;
-    uint32_t material_ptr;
-    uint32_t block_id;
-};
-
-layout(buffer_reference, buffer_reference_align = 8, scalar) buffer GeometryInfo {
-    Block blocks[];
-};
-layout(buffer_reference, buffer_reference_align = 1, scalar) buffer MaterialInfo {
-    uint8_t materials[];
-};
-layout(buffer_reference) buffer PaletteInfo {
-    u8vec4 palette[];
-};
-
-struct IrradianceCacheFace {
-    f16vec3 irradiance;
-    uint16_t mask;
-};
-struct IrradianceCacheEntry {
-    IrradianceCacheFace faces[6];
-    uint16_t lastAccessedFrameIndex[6];
-    uint32_t _reerved;
-};
-layout(buffer_reference, scalar) buffer IrradianceCache {
-    IrradianceCacheEntry entries[];
-};
-
+#include "standard.glsl"
 struct PhotonRayPayload {
     vec3 energy;
     float hitT;
@@ -62,12 +22,6 @@ layout(push_constant) uniform PushConstants {
 hitAttributeEXT HitAttribute {
     uint8_t voxelId;
 } hitAttributes;
-
-vec3 CubedNormalize(vec3 dir) {
-    vec3 dir_abs = abs(dir);
-    float max_element = max(dir_abs.x, max(dir_abs.y, dir_abs.z));
-    return sign(dir) * step(max_element, dir_abs);
-}
 
 void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
