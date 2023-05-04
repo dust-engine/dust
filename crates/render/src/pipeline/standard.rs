@@ -137,7 +137,7 @@ impl RayTracingPipeline for StandardPipeline {
             ),
             shadow_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics,
-                vec![],
+                vec![2],
                 SpecializedShader::for_shader(
                     asset_server.load("shadow.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
@@ -164,11 +164,12 @@ impl RayTracingPipeline for StandardPipeline {
     ) -> crate::sbt::SbtIndex {
         self.primary_ray_pipeline.material_instance_added::<M>();
         self.photon_ray_pipeline.material_instance_added::<M>();
+        self.shadow_ray_pipeline.material_instance_added::<M>();
         self.hitgroup_sbt_manager.add_instance(material, params)
     }
 
     fn num_raytypes() -> u32 {
-        2
+        3
     }
 
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
@@ -214,6 +215,7 @@ struct StandardPipelinePushConstant {
 impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
     pub const PHOTON_RAYTYPE: u32 = 1;
+    pub const SHADOW_RAYTYPE: u32 = 2;
 
     pub type RenderParams = (
         SRes<Assets<ShaderModule>>,
@@ -243,7 +245,7 @@ impl StandardPipeline {
         let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(shader_store)?;
         let noise_img = image_store.get(&blue_noise.unitvec3_cosine)?;
         self.hitgroup_sbt_manager
-            .specify_pipelines(&[primary_pipeline, photon_pipeline]);
+            .specify_pipelines(&[primary_pipeline, photon_pipeline, shadow_pipeline]);
         let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer()?;
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
 
@@ -354,6 +356,7 @@ NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
     type Output = ();
 
     type RetainedState = DisposeContainer<(
+        Arc<rhyolite::RayTracingPipeline>,
         Arc<rhyolite::RayTracingPipeline>,
         Arc<rhyolite::RayTracingPipeline>,
         RetainerHandle<DescriptorPool>,
@@ -539,6 +542,7 @@ NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
             DisposeContainer::new((
                 this.primary_pipeline.pipeline().clone(),
                 this.photon_pipeline.pipeline().clone(),
+                this.shadow_pipeline.pipeline().clone(),
                 this.desc_pool.handle(),
                 desc_set,
             )),

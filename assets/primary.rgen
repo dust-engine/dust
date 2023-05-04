@@ -31,7 +31,7 @@ void main() {
         gl_RayFlagsOpaqueEXT , // RayFlags
         0xFF, // CullMask
         0, // SBT offset, ray type index
-        2, // SBT stride, number of ray types
+        3, // SBT stride, number of ray types
         0, // missIndex
         sbt.camera_position,     // ray origin
         sbt.near,           // ray min range
