@@ -11,7 +11,7 @@ layout(shaderRecordEXT) buffer Sbt {
     vec3 camera_position;
     float tan_half_fov;
 } sbt;
-layout(location = 0) rayPayloadEXT vec3 hitLocation;
+layout(location = 0) rayPayloadEXT uint8_t _rayPayloadNotUsed;
 
 
 void main() {
@@ -25,7 +25,6 @@ void main() {
     const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
 
     const vec3 pixelCameraWorld = rotationMatrix * vec3(pixelCamera, -1);
-    hitLocation = vec3(0.0);
     traceRayEXT(
         accelerationStructure,
         gl_RayFlagsOpaqueEXT , // RayFlags
@@ -39,5 +38,4 @@ void main() {
         sbt.far, // tmax
         0 // payload
     );
-    return;
 }

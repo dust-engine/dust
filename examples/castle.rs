@@ -161,7 +161,7 @@ impl Plugin for RenderSystem {
                             allocator
                             .create_device_image_uninit(
                                 &ImageRequest {
-                                    format: vk::Format::R16G16_SNORM,
+                                    format: vk::Format::R16G16B16A16_SNORM,
                                     usage: vk::ImageUsageFlags::STORAGE,
                                     extent: swapchain_image.inner().extent(),
                                     ..Default::default()

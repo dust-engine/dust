@@ -156,6 +156,7 @@ impl RayTracingPipeline for StandardPipeline {
     fn shader_updated(&mut self, shader: &bevy_asset::Handle<ShaderModule>) {
         self.primary_ray_pipeline.shader_updated(shader);
         self.photon_ray_pipeline.shader_updated(shader);
+        self.shadow_ray_pipeline.shader_updated(shader);
     }
     fn material_instance_added<M: crate::Material<Pipeline = Self>>(
         &mut self,
@@ -516,6 +517,30 @@ NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
                 extent.height,
                 extent.depth,
             );
+            device.cmd_pipeline_barrier2(command_buffer, &vk::DependencyInfo {
+                dependency_flags: vk::DependencyFlags::BY_REGION,
+                image_memory_barrier_count: 1,
+                p_image_memory_barriers: &vk::ImageMemoryBarrier2 {
+                    src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    src_access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    dst_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    dst_access_mask: vk::AccessFlags2::SHADER_STORAGE_READ,
+                    old_layout: vk::ImageLayout::GENERAL,
+                    new_layout: vk::ImageLayout::GENERAL,
+                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    image: this.depth_image.inner().raw_image(),
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
             device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::RAY_TRACING_KHR,

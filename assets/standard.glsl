@@ -9,7 +9,7 @@
 
 layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
 layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
-layout(set = 0, binding = 2, rg16_snorm) uniform image2D u_normal;
+layout(set = 0, binding = 2, rgba16_snorm) uniform image2D u_normal;
 layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
 
 layout(set = 0, binding = 4) uniform accelerationStructureEXT accelerationStructure;
@@ -66,14 +66,4 @@ vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
 
 uint8_t encode_index(u8vec3 position){
     return (position.x<<4) | (position.y << 2) | position.z;
-}
-
-vec2 normal_to_gbuffer(vec3 normal) {
-    return normalize(normal.xy) * sqrt(normal.z * 0.5 + 0.5);
-}
-vec3 gbuffer_to_normal(vec2 g) {
-    vec3 normal;
-    normal.z = length(g) * 2.0 - 1.0;
-    normal.xy = normalize(g) * sqrt(1 - normal.z * normal.z);
-    return normal;
 }
