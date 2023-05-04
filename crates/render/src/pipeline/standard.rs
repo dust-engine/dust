@@ -534,7 +534,7 @@ NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
                 extent.width,
                 extent.height,
                 extent.depth,
-            );
+            ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
         });
         *frame_index += 1;
         std::task::Poll::Ready((
