@@ -299,7 +299,7 @@ impl StandardPipeline {
             far: 100000.0,
             padding: 0,
             camera_position: affine.translation.into(),
-            strength: 0.7,
+            strength: 37.0,
         };
 
         self.pipeline_sbt_manager

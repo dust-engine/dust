@@ -11,7 +11,9 @@ layout(shaderRecordEXT) buffer Sbt {
     vec3 camera_position;
     float tan_half_fov;
 } sbt;
-layout(location = 0) rayPayloadEXT uint8_t _ray_payload_not_used;
+layout(location = 0) rayPayloadEXT struct RayPayload {
+    f16vec3 color;
+} payload;
 
 
 void main() {
@@ -20,6 +22,8 @@ void main() {
         // Did not hit.
         return;
     }
+    payload.color = f16vec3(imageLoad(u_imgOutput, ivec2(gl_LaunchIDEXT.xy)).xyz);
+
     const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
 
     vec2 pixelCamera = 2 * pixelNDC - 1;

@@ -71,18 +71,6 @@ void main() {
     
     
     photon.hitT = gl_HitTEXT;
-
-    //vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(12, 24) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;
-    //float d = dot(noiseSample, normal);
-    //if (d < 0.0) {
-    //    noiseSample = -noiseSample;
-    //}
-    //photon.origin = photon.origin + photon.dir * (gl_HitTEXT * 0.99);
-    //photon.dir = noiseSample;
-    // What we're doing here:
-    // atomic exchange. one thread gets the old frame index, all other threads get the new frame index.
-    // multiplication. one thread multiplies the old energy by 0.5, all other threads do nothing
-    // addition. all threads add energy.
 }
 // TODO: use atomic swap on frame index, use weighted average function for irradiance cache
 // This makes photon mapping nearly free by avoiding resets and just storing a timestamp
