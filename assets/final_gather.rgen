@@ -31,20 +31,34 @@ void main() {
        
     const vec3 rayWorldDir = rotationMatrix * vec3(pixelCamera, -1);
 
-    const vec3 sunDir = vec3(0.0, 0.80114365, -0.5984721);
     const vec3 normalWorld = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
     vec3 hitLocation = hitT * rayWorldDir + sbt.camera_position + normalWorld * 0.01;
+
+    vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;
+    // noiseSample is weighted on the z axis
+    noiseSample = noiseSample * 2.0 - 1.0;
+
+    const vec3 k = cross(vec3(0, 0, 1), normalWorld);
+    const float cosTheta = dot(vec3(0, 0, 1), normalWorld);
+    const float sinTheta = length(k);
+    const vec3 crossed = cross(k, noiseSample);
+    vec3 rotatedNoiseSample = noiseSample * cosTheta + crossed * sinTheta + k * dot(k, noiseSample) * (1.0 - cosTheta);
+
+    if (dot(rotatedNoiseSample, vec3(normalWorld)) < 0.0) {
+        rotatedNoiseSample = -rotatedNoiseSample;
+    }
+
     // Shoot shadow ray
     traceRayEXT(
         accelerationStructure,
-        gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT, // RayFlags
+        gl_RayFlagsOpaqueEXT, // RayFlags
         0xFF, // CullMask
-        2, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
+        3, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
         4, // SBT stride, number of ray types // TODO: Make this a shader constant
-        1, // missIndex
+        2, // missIndex
         hitLocation,     // ray origin
-        0.0,           // ray min range
-        sunDir, // direction
+        sbt.near,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
+        rotatedNoiseSample, // direction
         sbt.far, // tmax
         0 // payload
     );

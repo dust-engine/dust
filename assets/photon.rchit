@@ -14,17 +14,27 @@ layout(shaderRecordEXT) buffer Sbt {
     IrradianceCache irradianceCache;
 } sbt;
 
-layout(push_constant) uniform PushConstants {
-    // Indexed by block id
-    uint rand;
-    uint frameIndex;
-} pushConstants;
 hitAttributeEXT HitAttribute {
     uint8_t voxelId;
 } hitAttributes;
 
 void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
+
+    {
+        // Multiply ray energy by voxel albedo
+        u32vec2 blockMask = unpack32(block.mask);
+        uint32_t numVoxelInBlock = bitCount(blockMask.x) + bitCount(blockMask.y);
+        uint32_t randomVoxelId = pushConstants.rand % numVoxelInBlock;
+
+        u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << randomVoxelId) - 1));
+        uint32_t voxelMemoryOffset = uint32_t(bitCount(masked) + bitCount(masked.y));
+
+        uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
+        u8vec4 color = sbt.paletteInfo.palette[palette_index];
+
+        photon.energy *= vec3(color.xyz) / 255.0;
+    }
 
     // Calculate normal
     vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT - block.position.xyz;
@@ -60,17 +70,6 @@ void main() {
     sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].mask |= uint16_t(1) << hitPointCoord;
     
     
-    u32vec2 blockMask = unpack32(block.mask);
-    uint32_t numVoxelInBlock = bitCount(blockMask.x) + bitCount(blockMask.y);
-    uint32_t randomVoxelId = pushConstants.rand % numVoxelInBlock;
-
-    u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << randomVoxelId) - 1));
-    uint32_t voxelMemoryOffset = uint32_t(bitCount(masked) + bitCount(masked.y));
-
-    uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
-    u8vec4 color = sbt.paletteInfo.palette[palette_index];
-
-    photon.energy *= vec3(color.xyz) / 255.0;
     photon.hitT = gl_HitTEXT;
 
     //vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(12, 24) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;

@@ -21,12 +21,6 @@ struct PhotonRayPayload {
     vec3 normal;
 };
 layout(location = 0) rayPayloadEXT PhotonRayPayload photon;
-layout(push_constant) uniform PushConstants {
-    // Indexed by block id
-    uint rand;
-    uint frameIndex;
-} pushConstants;
-
 
 
 void main() {
@@ -43,7 +37,7 @@ void main() {
         gl_RayFlagsOpaqueEXT, // RayFlags
         0xFF, // CullMask
         1, // SBT offset, ray type index
-        3, // SBT stride, number of ray types
+        4, // SBT stride, number of ray types
         -1, // missIndex
         rotationMatrix * vec3(pixelNDC, 0.0) + sbt.camera_position,     // ray origin
         sbt.near,           // ray min range
@@ -76,7 +70,7 @@ void main() {
             gl_RayFlagsOpaqueEXT , // RayFlags
             0xFF, // CullMask
             1, // SBT offset, ray type index
-            2, // SBT stride, number of ray types
+            4, // SBT stride, number of ray types
             -1, // missIndex
             currentOrigin,     // ray origin
             sbt.near,           // ray min range

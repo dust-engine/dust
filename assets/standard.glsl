@@ -7,7 +7,7 @@
 #extension GL_EXT_shader_atomic_float : require
 #extension GL_EXT_samplerless_texture_functions: require
 
-layout(set = 0, binding = 0) uniform writeonly image2D u_imgOutput;
+layout(set = 0, binding = 0, rgba32f) uniform image2D u_imgOutput;
 layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
 layout(set = 0, binding = 2, rgba16_snorm) uniform image2D u_normal;
 layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
@@ -15,6 +15,12 @@ layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
 layout(set = 0, binding = 4) uniform accelerationStructureEXT accelerationStructure;
 layout(set = 0, binding = 5) uniform texture2D blue_noise;
 
+
+layout(push_constant) uniform PushConstants {
+    // Indexed by block id
+    uint rand;
+    uint frameIndex;
+} pushConstants;
 
 struct Block
 {

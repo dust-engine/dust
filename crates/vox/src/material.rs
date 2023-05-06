@@ -82,7 +82,7 @@ impl dust_render::Material for DiffuseMaterial {
 
     const TYPE: MaterialType = MaterialType::Procedural;
 
-    fn rahit_shader(_ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
+    fn rahit_shader(_ray_type: u32, _asset_server: &AssetServer) -> Option<SpecializedShader> {
         None
     }
 
@@ -94,6 +94,10 @@ impl dust_render::Material for DiffuseMaterial {
             )),
             Self::Pipeline::PHOTON_RAYTYPE => Some(SpecializedShader::for_shader(
                 asset_server.load("photon.rchit.spv"),
+                vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+            )),
+            Self::Pipeline::FINAL_GATHER_RAYTYPE => Some(SpecializedShader::for_shader(
+                asset_server.load("final_gather.rchit.spv"),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )),
             _ => None,

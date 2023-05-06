@@ -1,12 +1,6 @@
 #version 460
 #include "standard.glsl"
 
-layout(push_constant) uniform PushConstants {
-    // Indexed by block id
-    uint rand;
-    uint frameIndex;
-} pushConstants;
-
 layout(shaderRecordEXT) buffer Sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
