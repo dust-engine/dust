@@ -58,8 +58,6 @@ fn main() {
     app.world
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
-            image_format: vk::Format::A2B10G10R10_UNORM_PACK32,
-            image_color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
             ..Default::default()
         });
@@ -94,7 +92,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 translate_sensitivity: 100.0,
                 ..Default::default()
             },
-            glam::Vec3::new(122.0, 166.61, 54.45),
+            glam::Vec3::new(122.0, 300.61, 54.45),
             glam::Vec3::new(0., 0., 0.),
             glam::Vec3::Y,
         ));
@@ -207,7 +205,8 @@ impl Plugin for RenderSystem {
                                 rendered = true;
                             }
                             if rendered {
-                                tone_mapping_pipeline.render(&radiance_image, &mut swapchain_image).await;
+                                let color_space = swapchain_image.inner().color_space().clone();
+                                tone_mapping_pipeline.render(&radiance_image, &mut swapchain_image, &color_space).await;
                             }
                             retain!(accel_struct);
                         }

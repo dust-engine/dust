@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::Arc, collections::HashMap,
 };
 
 use bevy_ecs::{
@@ -16,38 +16,56 @@ use rhyolite::{
         use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer, PerFrameState,
         RenderImage,
     },
-    macros::glsl_reflected,
+    macros::{glsl_reflected, set_layout},
     utils::retainer::{Retainer, RetainerHandle},
-    ComputePipeline, HasDevice, ImageViewLike,
+    ComputePipeline, HasDevice, ImageViewLike, PipelineLayout,
 };
 use rhyolite_bevy::{Device, Queues};
+use rhyolite::utils::format::{ColorSpace, ColorSpaceType};
 
 #[derive(Resource)]
 pub struct ToneMappingPipeline {
-    pipeline: Arc<ComputePipeline>,
+    layout: Arc<PipelineLayout>,
+    pipeline: HashMap<ColorSpace, Arc<ComputePipeline>>,
     desc_pool: Retainer<DescriptorPool>,
+    scene_color_space: ColorSpaceType,
 }
 
 impl FromWorld for ToneMappingPipeline {
+    /// The color input should be specified in a linear color space with primaries as specified by `scene_color_space.primaries()`.
+    /// The output will be in the color space as specified in `output_color_space`, with the transfer function applied.
     fn from_world(world: &mut World) -> Self {
-        let shader = glsl_reflected!("tone_map.comp");
-        let num_frame_in_flight = world.resource::<Queues>().num_frame_in_flight();
-        let module = shader
-            .build(world.resource::<Device>().inner().clone())
-            .unwrap();
-        let pipeline = ComputePipeline::create_with_reflected_shader(
-            module.specialized(cstr!("main")),
-            Default::default(),
-        )
-        .unwrap();
+        let queues: &Queues = world.resource();
+        let num_frame_in_flight = queues.num_frame_in_flight();
+        let device = queues.device().clone();
+
+        let set = set_layout! {
+            #[shader(vk::ShaderStageFlags::COMPUTE)]
+            src_img: vk::DescriptorType::STORAGE_IMAGE,
+
+            #[shader(vk::ShaderStageFlags::COMPUTE)]
+            dst_img: vk::DescriptorType::STORAGE_IMAGE,
+        }.build(device.clone()).unwrap();
+        let layout = Arc::new(
+            rhyolite::PipelineLayout::new(
+                device.clone(),
+                vec![Arc::new(set)],
+                Default::default(),
+                vk::PipelineLayoutCreateFlags::empty(),
+            )
+            .unwrap(),
+        );
+
         let desc_pool = DescriptorPool::for_pipeline_layouts(
-            std::iter::once(pipeline.layout().deref()),
+            std::iter::once(layout.deref()),
             num_frame_in_flight,
         )
         .unwrap();
         ToneMappingPipeline {
-            pipeline: Arc::new(pipeline),
+            layout,
+            pipeline: HashMap::new(),
             desc_pool: Retainer::new(desc_pool),
+            scene_color_space: ColorSpaceType::sRGB, // The default scene color space.
         }
     }
 }
@@ -62,11 +80,49 @@ impl ToneMappingPipeline {
         &mut self,
         src: SRef,
         dst: TRef,
+        output_color_space: &ColorSpace,
     ) -> ToneMappingFuture<S, SRef, T, TRef> {
+        let pipeline = self.pipeline
+        .entry(output_color_space.clone())
+        .or_insert_with(|| {
+            let device = self.desc_pool.device().clone();
+            println!("Convert from scen {:?} to output {:?}", self.scene_color_space, output_color_space);
+            let mat = self.scene_color_space.primaries().to_color_space(output_color_space.primaries());
+            println!(
+                "{:?}", mat
+            );
+            let transfer_function = output_color_space.transfer_function() as u32;
+            println!("Using transfer function {:?}", transfer_function);
+            
+            let shader = glsl_reflected!("tone_map.comp");
+            let module = shader
+                .build(device)
+                .unwrap();
+            let pipeline = ComputePipeline::create_with_reflected_shader_and_layout(
+                module
+                    .specialized(cstr!("main"))
+                    .with_const(0, transfer_function)
+                    .with_const(1, mat.x_axis.x)
+                    .with_const(2, mat.x_axis.y)
+                    .with_const(3, mat.x_axis.z)
+                    .with_const(4, mat.y_axis.x)
+                    .with_const(5, mat.y_axis.y)
+                    .with_const(6, mat.y_axis.z)
+                    .with_const(7, mat.z_axis.x)
+                    .with_const(8, mat.z_axis.y)
+                    .with_const(9, mat.z_axis.z),
+                Default::default(),
+                self.layout.clone()
+            )
+            .unwrap();
+            Arc::new(pipeline)
+        });
+
         ToneMappingFuture {
             src_img: src,
             dst_img: dst,
-            pipeline: self,
+            pipeline,
+            desc_pool: &mut self.desc_pool
         }
     }
 }
@@ -81,7 +137,8 @@ pub struct ToneMappingFuture<
 > {
     src_img: SRef,
     dst_img: TRef,
-    pipeline: &'a mut ToneMappingPipeline,
+    desc_pool: &'a mut Retainer<DescriptorPool>,
+    pipeline: &'a mut Arc<ComputePipeline>,
 }
 
 impl<
@@ -112,9 +169,9 @@ impl<
         let extent = this.src_img.inner().extent();
 
         let desc_set = use_per_frame_state(state_desc_sets, || {
-            this.pipeline
+            this
                 .desc_pool
-                .allocate_for_pipeline_layout(this.pipeline.pipeline.layout())
+                .allocate_for_pipeline_layout(this.pipeline.layout())
                 .unwrap()
         });
         unsafe {
@@ -131,7 +188,7 @@ impl<
                     image_layout: vk::ImageLayout::GENERAL,
                 },
             ];
-            this.pipeline.pipeline.device().update_descriptor_sets(
+            this.pipeline.device().update_descriptor_sets(
                 &[vk::WriteDescriptorSet {
                     dst_set: desc_set[0],
                     dst_binding: 0,
@@ -150,12 +207,12 @@ impl<
             device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                this.pipeline.pipeline.raw(),
+                this.pipeline.raw(),
             );
             device.cmd_bind_descriptor_sets(
                 command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                this.pipeline.pipeline.raw_layout(),
+                this.pipeline.raw_layout(),
                 0,
                 desc_set.as_slice(),
                 &[],
@@ -170,8 +227,8 @@ impl<
         std::task::Poll::Ready((
             (),
             DisposeContainer::new((
-                this.pipeline.pipeline.clone(),
-                this.pipeline.desc_pool.handle(),
+                this.pipeline.clone(),
+                this.desc_pool.handle(),
                 desc_set,
             )),
         ))

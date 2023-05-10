@@ -12,6 +12,11 @@ hitAttributeEXT HitAttribute {
     uint8_t voxelId;
 } hitAttributes;
 
+float SRGBToLinear(float color)
+{
+    // Approximately pow(color, 2.2)
+    return color < 0.04045 ? color / 12.92 : pow(abs(color + 0.055) / 1.055, 2.4);
+}
 
 
 void main() {
@@ -32,6 +37,9 @@ void main() {
 
 
     vec3 albedo = color.xyz / 255.0;
+    albedo.x = SRGBToLinear(albedo.x);
+    albedo.y = SRGBToLinear(albedo.y);
+    albedo.z = SRGBToLinear(albedo.z);
 
     // Store the contribution from photon maps
     imageStore(u_depth, ivec2(gl_LaunchIDEXT.xy), vec4(gl_HitTEXT));
