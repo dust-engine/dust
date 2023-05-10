@@ -59,6 +59,7 @@ fn main() {
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
+            required_feature_flags: vk::FormatFeatureFlags::TRANSFER_DST | vk::FormatFeatureFlags::STORAGE_IMAGE,
             ..Default::default()
         });
 
@@ -146,7 +147,7 @@ impl Plugin for RenderSystem {
                             .create_device_image_uninit(
                                 &ImageRequest {
                                     format: vk::Format::R32_SFLOAT,
-                                    usage: vk::ImageUsageFlags::STORAGE,
+                                    usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
                                     extent: swapchain_image.inner().extent(),
                                     ..Default::default()
                                 }
@@ -174,7 +175,7 @@ impl Plugin for RenderSystem {
                             .create_device_image_uninit(
                                 &ImageRequest {
                                     format: vk::Format::R32G32B32A32_SFLOAT,
-                                    usage: vk::ImageUsageFlags::STORAGE,
+                                    usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
                                     extent: swapchain_image.inner().extent(),
                                     ..Default::default()
                                 }

@@ -9,6 +9,7 @@ layout(location = 0) rayPayloadInEXT struct RayPayload {
 
 
 void main() {
+    const float ambient_light = 3.8;
     // TODO: calculate ambient light, add into main texture. We assume that the ambient light is 0.1.
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(payload.color + 38.0 * payload.albedo, 1.0));
+    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(payload.color + ambient_light * payload.albedo, 1.0));
 }
