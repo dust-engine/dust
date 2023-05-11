@@ -23,12 +23,23 @@ void main() {
 
     {
         // Multiply ray energy by voxel albedo
+        #ifdef SHADER_INT_64
         u32vec2 blockMask = unpack32(block.mask);
         uint32_t numVoxelInBlock = bitCount(blockMask.x) + bitCount(blockMask.y);
+        #else
+        uint32_t numVoxelInBlock = bitCount(block.mask1) + bitCount(block.mask2);
+        #endif
         uint32_t randomVoxelId = pushConstants.rand % numVoxelInBlock;
 
+        #ifdef SHADER_INT_64
         u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << randomVoxelId) - 1));
-        uint32_t voxelMemoryOffset = uint32_t(bitCount(masked) + bitCount(masked.y));
+        #else
+        u32vec2 masked = u32vec2(
+            randomVoxelId < 32 ? block.mask1 & ((1 << randomVoxelId) - 1) : block.mask1,
+            randomVoxelId >= 32 ? block.mask2 & ((1 << (randomVoxelId - 32)) - 1) : 0
+        );
+        #endif
+        uint32_t voxelMemoryOffset = uint32_t(bitCount(masked.x) + bitCount(masked.y));
 
         uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
         u8vec4 color = sbt.paletteInfo.palette[palette_index];

@@ -87,7 +87,7 @@ impl ToneMappingPipeline {
         .or_insert_with(|| {
             let device = self.desc_pool.device().clone();
             println!("Convert from scen {:?} to output {:?}", self.scene_color_space, output_color_space);
-            let mat = self.scene_color_space.primaries().to_color_space(output_color_space.primaries());
+            let mat = self.scene_color_space.primaries().to_color_space(&output_color_space.primaries());
             println!(
                 "{:?}", mat
             );

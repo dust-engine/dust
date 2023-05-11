@@ -15,6 +15,7 @@ layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
 layout(set = 0, binding = 4) uniform accelerationStructureEXT accelerationStructure;
 layout(set = 0, binding = 5) uniform texture2D blue_noise;
 
+//#define SHADER_INT_64 
 
 layout(push_constant) uniform PushConstants {
     // Indexed by block id
@@ -25,7 +26,12 @@ layout(push_constant) uniform PushConstants {
 struct Block
 {
     u16vec4 position;
+    #ifdef SHADER_INT_64
     uint64_t mask;
+    #else
+    uint32_t mask1;
+    uint32_t mask2;
+    #endif
     uint32_t material_ptr;
     uint32_t reserved;
 };

@@ -11,6 +11,14 @@ hitAttributeEXT HitAttribute {
     uint8_t voxelId;
 } hitAttributes;
 
+#ifdef SHADER_INT_64
+#define GridType uint64_t
+#define GridCheck(grid, hit) ((grid & (uint64_t(1) << hit)) == 0)
+#else
+#define GridType u32vec2
+#define GridCheck(grid, hit) (((hit < 32) ?(grid.x & (1 << hit)):(grid.y & (1 << (hit - 32)))) == 0)
+#endif
+
 /**
   Intersects ray with a unix box with 4x4x4 voxels. A branchless implementation of
   Amanatides, John & Woo, Andrew. (1987). A Fast Voxel Traversal Algorithm for Ray Tracing. Proceedings of EuroGraphics. 87.
@@ -19,7 +27,7 @@ hitAttributeEXT HitAttribute {
   @param(dir):    The direction of the ray. Does not have to be normalized.
   @param(grid):   The occupancy of the 64 voxels encoded in z-curve order.
 */
-void dda(vec3 origin, vec3 dir, uint64_t grid, float scale) {
+void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
     // Init phase
 
     // The initialization phase begins by identifying the voxel in which the ray origin is found. If the ray
@@ -60,7 +68,8 @@ void dda(vec3 origin, vec3 dir, uint64_t grid, float scale) {
     // Intersection phase
     uint8_t hit = encode_index(position);
     float hitDistance = initialIntersectionT.x;
-    while((grid & (uint64_t(1) << hit)) == 0) {
+
+    while(GridCheck(grid, hit)) {
         vec3 compResult = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
         i8vec3 positionDelta = i8vec3(STEP * compResult); // Either +1 or -1 or 0 on each digit.
         position += positionDelta;
@@ -101,7 +110,11 @@ void main()
     dda(
         gl_ObjectRayOriginEXT - min, // origin
         gl_ObjectRayDirectionEXT, // dir
+        #ifdef SHADER_INT_64
         block.mask,
+        #else
+        u32vec2(block.mask1, block.mask2),
+        #endif
         1.0
     );
 }

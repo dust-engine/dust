@@ -29,8 +29,17 @@ void main() {
     vec3 normalObject = CubedNormalize(hitPointObject - boxCenterObject);
     vec3 normalWorld = gl_ObjectToWorldEXT * vec4(normalObject, 0.0);
 
+    #ifdef SHADER_INT_64
     u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << hitAttributes.voxelId) - 1));
     uint32_t voxelMemoryOffset = bitCount(masked.x) + bitCount(masked.y);
+    #else
+    u32vec2 masked = u32vec2(
+        hitAttributes.voxelId < 32 ? block.mask1 & ((1 << hitAttributes.voxelId) - 1) : block.mask1,
+        hitAttributes.voxelId >= 32 ? block.mask2 & ((1 << (hitAttributes.voxelId - 32)) - 1) : 0
+    );
+    uint32_t voxelMemoryOffset = uint32_t(bitCount(masked.x) + bitCount(masked.y));
+    #endif
+
 
     uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = sbt.paletteInfo.palette[palette_index];
