@@ -86,13 +86,8 @@ impl ToneMappingPipeline {
         .entry(output_color_space.clone())
         .or_insert_with(|| {
             let device = self.desc_pool.device().clone();
-            println!("Convert from scen {:?} to output {:?}", self.scene_color_space, output_color_space);
             let mat = self.scene_color_space.primaries().to_color_space(&output_color_space.primaries());
-            println!(
-                "{:?}", mat
-            );
             let transfer_function = output_color_space.transfer_function() as u32;
-            println!("Using transfer function {:?}", transfer_function);
             
             let shader = glsl_reflected!("tone_map.comp");
             let module = shader

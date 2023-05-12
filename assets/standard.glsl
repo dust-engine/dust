@@ -15,6 +15,7 @@ layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
 layout(set = 0, binding = 4) uniform accelerationStructureEXT accelerationStructure;
 layout(set = 0, binding = 5) uniform texture2D blue_noise;
 
+// TODO: make this adaptable
 //#define SHADER_INT_64 
 
 layout(push_constant) uniform PushConstants {

@@ -123,12 +123,14 @@ vec3 SwapchainOETF(vec3 normalizedLinearValue) {
   } else if (OUTPUT_TRANSFER_FUNCTION == 5) {
     // ST2084_PQ
     // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_PQ
+    // TODO: This seems incorrect. The produced image looks too bright.
     const float m1 = 2610.0 / 16384.0;
     const float m2 = (2523.0 / 4096.0) * 128.0;
     const float c2 = (2413.0 / 4096.0) * 32.0;
     const float c3 = (2392.0 / 4096.0) * 32.0;
     const float c1 = c3 - c2 + 1.0;
-    return pow((c1 + c2 * pow(normalizedLinearValue, vec3(m1))) / (1.0 + c3 * pow(normalizedLinearValue, vec3(m1))), vec3(m2));
+    const vec3 Lm = pow(normalizedLinearValue, vec3(m1));
+    return pow((c1 + c2 * Lm) / (1.0 + c3 * Lm), vec3(m2));
   } else if (OUTPUT_TRANSFER_FUNCTION == 6) {
     // HLG
   } else if (OUTPUT_TRANSFER_FUNCTION == 7) {
@@ -144,7 +146,7 @@ vec3 SwapchainOETF(vec3 normalizedLinearValue) {
 void main() {
     vec4 in_value = imageLoad(u_src_img, ivec2(gl_GlobalInvocationID.xy));
 
-    float exposure = 0.005;
+    float exposure = 0.05;
 
     // Tone mapping
     vec3 mapped = ACESFitted(in_value.xyz * exposure);

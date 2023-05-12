@@ -93,7 +93,6 @@ impl Plugin for RenderPlugin {
                 inner: vk::PhysicalDeviceFeatures2 {
                     features: vk::PhysicalDeviceFeatures {
                         shader_int16: vk::TRUE,
-                        shader_int64: vk::TRUE,
                         ..Default::default()
                     },
                     ..Default::default()
