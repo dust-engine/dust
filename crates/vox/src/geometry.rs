@@ -103,7 +103,7 @@ impl VoxGeometry {
                     data,
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                         | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-                        16
+                    16,
                 )
                 .unwrap()
                 .map(|buffer| {
@@ -120,7 +120,7 @@ impl VoxGeometry {
                 .create_dynamic_asset_buffer_with_data(
                     data,
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                    16
+                    16,
                 )
                 .unwrap()
                 .map(|buffer| {

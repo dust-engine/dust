@@ -1,6 +1,7 @@
 use std::{
+    collections::HashMap,
     ops::{Deref, DerefMut},
-    sync::Arc, collections::HashMap,
+    sync::Arc,
 };
 
 use bevy_ecs::{
@@ -8,20 +9,20 @@ use bevy_ecs::{
     world::{FromWorld, World},
 };
 use pin_project::pin_project;
+use rhyolite::utils::format::{ColorSpace, ColorSpaceType};
 use rhyolite::{
     ash::vk,
     cstr,
     descriptor::DescriptorPool,
     future::{
         use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer, PerFrameState,
-        RenderImage,
+        RenderData, RenderImage,
     },
     macros::{glsl_reflected, set_layout},
     utils::retainer::{Retainer, RetainerHandle},
     ComputePipeline, HasDevice, ImageViewLike, PipelineLayout,
 };
 use rhyolite_bevy::{Device, Queues};
-use rhyolite::utils::format::{ColorSpace, ColorSpaceType};
 
 #[derive(Resource)]
 pub struct ToneMappingPipeline {
@@ -45,7 +46,9 @@ impl FromWorld for ToneMappingPipeline {
 
             #[shader(vk::ShaderStageFlags::COMPUTE)]
             dst_img: vk::DescriptorType::STORAGE_IMAGE,
-        }.build(device.clone()).unwrap();
+        }
+        .build(device.clone())
+        .unwrap();
         let layout = Arc::new(
             rhyolite::PipelineLayout::new(
                 device.clone(),
@@ -72,9 +75,9 @@ impl FromWorld for ToneMappingPipeline {
 impl ToneMappingPipeline {
     pub fn render<
         'a,
-        S: ImageViewLike,
+        S: ImageViewLike + RenderData,
         SRef: Deref<Target = RenderImage<S>>,
-        T: ImageViewLike,
+        T: ImageViewLike + RenderData,
         TRef: DerefMut<Target = RenderImage<T>>,
     >(
         &mut self,
@@ -82,42 +85,44 @@ impl ToneMappingPipeline {
         dst: TRef,
         output_color_space: &ColorSpace,
     ) -> ToneMappingFuture<S, SRef, T, TRef> {
-        let pipeline = self.pipeline
-        .entry(output_color_space.clone())
-        .or_insert_with(|| {
-            let device = self.desc_pool.device().clone();
-            let mat = self.scene_color_space.primaries().to_color_space(&output_color_space.primaries());
-            let transfer_function = output_color_space.transfer_function() as u32;
-            
-            let shader = glsl_reflected!("tone_map.comp");
-            let module = shader
-                .build(device)
+        let pipeline = self
+            .pipeline
+            .entry(output_color_space.clone())
+            .or_insert_with(|| {
+                let device = self.desc_pool.device().clone();
+                let mat = self
+                    .scene_color_space
+                    .primaries()
+                    .to_color_space(&output_color_space.primaries());
+                let transfer_function = output_color_space.transfer_function() as u32;
+
+                let shader = glsl_reflected!("tone_map.comp");
+                let module = shader.build(device).unwrap();
+                let pipeline = ComputePipeline::create_with_reflected_shader_and_layout(
+                    module
+                        .specialized(cstr!("main"))
+                        .with_const(0, transfer_function)
+                        .with_const(1, mat.x_axis.x)
+                        .with_const(2, mat.x_axis.y)
+                        .with_const(3, mat.x_axis.z)
+                        .with_const(4, mat.y_axis.x)
+                        .with_const(5, mat.y_axis.y)
+                        .with_const(6, mat.y_axis.z)
+                        .with_const(7, mat.z_axis.x)
+                        .with_const(8, mat.z_axis.y)
+                        .with_const(9, mat.z_axis.z),
+                    Default::default(),
+                    self.layout.clone(),
+                )
                 .unwrap();
-            let pipeline = ComputePipeline::create_with_reflected_shader_and_layout(
-                module
-                    .specialized(cstr!("main"))
-                    .with_const(0, transfer_function)
-                    .with_const(1, mat.x_axis.x)
-                    .with_const(2, mat.x_axis.y)
-                    .with_const(3, mat.x_axis.z)
-                    .with_const(4, mat.y_axis.x)
-                    .with_const(5, mat.y_axis.y)
-                    .with_const(6, mat.y_axis.z)
-                    .with_const(7, mat.z_axis.x)
-                    .with_const(8, mat.z_axis.y)
-                    .with_const(9, mat.z_axis.z),
-                Default::default(),
-                self.layout.clone()
-            )
-            .unwrap();
-            Arc::new(pipeline)
-        });
+                Arc::new(pipeline)
+            });
 
         ToneMappingFuture {
             src_img: src,
             dst_img: dst,
             pipeline,
-            desc_pool: &mut self.desc_pool
+            desc_pool: &mut self.desc_pool,
         }
     }
 }
@@ -125,9 +130,9 @@ impl ToneMappingPipeline {
 #[pin_project]
 pub struct ToneMappingFuture<
     'a,
-    S: ImageViewLike,
+    S: ImageViewLike + RenderData,
     SRef: Deref<Target = RenderImage<S>>,
-    T: ImageViewLike,
+    T: ImageViewLike + RenderData,
     TRef: DerefMut<Target = RenderImage<T>>,
 > {
     src_img: SRef,
@@ -138,9 +143,9 @@ pub struct ToneMappingFuture<
 
 impl<
         'a,
-        S: ImageViewLike,
+        S: ImageViewLike + RenderData,
         SRef: Deref<Target = RenderImage<S>>,
-        T: ImageViewLike,
+        T: ImageViewLike + RenderData,
         TRef: DerefMut<Target = RenderImage<T>>,
     > GPUCommandFuture for ToneMappingFuture<'a, S, SRef, T, TRef>
 {
@@ -164,8 +169,7 @@ impl<
         let extent = this.src_img.inner().extent();
 
         let desc_set = use_per_frame_state(state_desc_sets, || {
-            this
-                .desc_pool
+            this.desc_pool
                 .allocate_for_pipeline_layout(this.pipeline.layout())
                 .unwrap()
         });
@@ -221,11 +225,7 @@ impl<
         });
         std::task::Poll::Ready((
             (),
-            DisposeContainer::new((
-                this.pipeline.clone(),
-                this.desc_pool.handle(),
-                desc_set,
-            )),
+            DisposeContainer::new((this.pipeline.clone(), this.desc_pool.handle(), desc_set)),
         ))
     }
 

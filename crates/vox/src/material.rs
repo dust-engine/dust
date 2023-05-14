@@ -32,22 +32,17 @@ impl PaletteMaterial {
 #[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0b"]
 pub struct DiffuseMaterial {
     material: Handle<PaletteMaterial>,
-    irradiance_cache: ResidentBuffer
+    irradiance_cache: ResidentBuffer,
 }
 
-
 impl DiffuseMaterial {
-    pub fn new(
-        material: Handle<PaletteMaterial>,
-        irradiance_cache: ResidentBuffer
-    ) -> Self {
+    pub fn new(material: Handle<PaletteMaterial>, irradiance_cache: ResidentBuffer) -> Self {
         Self {
             material,
             irradiance_cache,
         }
     }
 }
-
 
 pub struct DiffuseMaterialIrradianceCacheEntryFace {
     irradiance: [u16; 3],
@@ -58,7 +53,7 @@ pub struct DiffuseMaterialIrradianceCacheEntry {
     /// The six faces. 8 bytes per face, 48 bytes in total.
     faces: [DiffuseMaterialIrradianceCacheEntryFace; 6],
     lastAccessedFrames: [u16; 6],
-    _reserved: u32
+    _reserved: u32,
 }
 
 #[repr(C)]
@@ -72,7 +67,7 @@ pub struct DiffuseMaterialShaderParams {
 
     /// Pointer to a list of 256 u8 colors
     palette_ptr: u64,
-    
+
     /// number of boxes of entries, each entry has 6 faces.
     irradiance_cache: u64,
 }

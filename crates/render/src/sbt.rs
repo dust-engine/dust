@@ -8,7 +8,7 @@ use rhyolite::{
     copy_buffer,
     future::{
         use_per_frame_state, use_shared_state, GPUCommandFuture, PerFrameContainer, PerFrameState,
-        RenderRes, SharedDeviceState, SharedDeviceStateHostContainer,
+        RenderData, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer,
     },
     macros::commands,
     utils::either::Either,
@@ -138,7 +138,7 @@ impl SbtManager {
                 vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                 one_raytype,
-                rtx_properties.shader_group_base_alignment as usize
+                rtx_properties.shader_group_base_alignment as usize,
             ),
             entries: Default::default(),
             raytype_pipeline_handles: vec![
@@ -200,7 +200,7 @@ impl SbtManager {
     }
     pub fn hitgroup_sbt_buffer(
         &mut self,
-    ) -> Option<impl GPUCommandFuture<Output = RenderRes<impl BufferLike>>> {
+    ) -> Option<impl GPUCommandFuture<Output = RenderRes<impl BufferLike + RenderData>>> {
         self.buffer.buffer()
     }
     pub fn hitgroup_stride(&self) -> usize {
@@ -263,6 +263,7 @@ pub struct PipelineSbtManagerInfo {
     num_callable: u32,
     offset_strides: Vec<(u32, u32)>,
 }
+impl RenderData for PipelineSbtManagerInfo {}
 impl BufferLike for PipelineSbtManagerInfo {
     fn raw_buffer(&self) -> vk::Buffer {
         self.buffer.raw_buffer()
@@ -508,7 +509,7 @@ impl PipelineSbtManager {
         commands! { move
             let upload_buffer = RenderRes::new(upload_buffer);
             let buffer = if let Some(device_buffer) = device_buffer {
-                let mut device_buffer = RenderRes::new(device_buffer);
+                let mut device_buffer = device_buffer;
                 copy_buffer(&upload_buffer, &mut device_buffer).await;
                 retain!(upload_buffer);
                 device_buffer.map(|a| Either::Left(a))

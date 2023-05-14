@@ -10,20 +10,19 @@ use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
 use rhyolite::{
-    update_buffer, fill_buffer,
     accel_struct::AccelerationStructure,
     ash::vk,
-    BufferExt,
-    future::GPUCommandFutureExt,
     descriptor::{DescriptorPool, PushConstants},
+    fill_buffer,
+    future::GPUCommandFutureExt,
     future::{
-        use_shared_state_initialized,
         use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, PerFrameContainer,
-        PerFrameState, RenderImage, RenderRes, SharedDeviceState,
+        PerFrameState, RenderData, RenderImage, RenderRes, SharedDeviceState,
     },
     macros::{commands, set_layout},
+    update_buffer,
     utils::retainer::{Retainer, RetainerHandle},
-    BufferLike, HasDevice, ImageLike, ImageViewLike, ResidentBuffer,
+    BufferExt, BufferLike, HasDevice, ImageLike, ImageViewLike, ResidentBuffer,
 };
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 
@@ -116,12 +115,10 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("primary.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                vec![
-                    SpecializedShader::for_shader(
-                        asset_server.load("miss.rmiss.spv"),
-                        vk::ShaderStageFlags::MISS_KHR,
-                    ),
-                ],
+                vec![SpecializedShader::for_shader(
+                    asset_server.load("miss.rmiss.spv"),
+                    vk::ShaderStageFlags::MISS_KHR,
+                )],
                 Vec::new(),
                 pipeline_cache.as_ref().cloned(),
             ),
@@ -143,11 +140,10 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("shadow.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                vec![
-                    SpecializedShader::for_shader(
-                        asset_server.load("shadow.rmiss.spv"),
-                        vk::ShaderStageFlags::MISS_KHR,
-                    ),],
+                vec![SpecializedShader::for_shader(
+                    asset_server.load("shadow.rmiss.spv"),
+                    vk::ShaderStageFlags::MISS_KHR,
+                )],
                 Vec::new(),
                 pipeline_cache.clone(),
             ),
@@ -158,11 +154,10 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("final_gather.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                vec![
-                    SpecializedShader::for_shader(
-                        asset_server.load("final_gather.rmiss.spv"),
-                        vk::ShaderStageFlags::MISS_KHR,
-                    ),],
+                vec![SpecializedShader::for_shader(
+                    asset_server.load("final_gather.rmiss.spv"),
+                    vk::ShaderStageFlags::MISS_KHR,
+                )],
                 Vec::new(),
                 pipeline_cache,
             ),
@@ -183,7 +178,8 @@ impl RayTracingPipeline for StandardPipeline {
         self.primary_ray_pipeline.material_instance_added::<M>();
         self.photon_ray_pipeline.material_instance_added::<M>();
         self.shadow_ray_pipeline.material_instance_added::<M>();
-        self.final_gather_ray_pipeline.material_instance_added::<M>();
+        self.final_gather_ray_pipeline
+            .material_instance_added::<M>();
         self.hitgroup_sbt_manager.add_instance(material, params)
     }
 
@@ -245,10 +241,10 @@ impl StandardPipeline {
     );
     pub fn render<'a>(
         &'a mut self,
-        target_image: &'a mut RenderImage<impl ImageViewLike>,
-        albedo_image: &'a mut RenderImage<impl ImageViewLike>,
-        normal_image: &'a mut RenderImage<impl ImageViewLike>,
-        depth_image: &'a mut RenderImage<impl ImageViewLike>,
+        target_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        albedo_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        normal_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        depth_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         params: &'a mut SystemParamItem<Self::RenderParams>,
         camera: (&PinholeProjection, &GlobalTransform),
@@ -265,8 +261,12 @@ impl StandardPipeline {
         let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(shader_store)?;
         let final_gather_pipeline = self.final_gather_ray_pipeline.get_pipeline(shader_store)?;
         let noise_img = image_store.get(&blue_noise.unitvec3_cosine)?;
-        self.hitgroup_sbt_manager
-            .specify_pipelines(&[primary_pipeline, photon_pipeline, shadow_pipeline, final_gather_pipeline]);
+        self.hitgroup_sbt_manager.specify_pipelines(&[
+            primary_pipeline,
+            photon_pipeline,
+            shadow_pipeline,
+            final_gather_pipeline,
+        ]);
         let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer()?;
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
 
@@ -351,11 +351,11 @@ use pin_project::pin_project;
 #[pin_project]
 struct StandardPipelineRenderingFuture<
     'a,
-    TargetImage: ImageViewLike,
-    AlbedoImage: ImageViewLike,
-    DepthImage: ImageViewLike,
-    NormalImage: ImageViewLike,
-    HitgroupBuf: BufferLike,
+    TargetImage: ImageViewLike + RenderData,
+    AlbedoImage: ImageViewLike + RenderData,
+    DepthImage: ImageViewLike + RenderData,
+    NormalImage: ImageViewLike + RenderData,
+    HitgroupBuf: BufferLike + RenderData,
 > {
     accel_struct: &'a RenderRes<Arc<AccelerationStructure>>,
     target_image: &'a mut RenderImage<TargetImage>,
@@ -373,12 +373,22 @@ struct StandardPipelineRenderingFuture<
     hitgroup_stride: usize,
 }
 
-impl<'a, TargetImage: ImageViewLike, 
-AlbedoImage: ImageViewLike,
-DepthImage: ImageViewLike,
-NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
-    rhyolite::future::GPUCommandFuture
-    for StandardPipelineRenderingFuture<'a, TargetImage, AlbedoImage, DepthImage, NormalImage, HitgroupBuf>
+impl<
+        'a,
+        TargetImage: ImageViewLike + RenderData,
+        AlbedoImage: ImageViewLike + RenderData,
+        DepthImage: ImageViewLike + RenderData,
+        NormalImage: ImageViewLike + RenderData,
+        HitgroupBuf: BufferLike + RenderData,
+    > rhyolite::future::GPUCommandFuture
+    for StandardPipelineRenderingFuture<
+        'a,
+        TargetImage,
+        AlbedoImage,
+        DepthImage,
+        NormalImage,
+        HitgroupBuf,
+    >
 {
     type Output = ();
 
@@ -544,30 +554,33 @@ NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
                 extent.height,
                 extent.depth,
             );
-            device.cmd_pipeline_barrier2(command_buffer, &vk::DependencyInfo {
-                dependency_flags: vk::DependencyFlags::BY_REGION,
-                image_memory_barrier_count: 1,
-                p_image_memory_barriers: &vk::ImageMemoryBarrier2 {
-                    src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    src_access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                    dst_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    dst_access_mask: vk::AccessFlags2::SHADER_STORAGE_READ,
-                    old_layout: vk::ImageLayout::GENERAL,
-                    new_layout: vk::ImageLayout::GENERAL,
-                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    image: this.depth_image.inner().raw_image(),
-                    subresource_range: vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
+            device.cmd_pipeline_barrier2(
+                command_buffer,
+                &vk::DependencyInfo {
+                    dependency_flags: vk::DependencyFlags::BY_REGION,
+                    image_memory_barrier_count: 1,
+                    p_image_memory_barriers: &vk::ImageMemoryBarrier2 {
+                        src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                        src_access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                        dst_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                        dst_access_mask: vk::AccessFlags2::SHADER_STORAGE_READ,
+                        old_layout: vk::ImageLayout::GENERAL,
+                        new_layout: vk::ImageLayout::GENERAL,
+                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        image: this.depth_image.inner().raw_image(),
+                        subresource_range: vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        },
+                        ..Default::default()
                     },
                     ..Default::default()
                 },
-                ..Default::default()
-            });
+            );
             device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::RAY_TRACING_KHR,
@@ -588,31 +601,34 @@ NormalImage: ImageViewLike, HitgroupBuf: BufferLike>
                 extent.depth,
             ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
 
-            
-            device.cmd_pipeline_barrier2(command_buffer, &vk::DependencyInfo {
-                dependency_flags: vk::DependencyFlags::BY_REGION,
-                image_memory_barrier_count: 1,
-                p_image_memory_barriers: &vk::ImageMemoryBarrier2 {
-                    src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    src_access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                    dst_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    dst_access_mask: vk::AccessFlags2::SHADER_STORAGE_READ | vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                    old_layout: vk::ImageLayout::GENERAL,
-                    new_layout: vk::ImageLayout::GENERAL,
-                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    image: this.target_image.inner().raw_image(),
-                    subresource_range: vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
+            device.cmd_pipeline_barrier2(
+                command_buffer,
+                &vk::DependencyInfo {
+                    dependency_flags: vk::DependencyFlags::BY_REGION,
+                    image_memory_barrier_count: 1,
+                    p_image_memory_barriers: &vk::ImageMemoryBarrier2 {
+                        src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                        src_access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                        dst_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                        dst_access_mask: vk::AccessFlags2::SHADER_STORAGE_READ
+                            | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                        old_layout: vk::ImageLayout::GENERAL,
+                        new_layout: vk::ImageLayout::GENERAL,
+                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        image: this.target_image.inner().raw_image(),
+                        subresource_range: vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        },
+                        ..Default::default()
                     },
                     ..Default::default()
                 },
-                ..Default::default()
-            });
+            );
             device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::RAY_TRACING_KHR,

@@ -50,10 +50,11 @@ impl<M> TLASStore<M> {
         );
         let fut = commands! { move
             let old_tlas: &mut Option<Arc<AccelerationStructure>> = using!();
+            let buffer = buffer.await;
             if !requires_rebuild && let Some(old_tlas) = old_tlas.as_ref() {
+                retain!(buffer);
                 return RenderRes::new(old_tlas.clone());
             }
-            let buffer = buffer.await;
 
             let mut accel_struct = accel_struct.build_for(buffer).await;
             accel_struct.inner_mut().set_name(&format!("TLAS for {}", std::any::type_name::<M>())).unwrap();

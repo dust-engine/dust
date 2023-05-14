@@ -1,7 +1,7 @@
 #![feature(generators)]
 #![feature(int_roundings)]
 use bevy_app::{App, Plugin, Startup};
-use bevy_asset::{AssetServer};
+use bevy_asset::AssetServer;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_transform::prelude::{GlobalTransform, Transform};
@@ -9,18 +9,15 @@ use bevy_window::{PrimaryWindow, Window};
 use dust_render::{PinholeProjection, StandardPipeline, TLASStore, ToneMappingPipeline};
 
 use rhyolite::ash::vk;
-use rhyolite::{clear_image, ImageRequest, ImageLike, ImageExt};
-use rhyolite::future::{GPUCommandFutureExt, RenderImage};
+use rhyolite::future::GPUCommandFutureExt;
+use rhyolite::{clear_image, ImageExt, ImageLike, ImageRequest};
 
 use rhyolite::{
     macros::{commands, gpu},
     QueueType,
 };
 
-use rhyolite_bevy::{
-    Image, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt,
-};
-
+use rhyolite_bevy::{Image, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt};
 
 fn main() {
     let mut app = App::new();
@@ -59,7 +56,8 @@ fn main() {
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
-            required_feature_flags: vk::FormatFeatureFlags::TRANSFER_DST | vk::FormatFeatureFlags::STORAGE_IMAGE,
+            required_feature_flags: vk::FormatFeatureFlags::TRANSFER_DST
+                | vk::FormatFeatureFlags::STORAGE_IMAGE,
             ..Default::default()
         });
 
@@ -128,60 +126,67 @@ impl Plugin for RenderSystem {
                 let future = gpu! {
                     let mut swapchain_image = swapchain_image.await;
                     commands! {
-                        let albedo_image = rhyolite::future::use_shared_state(using!(), |_| {
-                            allocator
-                            .create_device_image_uninit(
-                                &ImageRequest {
-                                    format: vk::Format::A2B10G10R10_UNORM_PACK32, // TODO: try bgr?
-                                    usage: vk::ImageUsageFlags::STORAGE,
-                                    extent: swapchain_image.inner().extent(),
-                                    ..Default::default()
-                                }
-                            ).unwrap().as_2d_view().unwrap()
+                        let mut albedo_image = rhyolite::future::use_shared_image(using!(), |_| {
+                            (
+                                allocator
+                                    .create_device_image_uninit(
+                                        &ImageRequest {
+                                            format: vk::Format::A2B10G10R10_UNORM_PACK32, // TODO: try bgr?
+                                            usage: vk::ImageUsageFlags::STORAGE,
+                                            extent: swapchain_image.inner().extent(),
+                                            ..Default::default()
+                                        }
+                                    ).unwrap().as_2d_view().unwrap(),
+                                vk::ImageLayout::UNDEFINED
+                            )
                         }, |image| swapchain_image.inner().extent() != image.extent());
-                        let mut albedo_image = RenderImage::new(albedo_image, vk::ImageLayout::UNDEFINED);
 
-                        
-                        let depth_image = rhyolite::future::use_shared_state(using!(), |_| {
-                            allocator
-                            .create_device_image_uninit(
-                                &ImageRequest {
-                                    format: vk::Format::R32_SFLOAT,
-                                    usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
-                                    extent: swapchain_image.inner().extent(),
-                                    ..Default::default()
-                                }
-                            ).unwrap().as_2d_view().unwrap()
+                        let mut depth_image = rhyolite::future::use_shared_image(using!(), |_| {
+                            (
+                                allocator
+                                    .create_device_image_uninit(
+                                        &ImageRequest {
+                                            format: vk::Format::R32_SFLOAT,
+                                            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
+                                            extent: swapchain_image.inner().extent(),
+                                            ..Default::default()
+                                        }
+                                    ).unwrap().as_2d_view().unwrap(),
+                                vk::ImageLayout::UNDEFINED,
+                            )
                         }, |image| swapchain_image.inner().extent() != image.extent());
-                        let mut depth_image = RenderImage::new(depth_image, vk::ImageLayout::UNDEFINED);
-
-                        
-                        let normal_image = rhyolite::future::use_shared_state(using!(), |_| {
-                            allocator
-                            .create_device_image_uninit(
-                                &ImageRequest {
-                                    format: vk::Format::R16G16B16A16_SNORM,
-                                    usage: vk::ImageUsageFlags::STORAGE,
-                                    extent: swapchain_image.inner().extent(),
-                                    ..Default::default()
-                                }
-                            ).unwrap().as_2d_view().unwrap()
-                        }, |image| swapchain_image.inner().extent() != image.extent());
-                        let mut normal_image = RenderImage::new(normal_image, vk::ImageLayout::UNDEFINED);
 
 
-                        let radiance_image = rhyolite::future::use_shared_state(using!(), |_| {
-                            allocator
-                            .create_device_image_uninit(
-                                &ImageRequest {
-                                    format: vk::Format::R32G32B32A32_SFLOAT,
-                                    usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
-                                    extent: swapchain_image.inner().extent(),
-                                    ..Default::default()
-                                }
-                            ).unwrap().as_2d_view().unwrap()
+                        let mut normal_image = rhyolite::future::use_shared_image(using!(), |_| {
+                            (
+                                allocator
+                                    .create_device_image_uninit(
+                                        &ImageRequest {
+                                            format: vk::Format::R16G16B16A16_SNORM,
+                                            usage: vk::ImageUsageFlags::STORAGE,
+                                            extent: swapchain_image.inner().extent(),
+                                            ..Default::default()
+                                        }
+                                    ).unwrap().as_2d_view().unwrap(),
+                                vk::ImageLayout::UNDEFINED,
+                            )
                         }, |image| swapchain_image.inner().extent() != image.extent());
-                        let mut radiance_image = RenderImage::new(radiance_image, vk::ImageLayout::UNDEFINED);
+
+
+                        let mut radiance_image = rhyolite::future::use_shared_image(using!(), |_| {
+                            (
+                                allocator
+                                    .create_device_image_uninit(
+                                        &ImageRequest {
+                                            format: vk::Format::R32G32B32A32_SFLOAT,
+                                            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
+                                            extent: swapchain_image.inner().extent(),
+                                            ..Default::default()
+                                        }
+                                    ).unwrap().as_2d_view().unwrap(),
+                                vk::ImageLayout::UNDEFINED,
+                            )
+                        }, |image| swapchain_image.inner().extent() != image.extent());
 
 
                         let mut rendered = false;
@@ -220,7 +225,6 @@ impl Plugin for RenderSystem {
                     }.schedule_on_queue(graphics_queue).await;
                     swapchain_image.present().await;
                 };
-
                 queues.submit(future, &mut *recycled_state);
             };
         app.add_system(sys.in_set(RenderSystems::Render));
@@ -228,6 +232,6 @@ impl Plugin for RenderSystem {
 }
 
 fn print_position(a: Query<&GlobalTransform, With<MainCamera>>) {
-    let transform = a.iter().next().unwrap();
+    let _transform = a.iter().next().unwrap();
     //println!("{:?}", transform);
 }
