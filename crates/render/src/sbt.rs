@@ -263,7 +263,11 @@ pub struct PipelineSbtManagerInfo {
     num_callable: u32,
     offset_strides: Vec<(u32, u32)>,
 }
-impl RenderData for PipelineSbtManagerInfo {}
+impl RenderData for PipelineSbtManagerInfo {
+    fn tracking_feedback(&mut self, feedback: &rhyolite::future::TrackingFeedback) {
+        self.buffer.tracking_feedback(feedback);
+    }
+}
 impl BufferLike for PipelineSbtManagerInfo {
     fn raw_buffer(&self) -> vk::Buffer {
         self.buffer.raw_buffer()
@@ -457,7 +461,7 @@ impl PipelineSbtManager {
                 self.allocator
                     .create_dynamic_buffer_uninit(
                         self.buffer.len() as u64,
-                        vk::BufferUsageFlags::empty(),
+                        vk::BufferUsageFlags::TRANSFER_SRC,
                     )
                     .unwrap()
             } else {
