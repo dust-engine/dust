@@ -7,7 +7,9 @@
 #extension GL_EXT_shader_atomic_float : require
 #extension GL_EXT_samplerless_texture_functions: require
 
-layout(set = 0, binding = 0, rgba32f) uniform image2D u_imgOutput;
+// Illuminance: total luminous flux incident on a surface, per unit area.
+// Unit: lux (lm / m^2)
+layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
 layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
 layout(set = 0, binding = 2, rgba16_snorm) uniform image2D u_normal;
 layout(set = 0, binding = 3, r32f) uniform image2D u_depth;

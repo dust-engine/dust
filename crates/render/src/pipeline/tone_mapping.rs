@@ -22,7 +22,7 @@ use rhyolite::{
     utils::retainer::{Retainer, RetainerHandle},
     ComputePipeline, HasDevice, ImageViewLike, PipelineLayout,
 };
-use rhyolite_bevy::{Device, Queues};
+use rhyolite_bevy::Queues;
 
 #[derive(Resource)]
 pub struct ToneMappingPipeline {

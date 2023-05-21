@@ -42,7 +42,7 @@ impl RayTracingPipelineCharacteristics {
 #[derive(Clone)]
 pub struct RayTracingPipelineCharacteristics {
     pub num_frame_in_flight: u32,
-    layout: Arc<PipelineLayout>,
+    pub layout: Arc<PipelineLayout>,
     pub sbt_param_layout: Layout,
     material_to_index: HashMap<std::any::TypeId, usize>,
     materials: Vec<RayTracingPipelineCharacteristicsMaterialInfo>,

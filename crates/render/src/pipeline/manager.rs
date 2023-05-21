@@ -236,7 +236,7 @@ impl RayTracingPipelineManager {
         let mut hitgroup_mapping: BTreeMap<u32, u32> = BTreeMap::new();
         let mut current_hitgroup: u32 = 0;
         let mut hitgroups = Vec::new();
-        for (material_index, material) in self
+        for (material_index, _material) in self
             .materials
             .iter_mut()
             .enumerate()

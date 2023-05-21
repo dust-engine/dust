@@ -12,8 +12,7 @@ hitAttributeEXT HitAttribute {
     uint8_t voxelId;
 } hitAttributes;
 layout(location = 0) rayPayloadInEXT struct RayPayload {
-    f16vec3 color;
-    f16vec3 albedo;
+    f16vec3 illuminance;
 } payload;
 
 
@@ -41,8 +40,5 @@ void main() {
     /// 1 (this frames energy) + \sigma 0.999^n = 1000
     radiance *= float16_t(0.001);
 
-    // Reflected radiance needs to be multiplied with the albedo of the current voxel too.
-    radiance *= payload.albedo;
-
-    imageStore(u_imgOutput, ivec2(gl_LaunchIDEXT.xy), vec4(payload.color + radiance, 1.0));
+    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(payload.illuminance + radiance, 1.0));
 }

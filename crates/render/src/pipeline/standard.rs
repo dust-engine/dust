@@ -1,7 +1,4 @@
-use std::{
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{ops::Deref, sync::Arc};
 
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
@@ -9,27 +6,24 @@ use bevy_math::{Quat, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
+use rhyolite::future::{run, use_state};
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
-    descriptor::{DescriptorPool, PushConstants},
-    fill_buffer,
-    future::GPUCommandFutureExt,
+    descriptor::{DescriptorPool, DescriptorSetWrite, PushConstants},
     future::{
-        use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, PerFrameContainer,
-        PerFrameState, RenderData, RenderImage, RenderRes, SharedDeviceState,
+        use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, RenderData,
+        RenderImage, RenderRes,
     },
     macros::{commands, set_layout},
-    update_buffer,
-    utils::retainer::{Retainer, RetainerHandle},
-    BufferExt, BufferLike, HasDevice, ImageLike, ImageViewLike, ResidentBuffer,
+    utils::retainer::Retainer,
+    BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 
 use crate::{
-    sbt::{EmptyShaderRecords, PipelineSbtManager, PipelineSbtManagerInfo, SbtManager},
-    BlueNoise, PinholeProjection, RayTracingPipelineManagerSpecializedPipeline, ShaderModule,
-    SpecializedShader,
+    sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
+    BlueNoise, PinholeProjection, ShaderModule, SpecializedShader,
 };
 
 use super::{RayTracingPipeline, RayTracingPipelineManager};
@@ -290,7 +284,7 @@ impl StandardPipeline {
                 z: -500.0,
             },
         );
-        let light_dir = affine.matrix3 * Vec3::new(0.0, -1.0, 0.0);
+        let _light_dir = affine.matrix3 * Vec3::new(0.0, -1.0, 0.0);
         let photon_camera = StandardPipelinePhotonCamera {
             camera_view_col0: affine.matrix3.x_axis.into(),
             camera_view_col1: affine.matrix3.y_axis.into(),
@@ -319,392 +313,314 @@ impl StandardPipeline {
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
 
-        let allocator = allocator.clone();
+        let _allocator = allocator.clone();
         let fut = commands! { move
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
-            StandardPipelineRenderingFuture {
-                accel_struct: tlas,
-                target_image,
-                albedo_image,
-                depth_image,
-                normal_image,
-                primary_pipeline,
-                shadow_pipeline,
-                photon_pipeline,
-                final_gather_pipeline,
-                desc_pool,
-                hitgroup_sbt_buffer: &hitgroup_sbt_buffer,
-                hitgroup_stride,
-                pipeline_sbt_buffer: &pipeline_sbt_buffer,
-                noise_img,
-            }.await;
+
+            let frame_index = use_state(
+                using!(),
+                || 0,
+                |a| *a += 1
+            );
+            let noise_texture_index = *frame_index % noise_img.subresource_range().layer_count;
+
+
+            let desc_set = use_per_frame_state(using!(), || {
+                desc_pool
+                    .allocate_for_pipeline_layout(primary_pipeline.layout())
+                    .unwrap()
+            });
+
+            primary_pipeline.device().write_descriptor_sets([
+                DescriptorSetWrite::storage_images(
+                    desc_set[0],
+                    0,
+                    0,
+                    &[
+                        target_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        albedo_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        normal_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        depth_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                    ]
+                ),
+                DescriptorSetWrite::sampled_images(
+                    desc_set[0],
+                    5,
+                    0,
+                    &[noise_img.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
+                ),
+                DescriptorSetWrite::accel_structs(
+                    desc_set[0],
+                    4,
+                    0,
+                    &[tlas.inner().raw()]
+                )
+            ]);
+
+            let extent = target_image.inner().extent();
+            run(|ctx: &rhyolite::future::CommandBufferRecordContext, command_buffer: vk::CommandBuffer| unsafe {
+                let device = ctx.device();
+                let rand: u32 = rand::thread_rng().gen();
+                device.cmd_push_constants(
+                    command_buffer,
+                    primary_pipeline.layout().raw(),
+                    vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                    0,
+                    std::slice::from_raw_parts(&rand as *const _ as *const u8, 4),
+                );
+                device.cmd_push_constants(
+                    command_buffer,
+                    primary_pipeline.layout().raw(),
+                    vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                    4,
+                    std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4),
+                );
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_KHR,
+                    primary_pipeline.layout().raw(),
+                    0,
+                    desc_set.as_slice(),
+                    &[],
+                );
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_KHR,
+                    photon_pipeline.pipeline().raw(),
+                );
+                device.rtx_loader().cmd_trace_rays(
+                    command_buffer,
+                    &pipeline_sbt_buffer.inner().rgen(1),
+                    &pipeline_sbt_buffer.inner().miss(),
+                    &vk::StridedDeviceAddressRegionKHR {
+                        device_address: hitgroup_sbt_buffer.inner().device_address(),
+                        stride: hitgroup_stride as u64,
+                        size: hitgroup_sbt_buffer.inner.size(),
+                    },
+                    &vk::StridedDeviceAddressRegionKHR::default(),
+                    512,
+                    512,
+                    1,
+                );
+            }, |ctx: &mut rhyolite::future::StageContext| {
+                ctx.read_others(
+                    tlas.deref(),
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
+                );
+                ctx.read(
+                    &hitgroup_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.read(
+                    &pipeline_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+            }).await;
+            run(|ctx, command_buffer| unsafe {
+                let device = ctx.device();
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_KHR,
+                    primary_pipeline.pipeline().raw(),
+                );
+                device.rtx_loader().cmd_trace_rays(
+                    command_buffer,
+                    &pipeline_sbt_buffer.inner().rgen(0),
+                    &pipeline_sbt_buffer.inner().miss(),
+                    &vk::StridedDeviceAddressRegionKHR {
+                        device_address: hitgroup_sbt_buffer.inner().device_address(),
+                        stride: hitgroup_stride as u64,
+                        size: hitgroup_sbt_buffer.inner.size(),
+                    },
+                    &vk::StridedDeviceAddressRegionKHR::default(),
+                    extent.width,
+                    extent.height,
+                    extent.depth,
+                );
+            }, |ctx| {
+                ctx.read_others(
+                    tlas.deref(),
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
+                );
+                ctx.read(
+                    &hitgroup_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.read(
+                    &pipeline_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.write_image(
+                    albedo_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
+                    depth_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
+                    normal_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
+                    target_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+            }).await;
+
+            run(|ctx, command_buffer| unsafe {
+                let device = ctx.device();
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_KHR,
+                    shadow_pipeline.pipeline().raw(),
+                );
+                device.rtx_loader().cmd_trace_rays(
+                    command_buffer,
+                    &pipeline_sbt_buffer.inner().rgen(2),
+                    &pipeline_sbt_buffer.inner().miss(),
+                    &vk::StridedDeviceAddressRegionKHR {
+                        device_address: hitgroup_sbt_buffer.inner().device_address(),
+                        stride: hitgroup_stride as u64,
+                        size: hitgroup_sbt_buffer.inner.size(),
+                    },
+                    &vk::StridedDeviceAddressRegionKHR::default(),
+                    extent.width,
+                    extent.height,
+                    extent.depth,
+                ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
+            }, |ctx| {
+                ctx.read_others(
+                    tlas.deref(),
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
+                );
+                ctx.read(
+                    &hitgroup_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.read(
+                    &pipeline_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.write_image(
+                    target_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    depth_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    normal_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+            }).await;
+
+
+            run(|ctx, command_buffer| unsafe {
+                let device = ctx.device();
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_KHR,
+                    final_gather_pipeline.pipeline().raw(),
+                );
+                device.rtx_loader().cmd_trace_rays(
+                    command_buffer,
+                    &pipeline_sbt_buffer.inner().rgen(3),
+                    &pipeline_sbt_buffer.inner().miss(),
+                    &vk::StridedDeviceAddressRegionKHR {
+                        device_address: hitgroup_sbt_buffer.inner().device_address(),
+                        stride: hitgroup_stride as u64,
+                        size: hitgroup_sbt_buffer.inner.size(),
+                    },
+                    &vk::StridedDeviceAddressRegionKHR::default(),
+                    extent.width,
+                    extent.height,
+                    extent.depth,
+                ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
+            }, |ctx| {
+                ctx.read_others(
+                    tlas.deref(),
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
+                );
+                ctx.read(
+                    &hitgroup_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.read(
+                    &pipeline_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.read_image(
+                    target_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
+                    target_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    albedo_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    depth_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    normal_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+            }).await;
             retain!(hitgroup_sbt_buffer);
             retain!(pipeline_sbt_buffer);
+            retain!(
+                DisposeContainer::new((
+                    primary_pipeline.pipeline().clone(),
+                    photon_pipeline.pipeline().clone(),
+                    shadow_pipeline.pipeline().clone(),
+                    final_gather_pipeline.pipeline().clone(),
+                    desc_pool.handle(),
+                    desc_set,
+                )));
         };
         Some(fut)
     }
 }
-
-use pin_project::pin_project;
-
-#[pin_project]
-struct StandardPipelineRenderingFuture<
-    'a,
-    TargetImage: ImageViewLike + RenderData,
-    AlbedoImage: ImageViewLike + RenderData,
-    DepthImage: ImageViewLike + RenderData,
-    NormalImage: ImageViewLike + RenderData,
-    HitgroupBuf: BufferLike + RenderData,
-> {
-    accel_struct: &'a RenderRes<Arc<AccelerationStructure>>,
-    target_image: &'a mut RenderImage<TargetImage>,
-    albedo_image: &'a mut RenderImage<AlbedoImage>,
-    depth_image: &'a mut RenderImage<DepthImage>,
-    normal_image: &'a mut RenderImage<NormalImage>,
-    primary_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
-    photon_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
-    shadow_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
-    final_gather_pipeline: RayTracingPipelineManagerSpecializedPipeline<'a>,
-    desc_pool: &'a mut Retainer<DescriptorPool>,
-    hitgroup_sbt_buffer: &'a RenderRes<HitgroupBuf>,
-    pipeline_sbt_buffer: &'a RenderRes<PipelineSbtManagerInfo>,
-    noise_img: &'a rhyolite_bevy::SlicedImageArray,
-    hitgroup_stride: usize,
-}
-
-impl<
-        'a,
-        TargetImage: ImageViewLike + RenderData,
-        AlbedoImage: ImageViewLike + RenderData,
-        DepthImage: ImageViewLike + RenderData,
-        NormalImage: ImageViewLike + RenderData,
-        HitgroupBuf: BufferLike + RenderData,
-    > rhyolite::future::GPUCommandFuture
-    for StandardPipelineRenderingFuture<
-        'a,
-        TargetImage,
-        AlbedoImage,
-        DepthImage,
-        NormalImage,
-        HitgroupBuf,
-    >
-{
-    type Output = ();
-
-    type RetainedState = DisposeContainer<(
-        Arc<rhyolite::RayTracingPipeline>,
-        Arc<rhyolite::RayTracingPipeline>,
-        Arc<rhyolite::RayTracingPipeline>,
-        Arc<rhyolite::RayTracingPipeline>,
-        RetainerHandle<DescriptorPool>,
-        PerFrameContainer<Vec<vk::DescriptorSet>>,
-    )>;
-
-    type RecycledState = (PerFrameState<Vec<vk::DescriptorSet>>, u32);
-
-    fn init(
-        self: std::pin::Pin<&mut Self>,
-        _ctx: &mut rhyolite::future::CommandBufferRecordContext,
-        _recycled_state: &mut Self::RecycledState,
-    ) -> Option<(Self::Output, Self::RetainedState)> {
-        None
-    }
-    fn record(
-        self: std::pin::Pin<&mut Self>,
-        ctx: &mut rhyolite::future::CommandBufferRecordContext,
-        recycled_state: &mut Self::RecycledState,
-    ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
-        let (state_desc_sets, frame_index) = recycled_state;
-        let this = self.project();
-        let noise_texture_index = *frame_index % this.noise_img.subresource_range().layer_count;
-        let desc_set = use_per_frame_state(state_desc_sets, || {
-            this.desc_pool
-                .allocate_for_pipeline_layout(this.primary_pipeline.layout())
-                .unwrap()
-        });
-        unsafe {
-            let acceleration_structure_write = vk::WriteDescriptorSetAccelerationStructureKHR {
-                acceleration_structure_count: 1,
-                p_acceleration_structures: &this.accel_struct.inner().raw(),
-                ..Default::default()
-            };
-            // TODO: optimize away redundant writes
-            this.primary_pipeline.device().update_descriptor_sets(
-                &[
-                    vk::WriteDescriptorSet {
-                        dst_set: desc_set[0],
-                        dst_binding: 0,
-                        descriptor_count: 4,
-                        descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                        p_image_info: [
-                            vk::DescriptorImageInfo {
-                                sampler: vk::Sampler::null(),
-                                image_view: this.target_image.inner().raw_image_view(),
-                                image_layout: vk::ImageLayout::GENERAL,
-                            },
-                            vk::DescriptorImageInfo {
-                                sampler: vk::Sampler::null(),
-                                image_view: this.albedo_image.inner().raw_image_view(),
-                                image_layout: vk::ImageLayout::GENERAL,
-                            },
-                            vk::DescriptorImageInfo {
-                                sampler: vk::Sampler::null(),
-                                image_view: this.normal_image.inner().raw_image_view(),
-                                image_layout: vk::ImageLayout::GENERAL,
-                            },
-                            vk::DescriptorImageInfo {
-                                sampler: vk::Sampler::null(),
-                                image_view: this.depth_image.inner().raw_image_view(),
-                                image_layout: vk::ImageLayout::GENERAL,
-                            },
-                        ]
-                        .as_ptr(),
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        p_next: &acceleration_structure_write as *const _ as *const _,
-                        dst_set: desc_set[0],
-                        dst_binding: 4,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_set: desc_set[0],
-                        dst_binding: 5,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                        p_image_info: &vk::DescriptorImageInfo {
-                            sampler: vk::Sampler::null(),
-                            image_view: this
-                                .noise_img
-                                .slice(noise_texture_index as usize)
-                                .raw_image_view(),
-                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        },
-                        ..Default::default()
-                    },
-                ],
-                &[],
-            );
-        }
-        let extent = this.target_image.inner().extent();
-
-        ctx.record(|ctx, command_buffer| unsafe {
-            let device = ctx.device();
-            let rand: u32 = rand::thread_rng().gen();
-            device.cmd_push_constants(
-                command_buffer,
-                this.primary_pipeline.layout().raw(),
-                vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-                0,
-                { std::slice::from_raw_parts(&rand as *const _ as *const u8, 4) },
-            );
-            device.cmd_push_constants(
-                command_buffer,
-                this.primary_pipeline.layout().raw(),
-                vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-                4,
-                { std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4) },
-            );
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_KHR,
-                this.primary_pipeline.layout().raw(),
-                0,
-                desc_set.as_slice(),
-                &[],
-            );
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_KHR,
-                this.photon_pipeline.pipeline().raw(),
-            );
-            device.rtx_loader().cmd_trace_rays(
-                command_buffer,
-                &this.pipeline_sbt_buffer.inner().rgen(1),
-                &this.pipeline_sbt_buffer.inner().miss(),
-                &vk::StridedDeviceAddressRegionKHR {
-                    device_address: this.hitgroup_sbt_buffer.inner().device_address(),
-                    stride: *this.hitgroup_stride as u64,
-                    size: this.hitgroup_sbt_buffer.inner.size(),
-                },
-                &vk::StridedDeviceAddressRegionKHR::default(),
-                512,
-                512,
-                1,
-            );
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_KHR,
-                this.primary_pipeline.pipeline().raw(),
-            );
-            device.rtx_loader().cmd_trace_rays(
-                command_buffer,
-                &this.pipeline_sbt_buffer.inner().rgen(0),
-                &this.pipeline_sbt_buffer.inner().miss(),
-                &vk::StridedDeviceAddressRegionKHR {
-                    device_address: this.hitgroup_sbt_buffer.inner().device_address(),
-                    stride: *this.hitgroup_stride as u64,
-                    size: this.hitgroup_sbt_buffer.inner.size(),
-                },
-                &vk::StridedDeviceAddressRegionKHR::default(),
-                extent.width,
-                extent.height,
-                extent.depth,
-            );
-            device.cmd_pipeline_barrier2(
-                command_buffer,
-                &vk::DependencyInfo {
-                    dependency_flags: vk::DependencyFlags::BY_REGION,
-                    image_memory_barrier_count: 1,
-                    p_image_memory_barriers: &vk::ImageMemoryBarrier2 {
-                        src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                        src_access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                        dst_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                        dst_access_mask: vk::AccessFlags2::SHADER_STORAGE_READ,
-                        old_layout: vk::ImageLayout::GENERAL,
-                        new_layout: vk::ImageLayout::GENERAL,
-                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                        image: this.depth_image.inner().raw_image(),
-                        subresource_range: vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        },
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            );
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_KHR,
-                this.shadow_pipeline.pipeline().raw(),
-            );
-            device.rtx_loader().cmd_trace_rays(
-                command_buffer,
-                &this.pipeline_sbt_buffer.inner().rgen(2),
-                &this.pipeline_sbt_buffer.inner().miss(),
-                &vk::StridedDeviceAddressRegionKHR {
-                    device_address: this.hitgroup_sbt_buffer.inner().device_address(),
-                    stride: *this.hitgroup_stride as u64,
-                    size: this.hitgroup_sbt_buffer.inner.size(),
-                },
-                &vk::StridedDeviceAddressRegionKHR::default(),
-                extent.width,
-                extent.height,
-                extent.depth,
-            ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
-
-            device.cmd_pipeline_barrier2(
-                command_buffer,
-                &vk::DependencyInfo {
-                    dependency_flags: vk::DependencyFlags::BY_REGION,
-                    image_memory_barrier_count: 1,
-                    p_image_memory_barriers: &vk::ImageMemoryBarrier2 {
-                        src_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                        src_access_mask: vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                        dst_stage_mask: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                        dst_access_mask: vk::AccessFlags2::SHADER_STORAGE_READ
-                            | vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                        old_layout: vk::ImageLayout::GENERAL,
-                        new_layout: vk::ImageLayout::GENERAL,
-                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                        image: this.target_image.inner().raw_image(),
-                        subresource_range: vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        },
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            );
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_KHR,
-                this.final_gather_pipeline.pipeline().raw(),
-            );
-            device.rtx_loader().cmd_trace_rays(
-                command_buffer,
-                &this.pipeline_sbt_buffer.inner().rgen(3),
-                &this.pipeline_sbt_buffer.inner().miss(),
-                &vk::StridedDeviceAddressRegionKHR {
-                    device_address: this.hitgroup_sbt_buffer.inner().device_address(),
-                    stride: *this.hitgroup_stride as u64,
-                    size: this.hitgroup_sbt_buffer.inner.size(),
-                },
-                &vk::StridedDeviceAddressRegionKHR::default(),
-                extent.width,
-                extent.height,
-                extent.depth,
-            ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
-        });
-        *frame_index += 1;
-        std::task::Poll::Ready((
-            (),
-            DisposeContainer::new((
-                this.primary_pipeline.pipeline().clone(),
-                this.photon_pipeline.pipeline().clone(),
-                this.shadow_pipeline.pipeline().clone(),
-                this.final_gather_pipeline.pipeline().clone(),
-                this.desc_pool.handle(),
-                desc_set,
-            )),
-        ))
-    }
-
-    fn context(self: std::pin::Pin<&mut Self>, ctx: &mut rhyolite::future::StageContext) {
-        let this = self.project();
-        ctx.write_image(
-            this.target_image.deref_mut(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_STORAGE_WRITE,
-            vk::ImageLayout::GENERAL,
-        );
-        ctx.write_image(
-            this.albedo_image.deref_mut(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_STORAGE_WRITE,
-            vk::ImageLayout::GENERAL,
-        );
-        ctx.write_image(
-            this.depth_image.deref_mut(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_STORAGE_WRITE,
-            vk::ImageLayout::GENERAL,
-        );
-        ctx.write_image(
-            this.normal_image.deref_mut(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_STORAGE_WRITE,
-            vk::ImageLayout::GENERAL,
-        );
-        ctx.read(
-            this.hitgroup_sbt_buffer.deref(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
-        );
-        ctx.read(
-            this.pipeline_sbt_buffer.deref(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
-        );
-        ctx.read_others(
-            this.accel_struct.deref(),
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
-        );
-    }
-}
-
-// TODO: group base alignment

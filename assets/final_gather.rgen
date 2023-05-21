@@ -12,8 +12,7 @@ layout(shaderRecordEXT) buffer Sbt {
     float tan_half_fov;
 } sbt;
 layout(location = 0) rayPayloadEXT struct RayPayload {
-    f16vec3 color;
-    f16vec3 albedo;
+    f16vec3 illuminance;
 } payload;
 
 
@@ -23,8 +22,7 @@ void main() {
         // Did not hit.
         return;
     }
-    payload.color = f16vec3(imageLoad(u_imgOutput, ivec2(gl_LaunchIDEXT.xy)).xyz);
-    payload.albedo = f16vec3(imageLoad(u_albedo, ivec2(gl_LaunchIDEXT.xy)).xyz);
+    payload.illuminance = f16vec3(imageLoad(u_illuminance, ivec2(gl_LaunchIDEXT.xy)).xyz);
 
     const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
 
