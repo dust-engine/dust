@@ -230,7 +230,6 @@ impl StandardPipeline {
     pub type RenderParams = (
         SRes<Assets<ShaderModule>>,
         SRes<Assets<SlicedImageArray>>,
-        SRes<Allocator>,
         SRes<BlueNoise>,
     );
     pub fn render<'a>(
@@ -249,7 +248,7 @@ impl StandardPipeline {
                 RecycledState: 'static + Default,
             > + 'a,
     > {
-        let (shader_store, image_store, allocator, blue_noise) = params;
+        let (shader_store, image_store, blue_noise) = params;
         let primary_pipeline = self.primary_ray_pipeline.get_pipeline(shader_store)?;
         let photon_pipeline = self.photon_ray_pipeline.get_pipeline(shader_store)?;
         let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(shader_store)?;
@@ -313,7 +312,6 @@ impl StandardPipeline {
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
 
-        let _allocator = allocator.clone();
         let fut = commands! { move
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join

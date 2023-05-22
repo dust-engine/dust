@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    ops::{Deref, DerefMut},
+    ops::Deref,
     sync::Arc,
 };
 
@@ -8,19 +8,22 @@ use bevy_ecs::{
     system::Resource,
     world::{FromWorld, World},
 };
-use pin_project::pin_project;
-use rhyolite::utils::format::{ColorSpace, ColorSpaceType};
 use rhyolite::{
     ash::vk,
     cstr,
-    descriptor::DescriptorPool,
+    descriptor::{DescriptorPool, DescriptorSetWrite},
     future::{
-        use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer, PerFrameState,
-        RenderData, RenderImage,
+        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer,
+        PerFrameState, RenderData, RenderImage,
     },
     macros::{glsl_reflected, set_layout},
     utils::retainer::{Retainer, RetainerHandle},
-    ComputePipeline, HasDevice, ImageViewLike, PipelineLayout,
+    ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
+};
+use rhyolite::{
+    future::Disposable,
+    macros::commands,
+    utils::format::{ColorSpace, ColorSpaceType},
 };
 use rhyolite_bevy::Queues;
 
@@ -73,18 +76,16 @@ impl FromWorld for ToneMappingPipeline {
     }
 }
 impl ToneMappingPipeline {
-    pub fn render<
-        'a,
-        S: ImageViewLike + RenderData,
-        SRef: Deref<Target = RenderImage<S>>,
-        T: ImageViewLike + RenderData,
-        TRef: DerefMut<Target = RenderImage<T>>,
-    >(
-        &mut self,
-        src: SRef,
-        dst: TRef,
+    pub fn render<'a>(
+        &'a mut self,
+        src: &'a RenderImage<impl ImageViewLike + RenderData>,
+        mut dst: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         output_color_space: &ColorSpace,
-    ) -> ToneMappingFuture<S, SRef, T, TRef> {
+    ) -> impl GPUCommandFuture<
+        Output = (),
+        RetainedState: 'static + Disposable,
+        RecycledState: 'static + Default,
+    > + 'a {
         let pipeline = self
             .pipeline
             .entry(output_color_space.clone())
@@ -116,132 +117,64 @@ impl ToneMappingPipeline {
                 )
                 .unwrap();
                 Arc::new(pipeline)
+            })
+            .clone();
+        let desc_pool = &mut self.desc_pool;
+        commands! { move
+            let desc_set = use_per_frame_state(using!(), || {
+                desc_pool
+                    .allocate_for_pipeline_layout(pipeline.layout())
+                    .unwrap()
             });
-
-        ToneMappingFuture {
-            src_img: src,
-            dst_img: dst,
-            pipeline,
-            desc_pool: &mut self.desc_pool,
+            pipeline.device().write_descriptor_sets([
+                DescriptorSetWrite::storage_images(
+                    desc_set[0],
+                    0,
+                    0,
+                    &[
+                        src.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        dst.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                    ]
+                ),
+            ]);
+            let extent = src.inner().extent();
+            run(|ctx, command_buffer| unsafe {
+                let device = ctx.device();
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    pipeline.raw(),
+                );
+                device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    pipeline.raw_layout(),
+                    0,
+                    desc_set.as_slice(),
+                    &[],
+                );
+                device.cmd_dispatch(
+                    command_buffer,
+                    extent.width.div_ceil(8),
+                    extent.height.div_ceil(8),
+                    extent.depth,
+                );
+            }, |ctx| {
+                ctx.read_image(
+                    src,
+                    vk::PipelineStageFlags2::COMPUTE_SHADER,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
+                    dst,
+                    vk::PipelineStageFlags2::COMPUTE_SHADER,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+            }).await;
+            retain!(
+                DisposeContainer::new((pipeline.clone(), desc_pool.handle(), desc_set)));
         }
-    }
-}
-
-#[pin_project]
-pub struct ToneMappingFuture<
-    'a,
-    S: ImageViewLike + RenderData,
-    SRef: Deref<Target = RenderImage<S>>,
-    T: ImageViewLike + RenderData,
-    TRef: DerefMut<Target = RenderImage<T>>,
-> {
-    src_img: SRef,
-    dst_img: TRef,
-    desc_pool: &'a mut Retainer<DescriptorPool>,
-    pipeline: &'a mut Arc<ComputePipeline>,
-}
-
-impl<
-        'a,
-        S: ImageViewLike + RenderData,
-        SRef: Deref<Target = RenderImage<S>>,
-        T: ImageViewLike + RenderData,
-        TRef: DerefMut<Target = RenderImage<T>>,
-    > GPUCommandFuture for ToneMappingFuture<'a, S, SRef, T, TRef>
-{
-    type Output = ();
-
-    type RetainedState = DisposeContainer<(
-        Arc<ComputePipeline>,
-        RetainerHandle<DescriptorPool>,
-        PerFrameContainer<Vec<vk::DescriptorSet>>,
-    )>;
-
-    type RecycledState = PerFrameState<Vec<vk::DescriptorSet>>;
-
-    fn record(
-        self: std::pin::Pin<&mut Self>,
-        ctx: &mut rhyolite::future::CommandBufferRecordContext,
-        state_desc_sets: &mut Self::RecycledState,
-    ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
-        let this = self.project();
-        assert_eq!(this.src_img.inner().extent(), this.dst_img.inner().extent());
-        let extent = this.src_img.inner().extent();
-
-        let desc_set = use_per_frame_state(state_desc_sets, || {
-            this.desc_pool
-                .allocate_for_pipeline_layout(this.pipeline.layout())
-                .unwrap()
-        });
-        unsafe {
-            // TODO: optimize away redundant writes
-            let image_infos = [
-                vk::DescriptorImageInfo {
-                    sampler: vk::Sampler::null(),
-                    image_view: this.src_img.inner().raw_image_view(),
-                    image_layout: vk::ImageLayout::GENERAL,
-                },
-                vk::DescriptorImageInfo {
-                    sampler: vk::Sampler::null(),
-                    image_view: this.dst_img.inner().raw_image_view(),
-                    image_layout: vk::ImageLayout::GENERAL,
-                },
-            ];
-            this.pipeline.device().update_descriptor_sets(
-                &[vk::WriteDescriptorSet {
-                    dst_set: desc_set[0],
-                    dst_binding: 0,
-                    dst_array_element: 0,
-                    descriptor_count: 2,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    p_image_info: image_infos.as_ptr(),
-                    ..Default::default()
-                }],
-                &[],
-            );
-        }
-
-        ctx.record(|ctx, command_buffer| unsafe {
-            let device = ctx.device();
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                this.pipeline.raw(),
-            );
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                this.pipeline.raw_layout(),
-                0,
-                desc_set.as_slice(),
-                &[],
-            );
-            device.cmd_dispatch(
-                command_buffer,
-                extent.width.div_ceil(8),
-                extent.height.div_ceil(8),
-                extent.depth,
-            );
-        });
-        std::task::Poll::Ready((
-            (),
-            DisposeContainer::new((this.pipeline.clone(), this.desc_pool.handle(), desc_set)),
-        ))
-    }
-
-    fn context(self: std::pin::Pin<&mut Self>, ctx: &mut rhyolite::future::StageContext) {
-        let this = self.project();
-        ctx.read_image(
-            this.src_img.deref(),
-            vk::PipelineStageFlags2::COMPUTE_SHADER,
-            vk::AccessFlags2::SHADER_STORAGE_READ,
-            vk::ImageLayout::GENERAL,
-        );
-        ctx.write_image(
-            this.dst_img.deref_mut(),
-            vk::PipelineStageFlags2::COMPUTE_SHADER,
-            vk::AccessFlags2::SHADER_STORAGE_WRITE,
-            vk::ImageLayout::GENERAL,
-        );
     }
 }
