@@ -12,7 +12,7 @@ use rhyolite::{
     ash::vk,
     future::{GPUCommandFuture, RenderRes},
     macros::commands,
-    HasDevice, ManagedBuffer,
+    HasDevice, ManagedBufferVec,
 };
 use rhyolite_bevy::{Allocator, RenderSystems};
 
@@ -29,7 +29,7 @@ use rhyolite::debug::DebugObject;
 pub struct TLASStore<M = Renderable> {
     geometry_flags: vk::GeometryFlagsKHR,
     build_flags: vk::BuildAccelerationStructureFlagsKHR,
-    buffer: ManagedBuffer<vk::AccelerationStructureInstanceKHR>,
+    buffer: ManagedBufferVec<vk::AccelerationStructureInstanceKHR>,
     requires_rebuild: bool,
     _marker: PhantomData<M>,
 }
@@ -167,7 +167,7 @@ impl<M: Component> Plugin for TLASPlugin<M> {
         .insert_resource(TLASStore::<M> {
             geometry_flags: self.geometry_flags,
             build_flags: self.build_flags,
-            buffer: ManagedBuffer::new(
+            buffer: ManagedBufferVec::new(
                 allocator.into_inner(),
                 vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,

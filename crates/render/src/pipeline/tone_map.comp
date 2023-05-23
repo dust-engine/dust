@@ -144,6 +144,13 @@ vec3 SwapchainOETF(vec3 normalizedLinearValue) {
 
 
 void main() {
+    uvec2 dim = min(imageSize(u_src_img).xy, imageSize(u_dst_img).xy);
+
+    // Ignore threads that map to areas beyond the bounds of our image
+    if (gl_GlobalInvocationID.x >= dim.x && gl_GlobalInvocationID.y >= dim.y) {
+      return;
+    }
+
     vec4 in_value = imageLoad(u_src_img, ivec2(gl_GlobalInvocationID.xy));
 
     float exposure = 0.05;

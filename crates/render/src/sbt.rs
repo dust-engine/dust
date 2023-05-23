@@ -12,7 +12,7 @@ use rhyolite::{
     },
     macros::commands,
     utils::either::Either,
-    Allocator, BufferLike, HasDevice, ManagedBufferUnsized, PhysicalDeviceMemoryModel,
+    Allocator, BufferLike, HasDevice, ManagedBufferVecUnsized, PhysicalDeviceMemoryModel,
     ResidentBuffer,
 };
 
@@ -87,7 +87,7 @@ pub struct SbtManager {
     allocator: Allocator,
     layout: SbtLayout,
     total_raytype: u32,
-    buffer: ManagedBufferUnsized,
+    buffer: ManagedBufferVecUnsized,
 
     /// Mapping from SBT Entry to index
     entries: HashMap<Entry, u32>,
@@ -133,7 +133,7 @@ impl SbtManager {
             allocator: allocator.clone().into_inner(),
             total_raytype: pipeline_characteristics.num_raytype,
             layout,
-            buffer: ManagedBufferUnsized::new(
+            buffer: ManagedBufferVecUnsized::new(
                 allocator.into_inner(),
                 vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
