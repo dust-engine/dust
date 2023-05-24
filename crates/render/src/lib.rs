@@ -76,6 +76,7 @@ impl Plugin for RenderPlugin {
             enabled_device_features: Box::new(rhyolite::PhysicalDeviceFeatures {
                 v13: vk::PhysicalDeviceVulkan13Features {
                     synchronization2: vk::TRUE,
+                    inline_uniform_block: vk::TRUE,
                     ..Default::default()
                 },
                 v12: vk::PhysicalDeviceVulkan12Features {

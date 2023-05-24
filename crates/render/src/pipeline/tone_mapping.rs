@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    ops::Deref,
-    sync::Arc,
-};
+use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use bevy_ecs::{
     system::Resource,
@@ -14,11 +10,11 @@ use rhyolite::{
     descriptor::{DescriptorPool, DescriptorSetWrite},
     future::{
         run, use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer,
-        PerFrameState, RenderData, RenderImage,
+        PerFrameState, RenderData, RenderImage, RenderRes,
     },
     macros::{glsl_reflected, set_layout},
     utils::retainer::{Retainer, RetainerHandle},
-    ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
+    BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
 };
 use rhyolite::{
     future::Disposable,
@@ -46,9 +42,14 @@ impl FromWorld for ToneMappingPipeline {
         let set = set_layout! {
             #[shader(vk::ShaderStageFlags::COMPUTE)]
             src_img: vk::DescriptorType::STORAGE_IMAGE,
+            #[shader(vk::ShaderStageFlags::COMPUTE)]
+            src_img_albedo: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::COMPUTE)]
             dst_img: vk::DescriptorType::STORAGE_IMAGE,
+
+            #[shader(vk::ShaderStageFlags::COMPUTE)]
+            histogram_avg: vk::DescriptorType::UNIFORM_BUFFER,
         }
         .build(device.clone())
         .unwrap();
@@ -79,7 +80,9 @@ impl ToneMappingPipeline {
     pub fn render<'a>(
         &'a mut self,
         src: &'a RenderImage<impl ImageViewLike + RenderData>,
+        albedo: &'a RenderImage<impl ImageViewLike + RenderData>,
         mut dst: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        exposure: &'a RenderRes<impl BufferLike + RenderData>,
         output_color_space: &ColorSpace,
     ) -> impl GPUCommandFuture<
         Output = (),
@@ -133,8 +136,18 @@ impl ToneMappingPipeline {
                     0,
                     &[
                         src.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        albedo.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         dst.inner().as_descriptor(vk::ImageLayout::GENERAL),
                     ]
+                ),
+                DescriptorSetWrite::uniform_buffers(
+                    desc_set[0],
+                    3,
+                    0,
+                    &[
+                        exposure.inner().as_descriptor(),
+                    ],
+                    false
                 ),
             ]);
             let extent = src.inner().extent();
@@ -171,6 +184,11 @@ impl ToneMappingPipeline {
                     vk::PipelineStageFlags2::COMPUTE_SHADER,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
+                );
+                ctx.read(
+                    exposure,
+                    vk::PipelineStageFlags2::COMPUTE_SHADER,
+                    vk::AccessFlags2::UNIFORM_READ,
                 );
             }).await;
             retain!(

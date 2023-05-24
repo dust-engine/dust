@@ -3,8 +3,9 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(rgba8, set = 0, binding = 0) uniform readonly image2D u_src_img;
-layout(rgba8, set = 0, binding = 1) uniform writeonly image2D u_dst_img;
+layout(rgba32f, set = 0, binding = 0) uniform readonly image2D u_src_img;
+layout(rgb10_a2, set = 0, binding = 1) uniform readonly image2D u_src_img_albedo;
+layout(set = 0, binding = 2) uniform writeonly image2D u_dst_img;
 
 // Gamma correction
 layout (constant_id = 0) const uint OUTPUT_TRANSFER_FUNCTION = 0;
@@ -21,6 +22,9 @@ layout (constant_id = 8) const float COLOR_SPACE_CONVERSION_7 = 0.0;
 layout (constant_id = 9) const float COLOR_SPACE_CONVERSION_8 = 1.0;
 
 
+layout(set = 0, binding = 3) uniform Histogram {
+    float avg;
+} u_histogram;
 
 
 
@@ -152,11 +156,12 @@ void main() {
     }
 
     vec4 in_value = imageLoad(u_src_img, ivec2(gl_GlobalInvocationID.xy));
+    vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
-    float exposure = 0.05;
+    float exposure = 1.0 / (9.6*u_histogram.avg);
 
     // Tone mapping
-    vec3 mapped = ACESFitted(in_value.xyz * exposure);
+    vec3 mapped = ACESFitted(in_value.xyz * albedo.xyz * exposure);
 
     const mat3 COLOR_SPACE_CONVERSION = mat3(
       COLOR_SPACE_CONVERSION_0, COLOR_SPACE_CONVERSION_1, COLOR_SPACE_CONVERSION_2,

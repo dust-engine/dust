@@ -6,11 +6,14 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
-use dust_render::{PinholeProjection, StandardPipeline, TLASStore, ToneMappingPipeline};
+use dust_render::{
+    AutoExposurePipeline, ExposureSettings, PinholeProjection, StandardPipeline, TLASStore,
+    ToneMappingPipeline,
+};
 
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
-use rhyolite::{clear_image, ImageExt, ImageLike, ImageRequest};
+use rhyolite::{clear_image, BufferExt, ImageExt, ImageLike, ImageRequest};
 
 use rhyolite::{
     macros::{commands, gpu},
@@ -45,7 +48,9 @@ fn main() {
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
         .add_plugin(RenderSystem)
         .add_systems(bevy_app::Update, print_position)
-        .init_resource::<ToneMappingPipeline>();
+        .init_resource::<ToneMappingPipeline>()
+        .init_resource::<AutoExposurePipeline>()
+        .init_resource::<ExposureSettings>();
     let main_window = app
         .world
         .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -109,6 +114,8 @@ impl Plugin for RenderSystem {
              mut tlas_store: ResMut<TLASStore>,
              allocator: Res<rhyolite_bevy::Allocator>,
              mut pipeline: ResMut<StandardPipeline>,
+             mut auto_exposure_pipeline: ResMut<AutoExposurePipeline>,
+             mut auto_exposure_params: SystemParamItem<AutoExposurePipeline::RenderParams>,
              mut recycled_state: Local<_>,
              mut tone_mapping_pipeline: ResMut<ToneMappingPipeline>,
              mut render_params: SystemParamItem<StandardPipeline::RenderParams>,
@@ -211,8 +218,17 @@ impl Plugin for RenderSystem {
                                 rendered = true;
                             }
                             if rendered {
+                                let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_params).await;
+                                let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
                                 let color_space = swapchain_image.inner().color_space().clone();
-                                tone_mapping_pipeline.render(&radiance_image, &mut swapchain_image, &color_space).await;
+                                tone_mapping_pipeline.render(
+                                    &radiance_image,
+                                    &albedo_image,
+                                    &mut swapchain_image,
+                                    &exposure_avg,
+                                    &color_space
+                                ).await;
+                                retain!(exposure_avg);
                             }
                             retain!(accel_struct);
                         }

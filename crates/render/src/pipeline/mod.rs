@@ -7,6 +7,7 @@ use bevy_ecs::{
 };
 use rhyolite::PipelineLayout;
 use rhyolite_bevy::Allocator;
+mod auto_exposure;
 mod builder;
 mod manager;
 mod plugin;
@@ -20,6 +21,7 @@ pub use builder::RayTracingPipelineBuilder;
 pub use manager::{RayTracingPipelineManager, RayTracingPipelineManagerSpecializedPipeline};
 pub use tone_mapping::ToneMappingPipeline;
 
+pub use auto_exposure::*;
 pub use plugin::RayTracingPipelinePlugin;
 pub use standard::StandardPipeline;
 

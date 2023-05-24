@@ -1,0 +1,49 @@
+#version 460
+#extension GL_EXT_control_flow_attributes: require
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
+layout(set = 0, binding = 1) uniform Params {
+    float minLogLum;
+    float logLumRange;
+    float timeCoeff;
+} u_params;
+layout(set = 0, binding = 2) buffer Histogram {
+    uint histogram[256];
+    float avg;
+} u_histogram;
+
+
+shared uint histogramShared[256];
+
+void main() {
+    uint countForThisBin = u_histogram.histogram[gl_LocalInvocationIndex];
+    histogramShared[gl_LocalInvocationIndex] = countForThisBin * gl_LocalInvocationIndex;
+    barrier();
+    u_histogram.histogram[gl_LocalInvocationIndex] = 0;
+
+    [[unroll]]
+    for (uint cutoff = (256 >> 1); cutoff > 0; cutoff >>= 1) {
+        if (gl_LocalInvocationIndex >= cutoff) {
+            return;
+        }
+        histogramShared[gl_LocalInvocationIndex] += histogramShared[gl_LocalInvocationIndex + cutoff];
+        barrier();
+    }
+    // Here we take our weighted sum and divide it by the number of pixels
+    // that had luminance greater than zero (since the index == 0, we can
+    // use countForThisBin to find the number of black pixels)
+    
+    uvec2 dim = imageSize(u_illuminance).xy;
+    uint numPixels = dim.x * dim.y;
+    float weightedLogAverage = (histogramShared[0] / max(numPixels - float(countForThisBin), 1.0)) - 1.0;
+
+    // Map from our histogram space to actual luminance
+    float weightedAvgLum = exp2(((weightedLogAverage / 254.0) * u_params.logLumRange) + u_params.minLogLum);
+
+    // The new stored value will be interpolated using the last frames value
+    // to prevent sudden shifts in the exposure.
+    float lumLastFrame = u_histogram.avg;
+    float adaptedLum = lumLastFrame + (weightedAvgLum - lumLastFrame) * u_params.timeCoeff;
+    u_histogram.avg = adaptedLum;
+}
