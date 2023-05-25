@@ -4,8 +4,9 @@ use bevy_ecs::{
     system::{lifetimeless::SRes, Res, ResMut, Resource, SystemParamItem},
     world::{FromWorld, World},
 };
-use rhyolite::future::run;
+use rhyolite::future::{run};
 use rhyolite::BufferExt;
+use rhyolite::future::GPUCommandFutureExt;
 use rhyolite::{
     ash::vk,
     cstr,
@@ -130,6 +131,9 @@ impl AutoExposurePipeline {
                 ).unwrap();
                 buffer
             }, |_| false);
+            if !buffer.inner().reused() {
+                fill_buffer(&mut buffer, 0).await;
+            }
 
 
             let desc_set = use_per_frame_state(using!(), || {
@@ -169,7 +173,6 @@ impl AutoExposurePipeline {
                 ),
             ]);
 
-            fill_buffer(&mut buffer, 0).await;
             run(|ctx, command_buffer| unsafe {
                 let device = ctx.device();
                 device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, self.pipeline.raw());
@@ -237,6 +240,7 @@ impl AutoExposurePipeline {
 pub struct ExposureSettings {
     pub min_log_luminance: f32,
     pub max_log_luminance: f32,
+    /// A value between 0 and 1. The higher the value, the faster the exposure will adapt to changes.
     pub time_coefficient: f32,
     pub default: f32,
     pub current: f32,
@@ -244,10 +248,10 @@ pub struct ExposureSettings {
 impl Default for ExposureSettings {
     fn default() -> Self {
         Self {
-            min_log_luminance: -8.0,
-            max_log_luminance: 3.5,
+            min_log_luminance: -6.0,
+            max_log_luminance: 8.5,
             default: 0.0,
-            time_coefficient: 0.5,
+            time_coefficient: 0.2,
             current: 0.0,
         }
     }

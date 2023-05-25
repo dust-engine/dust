@@ -12,7 +12,7 @@ hitAttributeEXT HitAttribute {
     uint8_t voxelId;
 } hitAttributes;
 layout(location = 0) rayPayloadInEXT struct RayPayload {
-    f16vec3 illuminance;
+    vec3 illuminance;
 } payload;
 
 
@@ -33,12 +33,12 @@ void main() {
     uint16_t lastAccessedFrameIndex = sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[faceIdU];
 
     // irradiance, pre multiplied with albedo
-    f16vec3 irradiance = hashEntry.irradiance * float16_t(pow(0.999, uint16_t(pushConstants.frameIndex) - lastAccessedFrameIndex));
-    f16vec3 radiance = irradiance / float16_t(bitCount(uint(hashEntry.mask)));
+    vec3 irradiance = hashEntry.irradiance * float16_t(pow(0.999, uint16_t(pushConstants.frameIndex) - lastAccessedFrameIndex));
+    vec3 radiance = irradiance / float16_t(bitCount(uint(hashEntry.mask)));
 
     // The parameter 0.001 was derived from the 0.999 retention factor. It's not arbitrary.
     /// 1 (this frames energy) + \sigma 0.999^n = 1000
-    radiance *= float16_t(0.001);
+    radiance *= 0.001;
 
     imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(payload.illuminance + radiance, 1.0));
 }

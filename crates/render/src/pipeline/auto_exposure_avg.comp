@@ -1,6 +1,7 @@
 #version 460
 #extension GL_EXT_control_flow_attributes: require
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+#extension GL_EXT_debug_printf : enable
 
 layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
 layout(set = 0, binding = 1) uniform Params {
@@ -18,6 +19,9 @@ shared uint histogramShared[256];
 
 void main() {
     uint countForThisBin = u_histogram.histogram[gl_LocalInvocationIndex];
+
+
+    // This gives higher weight to higher lum pixels.... why???
     histogramShared[gl_LocalInvocationIndex] = countForThisBin * gl_LocalInvocationIndex;
     barrier();
     u_histogram.histogram[gl_LocalInvocationIndex] = 0;
@@ -36,7 +40,7 @@ void main() {
     
     uvec2 dim = imageSize(u_illuminance).xy;
     uint numPixels = dim.x * dim.y;
-    float weightedLogAverage = (histogramShared[0] / max(numPixels - float(countForThisBin), 1.0)) - 1.0;
+    float weightedLogAverage = (histogramShared[0] / max(numPixels, 1.0)) - 1.0;
 
     // Map from our histogram space to actual luminance
     float weightedAvgLum = exp2(((weightedLogAverage / 254.0) * u_params.logLumRange) + u_params.minLogLum);
@@ -46,4 +50,5 @@ void main() {
     float lumLastFrame = u_histogram.avg;
     float adaptedLum = lumLastFrame + (weightedAvgLum - lumLastFrame) * u_params.timeCoeff;
     u_histogram.avg = adaptedLum;
+    debugPrintfEXT("avg %f\n", adaptedLum);
 }
