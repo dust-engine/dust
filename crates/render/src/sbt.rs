@@ -283,6 +283,9 @@ impl BufferLike for PipelineSbtManagerInfo {
     fn offset(&self) -> vk::DeviceSize {
         self.buffer.offset()
     }
+    fn as_mut_ptr(&mut self) -> Option<*mut ()> {
+        self.buffer.as_mut_ptr()
+    }
 }
 impl PipelineSbtManagerInfo {
     pub fn rgen(&self, index: usize) -> vk::StridedDeviceAddressRegionKHR {

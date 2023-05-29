@@ -114,7 +114,8 @@ impl Plugin for RenderPlugin {
         .add_systems(Update, build_blas_system.in_set(RenderSystems::SetUp))
         .init_resource::<BlasStore>()
         .add_asset::<ShaderModule>()
-        .init_resource::<BlueNoise>();
+        .init_resource::<BlueNoise>()
+        .init_resource::<Sunlight>();
 
         let device = app.world.resource::<rhyolite_bevy::Device>();
         DeferredTaskPool::init(device.inner().clone());

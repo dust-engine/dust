@@ -72,7 +72,7 @@ impl FromWorld for ToneMappingPipeline {
             layout,
             pipeline: HashMap::new(),
             desc_pool: Retainer::new(desc_pool),
-            scene_color_space: ColorSpaceType::sRGB, // The default scene color space.
+            scene_color_space: ColorSpaceType::DCI_P3, // The default scene color space.
         }
     }
 }

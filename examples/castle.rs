@@ -1,14 +1,14 @@
 #![feature(generators)]
 #![feature(int_roundings)]
 use bevy_app::{App, Plugin, Startup};
-use bevy_asset::AssetServer;
+use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
 use dust_render::{
-    AutoExposurePipeline, ExposureSettings, PinholeProjection, StandardPipeline, TLASStore,
-    ToneMappingPipeline,
+    AutoExposurePipeline, BlueNoise, ExposureSettings, PinholeProjection, StandardPipeline,
+    TLASStore, ToneMappingPipeline,
 };
 
 use rhyolite::ash::vk;
@@ -20,7 +20,9 @@ use rhyolite::{
     QueueType,
 };
 
-use rhyolite_bevy::{Image, Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt};
+use rhyolite_bevy::{
+    Image, Queues, QueuesRouter, RenderSystems, SlicedImageArray, Swapchain, SwapchainConfigExt,
+};
 
 fn main() {
     let mut app = App::new();
@@ -61,6 +63,10 @@ fn main() {
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
+            image_format: Some(vk::SurfaceFormatKHR {
+                format: vk::Format::B8G8R8A8_UNORM,
+                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+            }),
             required_feature_flags: vk::FormatFeatureFlags::TRANSFER_DST
                 | vk::FormatFeatureFlags::STORAGE_IMAGE,
             ..Default::default()
@@ -120,6 +126,8 @@ impl Plugin for RenderSystem {
              mut tone_mapping_pipeline: ResMut<ToneMappingPipeline>,
              mut render_params: SystemParamItem<StandardPipeline::RenderParams>,
              cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
+             blue_noise: Res<BlueNoise>,
+             img_slices: Res<Assets<SlicedImageArray>>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
                     return;
@@ -127,9 +135,13 @@ impl Plugin for RenderSystem {
                 let Some(camera) = cameras.iter().next() else {
                     return;
                 };
+                let Some(blue_noise) = img_slices.get(&blue_noise.unitvec3_cosine) else {
+                    return;
+                };
                 let accel_struct = tlas_store.accel_struct();
                 let graphics_queue = queue_router.of_type(QueueType::Graphics);
                 let swapchain_image = swapchain.acquire_next_image(queues.current_frame());
+
                 let future = gpu! {
                     let mut swapchain_image = swapchain_image.await;
                     commands! {
@@ -210,9 +222,10 @@ impl Plugin for RenderSystem {
                                 &mut albedo_image,
                                 &mut normal_image,
                                 &mut depth_image,
+                                &blue_noise,
                                 &accel_struct,
-                                &mut render_params,
-                                camera
+                                render_params,
+                                camera,
                             ) {
                                 render.await;
                                 rendered = true;

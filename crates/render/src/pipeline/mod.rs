@@ -11,8 +11,11 @@ mod auto_exposure;
 mod builder;
 mod manager;
 mod plugin;
+mod sky;
 mod standard;
 mod tone_mapping;
+
+pub use sky::Sunlight;
 
 use crate::{
     material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable, ShaderModule,

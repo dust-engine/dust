@@ -26,7 +26,7 @@ layout(location = 0) rayPayloadEXT PhotonRayPayload photon;
 void main() {
     const vec2 jitter = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy - uvec2(16, 44) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xy;
     const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + jitter) / vec2(gl_LaunchSizeEXT.xy);
-    const vec3 direction = vec3(0.0, 0.0, -1.0);
+    const vec3 direction = -sunlight_config.direction;
 
     const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
 

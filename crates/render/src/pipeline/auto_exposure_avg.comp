@@ -50,5 +50,5 @@ void main() {
     float lumLastFrame = u_histogram.avg;
     float adaptedLum = lumLastFrame + (weightedAvgLum - lumLastFrame) * u_params.timeCoeff;
     u_histogram.avg = adaptedLum;
-    debugPrintfEXT("avg %f\n", adaptedLum);
+    debugPrintfEXT("avg %f\n", log2(adaptedLum));
 }

@@ -1,12 +1,13 @@
 use std::{ops::Deref, sync::Arc};
 
 use bevy_asset::{AssetServer, Assets};
+use bevy_ecs::system::Res;
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
 use bevy_math::{Quat, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
-use rhyolite::future::{run, use_state};
+use rhyolite::future::{run, use_shared_state, use_state};
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
@@ -19,13 +20,16 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
+use rhyolite_bevy::StagingRingBuffer;
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 
+use crate::Sunlight;
 use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
     BlueNoise, PinholeProjection, ShaderModule, SpecializedShader,
 };
 
+use super::sky::SkyModelState;
 use super::{RayTracingPipeline, RayTracingPipelineManager};
 
 #[derive(Resource)]
@@ -71,6 +75,9 @@ impl RayTracingPipeline for StandardPipeline {
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
             noise_unitvec3_cosine: vk::DescriptorType::SAMPLED_IMAGE,
+
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
+            sunlight_settings: vk::DescriptorType::UNIFORM_BUFFER,
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -229,8 +236,9 @@ impl StandardPipeline {
 
     pub type RenderParams = (
         SRes<Assets<ShaderModule>>,
-        SRes<Assets<SlicedImageArray>>,
-        SRes<BlueNoise>,
+        SRes<Allocator>,
+        SRes<Sunlight>,
+        SRes<StagingRingBuffer>,
     );
     pub fn render<'a>(
         &'a mut self,
@@ -238,8 +246,9 @@ impl StandardPipeline {
         albedo_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         normal_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         depth_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        noise_image: &'a SlicedImageArray,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
-        params: &'a mut SystemParamItem<Self::RenderParams>,
+        params: SystemParamItem<'a, '_, Self::RenderParams>,
         camera: (&PinholeProjection, &GlobalTransform),
     ) -> Option<
         impl GPUCommandFuture<
@@ -248,12 +257,11 @@ impl StandardPipeline {
                 RecycledState: 'static + Default,
             > + 'a,
     > {
-        let (shader_store, image_store, blue_noise) = params;
-        let primary_pipeline = self.primary_ray_pipeline.get_pipeline(shader_store)?;
-        let photon_pipeline = self.photon_ray_pipeline.get_pipeline(shader_store)?;
-        let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(shader_store)?;
-        let final_gather_pipeline = self.final_gather_ray_pipeline.get_pipeline(shader_store)?;
-        let noise_img = image_store.get(&blue_noise.unitvec3_cosine)?;
+        let (shader_store, allocator, sunlight, staging_ring_buffer) = params;
+        let primary_pipeline = self.primary_ray_pipeline.get_pipeline(&shader_store)?;
+        let photon_pipeline = self.photon_ray_pipeline.get_pipeline(&shader_store)?;
+        let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(&shader_store)?;
+        let final_gather_pipeline = self.final_gather_ray_pipeline.get_pipeline(&shader_store)?;
         self.hitgroup_sbt_manager.specify_pipelines(&[
             primary_pipeline,
             photon_pipeline,
@@ -311,17 +319,29 @@ impl StandardPipeline {
             .push_miss(final_gather_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
+        let sunlight = sunlight.bake();
 
         let fut = commands! { move
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
+
+            let mut sunlight_buffer = use_shared_state(
+                using!(),
+                move |_| {
+                    allocator.create_device_buffer_uninit(std::mem::size_of::<SkyModelState>() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST).unwrap()
+                },
+                |_| false
+            );
+            staging_ring_buffer.update_buffer(&mut sunlight_buffer, unsafe {
+                std::slice::from_raw_parts(&sunlight as *const _ as *const u8, std::mem::size_of_val(&sunlight))
+            }).await;
 
             let frame_index = use_state(
                 using!(),
                 || 0,
                 |a| *a += 1
             );
-            let noise_texture_index = *frame_index % noise_img.subresource_range().layer_count;
+            let noise_texture_index = *frame_index % noise_image.subresource_range().layer_count;
 
 
             let desc_set = use_per_frame_state(using!(), || {
@@ -346,13 +366,20 @@ impl StandardPipeline {
                     desc_set[0],
                     5,
                     0,
-                    &[noise_img.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
+                    &[noise_image.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
                 ),
                 DescriptorSetWrite::accel_structs(
                     desc_set[0],
                     4,
                     0,
                     &[tlas.inner().raw()]
+                ),
+                DescriptorSetWrite::uniform_buffers(
+                    desc_set[0],
+                    6,
+                    0,
+                    &[sunlight_buffer.inner().as_descriptor()],
+                    false
                 )
             ]);
 
@@ -417,6 +444,11 @@ impl StandardPipeline {
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
                 );
+                ctx.read(
+                    &sunlight_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::UNIFORM_READ,
+                );
             }).await;
             run(|ctx, command_buffer| unsafe {
                 let device = ctx.device();
@@ -479,6 +511,11 @@ impl StandardPipeline {
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
+                ctx.read(
+                    &sunlight_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::UNIFORM_READ,
+                );
             }).await;
 
             run(|ctx, command_buffer| unsafe {
@@ -535,6 +572,11 @@ impl StandardPipeline {
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
+                );
+                ctx.read(
+                    &sunlight_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::UNIFORM_READ,
                 );
             }).await;
 
@@ -606,9 +648,15 @@ impl StandardPipeline {
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
+                ctx.read(
+                    &sunlight_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::UNIFORM_READ,
+                );
             }).await;
             retain!(hitgroup_sbt_buffer);
             retain!(pipeline_sbt_buffer);
+            retain!(sunlight_buffer);
             retain!(
                 DisposeContainer::new((
                     primary_pipeline.pipeline().clone(),

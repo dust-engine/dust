@@ -4,9 +4,9 @@ use bevy_ecs::{
     system::{lifetimeless::SRes, Res, ResMut, Resource, SystemParamItem},
     world::{FromWorld, World},
 };
-use rhyolite::future::{run};
-use rhyolite::BufferExt;
+use rhyolite::future::run;
 use rhyolite::future::GPUCommandFutureExt;
+use rhyolite::BufferExt;
 use rhyolite::{
     ash::vk,
     cstr,

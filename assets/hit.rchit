@@ -18,6 +18,14 @@ float SRGBToLinear(float color)
     return color < 0.04045 ? color / 12.92 : pow(abs(color + 0.055) / 1.055, 2.4);
 }
 
+vec3 SRGBToXYZ(vec3 srgb) {
+    mat3 transform = mat3(
+        0.4124564, 0.2126729, 0.0193339,
+        0.3575761, 0.7151522, 0.1191920,
+        0.1804375, 0.0721750, 0.9503041
+    );
+    return transform * srgb;
+}
 
 void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
@@ -53,5 +61,5 @@ void main() {
     // Store the contribution from photon maps
     imageStore(u_depth, ivec2(gl_LaunchIDEXT.xy), vec4(gl_HitTEXT));
     imageStore(u_normal, ivec2(gl_LaunchIDEXT.xy), vec4(normalWorld, 1.0));
-    imageStore(u_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(albedo, 1.0));
+    imageStore(u_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(albedo), 1.0));
 }

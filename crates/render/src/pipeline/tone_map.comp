@@ -161,7 +161,7 @@ void main() {
     float exposure = 1.0 / (9.6*u_histogram.avg);
 
     // Tone mapping
-    vec3 mapped = ACESFitted(in_value.xyz * albedo.xyz * exposure);
+    vec3 mapped = in_value.xyz * albedo.xyz * exposure;
 
     const mat3 COLOR_SPACE_CONVERSION = mat3(
       COLOR_SPACE_CONVERSION_0, COLOR_SPACE_CONVERSION_1, COLOR_SPACE_CONVERSION_2,
@@ -171,6 +171,8 @@ void main() {
 
     // Map to swapchain color space
     mapped = COLOR_SPACE_CONVERSION * mapped;
+
+    mapped = ACESFitted(mapped);
 
     // Apply OETF coorection
     vec3 corrected = SwapchainOETF(mapped);
