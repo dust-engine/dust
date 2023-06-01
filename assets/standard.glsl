@@ -88,8 +88,8 @@ struct ArHosekSkyModelChannelConfiguration {
     float radiance;
 };
 
-layout(set = 0, binding = 6, scalar) uniform ArHosekSkyModelConfiguration{
-	ArHosekSkyModelChannelConfiguration channels[3];
+layout(set = 0, binding = 6) uniform ArHosekSkyModelConfiguration{
+    float params[32];
     vec3 direction; // normalized
 } sunlight_config;
 
@@ -120,21 +120,51 @@ vec3 arhosek_sky_radiance(vec3 dir)
 
     float x =
     ArHosekSkyModel_GetRadianceInternal(
-        sunlight_config.channels[0].configuration, 
+        float[](
+            sunlight_config.params[0],
+            sunlight_config.params[1],
+            sunlight_config.params[2],
+            sunlight_config.params[3],
+            sunlight_config.params[4],
+            sunlight_config.params[5],
+            sunlight_config.params[6],
+            sunlight_config.params[7],
+            sunlight_config.params[8]
+        ), 
         cos_theta,
         gamma, cos_gamma
-    ) * sunlight_config.channels[0].radiance;
+    ) * sunlight_config.params[9];
     float y =
     ArHosekSkyModel_GetRadianceInternal(
-        sunlight_config.channels[1].configuration, 
+        float[](
+            sunlight_config.params[10],
+            sunlight_config.params[11],
+            sunlight_config.params[12],
+            sunlight_config.params[13],
+            sunlight_config.params[14],
+            sunlight_config.params[15],
+            sunlight_config.params[16],
+            sunlight_config.params[17],
+            sunlight_config.params[18]
+        ), 
         cos_theta,
         gamma, cos_gamma
-    ) * sunlight_config.channels[1].radiance;
+    ) * sunlight_config.params[19];
     float z =
     ArHosekSkyModel_GetRadianceInternal(
-        sunlight_config.channels[2].configuration, 
+        float[](
+            sunlight_config.params[20],
+            sunlight_config.params[21],
+            sunlight_config.params[22],
+            sunlight_config.params[23],
+            sunlight_config.params[24],
+            sunlight_config.params[25],
+            sunlight_config.params[26],
+            sunlight_config.params[27],
+            sunlight_config.params[28]
+        ), 
         cos_theta,
         gamma, cos_gamma
-    ) * sunlight_config.channels[2].radiance;
+    ) * sunlight_config.params[29];
     return vec3(x, y, z);
 }

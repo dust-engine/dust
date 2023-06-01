@@ -65,7 +65,9 @@ pub struct SkyModelChannelState {
 #[derive(Clone, Debug)]
 pub struct SkyModelState {
     pub configs: [SkyModelChannelState; 3],
+    _padding: [f32; 2],
     pub direction: Vec3,
+    _padding2: f32
 }
 
 impl Sunlight {
@@ -84,6 +86,8 @@ impl Sunlight {
         SkyModelState {
             configs,
             direction: self.direction.into(),
+            _padding: [0.0, 0.0],
+            _padding2: 0.0
         }
     }
 }

@@ -34,7 +34,14 @@ fn main() {
         .add_plugin(bevy_hierarchy::HierarchyPlugin::default())
         .add_plugin(bevy_diagnostic::DiagnosticsPlugin::default())
         .add_plugin(bevy_input::InputPlugin::default())
-        .add_plugin(bevy_window::WindowPlugin::default())
+        .add_plugin(bevy_window::WindowPlugin {
+            primary_window: Some(Window {
+                title: "Dust Engine: Castle".into(),
+                resolution: (1280., 720.).into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
         .add_plugin(bevy_a11y::AccessibilityPlugin)
         .add_plugin(bevy_winit::WinitPlugin::default())
         .add_plugin(bevy_asset::AssetPlugin {
