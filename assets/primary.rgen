@@ -25,6 +25,8 @@ void main() {
     const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
 
     const vec3 pixelCameraWorld = rotationMatrix * vec3(pixelCamera, -1);
+    
+    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));
     traceRayEXT(
         accelerationStructure,
         gl_RayFlagsOpaqueEXT , // RayFlags

@@ -7,6 +7,7 @@
 #extension GL_EXT_shader_atomic_float : require
 #extension GL_EXT_samplerless_texture_functions: require
 
+#extension GL_EXT_debug_printf : enable
 // Illuminance: total luminous flux incident on a surface, per unit area.
 // Unit: lux (lm / m^2)
 layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
@@ -88,7 +89,7 @@ struct ArHosekSkyModelChannelConfiguration {
     float radiance;
 };
 
-layout(set = 0, binding = 6) uniform ArHosekSkyModelConfiguration{
+layout(set = 0, binding = 6, std430) uniform ArHosekSkyModelConfiguration{
     float params[32];
     vec3 direction; // normalized
 } sunlight_config;
@@ -166,5 +167,6 @@ vec3 arhosek_sky_radiance(vec3 dir)
         cos_theta,
         gamma, cos_gamma
     ) * sunlight_config.params[29];
-    return vec3(x, y, z);
+    vec3 sky_color =  vec3(x, y, z) * 120.0;
+    return sky_color;
 }

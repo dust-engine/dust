@@ -8,9 +8,10 @@ use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
 use dust_render::{
     AutoExposurePipeline, BlueNoise, ExposureSettings, PinholeProjection, StandardPipeline,
-    TLASStore, ToneMappingPipeline,
+    TLASStore, ToneMappingPipeline, Sunlight,
 };
 
+use glam::{Vec3A, Vec3};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
 use rhyolite::{clear_image, BufferExt, ImageExt, ImageLike, ImageRequest};
@@ -218,12 +219,6 @@ impl Plugin for RenderSystem {
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
                             let accel_struct = accel_struct.await;
-                            clear_image(&mut depth_image, vk::ClearColorValue {
-                                float32: [0.0, 0.0, 0.0, 0.0]
-                            }).await;
-                            clear_image(&mut radiance_image, vk::ClearColorValue {
-                                float32: [0.0, 0.0, 0.0, 0.0]
-                            }).await;
                             if let Some(render) = pipeline.render(
                                 &mut radiance_image,
                                 &mut albedo_image,
@@ -267,7 +262,13 @@ impl Plugin for RenderSystem {
     }
 }
 
-fn print_position(a: Query<&GlobalTransform, With<MainCamera>>) {
+fn print_position(
+    mut sunlight: ResMut<Sunlight>,
+    mut angle: Local<f32>,
+    a: Query<&GlobalTransform, With<MainCamera>>
+) {
+    *angle += 0.001;
+    //sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *angle) * Vec3A::new(0.0, 0.0, 1.0);
     let _transform = a.iter().next().unwrap();
     //println!("{:?}", transform);
 }

@@ -1,5 +1,6 @@
 #version 460
 
+#extension GL_EXT_debug_printf : enable
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -159,6 +160,11 @@ void main() {
     vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
     float exposure = 1.0 / (9.6*u_histogram.avg);
+    
+    if (gl_GlobalInvocationID.x == 0 && gl_GlobalInvocationID.y == 0) {
+    debugPrintfEXT("avg %f, %f\n", log2(u_histogram.avg), exposure); 
+    }
+    exposure = 0.025;
 
     // Tone mapping
     vec3 mapped = in_value.xyz * albedo.xyz * exposure;

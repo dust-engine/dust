@@ -1,7 +1,6 @@
 #version 460
 #extension GL_EXT_control_flow_attributes: require
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-#extension GL_EXT_debug_printf : enable
 
 layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
 layout(set = 0, binding = 1) uniform Params {
@@ -50,5 +49,4 @@ void main() {
     float lumLastFrame = u_histogram.avg;
     float adaptedLum = lumLastFrame + (weightedAvgLum - lumLastFrame) * u_params.timeCoeff;
     u_histogram.avg = adaptedLum;
-    debugPrintfEXT("avg %f\n", log2(adaptedLum));
 }
