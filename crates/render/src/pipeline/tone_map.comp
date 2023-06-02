@@ -160,10 +160,6 @@ void main() {
     vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
     float exposure = 1.0 / (9.6*u_histogram.avg);
-    
-    if (gl_GlobalInvocationID.x == 0 && gl_GlobalInvocationID.y == 0) {
-    debugPrintfEXT("avg %f, %f\n", log2(u_histogram.avg), exposure); 
-    }
     exposure = 0.02;
 
     // Tone mapping

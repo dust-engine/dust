@@ -1,5 +1,6 @@
 use bevy_ecs::system::Resource;
-use bevy_math::{Vec3, Vec3A};
+use bevy_math::{Vec3, Vec3A, Vec4, Vec2};
+use crevice::std430::AsStd430;
 
 #[derive(Debug, Resource)]
 pub struct Sunlight {
@@ -53,21 +54,22 @@ mod dataset {
         unsafe { std::slice::from_raw_parts(RAW_RAD.as_ptr().add(60) as *const [Vec3; 6], 10) };
 }
 
-#[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, AsStd430)]
 pub struct SkyModelChannelState {
-    pub config: [f32; 9],
+    pub config1: Vec4,
+    pub config2: Vec4,
+    pub config3: f32,
     pub radiance: f32,
-    padding: [f32; 2]
+    padding: Vec2,
 }
 
 /// This is what you want to send to the shader.
-#[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, AsStd430)]
 pub struct SkyModelState {
-    pub configs: [SkyModelChannelState; 3],
-    pub direction: Vec3,
-    _padding2: f32
+    pub r: SkyModelChannelState,
+    pub g: SkyModelChannelState,
+    pub b: SkyModelChannelState,
+    pub direction: Vec4,
 }
 
 impl Sunlight {
@@ -77,17 +79,20 @@ impl Sunlight {
         let configs = cook_config(self.turbidity, self.albedo, self.direction.y);
         let radiances = cook_radiance_config(self.turbidity, self.albedo, self.direction.y);
         let mut configs = configs.map(|config| SkyModelChannelState {
-            config,
+            config1: Vec4::new(config[0], config[1], config[2], config[3]),
+            config2: Vec4::new(config[4], config[5], config[6], config[7]),
+            config3: config[8],
             radiance: 0.0,
-            padding: [0.0; 2]
+            padding: Vec2::new(0.0, 0.0)
         });
         configs[0].radiance = radiances.x;
         configs[1].radiance = radiances.y;
         configs[2].radiance = radiances.z;
         SkyModelState {
-            configs,
-            direction: self.direction.into(),
-            _padding2: 0.0
+            r: configs[0].clone(),
+            g: configs[1].clone(),
+            b: configs[2].clone(),
+            direction: Vec4::new(self.direction.x, self.direction.y, self.direction.z, 0.0),
         }
     }
 }

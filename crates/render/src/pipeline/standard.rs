@@ -319,7 +319,7 @@ impl StandardPipeline {
             .push_miss(final_gather_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_info = self.pipeline_sbt_manager.build();
         let desc_pool = &mut self.desc_pool;
-        let sunlight = sunlight.bake();
+        let sunlight = sunlight.bake().as_std430();
 
         let fut = commands! { move
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
@@ -328,13 +328,11 @@ impl StandardPipeline {
             let mut sunlight_buffer = use_shared_state(
                 using!(),
                 move |_| {
-                    allocator.create_device_buffer_uninit(std::mem::size_of::<SkyModelState>() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST).unwrap()
+                    allocator.create_device_buffer_uninit(SkyModelState::std430_size_static() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST).unwrap()
                 },
                 |_| false
             );
-            staging_ring_buffer.update_buffer(&mut sunlight_buffer, unsafe {
-                std::slice::from_raw_parts(&sunlight as *const _ as *const u8, std::mem::size_of_val(&sunlight))
-            }).await;
+            staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes()).await;
 
             let frame_index = use_state(
                 using!(),

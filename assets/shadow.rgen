@@ -33,7 +33,7 @@ void main() {
        
     const vec3 rayWorldDir = rotationMatrix * vec3(pixelCamera, -1);
 
-    const vec3 sunDir = sunlight_config.direction;
+    const vec3 sunDir = sunlight_config.direction.xyz;
     payload.normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
     vec3 hitLocation = hitT * rayWorldDir + sbt.camera_position + payload.normal * 0.01;
     // Shoot shadow ray

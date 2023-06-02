@@ -93,9 +93,10 @@ struct ArHosekSkyModelChannelConfiguration {
 };
 
 layout(set = 0, binding = 6, std430) uniform ArHosekSkyModelConfiguration{
-    ArHosekSkyModelChannelConfiguration channels[3];
-    vec3 direction; // normalized
-    float padding;
+    ArHosekSkyModelChannelConfiguration r;
+    ArHosekSkyModelChannelConfiguration g;
+    ArHosekSkyModelChannelConfiguration b;
+    vec4 direction; // normalized. the w channel is unused.
 } sunlight_config;
 
 
@@ -118,59 +119,60 @@ float ArHosekSkyModel_GetRadianceInternal(
 // dir: normalized direction vector
 vec3 arhosek_sky_radiance(vec3 dir)
 {
+    return vec3(20.0);
     float cos_theta = clamp(dir.y, 0, 1);
-    float cos_gamma = dot(dir, sunlight_config.direction);
+    float cos_gamma = dot(dir, sunlight_config.direction.xyz);
     float gamma = acos(cos_gamma);
 
 
     float x =
     ArHosekSkyModel_GetRadianceInternal(
         float[](
-            sunlight_config.channels[0].configs0.x,
-            sunlight_config.channels[0].configs0.y,
-            sunlight_config.channels[0].configs0.z,
-            sunlight_config.channels[0].configs0.w,
-            sunlight_config.channels[0].configs1.x,
-            sunlight_config.channels[0].configs1.y,
-            sunlight_config.channels[0].configs1.z,
-            sunlight_config.channels[0].configs1.w,
-            sunlight_config.channels[0].configs2
+            sunlight_config.r.configs0.x,
+            sunlight_config.r.configs0.y,
+            sunlight_config.r.configs0.z,
+            sunlight_config.r.configs0.w,
+            sunlight_config.r.configs1.x,
+            sunlight_config.r.configs1.y,
+            sunlight_config.r.configs1.z,
+            sunlight_config.r.configs1.w,
+            sunlight_config.r.configs2
         ), 
         cos_theta,
         gamma, cos_gamma
-    ) * sunlight_config.channels[0].radiance;
+    ) * sunlight_config.r.radiance;
     float y =
     ArHosekSkyModel_GetRadianceInternal(
         float[](
-            sunlight_config.channels[1].configs0.x,
-            sunlight_config.channels[1].configs0.y,
-            sunlight_config.channels[1].configs0.z,
-            sunlight_config.channels[1].configs0.w,
-            sunlight_config.channels[1].configs1.x,
-            sunlight_config.channels[1].configs1.y,
-            sunlight_config.channels[1].configs1.z,
-            sunlight_config.channels[1].configs1.w,
-            sunlight_config.channels[1].configs2
+            sunlight_config.g.configs0.x,
+            sunlight_config.g.configs0.y,
+            sunlight_config.g.configs0.z,
+            sunlight_config.g.configs0.w,
+            sunlight_config.g.configs1.x,
+            sunlight_config.g.configs1.y,
+            sunlight_config.g.configs1.z,
+            sunlight_config.g.configs1.w,
+            sunlight_config.g.configs2
         ), 
         cos_theta,
         gamma, cos_gamma
-    ) * sunlight_config.channels[1].radiance;
+    ) * sunlight_config.g.radiance;
     float z =
     ArHosekSkyModel_GetRadianceInternal(
         float[](
-            sunlight_config.channels[2].configs0.x,
-            sunlight_config.channels[2].configs0.y,
-            sunlight_config.channels[2].configs0.z,
-            sunlight_config.channels[2].configs0.w,
-            sunlight_config.channels[2].configs1.x,
-            sunlight_config.channels[2].configs1.y,
-            sunlight_config.channels[2].configs1.z,
-            sunlight_config.channels[2].configs1.w,
-            sunlight_config.channels[2].configs2
+            sunlight_config.b.configs0.x,
+            sunlight_config.b.configs0.y,
+            sunlight_config.b.configs0.z,
+            sunlight_config.b.configs0.w,
+            sunlight_config.b.configs1.x,
+            sunlight_config.b.configs1.y,
+            sunlight_config.b.configs1.z,
+            sunlight_config.b.configs1.w,
+            sunlight_config.b.configs2
         ), 
         cos_theta,
         gamma, cos_gamma
-    ) * sunlight_config.channels[2].radiance;
+    ) * sunlight_config.b.radiance;
     vec3 sky_color =  vec3(x, y, z) * 683.0;
     return sky_color;
 }
