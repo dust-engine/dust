@@ -1,9 +1,13 @@
 #![feature(generators)]
 #![feature(int_roundings)]
+use std::ops::DerefMut;
+
 use bevy_app::{App, Plugin, Startup};
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
+use bevy_input::mouse::MouseWheel;
+use bevy_input::prelude::MouseButton;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window};
 use dust_render::{
@@ -264,11 +268,20 @@ impl Plugin for RenderSystem {
 
 fn print_position(
     mut sunlight: ResMut<Sunlight>,
-    mut angle: Local<f32>,
+    mut state: Local<(f32, f32)>,
+    mut events: EventReader<MouseWheel>,
     a: Query<&GlobalTransform, With<MainCamera>>
 ) {
-    *angle += 0.001;
-    //sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *angle) * Vec3A::new(0.0, 0.0, 1.0);
+    let (current, target) = &mut state.deref_mut();
+    for event in events.iter() {
+        let delta = match event.unit {
+            bevy_input::mouse::MouseScrollUnit::Line => event.y * 30.0,
+            bevy_input::mouse::MouseScrollUnit::Pixel => event.y,
+        };
+        *target += delta;
+    }
+    *current += 0.5 * (*target - *current);
+    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.0001) * Vec3A::new(0.0, 0.0, 1.0);
     let _transform = a.iter().next().unwrap();
     //println!("{:?}", transform);
 }

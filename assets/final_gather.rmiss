@@ -9,7 +9,7 @@ layout(location = 0) rayPayloadInEXT struct RayPayload {
 
 
 void main() {
-    const float ambient_light = 20.0;
+    vec3 sky_illuminance = arhosek_sky_radiance(normalize(gl_WorldRayDirectionEXT));
     // TODO: calculate ambient light, add into main texture. We assume that the ambient light is 0.1.
-    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(payload.illuminance + ambient_light, 1.0));
+    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(payload.illuminance + sky_illuminance, 1.0));
 }

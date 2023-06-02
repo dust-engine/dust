@@ -58,6 +58,7 @@ mod dataset {
 pub struct SkyModelChannelState {
     pub config: [f32; 9],
     pub radiance: f32,
+    padding: [f32; 2]
 }
 
 /// This is what you want to send to the shader.
@@ -65,7 +66,6 @@ pub struct SkyModelChannelState {
 #[derive(Clone, Debug)]
 pub struct SkyModelState {
     pub configs: [SkyModelChannelState; 3],
-    _padding: [f32; 2],
     pub direction: Vec3,
     _padding2: f32
 }
@@ -79,6 +79,7 @@ impl Sunlight {
         let mut configs = configs.map(|config| SkyModelChannelState {
             config,
             radiance: 0.0,
+            padding: [0.0; 2]
         });
         configs[0].radiance = radiances.x;
         configs[1].radiance = radiances.y;
@@ -86,7 +87,6 @@ impl Sunlight {
         SkyModelState {
             configs,
             direction: self.direction.into(),
-            _padding: [0.0, 0.0],
             _padding2: 0.0
         }
     }

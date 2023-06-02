@@ -164,7 +164,7 @@ void main() {
     if (gl_GlobalInvocationID.x == 0 && gl_GlobalInvocationID.y == 0) {
     debugPrintfEXT("avg %f, %f\n", log2(u_histogram.avg), exposure); 
     }
-    exposure = 0.025;
+    exposure = 0.02;
 
     // Tone mapping
     vec3 mapped = in_value.xyz * albedo.xyz * exposure;
