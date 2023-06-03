@@ -119,7 +119,6 @@ float ArHosekSkyModel_GetRadianceInternal(
 // dir: normalized direction vector
 vec3 arhosek_sky_radiance(vec3 dir)
 {
-    return vec3(20.0);
     float cos_theta = clamp(dir.y, 0, 1);
     float cos_gamma = dot(dir, sunlight_config.direction.xyz);
     float gamma = acos(cos_gamma);

@@ -325,6 +325,7 @@ impl StandardPipeline {
             let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
             let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
 
+            // TODO: Direct writes on integrated GPUs.
             let mut sunlight_buffer = use_shared_state(
                 using!(),
                 move |_| {

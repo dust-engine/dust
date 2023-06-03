@@ -3,7 +3,7 @@
 #include "standard.glsl"
 
 layout(location = 0) rayPayloadInEXT struct RayPayload {
-    f16vec3 illuminance;
+    vec3 illuminance;
 } payload;
 
 

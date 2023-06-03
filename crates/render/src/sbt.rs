@@ -283,7 +283,7 @@ impl BufferLike for PipelineSbtManagerInfo {
     fn offset(&self) -> vk::DeviceSize {
         self.buffer.offset()
     }
-    fn as_mut_ptr(&mut self) -> Option<*mut ()> {
+    fn as_mut_ptr(&mut self) -> Option<*mut u8> {
         self.buffer.as_mut_ptr()
     }
 }

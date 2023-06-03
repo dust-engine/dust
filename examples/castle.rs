@@ -7,9 +7,9 @@ use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_input::mouse::MouseWheel;
-use bevy_input::prelude::MouseButton;
+use bevy_input::prelude::{MouseButton, KeyCode};
 use bevy_transform::prelude::{GlobalTransform, Transform};
-use bevy_window::{PrimaryWindow, Window};
+use bevy_window::{PrimaryWindow, Window, Cursor, WindowResolution};
 use dust_render::{
     AutoExposurePipeline, BlueNoise, ExposureSettings, PinholeProjection, StandardPipeline,
     TLASStore, ToneMappingPipeline, Sunlight,
@@ -42,7 +42,12 @@ fn main() {
         .add_plugin(bevy_window::WindowPlugin {
             primary_window: Some(Window {
                 title: "Dust Engine: Castle".into(),
-                resolution: (1280., 720.).into(),
+                resolution: WindowResolution::new(1920.0, 1080.0).with_scale_factor_override(1.0),
+                cursor: Cursor {
+                    grab_mode: bevy_window::CursorGrabMode::Locked,
+                    visible: false,
+                    ..Default::default()
+                },
                 ..Default::default()
             }),
             ..Default::default()
@@ -62,6 +67,7 @@ fn main() {
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
         .add_plugin(RenderSystem)
         .add_systems(bevy_app::Update, print_position)
+        .add_systems(bevy_app::Update, cursor_grab_system)
         .init_resource::<ToneMappingPipeline>()
         .init_resource::<AutoExposurePipeline>()
         .init_resource::<ExposureSettings>();
@@ -282,6 +288,25 @@ fn print_position(
     }
     *current += 0.5 * (*target - *current);
     sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.0001) * Vec3A::new(0.0, 0.0, 1.0);
+    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.2) * sunlight.direction;
     let _transform = a.iter().next().unwrap();
-    //println!("{:?}", transform);
+}
+
+
+fn cursor_grab_system(
+    btn: Res<bevy_input::Input<MouseButton>>,
+    key: Res<bevy_input::Input<KeyCode>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>
+) {
+    let mut window = windows.iter_mut().next().unwrap();
+
+    if btn.just_pressed(MouseButton::Left) {
+        window.cursor.grab_mode = bevy_window::CursorGrabMode::Locked;
+        window.cursor.visible = false;
+    }
+
+    if key.just_pressed(KeyCode::Escape) {
+        window.cursor.grab_mode = bevy_window::CursorGrabMode::None;
+        window.cursor.visible = true;
+    }
 }
