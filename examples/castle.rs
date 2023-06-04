@@ -7,15 +7,15 @@ use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_input::mouse::MouseWheel;
-use bevy_input::prelude::{MouseButton, KeyCode};
+use bevy_input::prelude::{KeyCode, MouseButton};
 use bevy_transform::prelude::{GlobalTransform, Transform};
-use bevy_window::{PrimaryWindow, Window, Cursor, WindowResolution};
+use bevy_window::{Cursor, PrimaryWindow, Window, WindowResolution};
 use dust_render::{
     AutoExposurePipeline, BlueNoise, ExposureSettings, PinholeProjection, StandardPipeline,
-    TLASStore, ToneMappingPipeline, Sunlight,
+    Sunlight, TLASStore, ToneMappingPipeline,
 };
 
-use glam::{Vec3A, Vec3};
+use glam::{Vec3, Vec3A};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
 use rhyolite::{clear_image, BufferExt, ImageExt, ImageLike, ImageRequest};
@@ -82,8 +82,8 @@ fn main() {
         .insert(SwapchainConfigExt {
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
             image_format: Some(vk::SurfaceFormatKHR {
-                format: vk::Format::B8G8R8A8_UNORM,
-                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+                format: vk::Format::R16G16B16A16_SFLOAT,
+                color_space: vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT,
             }),
             required_feature_flags: vk::FormatFeatureFlags::TRANSFER_DST
                 | vk::FormatFeatureFlags::STORAGE_IMAGE,
@@ -276,7 +276,7 @@ fn print_position(
     mut sunlight: ResMut<Sunlight>,
     mut state: Local<(f32, f32)>,
     mut events: EventReader<MouseWheel>,
-    a: Query<&GlobalTransform, With<MainCamera>>
+    a: Query<&GlobalTransform, With<MainCamera>>,
 ) {
     let (current, target) = &mut state.deref_mut();
     for event in events.iter() {
@@ -287,16 +287,17 @@ fn print_position(
         *target += delta;
     }
     *current += 0.5 * (*target - *current);
-    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.0001) * Vec3A::new(0.0, 0.0, 1.0);
-    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.2) * sunlight.direction;
+    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.0001)
+        * Vec3A::new(0.0, 0.0, 1.0);
+    sunlight.direction =
+        glam::Mat3A::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.2) * sunlight.direction;
     let _transform = a.iter().next().unwrap();
 }
-
 
 fn cursor_grab_system(
     btn: Res<bevy_input::Input<MouseButton>>,
     key: Res<bevy_input::Input<KeyCode>>,
-    mut windows: Query<&mut Window, With<PrimaryWindow>>
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let mut window = windows.iter_mut().next().unwrap();
 

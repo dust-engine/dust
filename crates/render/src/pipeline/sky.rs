@@ -1,5 +1,5 @@
 use bevy_ecs::system::Resource;
-use bevy_math::{Vec3, Vec3A, Vec4, Vec2};
+use bevy_math::{Vec2, Vec3, Vec3A, Vec4};
 use crevice::std430::AsStd430;
 
 #[derive(Debug, Resource)]
@@ -52,6 +52,15 @@ mod dataset {
         unsafe { std::slice::from_raw_parts(RAW_RAD.as_ptr() as *const [Vec3; 6], 10) };
     pub const RAD_HIGH_ALBEDO: &'static [[Vec3; 6]] =
         unsafe { std::slice::from_raw_parts(RAW_RAD.as_ptr().add(60) as *const [Vec3; 6], 10) };
+
+    const RAW_SOLAR_DAT: &'static AlignedTo<f32, [u8]> = &AlignedTo {
+        _align: [],
+        bytes: *include_bytes!("datasetSolar.bin"),
+    };
+    pub const SOLAR_DATASET: &'static [Vec3; 1800] =
+        unsafe { std::mem::transmute(RAW_SOLAR_DAT.bytes.as_ptr() as *const Vec3) };
+    pub const SOLAR_LD_COEFS: &'static [Vec3; 6] =
+        unsafe { std::mem::transmute((RAW_SOLAR_DAT.bytes.as_ptr() as *const Vec3).add(1800)) };
 }
 
 #[derive(Clone, Debug, AsStd430)]
@@ -60,7 +69,9 @@ pub struct SkyModelChannelState {
     pub config2: Vec4,
     pub config3: f32,
     pub radiance: f32,
-    padding: Vec2,
+    pub ld_coefficient0: f32,
+    pub ld_coefficient1: f32,
+    pub ld_coefficient2: Vec4,
 }
 
 /// This is what you want to send to the shader.
@@ -70,20 +81,42 @@ pub struct SkyModelState {
     pub g: SkyModelChannelState,
     pub b: SkyModelChannelState,
     pub direction: Vec4,
+    pub sunlight_intensity: Vec4,
 }
 
 impl Sunlight {
     /// albedo: Ground albedo value between [0, 1]
     /// solar_elevation: Solar elevation in radians
     pub fn bake(&self) -> SkyModelState {
-        let configs = cook_config(self.turbidity, self.albedo, self.direction.y);
-        let radiances = cook_radiance_config(self.turbidity, self.albedo, self.direction.y);
-        let mut configs = configs.map(|config| SkyModelChannelState {
-            config1: Vec4::new(config[0], config[1], config[2], config[3]),
-            config2: Vec4::new(config[4], config[5], config[6], config[7]),
-            config3: config[8],
-            radiance: 0.0,
-            padding: Vec2::new(0.0, 0.0)
+        // The solar elevation   is given in radians.
+        let configs = cook_config(self.turbidity, self.albedo, self.direction.y.asin());
+        let radiances = cook_radiance_config(self.turbidity, self.albedo, self.direction.y.asin());
+
+        let theta = self.direction.y.asin();
+        let solar_intensity = arhosekskymodel_solar_direct_radiance_xyz(
+            theta,
+            self.turbidity,
+        );
+        println!("{:?}", solar_intensity);
+
+        let mut i = 0;
+        let mut configs = configs.map(|config| {
+            let n = i;
+            i += 1;
+            SkyModelChannelState {
+                config1: Vec4::new(config[0], config[1], config[2], config[3]),
+                config2: Vec4::new(config[4], config[5], config[6], config[7]),
+                config3: config[8],
+                radiance: 0.0,
+                ld_coefficient0: dataset::SOLAR_LD_COEFS[0][n],
+                ld_coefficient1: dataset::SOLAR_LD_COEFS[1][n],
+                ld_coefficient2: Vec4::new(
+                    dataset::SOLAR_LD_COEFS[2][n],
+                    dataset::SOLAR_LD_COEFS[3][n],
+                    dataset::SOLAR_LD_COEFS[4][n],
+                    dataset::SOLAR_LD_COEFS[5][n],
+                ),
+            }
         });
         configs[0].radiance = radiances.x;
         configs[1].radiance = radiances.y;
@@ -93,6 +126,12 @@ impl Sunlight {
             g: configs[1].clone(),
             b: configs[2].clone(),
             direction: Vec4::new(self.direction.x, self.direction.y, self.direction.z, 0.0),
+            sunlight_intensity: Vec4::new(
+                solar_intensity.x,
+                solar_intensity.y,
+                solar_intensity.z,
+                ((0.51 * (std::f32::consts::PI / 180.0)) / 2.0),
+            ),
         }
     }
 }
@@ -189,4 +228,45 @@ fn cook_config(turbidity: f32, albedo: Vec3A, solar_elevation: f32) -> [[f32; 9]
     }
 
     config
+}
+
+fn arhosekskymodel_sr_internal_xyz(
+    turbidity: u32, // 1 - 10
+    elevation: f32,
+) -> Vec3A {
+    const PIECES: u32 = 45;
+    const ORDER: u32 = 4;
+    let pos: u32 =
+        ((2.0 * elevation / std::f32::consts::PI).powf(1.0 / 3.0) * PIECES as f32) as u32; // floor
+    let pos = pos.min(PIECES - 1); // Cap at 44
+
+    let break_x: f32 = (pos as f32 / PIECES as f32).powi(3) * std::f32::consts::FRAC_PI_2;
+
+    let mut res: Vec3A = Vec3A::splat(0.0);
+    let x: f32 = elevation - break_x;
+    let mut x_exp: f32 = 1.0;
+
+    let base_offset = (ORDER * PIECES * turbidity + ORDER * pos) as usize;
+    let coefs = &dataset::SOLAR_DATASET[base_offset..base_offset + ORDER as usize];
+
+    for coef in coefs.iter().rev() {
+        let coef: Vec3A = (*coef).into();
+        res += coef * x_exp;
+        x_exp *= x;
+    }
+    res
+}
+fn arhosekskymodel_solar_direct_radiance_xyz(elevation: f32, turbidity: f32) -> Vec3A {
+    assert!(turbidity >= 1.0 && turbidity <= 10.0);
+
+    let mut turb_low: u32 = turbidity as u32 - 1;
+    let mut turb_frac: f32 = turbidity - (turb_low + 1) as f32;
+
+    if turb_low == 9 {
+        turb_low = 8;
+        turb_frac = 1.0;
+    }
+
+    (1.0 - turb_frac) * arhosekskymodel_sr_internal_xyz(turb_low, elevation)
+        + turb_frac * arhosekskymodel_sr_internal_xyz(turb_low + 1, elevation)
 }
