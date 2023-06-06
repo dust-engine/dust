@@ -32,13 +32,18 @@ void main() {
     IrradianceCacheFace hashEntry = sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU];
     uint16_t lastAccessedFrameIndex = sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[faceIdU];
 
-    // irradiance, pre multiplied with albedo
-    vec3 irradiance = hashEntry.irradiance * float16_t(pow(0.999, uint16_t(pushConstants.frameIndex) - lastAccessedFrameIndex));
-    vec3 radiance = irradiance / float16_t(bitCount(uint(hashEntry.mask)));
+    // irradiance, pre multiplied with albedo.
+    vec3 irradiance = hashEntry.irradiance * pow(RETENTION_FACTOR, uint16_t(pushConstants.frameIndex) - lastAccessedFrameIndex);
 
-    // The parameter 0.001 was derived from the 0.999 retention factor. It's not arbitrary.
-    /// 1 (this frames energy) + \sigma 0.999^n = 1000
-    radiance *= 0.001;
+    float scaling_factors =
+    // Divide by the activated surface area of the voxel
+    (1.0 / float(bitCount(uint(hashEntry.mask)))) *
+    // Correction based on the retention factor.
+    /// \sigma a^n from 0 to inf is 1 / (1 - a).
+    (1.0 - RETENTION_FACTOR)
+    ;
+    vec3 radiance = irradiance * scaling_factors;
+
 
     imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(payload.illuminance + radiance, 1.0));
 }

@@ -19,6 +19,8 @@ layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
 layout(set = 0, binding = 4) uniform accelerationStructureEXT accelerationStructure;
 layout(set = 0, binding = 5) uniform texture2D blue_noise;
 
+#define RETENTION_FACTOR 0.95
+
 // TODO: make this adaptable
 //#define SHADER_INT_64 
 
@@ -184,7 +186,7 @@ vec3 arhosek_sun_radiance(
     vec3 dir
 ) {
     float cos_gamma = dot(dir, sunlight_config.direction.xyz);
-    if (cos_gamma < 0.0) {
+    if (cos_gamma < 0.0 || dir.y < 0.0) {
         return vec3(0.0);
     }
     float sol_rad_sin = sin(sunlight_config.solar_intensity.w);

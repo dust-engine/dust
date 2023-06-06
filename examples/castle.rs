@@ -8,6 +8,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_input::mouse::MouseWheel;
 use bevy_input::prelude::{KeyCode, MouseButton};
+use bevy_time::Time;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{Cursor, PrimaryWindow, Window, WindowResolution};
 use dust_render::{
@@ -41,7 +42,7 @@ fn main() {
         .add_plugin(bevy_input::InputPlugin::default())
         .add_plugin(bevy_window::WindowPlugin {
             primary_window: Some(Window {
-                title: "Dust Engine: Castle".into(),
+                title: "Dust Renderer: Castle".into(),
                 resolution: WindowResolution::new(1920.0, 1080.0).with_scale_factor_override(1.0),
                 cursor: Cursor {
                     grab_mode: bevy_window::CursorGrabMode::Locked,
@@ -81,10 +82,6 @@ fn main() {
         .entity_mut(main_window)
         .insert(SwapchainConfigExt {
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
-            image_format: Some(vk::SurfaceFormatKHR {
-                format: vk::Format::R16G16B16A16_SFLOAT,
-                color_space: vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT,
-            }),
             required_feature_flags: vk::FormatFeatureFlags::TRANSFER_DST
                 | vk::FormatFeatureFlags::STORAGE_IMAGE,
             ..Default::default()
@@ -276,6 +273,7 @@ fn print_position(
     mut sunlight: ResMut<Sunlight>,
     mut state: Local<(f32, f32)>,
     mut events: EventReader<MouseWheel>,
+    time: Res<Time>,
     a: Query<&GlobalTransform, With<MainCamera>>,
 ) {
     let (current, target) = &mut state.deref_mut();
@@ -287,7 +285,9 @@ fn print_position(
         *target += delta;
     }
     *current += 0.5 * (*target - *current);
-    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.0001)
+
+    let calculated_angle = ((time.elapsed_seconds() * 0.4).cos() + 1.0) * std::f32::consts::FRAC_PI_2;
+    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), -calculated_angle)
         * Vec3A::new(0.0, 0.0, 1.0);
     sunlight.direction =
         glam::Mat3A::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.2) * sunlight.direction;

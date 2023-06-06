@@ -24,13 +24,16 @@ layout(location = 0) rayPayloadEXT PhotonRayPayload photon;
 
 
 void main() {
-    const vec2 jitter = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy - uvec2(16, 44) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xy;
-    const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + jitter) / vec2(gl_LaunchSizeEXT.xy);
-    const vec3 direction = -sunlight_config.direction.xyz;
+    vec2 jitter = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy - uvec2(16, 44) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xy;
+    vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + jitter) / vec2(gl_LaunchSizeEXT.xy);
+    pixelNDC = pixelNDC * 2.0 - 1.0;
+    pixelNDC *= 800.0;
+    pixelNDC.x -= 100.0;
+    vec3 direction = -sunlight_config.direction.xyz;
 
-    const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
+    //const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
 
-    photon.energy = vec3(sbt.strength);
+    photon.energy = sunlight_config.solar_intensity.xyz;
     photon.hitT = 0.0;
     traceRayEXT(
         accelerationStructure,
@@ -39,15 +42,15 @@ void main() {
         1, // SBT offset, ray type index
         4, // SBT stride, number of ray types
         -1, // missIndex
-        rotationMatrix * vec3(pixelNDC, 0.0) + sbt.camera_position,     // ray origin
+        vec3(pixelNDC.x, 0.0, pixelNDC.y) + sbt.camera_position,     // ray origin
         sbt.near,           // ray min range
-        rotationMatrix * direction, // direction
+        direction, // direction
         sbt.far, // tmax
         0 // payload
     );
 
-    vec3 currentDir = rotationMatrix * direction; // Initial direction
-    vec3 currentOrigin = rotationMatrix * vec3(pixelNDC, 0.0) + sbt.camera_position; // Initial origin
+    vec3 currentDir = direction; // Initial direction
+    vec3 currentOrigin = vec3(pixelNDC.x, 0.0, pixelNDC.y) + sbt.camera_position; // Initial origin
     for (int i = 0; i < 1; i++) {
         vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(12, 24) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;
         // noiseSample is weighted on the z axis

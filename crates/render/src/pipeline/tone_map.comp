@@ -66,9 +66,6 @@ vec3 ACESFitted(vec3 color) {
 
     fitted_color *= odt_to_rgb;
 
-    // Clamp to [0, 1]
-    fitted_color = clamp(fitted_color, 0.0, 1.0);
-
     return fitted_color;
 }
 
@@ -160,7 +157,7 @@ void main() {
     vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
     float exposure = 1.0 / (9.6*u_histogram.avg);
-    exposure = 0.02;
+    exposure = 0.05;
 
     // Tone mapping
     vec3 mapped = in_value.xyz * albedo.xyz * exposure;

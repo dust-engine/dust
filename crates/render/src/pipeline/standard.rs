@@ -291,15 +291,14 @@ impl StandardPipeline {
                 z: -500.0,
             },
         );
-        let _light_dir = affine.matrix3 * Vec3::new(0.0, -1.0, 0.0);
         let photon_camera = StandardPipelinePhotonCamera {
             camera_view_col0: affine.matrix3.x_axis.into(),
             camera_view_col1: affine.matrix3.y_axis.into(),
             camera_view_col2: affine.matrix3.z_axis.into(),
             near: 0.1,
-            far: 100000.0,
+            far: 10000.0,
             padding: 0,
-            camera_position: affine.translation.into(),
+            camera_position: (1000.0 * sunlight.direction).into(),
             strength: 37.0,
         };
 
@@ -423,8 +422,8 @@ impl StandardPipeline {
                         size: hitgroup_sbt_buffer.inner.size(),
                     },
                     &vk::StridedDeviceAddressRegionKHR::default(),
-                    512,
-                    512,
+                    1024,
+                    1024,
                     1,
                 );
             }, |ctx: &mut rhyolite::future::StageContext| {
