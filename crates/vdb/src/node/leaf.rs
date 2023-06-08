@@ -1,5 +1,5 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool};
+use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool, ConstUVec3};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
@@ -12,7 +12,7 @@ use std::{
 /// Size: 3 u32
 #[repr(C)]
 #[derive(Default, Clone)]
-pub struct LeafNode<const LOG2: UVec3>
+pub struct LeafNode<const LOG2: ConstUVec3>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -28,7 +28,7 @@ pub trait IsLeaf: Node {
     fn get_occupancy(&self, data: &mut [u64]);
 }
 
-impl<const LOG2: UVec3> IsLeaf for LeafNode<LOG2>
+impl<const LOG2: ConstUVec3> IsLeaf for LeafNode<LOG2>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -46,7 +46,7 @@ where
     }
 }
 
-impl<const LOG2: UVec3> Node for LeafNode<LOG2>
+impl<const LOG2: ConstUVec3> Node for LeafNode<LOG2>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -54,7 +54,7 @@ where
     const SIZE: usize = size_of_grid(LOG2);
     type LeafType = Self;
     /// Extent of the leaf node in each axis.
-    const EXTENT_LOG2: UVec3 = LOG2;
+    const EXTENT_LOG2: UVec3 = LOG2.to_glam();
     const EXTENT: UVec3 = UVec3 {
         x: 1 << LOG2.x,
         y: 1 << LOG2.y,
@@ -164,7 +164,7 @@ where
     }
 }
 
-impl<const LOG2: UVec3> const NodeConst for LeafNode<LOG2>
+impl<const LOG2: ConstUVec3> const NodeConst for LeafNode<LOG2>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -173,14 +173,14 @@ where
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
             extent_log2: Self::EXTENT_LOG2,
-            fanout_log2: LOG2,
+            fanout_log2: LOG2.to_glam(),
             extent_mask: Self::EXTENT_MASK,
             setter: Self::set_in_pools,
         });
     }
 }
 
-impl<const LOG2: UVec3> std::fmt::Debug for LeafNode<LOG2>
+impl<const LOG2: ConstUVec3> std::fmt::Debug for LeafNode<LOG2>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -191,14 +191,14 @@ where
     }
 }
 
-pub struct LeafNodeIterator<'a, const LOG2: UVec3>
+pub struct LeafNodeIterator<'a, const LOG2: ConstUVec3>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     location_offset: UVec3,
     bits_iterator: SetBitIterator<'a, { size_of_grid(LOG2) }>,
 }
-impl<'a, const LOG2: UVec3> Iterator for LeafNodeIterator<'a, LOG2>
+impl<'a, const LOG2: ConstUVec3> Iterator for LeafNodeIterator<'a, LOG2>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {

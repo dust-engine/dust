@@ -12,7 +12,7 @@ pub use internal::*;
 pub use leaf::*;
 pub use root::*;
 
-use crate::Pool;
+use crate::{Pool, ConstUVec3};
 
 pub struct NodeMeta<V> {
     pub(crate) layout: Layout,
@@ -112,19 +112,19 @@ pub trait NodeConst: Node {
 #[macro_export]
 macro_rules! hierarchy {
     ($e: tt) => {
-        $crate::LeafNode<{glam::UVec3{x:$e,y:$e,z:$e}}>
+        $crate::LeafNode<{dust_vdb::ConstUVec3{x:$e,y:$e,z:$e}}>
     };
     (#, $($n:tt),+) => {
         $crate::RootNode<hierarchy!($($n),*)>
     };
     ($e: tt, $($n:tt),+) => {
-        $crate::InternalNode::<hierarchy!($($n),*), {glam::UVec3{x:$e,y:$e,z:$e}}>
+        $crate::InternalNode::<hierarchy!($($n),*), {dust_vdb::ConstUVec3{x:$e,y:$e,z:$e}}>
     };
 }
 
 /// Returns the size of a grid represented by the log2 of its extent.
 /// This is needed because of Rust limitations.
 /// Won't need this once we're allowed to use Self::Size in the bounds.
-pub const fn size_of_grid(log2: UVec3) -> usize {
+pub const fn size_of_grid(log2: ConstUVec3) -> usize {
     return 1 << (log2.x + log2.y + log2.z);
 }

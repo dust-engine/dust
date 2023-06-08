@@ -97,7 +97,6 @@ impl Sunlight {
             theta,
             self.turbidity,
         );
-        println!("{:?}", solar_intensity);
 
         let mut i = 0;
         let mut configs = configs.map(|config| {

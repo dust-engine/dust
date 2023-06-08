@@ -1,5 +1,5 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool};
+use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool, ConstUVec3};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
@@ -20,7 +20,7 @@ pub union InternalNodeEntry {
 /// Internal nodes are always 4x4x4 so that the child mask contains exactly 64 voxels.
 /// Size: 3 - 66 u32
 #[repr(C)]
-pub struct InternalNode<CHILD: Node, const FANOUT_LOG2: UVec3>
+pub struct InternalNode<CHILD: Node, const FANOUT_LOG2: ConstUVec3>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -30,7 +30,7 @@ where
     pub child_ptrs: [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
     _marker: PhantomData<CHILD>,
 }
-impl<CHILD: Node, const FANOUT_LOG2: UVec3> Default for InternalNode<CHILD, FANOUT_LOG2>
+impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Default for InternalNode<CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -42,7 +42,7 @@ where
         }
     }
 }
-impl<CHILD: Node, const FANOUT_LOG2: UVec3> Node for InternalNode<CHILD, FANOUT_LOG2>
+impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Node for InternalNode<CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -209,7 +209,7 @@ where
     }
 }
 
-impl<CHILD: ~const NodeConst + Node, const FANOUT_LOG2: UVec3> const NodeConst
+impl<CHILD: ~const NodeConst + Node, const FANOUT_LOG2: ConstUVec3> const NodeConst
     for InternalNode<CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
@@ -221,14 +221,14 @@ where
             setter: Self::set_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             extent_mask: Self::EXTENT_MASK,
-            fanout_log2: FANOUT_LOG2,
+            fanout_log2: FANOUT_LOG2.to_glam(),
         });
         CHILD::write_meta(metas);
     }
 }
 
 /// When the alternate flag was specified, also print the child pointers.
-impl<CHILD: Node, const FANOUT_LOG2: UVec3> std::fmt::Debug for InternalNode<CHILD, FANOUT_LOG2>
+impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> std::fmt::Debug for InternalNode<CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -239,7 +239,7 @@ where
     }
 }
 
-pub struct InternalNodeIterator<'a, CHILD: Node, const FANOUT_LOG2: UVec3>
+pub struct InternalNodeIterator<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -249,7 +249,7 @@ where
     child_iterator: Option<CHILD::Iterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
 }
-impl<'a, CHILD: Node, const FANOUT_LOG2: UVec3> Iterator
+impl<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3> Iterator
     for InternalNodeIterator<'a, CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
@@ -285,7 +285,7 @@ where
     }
 }
 
-pub struct InternalNodeLeafIterator<'a, CHILD: Node, const FANOUT_LOG2: UVec3>
+pub struct InternalNodeLeafIterator<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -295,7 +295,7 @@ where
     child_iterator: Option<CHILD::LeafIterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
 }
-impl<'a, CHILD: Node, const FANOUT_LOG2: UVec3> Iterator
+impl<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3> Iterator
     for InternalNodeLeafIterator<'a, CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
