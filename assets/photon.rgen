@@ -52,6 +52,9 @@ void main() {
     vec3 currentDir = direction; // Initial direction
     vec3 currentOrigin = vec3(pixelNDC.x, 0.0, pixelNDC.y) + sbt.camera_position; // Initial origin
     for (int i = 0; i < 1; i++) {
+        if (photon.hitT == 0.0) {
+            return;
+        }
         vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(12, 24) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;
         // noiseSample is weighted on the z axis
         noiseSample = noiseSample * 2.0 - 1.0;
@@ -65,9 +68,8 @@ void main() {
         if (dot(rotatedNoiseSample, vec3(photon.normal)) < 0.0) {
             rotatedNoiseSample = -rotatedNoiseSample;
         }
-        vec3 currentOrigin = currentOrigin + currentDir * photon.hitT + photon.normal * 0.001;
-        vec3 currentDir = rotatedNoiseSample;
         
+        photon.hitT = 0.0;
         traceRayEXT(
             accelerationStructure,
             gl_RayFlagsOpaqueEXT , // RayFlags
@@ -75,9 +77,9 @@ void main() {
             1, // SBT offset, ray type index
             4, // SBT stride, number of ray types
             -1, // missIndex
-            currentOrigin,     // ray origin
+            currentOrigin + currentDir * photon.hitT + photon.normal * 0.001,     // ray origin
             sbt.near,           // ray min range
-            currentDir, // direction
+            rotatedNoiseSample, // direction
             sbt.far, // tmax
             0 // payload
         );
