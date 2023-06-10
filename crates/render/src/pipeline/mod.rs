@@ -9,12 +9,16 @@ use rhyolite::PipelineLayout;
 use rhyolite_bevy::Allocator;
 mod auto_exposure;
 mod builder;
+mod cache;
+mod compute;
 mod manager;
 mod plugin;
 mod sky;
 mod standard;
 mod tone_mapping;
 
+pub use cache::*;
+pub use compute::*;
 pub use sky::Sunlight;
 
 use crate::{

@@ -32,7 +32,7 @@ pub extern crate self as dust_vdb;
 pub struct ConstUVec3 {
     pub x: u32,
     pub y: u32,
-    pub z: u32
+    pub z: u32,
 }
 
 impl ConstUVec3 {
@@ -40,8 +40,7 @@ impl ConstUVec3 {
         glam::UVec3 {
             x: self.x,
             y: self.y,
-            z: self.z
+            z: self.z,
         }
     }
 }
-

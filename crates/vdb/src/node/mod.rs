@@ -12,7 +12,7 @@ pub use internal::*;
 pub use leaf::*;
 pub use root::*;
 
-use crate::{Pool, ConstUVec3};
+use crate::{ConstUVec3, Pool};
 
 pub struct NodeMeta<V> {
     pub(crate) layout: Layout,

@@ -1,0 +1,141 @@
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
+
+use bevy_app::Plugin;
+use bevy_asset::{AssetEvent, Assets, Handle};
+use bevy_ecs::{
+    prelude::EventReader,
+    system::{ResMut, Resource},
+    world::FromWorld,
+};
+
+use crate::{deferred_task::DeferredValue, ShaderModule};
+
+#[derive(Resource)]
+pub struct PipelineCache {
+    cache: Option<Arc<rhyolite::PipelineCache>>,
+    shader_generations: HashMap<Handle<ShaderModule>, u32>,
+    hot_reload_enabled: bool,
+}
+
+pub struct CachedPipeline<T: CachablePipeline> {
+    build_info: Option<T::BuildInfo>,
+    pipeline: Option<Arc<T>>,
+    task: DeferredValue<Arc<T>>,
+    shader_generations: HashMap<Handle<ShaderModule>, u32>,
+}
+
+pub trait CachablePipeline {
+    type BuildInfo: PipelineBuildInfo<Pipeline = Self>;
+}
+
+pub trait PipelineBuildInfo: Clone {
+    type Pipeline: CachablePipeline<BuildInfo = Self>;
+    fn build(
+        self,
+        assets: &Assets<ShaderModule>,
+        cache: Option<&Arc<rhyolite::PipelineCache>>,
+    ) -> DeferredValue<Arc<Self::Pipeline>>;
+}
+
+impl PipelineCache {
+    pub fn retrieve<'a, T: CachablePipeline>(
+        &self,
+        cached_pipeline: &'a mut CachedPipeline<T>,
+        assets: &Assets<ShaderModule>,
+    ) -> Option<&'a Arc<T>> {
+        if let Some(pipeline) = cached_pipeline.task.take() {
+            cached_pipeline.pipeline = Some(pipeline);
+        }
+
+        if self.hot_reload_enabled {
+            for (shader, generation) in cached_pipeline.shader_generations.iter() {
+                if let Some(latest_generation) = self.shader_generations.get(shader) {
+                    if latest_generation > generation {
+                        // schedule.
+
+                        cached_pipeline.task = cached_pipeline
+                            .build_info
+                            .as_ref()
+                            .unwrap()
+                            .clone()
+                            .build(assets, self.cache.as_ref());
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(pipeline) = cached_pipeline.pipeline.as_ref() {
+            return Some(pipeline);
+        } else {
+            if cached_pipeline.task.is_none() {
+                // schedule
+                if self.hot_reload_enabled {
+                    cached_pipeline.task = cached_pipeline
+                        .build_info
+                        .as_ref()
+                        .unwrap()
+                        .clone()
+                        .build(assets, self.cache.as_ref());
+                } else {
+                    cached_pipeline.task = cached_pipeline
+                        .build_info
+                        .take()
+                        .unwrap()
+                        .build(assets, self.cache.as_ref());
+                }
+            }
+            return None;
+        }
+    }
+}
+
+fn pipeline_cache_shader_updated_system(
+    mut pipeline_cache: ResMut<PipelineCache>,
+    mut events: EventReader<AssetEvent<ShaderModule>>,
+) {
+    for event in events.iter() {
+        match event {
+            AssetEvent::Created { handle } => (),
+            AssetEvent::Modified { handle } => {
+                let generation = pipeline_cache
+                    .shader_generations
+                    .entry(handle.clone_weak())
+                    .or_default();
+                *generation += 1;
+            }
+            AssetEvent::Removed { handle } => {
+                pipeline_cache.shader_generations.remove(handle);
+            }
+        }
+    }
+}
+
+pub struct PipelineCachePlugin {
+    shader_hot_reload: bool,
+    pipeline_cache_enabled: bool, // TODO: use pipeline cache
+}
+
+impl Default for PipelineCachePlugin {
+    fn default() -> Self {
+        Self {
+            shader_hot_reload: true,
+            pipeline_cache_enabled: false,
+        }
+    }
+}
+
+impl Plugin for PipelineCachePlugin {
+    fn build(&self, app: &mut bevy_app::App) {
+        let cache = PipelineCache {
+            cache: None, // TODO
+            shader_generations: Default::default(),
+            hot_reload_enabled: self.shader_hot_reload,
+        };
+        app.insert_resource(cache)
+            .add_systems(bevy_app::PreUpdate, pipeline_cache_shader_updated_system);
+    }
+}

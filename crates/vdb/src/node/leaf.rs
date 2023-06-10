@@ -1,5 +1,5 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool, ConstUVec3};
+use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, NodeConst, Pool};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,

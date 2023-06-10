@@ -110,6 +110,7 @@ impl Plugin for RenderPlugin {
             }),
             ..rhyolite_bevy::RenderPlugin::default()
         })
+        .add_plugin(PipelineCachePlugin::default())
         .register_type::<Renderable>()
         .add_systems(Update, build_blas_system.in_set(RenderSystems::SetUp))
         .init_resource::<BlasStore>()

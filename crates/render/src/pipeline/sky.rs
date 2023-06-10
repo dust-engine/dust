@@ -93,10 +93,7 @@ impl Sunlight {
         let radiances = cook_radiance_config(self.turbidity, self.albedo, self.direction.y.asin());
 
         let theta = self.direction.y.asin();
-        let solar_intensity = arhosekskymodel_solar_direct_radiance_xyz(
-            theta,
-            self.turbidity,
-        );
+        let solar_intensity = arhosekskymodel_solar_direct_radiance_xyz(theta, self.turbidity);
 
         let mut i = 0;
         let mut configs = configs.map(|config| {

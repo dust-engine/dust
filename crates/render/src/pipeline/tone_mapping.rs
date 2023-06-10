@@ -102,7 +102,7 @@ impl ToneMappingPipeline {
 
                 let shader = glsl_reflected!("tone_map.comp");
                 let module = shader.build(device).unwrap();
-                let pipeline = ComputePipeline::create_with_reflected_shader_and_layout(
+                let pipeline = ComputePipeline::create_with_shader_and_layout(
                     module
                         .specialized(cstr!("main"))
                         .with_const(0, transfer_function)
@@ -114,9 +114,11 @@ impl ToneMappingPipeline {
                         .with_const(6, mat.y_axis.z)
                         .with_const(7, mat.z_axis.x)
                         .with_const(8, mat.z_axis.y)
-                        .with_const(9, mat.z_axis.z),
-                    Default::default(),
+                        .with_const(9, mat.z_axis.z)
+                        .into(),
                     self.layout.clone(),
+                    Default::default(),
+                    None,
                 )
                 .unwrap();
                 Arc::new(pipeline)

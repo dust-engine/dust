@@ -76,19 +76,21 @@ impl FromWorld for AutoExposurePipeline {
 
         let shader = glsl_reflected!("auto_exposure.comp");
         let module = shader.build(device.clone()).unwrap();
-        let pipeline = ComputePipeline::create_with_reflected_shader_and_layout(
-            module.specialized(cstr!("main")),
-            Default::default(),
+        let pipeline = ComputePipeline::create_with_shader_and_layout(
+            module.specialized(cstr!("main")).into(),
             layout.clone(),
+            Default::default(),
+            None,
         )
         .unwrap();
 
         let shader = glsl_reflected!("auto_exposure_avg.comp");
         let module = shader.build(device).unwrap();
-        let avg_pipeline = ComputePipeline::create_with_reflected_shader_and_layout(
-            module.specialized(cstr!("main")),
-            Default::default(),
+        let avg_pipeline = ComputePipeline::create_with_shader_and_layout(
+            module.specialized(cstr!("main")).into(),
             layout.clone(),
+            Default::default(),
+            None,
         )
         .unwrap();
 

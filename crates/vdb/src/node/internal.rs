@@ -1,5 +1,5 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, Node, NodeConst, Pool, ConstUVec3};
+use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, NodeConst, Pool};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
@@ -228,7 +228,8 @@ where
 }
 
 /// When the alternate flag was specified, also print the child pointers.
-impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> std::fmt::Debug for InternalNode<CHILD, FANOUT_LOG2>
+impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> std::fmt::Debug
+    for InternalNode<CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {

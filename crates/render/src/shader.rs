@@ -13,6 +13,7 @@ impl ShaderModule {
     }
 }
 
+// TODO: Pipelines don't need to own the specialized shader once they've been created.
 #[derive(Clone)]
 pub struct SpecializedShader {
     pub stage: vk::ShaderStageFlags,

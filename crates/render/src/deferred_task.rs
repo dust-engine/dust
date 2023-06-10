@@ -39,10 +39,47 @@ impl<T> DeferredValue<T> {
             _ => false,
         }
     }
+    pub fn is_none(&self) -> bool {
+        match self {
+            Self::None => true,
+            _ => false,
+        }
+    }
     pub fn map<R>(&self, mapper: impl FnOnce(&T) -> R) -> Option<R> {
         match self {
             Self::Done(value) => Some(mapper(value)),
             _ => None,
+        }
+    }
+    pub fn take(&mut self) -> Option<T> {
+        match self {
+            Self::Pending(task) => {
+                if task.is_finished() {
+                    let task = match std::mem::replace(self, Self::None) {
+                        Self::Pending(task) => task,
+                        _ => unreachable!(),
+                    };
+                    let value = futures_lite::future::block_on(task);
+                    match value {
+                        Ok(value) => return Some(value),
+                        Err(result) => {
+                            *self = Self::Errored(result);
+                            return None;
+                        }
+                    }
+                } else {
+                    return None;
+                }
+            }
+            Self::Done(value) => {
+                let value = std::mem::replace(self, Self::None);
+                match value {
+                    Self::Done(value) => return Some(value),
+                    _ => unreachable!(),
+                }
+            }
+            Self::Errored(_) => return None,
+            Self::None => unreachable!(),
         }
     }
     pub fn try_get(&mut self) -> Option<&mut T> {
@@ -73,7 +110,7 @@ impl<T> DeferredValue<T> {
             }
             Self::Done(value) => return Some(value),
             Self::Errored(_) => return None,
-            Self::None => unreachable!(),
+            Self::None => return None,
         }
     }
 }
