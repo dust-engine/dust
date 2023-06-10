@@ -71,7 +71,7 @@ impl<T> DeferredValue<T> {
                     return None;
                 }
             }
-            Self::Done(value) => {
+            Self::Done(_) => {
                 let value = std::mem::replace(self, Self::None);
                 match value {
                     Self::Done(value) => return Some(value),
@@ -79,7 +79,7 @@ impl<T> DeferredValue<T> {
                 }
             }
             Self::Errored(_) => return None,
-            Self::None => unreachable!(),
+            Self::None => return None,
         }
     }
     pub fn try_get(&mut self) -> Option<&mut T> {

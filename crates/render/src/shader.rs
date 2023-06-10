@@ -32,6 +32,10 @@ impl SpecializedShader {
             entry_point: cstr!("main"),
         }
     }
+    pub fn with_const<T: Copy + 'static>(mut self, constant_id: u32, item: T) -> Self {
+        self.specialization_info.push(constant_id, item);
+        self
+    }
 }
 
 pub struct SpirvLoader {

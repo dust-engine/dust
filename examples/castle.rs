@@ -137,6 +137,7 @@ impl Plugin for RenderSystem {
              mut pipeline: ResMut<StandardPipeline>,
              mut auto_exposure_pipeline: ResMut<AutoExposurePipeline>,
              mut auto_exposure_params: SystemParamItem<AutoExposurePipeline::RenderParams>,
+             mut tone_mapping_params: SystemParamItem<ToneMappingPipeline::RenderParams>,
              mut recycled_state: Local<_>,
              mut tone_mapping_pipeline: ResMut<ToneMappingPipeline>,
              mut render_params: SystemParamItem<StandardPipeline::RenderParams>,
@@ -248,14 +249,15 @@ impl Plugin for RenderSystem {
                                     &albedo_image,
                                     &mut swapchain_image,
                                     &exposure_avg,
-                                    &color_space
+                                    &color_space,
+                                    &tone_mapping_params
                                 ).await;
                                 retain!(exposure_avg);
                             }
                             retain!(accel_struct);
                         }
                         retain!((radiance_image, albedo_image, normal_image, depth_image));
-                        if !rendered {
+                        if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]
                             }).await;
@@ -286,8 +288,9 @@ fn print_position(
     }
     *current += 0.5 * (*target - *current);
 
-    let calculated_angle = ((time.elapsed_seconds() * 0.4).cos() + 1.0) * std::f32::consts::FRAC_PI_2;
-    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), -calculated_angle)
+    let calculated_angle =
+        ((time.elapsed_seconds() * 0.4).cos() + 1.0) * std::f32::consts::FRAC_PI_2;
+    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.001)
         * Vec3A::new(0.0, 0.0, 1.0);
     sunlight.direction =
         glam::Mat3A::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.2) * sunlight.direction;

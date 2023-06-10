@@ -1,7 +1,11 @@
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
+use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::{
-    system::Resource,
+    system::{
+        lifetimeless::{SRes, SResMut},
+        Resource, SystemParamItem,
+    },
     world::{FromWorld, World},
 };
 use rhyolite::{
@@ -23,10 +27,12 @@ use rhyolite::{
 };
 use rhyolite_bevy::Queues;
 
+use crate::{CachedPipeline, PipelineCache, ShaderModule, SpecializedShader};
+
 #[derive(Resource)]
 pub struct ToneMappingPipeline {
     layout: Arc<PipelineLayout>,
-    pipeline: HashMap<ColorSpace, Arc<ComputePipeline>>,
+    pipeline: HashMap<ColorSpace, CachedPipeline<ComputePipeline>>,
     desc_pool: Retainer<DescriptorPool>,
     scene_color_space: ColorSpaceType,
 }
@@ -77,6 +83,12 @@ impl FromWorld for ToneMappingPipeline {
     }
 }
 impl ToneMappingPipeline {
+    pub type RenderParams = (
+        SRes<AssetServer>,
+        SRes<PipelineCache>,
+        SRes<Assets<ShaderModule>>,
+    );
+
     pub fn render<'a>(
         &'a mut self,
         src: &'a RenderImage<impl ImageViewLike + RenderData>,
@@ -84,11 +96,13 @@ impl ToneMappingPipeline {
         mut dst: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         exposure: &'a RenderRes<impl BufferLike + RenderData>,
         output_color_space: &ColorSpace,
+        params: &'a SystemParamItem<Self::RenderParams>,
     ) -> impl GPUCommandFuture<
         Output = (),
         RetainedState: 'static + Disposable,
         RecycledState: 'static + Default,
     > + 'a {
+        let (asset_server, pipeline_cache, shader_assets) = params;
         let pipeline = self
             .pipeline
             .entry(output_color_space.clone())
@@ -100,11 +114,10 @@ impl ToneMappingPipeline {
                     .to_color_space(&output_color_space.primaries());
                 let transfer_function = output_color_space.transfer_function() as u32;
 
-                let shader = glsl_reflected!("tone_map.comp");
-                let module = shader.build(device).unwrap();
-                let pipeline = ComputePipeline::create_with_shader_and_layout(
-                    module
-                        .specialized(cstr!("main"))
+                let shader = asset_server.load("tone_map.comp.spv");
+                pipeline_cache.add_compute_pipeline(
+                    self.layout.clone(),
+                    SpecializedShader::for_shader(shader, vk::ShaderStageFlags::COMPUTE)
                         .with_const(0, transfer_function)
                         .with_const(1, mat.x_axis.x)
                         .with_const(2, mat.x_axis.y)
@@ -116,16 +129,13 @@ impl ToneMappingPipeline {
                         .with_const(8, mat.z_axis.y)
                         .with_const(9, mat.z_axis.z)
                         .into(),
-                    self.layout.clone(),
-                    Default::default(),
-                    None,
                 )
-                .unwrap();
-                Arc::new(pipeline)
-            })
-            .clone();
+            });
         let desc_pool = &mut self.desc_pool;
         commands! { move
+            let Some(pipeline) = pipeline_cache.retrieve(pipeline, shader_assets) else {
+                return;
+            };
             let desc_set = use_per_frame_state(using!(), || {
                 desc_pool
                     .allocate_for_pipeline_layout(pipeline.layout())

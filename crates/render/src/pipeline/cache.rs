@@ -10,8 +10,11 @@ use bevy_ecs::{
     system::{ResMut, Resource},
     world::FromWorld,
 };
+use rhyolite::{ComputePipeline, PipelineLayout};
 
-use crate::{deferred_task::DeferredValue, ShaderModule};
+use crate::{
+    deferred_task::DeferredValue, ComputePipelineBuildInfo, ShaderModule, SpecializedShader,
+};
 
 #[derive(Resource)]
 pub struct PipelineCache {
@@ -41,6 +44,24 @@ pub trait PipelineBuildInfo: Clone {
 }
 
 impl PipelineCache {
+    pub fn add_compute_pipeline(
+        &self,
+        layout: Arc<PipelineLayout>,
+        shader: SpecializedShader,
+    ) -> CachedPipeline<ComputePipeline> {
+        CachedPipeline {
+            shader_generations: if self.hot_reload_enabled {
+                let mut map = HashMap::new();
+                map.insert(shader.shader.clone_weak(), 0);
+                map
+            } else {
+                Default::default()
+            },
+            build_info: Some(ComputePipelineBuildInfo { layout, shader }),
+            pipeline: None,
+            task: DeferredValue::None,
+        }
+    }
     pub fn retrieve<'a, T: CachablePipeline>(
         &self,
         cached_pipeline: &'a mut CachedPipeline<T>,

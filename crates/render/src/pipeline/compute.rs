@@ -15,8 +15,8 @@ use crate::{
 
 #[derive(Clone)]
 pub struct ComputePipelineBuildInfo {
-    layout: Arc<PipelineLayout>,
-    shader: SpecializedShader,
+    pub layout: Arc<PipelineLayout>,
+    pub shader: SpecializedShader,
 }
 
 impl CachablePipeline for rhyolite::ComputePipeline {

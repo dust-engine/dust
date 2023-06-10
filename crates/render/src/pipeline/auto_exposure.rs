@@ -1,8 +1,9 @@
 use std::{ops::Deref, sync::Arc};
 
+use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::{
     system::{lifetimeless::SRes, Res, ResMut, Resource, SystemParamItem},
-    world::{FromWorld, World},
+    world::{FromWorld, Mut, World},
 };
 use rhyolite::future::run;
 use rhyolite::future::GPUCommandFutureExt;
@@ -23,6 +24,8 @@ use rhyolite::{
     ResidentBuffer,
 };
 use rhyolite_bevy::{Allocator, Device, Queues};
+
+use crate::{CachedPipeline, PipelineCache, ShaderModule, SpecializedShader};
 struct AutoExposureBuffer {
     histogram: [f32; 256],
     avg: f32,
@@ -31,8 +34,8 @@ struct AutoExposureBuffer {
 #[derive(Resource)]
 pub struct AutoExposurePipeline {
     layout: Arc<PipelineLayout>,
-    pipeline: Arc<ComputePipeline>,
-    avg_pipeline: Arc<ComputePipeline>,
+    pipeline: CachedPipeline<ComputePipeline>,
+    avg_pipeline: CachedPipeline<ComputePipeline>,
     desc_pool: Retainer<DescriptorPool>,
 
     buffer: SharedDeviceStateHostContainer<ResidentBuffer>,
@@ -74,25 +77,20 @@ impl FromWorld for AutoExposurePipeline {
         )
         .unwrap();
 
-        let shader = glsl_reflected!("auto_exposure.comp");
-        let module = shader.build(device.clone()).unwrap();
-        let pipeline = ComputePipeline::create_with_shader_and_layout(
-            module.specialized(cstr!("main")).into(),
-            layout.clone(),
-            Default::default(),
-            None,
-        )
-        .unwrap();
+        let asset_server: &AssetServer = world.resource();
+        let auto_exposure_shader = asset_server.load("auto_exposure.comp.spv");
+        let auto_exposure_avg_shader = asset_server.load("auto_exposure_avg.comp.spv");
 
-        let shader = glsl_reflected!("auto_exposure_avg.comp");
-        let module = shader.build(device).unwrap();
-        let avg_pipeline = ComputePipeline::create_with_shader_and_layout(
-            module.specialized(cstr!("main")).into(),
+        let mut pipeline_cache: Mut<PipelineCache> = world.resource_mut();
+        let pipeline = pipeline_cache.add_compute_pipeline(
             layout.clone(),
-            Default::default(),
-            None,
-        )
-        .unwrap();
+            SpecializedShader::for_shader(auto_exposure_shader, vk::ShaderStageFlags::COMPUTE),
+        );
+
+        let avg_pipeline = pipeline_cache.add_compute_pipeline(
+            layout.clone(),
+            SpecializedShader::for_shader(auto_exposure_avg_shader, vk::ShaderStageFlags::COMPUTE),
+        );
 
         let allocator = world.resource::<Allocator>();
         let buffer = allocator
@@ -103,16 +101,21 @@ impl FromWorld for AutoExposurePipeline {
             .unwrap();
         AutoExposurePipeline {
             layout,
-            pipeline: Arc::new(pipeline),
+            pipeline: pipeline,
             desc_pool: Retainer::new(desc_pool),
-            avg_pipeline: Arc::new(avg_pipeline),
+            avg_pipeline: avg_pipeline,
             buffer: SharedDeviceStateHostContainer::new(buffer),
         }
     }
 }
 
 impl AutoExposurePipeline {
-    pub type RenderParams = (SRes<Allocator>, SRes<ExposureSettings>);
+    pub type RenderParams = (
+        SRes<Allocator>,
+        SRes<ExposureSettings>,
+        SRes<PipelineCache>,
+        SRes<Assets<ShaderModule>>,
+    );
 
     pub fn render<'a>(
         &'a mut self,
@@ -123,7 +126,7 @@ impl AutoExposurePipeline {
         RetainedState: 'static + Disposable,
         RecycledState: 'static + Default,
     > + 'a {
-        let (allocator, settings) = params;
+        let (allocator, settings, pipeline_cache, shader_assets) = params;
         commands! {
             let size = illuminance_image.inner().extent();
             let mut buffer = use_shared_state(using!(), |_| {
@@ -138,12 +141,20 @@ impl AutoExposurePipeline {
             }
 
 
+            let Some(pipeline) = pipeline_cache.retrieve(&mut self.pipeline, shader_assets) else {
+                return buffer;
+            };
+            let Some(avg_pipeline) = pipeline_cache.retrieve(&mut self.avg_pipeline, shader_assets) else {
+                return buffer;
+            };
+
+
             let desc_set = use_per_frame_state(using!(), || {
                 self.desc_pool
-                    .allocate_for_pipeline_layout(self.pipeline.layout())
+                    .allocate_for_pipeline_layout(&self.layout)
                     .unwrap()
             });
-            self.pipeline.device().write_descriptor_sets([
+            self.layout.device().write_descriptor_sets([
                 DescriptorSetWrite::storage_images(
                     desc_set[0],
                     0,
@@ -177,11 +188,11 @@ impl AutoExposurePipeline {
 
             run(|ctx, command_buffer| unsafe {
                 let device = ctx.device();
-                device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, self.pipeline.raw());
+                device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, pipeline.raw());
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
-                    self.pipeline.layout().raw(),
+                    self.layout.raw(),
                     0,
                     &desc_set,
                     &[]
@@ -213,7 +224,7 @@ impl AutoExposurePipeline {
             }).await;
             run(|ctx, command_buffer| unsafe {
                 let device = ctx.device();
-                device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, self.avg_pipeline.raw());
+                device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, avg_pipeline.raw());
                 device.cmd_dispatch(
                     command_buffer,
                     1,
@@ -232,7 +243,7 @@ impl AutoExposurePipeline {
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                 );
             }).await;
-            retain!(DisposeContainer::new((desc_set, self.desc_pool.handle(), self.pipeline.clone())));
+            retain!(DisposeContainer::new((desc_set, self.desc_pool.handle(), pipeline.clone(), avg_pipeline.clone())));
             buffer
         }
     }
