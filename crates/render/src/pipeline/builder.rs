@@ -58,7 +58,6 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
         self,
         num_frame_in_flight: u32,
         asset_server: &AssetServer,
-        pipeline_cache: Option<Arc<PipelineCache>>,
     ) -> P {
         let pipeline_layout = P::pipeline_layout(self.allocator.device());
         let characteristics = RayTracingPipelineCharacteristics {
@@ -75,7 +74,6 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
             self.allocator,
             characteristics,
             asset_server,
-            pipeline_cache,
         )
     }
 }

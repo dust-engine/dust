@@ -97,6 +97,5 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
         allocator: Allocator,
         pipeline_characteristic: RayTracingPipelineCharacteristics,
         asset_server: &AssetServer,
-        pipeline_cache: Option<Arc<rhyolite::PipelineCache>>,
     ) -> Self;
 }

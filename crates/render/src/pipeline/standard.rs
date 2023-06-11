@@ -95,7 +95,6 @@ impl RayTracingPipeline for StandardPipeline {
         allocator: Allocator,
         pipeline_characteristic: super::RayTracingPipelineCharacteristics,
         asset_server: &AssetServer,
-        pipeline_cache: Option<std::sync::Arc<rhyolite::PipelineCache>>,
     ) -> Self {
         let pipeline_characteristics = Arc::new(pipeline_characteristic);
         let hitgroup_sbt_manager = SbtManager::new(allocator.clone(), &pipeline_characteristics);
@@ -121,7 +120,7 @@ impl RayTracingPipeline for StandardPipeline {
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
-                pipeline_cache.as_ref().cloned(),
+                None,
             ),
             photon_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics.clone(),
@@ -132,7 +131,7 @@ impl RayTracingPipeline for StandardPipeline {
                 ),
                 vec![],
                 Vec::new(),
-                pipeline_cache.as_ref().cloned(),
+                None,
             ),
             shadow_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics.clone(),
@@ -146,7 +145,7 @@ impl RayTracingPipeline for StandardPipeline {
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
-                pipeline_cache.clone(),
+                None,
             ),
             final_gather_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics,
@@ -160,7 +159,7 @@ impl RayTracingPipeline for StandardPipeline {
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
-                pipeline_cache,
+                None,
             ),
             pipeline_sbt_manager,
         }

@@ -76,13 +76,24 @@ impl PipelineCache {
                 if let Some(latest_generation) = self.shader_generations.get(shader) {
                     if latest_generation > generation {
                         // schedule.
-
                         cached_pipeline.task = cached_pipeline
                             .build_info
                             .as_ref()
                             .unwrap()
                             .clone()
                             .build(assets, self.cache.as_ref());
+                        if !cached_pipeline.task.is_none() {
+                            // If a new shader build task was successfully scheduled, update all shader generations
+                            // to latest so that this particular pipeline won't be updated next frame.
+                            // Otherwise, leave it as is, and this is going to attempt creating a new pipeline
+                            // compilation task again next time.
+                            for (shader, generation) in cached_pipeline.shader_generations.iter_mut() {
+                                if let Some(latest_generation) = self.shader_generations.get(shader) {
+                                    *generation = *latest_generation;
+                                }
+                            }
+                        }
+                        // TODO: what if this returns None? will this be invoked multiple times? due to generation not getting updated
                         break;
                     }
                 }

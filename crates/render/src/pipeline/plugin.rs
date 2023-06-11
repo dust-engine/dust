@@ -26,12 +26,9 @@ impl<P: RayTracingPipeline> Plugin for RayTracingPipelinePlugin<P> {
             .world
             .remove_resource::<RayTracingPipelineBuilder<P>>()
             .unwrap();
-        let pipeline_cache: Option<&rhyolite_bevy::PipelineCache> = app.world.get_resource();
-        let pipeline_cache = pipeline_cache.map(|a| a.inner().clone());
-
         let queues = app.world.resource::<rhyolite_bevy::Queues>();
         let asset_server = app.world.resource::<AssetServer>();
-        let pipeline = builder.build(queues.num_frame_in_flight(), asset_server, pipeline_cache);
+        let pipeline = builder.build(queues.num_frame_in_flight(), asset_server);
         app.insert_resource(pipeline);
     }
 }
