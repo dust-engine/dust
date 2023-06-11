@@ -8,16 +8,16 @@ edition = "2021"
 [dependencies]
 dot_vox = { git = "https://github.com/dust-engine/dot_vox.git" }
 dust-render = { path = "../render" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f", default-features=false, features=["serialize"] }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", default-features=false, features=["serialize"] }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 rhyolite = { path = "../../../rhyolite/core" }
 rhyolite-bevy = { path = "../../../rhyolite/bevy" }
 dust_vdb = { path = "../vdb" }
-glam = "0.23.0"
+glam = "^0.24"
 anyhow = "*"
 rayon = "1.7"

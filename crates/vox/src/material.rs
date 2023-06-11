@@ -6,7 +6,7 @@ use crate::{VoxGeometry, VoxPalette};
 use dust_render::SpecializedShader;
 use rhyolite::{ash::vk, BufferLike, ResidentBuffer};
 
-#[derive(bevy_reflect::TypeUuid)]
+#[derive(bevy_reflect::TypeUuid, bevy_reflect::TypePath)]
 #[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0a"]
 pub struct PaletteMaterial {
     palette: Handle<VoxPalette>,
@@ -28,7 +28,7 @@ impl PaletteMaterial {
     }
 }
 
-#[derive(bevy_reflect::TypeUuid)]
+#[derive(bevy_reflect::TypeUuid, bevy_reflect::TypePath)]
 #[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0b"]
 pub struct DiffuseMaterial {
     material: Handle<PaletteMaterial>,

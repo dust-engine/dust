@@ -21,7 +21,7 @@ impl<P: RayTracingPipeline> Plugin for RayTracingPipelinePlugin<P> {
         app.insert_resource(RayTracingPipelineBuilder::<P>::new(&app.world))
             .add_systems(bevy_app::Update, shader_update_system::<P>);
     }
-    fn setup(&self, app: &mut bevy_app::App) {
+    fn cleanup(&self, app: &mut bevy_app::App) {
         let builder = app
             .world
             .remove_resource::<RayTracingPipelineBuilder<P>>()

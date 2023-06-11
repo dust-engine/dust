@@ -56,7 +56,9 @@ fn main() {
         .add_plugin(bevy_a11y::AccessibilityPlugin)
         .add_plugin(bevy_winit::WinitPlugin::default())
         .add_plugin(bevy_asset::AssetPlugin {
-            watch_for_changes: true,
+            watch_for_changes: bevy_asset::ChangeWatcher::with_delay(
+                std::time::Duration::from_secs(1),
+            ),
             ..Default::default()
         })
         .add_plugin(dust_render::RenderPlugin::default())

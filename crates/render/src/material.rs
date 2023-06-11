@@ -10,7 +10,7 @@ use bevy_ecs::{
     query::Changed,
     system::{Commands, Local, Query, Res, ResMut, SystemParam, SystemParamItem},
 };
-use bevy_reflect::TypeUuid;
+use bevy_reflect::{TypePath, TypeUuid};
 
 use crate::{
     pipeline::RayTracingPipeline, pipeline::RayTracingPipelineBuilder, sbt::SbtIndex,
@@ -19,7 +19,7 @@ use crate::{
 
 pub type MaterialType = rhyolite::RayTracingHitGroupType;
 // Handle<Material> is a component
-pub trait Material: Send + Sync + 'static + TypeUuid {
+pub trait Material: Send + Sync + 'static + TypeUuid + TypePath {
     type Pipeline: RayTracingPipeline;
     const TYPE: MaterialType;
     fn rahit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;

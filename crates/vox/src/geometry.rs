@@ -11,7 +11,7 @@ use rhyolite::future::{GPUCommandFuture, GPUCommandFutureExt, UnitCommandFuture}
 use rhyolite::ResidentBuffer;
 use rhyolite_bevy::Allocator;
 
-#[derive(bevy_reflect::TypeUuid)]
+#[derive(bevy_reflect::TypeUuid, bevy_reflect::TypePath)]
 #[uuid = "307feebb-14b8-4135-be09-ae828decc6a4"]
 pub struct VoxGeometry {
     tree: Tree,

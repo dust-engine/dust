@@ -19,21 +19,21 @@ rhyolite = { path = "../rhyolite/core" }
 rhyolite-bevy = { path = "../rhyolite/bevy" }
 dust-render = { path = "./crates/render" }
 dust-vox = { path = "./crates/vox" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_log = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_window = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_input = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_core = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_winit = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_a11y = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f", features = ["filesystem_watcher"] }
-bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f", default-features=false }
-bevy_diagnostic = { git = "https://github.com/bevyengine/bevy.git", rev = "e9312254d8906e9f491c4f3761659df0d179687f" }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_log = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_window = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_input = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_core = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_winit = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_a11y = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", features = ["filesystem_watcher"] }
+bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", default-features=false }
+bevy_diagnostic = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 image = "0.24"
-glam = "0.23"
+glam = "^0.24"
 reqwest = { version = "*", features = ["blocking"] }
-smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "9a7fe98e5e9c1978871e59e6cbb83c30a2b0386e" }
+smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "2c626db7e35eb543fb24b53e4a2b56e611421dba" }
