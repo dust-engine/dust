@@ -85,10 +85,6 @@ pub trait RayTracingPipeline: Send + Sync + 'static + Resource {
     ) -> SbtIndex;
     fn material_instance_removed<M: Material<Pipeline = Self>>(&mut self) {}
 
-    /// Implementation need to call shader_updated on each contained RayTracingPipelineManager
-    /// Optional; useful for shader hot-reloading.
-    fn shader_updated(&mut self, _shader: &Handle<ShaderModule>) {}
-
     fn create_info() -> rhyolite::RayTracingPipelineLibraryCreateInfo {
         Default::default()
     }

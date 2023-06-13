@@ -10,11 +10,13 @@ use bevy_ecs::{
     system::{ResMut, Resource},
     world::FromWorld,
 };
-use rhyolite::{ComputePipeline, PipelineLayout};
+use rhyolite::{ComputePipeline, PipelineLayout, RayTracingHitGroupType};
 
 use crate::{
-    deferred_task::DeferredValue, ComputePipelineBuildInfo, ShaderModule, SpecializedShader,
+    deferred_task::DeferredValue, ComputePipelineBuildInfo, ShaderModule, SpecializedShader, RayTracingPipelineCharacteristics,
 };
+
+use super::manager::RayTracingPipelineBuildInfo;
 
 #[derive(Resource)]
 pub struct PipelineCache {
@@ -43,6 +45,12 @@ pub trait PipelineBuildInfo: Clone {
     ) -> DeferredValue<Arc<Self::Pipeline>>;
 }
 
+impl<T: CachablePipeline> CachedPipeline<T> {
+    pub fn is_ready(&self) -> bool {
+        self.task.is_done()
+    }
+}
+
 impl PipelineCache {
     pub fn add_compute_pipeline(
         &self,
@@ -58,6 +66,35 @@ impl PipelineCache {
                 Default::default()
             },
             build_info: Some(ComputePipelineBuildInfo { layout, shader }),
+            pipeline: None,
+            task: DeferredValue::None,
+        }
+    }
+    pub fn add_ray_tracing_pipeline(
+        &self,
+        pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
+        base_shaders: Vec<SpecializedShader>,
+        hitgroup_shaders: Vec<(Option<SpecializedShader>, Option<SpecializedShader>, Option<SpecializedShader>, RayTracingHitGroupType)>,
+    ) -> CachedPipeline<rhyolite::RayTracingPipeline> {
+        CachedPipeline {
+            
+            shader_generations: if self.hot_reload_enabled {
+                base_shaders.iter()
+                .chain(hitgroup_shaders.iter().flat_map(|(rchit, rint, rahit, _)| {
+                    rchit.into_iter().chain(rint).chain(rahit)
+                }))
+                .map(|shader| (shader.shader.clone_weak(), 0))
+                .collect()
+            } else {
+                Default::default()
+            },
+            build_info: Some(
+                RayTracingPipelineBuildInfo {
+                    pipeline_characteristics,
+                    base_shaders,
+                    hitgroup_shaders,
+                }
+            ),
             pipeline: None,
             task: DeferredValue::None,
         }
@@ -92,6 +129,7 @@ impl PipelineCache {
                                     *generation = *latest_generation;
                                 }
                             }
+                            tracing::info!("Shader hot reload: updated");
                         }
                         // TODO: what if this returns None? will this be invoked multiple times? due to generation not getting updated
                         break;
@@ -167,7 +205,9 @@ impl Plugin for PipelineCachePlugin {
             shader_generations: Default::default(),
             hot_reload_enabled: self.shader_hot_reload,
         };
-        app.insert_resource(cache)
-            .add_systems(bevy_app::PreUpdate, pipeline_cache_shader_updated_system);
+        app.insert_resource(cache);
+        if self.shader_hot_reload {
+            app.add_systems(bevy_app::PreUpdate, pipeline_cache_shader_updated_system);
+        }
     }
 }

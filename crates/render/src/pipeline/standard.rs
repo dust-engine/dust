@@ -23,7 +23,7 @@ use rhyolite::{
 use rhyolite_bevy::StagingRingBuffer;
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 
-use crate::Sunlight;
+use crate::{Sunlight, PipelineCache};
 use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
     BlueNoise, PinholeProjection, ShaderModule, SpecializedShader,
@@ -120,7 +120,6 @@ impl RayTracingPipeline for StandardPipeline {
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
-                None,
             ),
             photon_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics.clone(),
@@ -131,7 +130,6 @@ impl RayTracingPipeline for StandardPipeline {
                 ),
                 vec![],
                 Vec::new(),
-                None,
             ),
             shadow_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics.clone(),
@@ -145,7 +143,6 @@ impl RayTracingPipeline for StandardPipeline {
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
-                None,
             ),
             final_gather_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics,
@@ -159,16 +156,9 @@ impl RayTracingPipeline for StandardPipeline {
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
-                None,
             ),
             pipeline_sbt_manager,
         }
-    }
-    fn shader_updated(&mut self, shader: &bevy_asset::Handle<ShaderModule>) {
-        self.primary_ray_pipeline.shader_updated(shader);
-        self.photon_ray_pipeline.shader_updated(shader);
-        self.shadow_ray_pipeline.shader_updated(shader);
-        self.final_gather_ray_pipeline.shader_updated(shader);
     }
     fn material_instance_added<M: crate::Material<Pipeline = Self>>(
         &mut self,
@@ -235,6 +225,7 @@ impl StandardPipeline {
 
     pub type RenderParams = (
         SRes<Assets<ShaderModule>>,
+        SRes<PipelineCache>,
         SRes<Allocator>,
         SRes<Sunlight>,
         SRes<StagingRingBuffer>,
@@ -256,11 +247,11 @@ impl StandardPipeline {
                 RecycledState: 'static + Default,
             > + 'a,
     > {
-        let (shader_store, allocator, sunlight, staging_ring_buffer) = params;
-        let primary_pipeline = self.primary_ray_pipeline.get_pipeline(&shader_store)?;
-        let photon_pipeline = self.photon_ray_pipeline.get_pipeline(&shader_store)?;
-        let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(&shader_store)?;
-        let final_gather_pipeline = self.final_gather_ray_pipeline.get_pipeline(&shader_store)?;
+        let (shader_store, pipeline_cache, allocator, sunlight, staging_ring_buffer) = params;
+        let primary_pipeline = self.primary_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
+        let photon_pipeline = self.photon_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
+        let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
+        let final_gather_pipeline = self.final_gather_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
         self.hitgroup_sbt_manager.specify_pipelines(&[
             primary_pipeline,
             photon_pipeline,
