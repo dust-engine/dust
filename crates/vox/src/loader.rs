@@ -55,6 +55,33 @@ struct SceneGraphTraverser<'a> {
 }
 
 impl<'a> SceneGraphTraverser<'a> {
+    fn traverse(
+        &mut self,
+        node: u32,
+        parent: WorldOrParent<'_, '_>,
+        translation: glam::IVec3,
+        rotation: Rotation,
+        name: Option<&str>,
+    ) {
+        if self.scene.scenes.is_empty() {
+            // Shape nodes are leafs and correspond to models
+            assert_eq!(self.scene.models.len(), 1);
+            let model = &self.scene.models[0];
+            if model.voxels.len() == 0 {
+                return;
+            }
+            let entity = parent
+                .spawn(VoxBundle {
+                    transform: Default::default(),
+                    ..VoxBundle::from_geometry_material(Handle::default(), Handle::default())
+                })
+                .id();
+            self.instances.push((0, entity));
+            self.models.insert(0);
+            return;
+        }
+        self.traverse_recursive(node, parent, translation, rotation, name);
+    }
     fn traverse_recursive(
         &mut self,
         node: u32,
@@ -293,7 +320,7 @@ impl AssetLoader for VoxLoader {
                 models: HashSet::new(),
                 instances: Vec::new(),
             };
-            traverser.traverse_recursive(
+            traverser.traverse(
                 0,
                 WorldOrParent::World(&mut world),
                 IVec3::ZERO,
