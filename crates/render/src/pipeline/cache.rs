@@ -13,7 +13,8 @@ use bevy_ecs::{
 use rhyolite::{ComputePipeline, PipelineLayout, RayTracingHitGroupType};
 
 use crate::{
-    deferred_task::DeferredValue, ComputePipelineBuildInfo, ShaderModule, SpecializedShader, RayTracingPipelineCharacteristics,
+    deferred_task::DeferredValue, ComputePipelineBuildInfo, RayTracingPipelineCharacteristics,
+    ShaderModule, SpecializedShader,
 };
 
 use super::manager::RayTracingPipelineBuildInfo;
@@ -74,27 +75,30 @@ impl PipelineCache {
         &self,
         pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
         base_shaders: Vec<SpecializedShader>,
-        hitgroup_shaders: Vec<(Option<SpecializedShader>, Option<SpecializedShader>, Option<SpecializedShader>, RayTracingHitGroupType)>,
+        hitgroup_shaders: Vec<(
+            Option<SpecializedShader>,
+            Option<SpecializedShader>,
+            Option<SpecializedShader>,
+            RayTracingHitGroupType,
+        )>,
     ) -> CachedPipeline<rhyolite::RayTracingPipeline> {
         CachedPipeline {
-            
             shader_generations: if self.hot_reload_enabled {
-                base_shaders.iter()
-                .chain(hitgroup_shaders.iter().flat_map(|(rchit, rint, rahit, _)| {
-                    rchit.into_iter().chain(rint).chain(rahit)
-                }))
-                .map(|shader| (shader.shader.clone_weak(), 0))
-                .collect()
+                base_shaders
+                    .iter()
+                    .chain(hitgroup_shaders.iter().flat_map(|(rchit, rint, rahit, _)| {
+                        rchit.into_iter().chain(rint).chain(rahit)
+                    }))
+                    .map(|shader| (shader.shader.clone_weak(), 0))
+                    .collect()
             } else {
                 Default::default()
             },
-            build_info: Some(
-                RayTracingPipelineBuildInfo {
-                    pipeline_characteristics,
-                    base_shaders,
-                    hitgroup_shaders,
-                }
-            ),
+            build_info: Some(RayTracingPipelineBuildInfo {
+                pipeline_characteristics,
+                base_shaders,
+                hitgroup_shaders,
+            }),
             pipeline: None,
             task: DeferredValue::None,
         }
@@ -124,8 +128,11 @@ impl PipelineCache {
                             // to latest so that this particular pipeline won't be updated next frame.
                             // Otherwise, leave it as is, and this is going to attempt creating a new pipeline
                             // compilation task again next time.
-                            for (shader, generation) in cached_pipeline.shader_generations.iter_mut() {
-                                if let Some(latest_generation) = self.shader_generations.get(shader) {
+                            for (shader, generation) in
+                                cached_pipeline.shader_generations.iter_mut()
+                            {
+                                if let Some(latest_generation) = self.shader_generations.get(shader)
+                                {
                                     *generation = *latest_generation;
                                 }
                             }

@@ -13,7 +13,7 @@ use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{Cursor, PrimaryWindow, Window, WindowResolution};
 use dust_render::{
     AutoExposurePipeline, BlueNoise, ExposureSettings, PinholeProjection, StandardPipeline,
-    Sunlight, TLASStore, ToneMappingPipeline,
+    Sunlight, SvgfPipeline, TLASStore, ToneMappingPipeline,
 };
 
 use glam::{Vec3, Vec3A};
@@ -73,6 +73,7 @@ fn main() {
         .add_systems(bevy_app::Update, cursor_grab_system)
         .init_resource::<ToneMappingPipeline>()
         .init_resource::<AutoExposurePipeline>()
+        .init_resource::<SvgfPipeline>()
         .init_resource::<ExposureSettings>();
     let main_window = app
         .world
@@ -136,17 +137,35 @@ impl Plugin for RenderSystem {
              queue_router: Res<QueuesRouter>,
              mut tlas_store: ResMut<TLASStore>,
              allocator: Res<rhyolite_bevy::Allocator>,
-             mut pipeline: ResMut<StandardPipeline>,
-             mut auto_exposure_pipeline: ResMut<AutoExposurePipeline>,
-             mut auto_exposure_params: SystemParamItem<AutoExposurePipeline::RenderParams>,
-             mut tone_mapping_params: SystemParamItem<ToneMappingPipeline::RenderParams>,
+             pipelines: (
+                ResMut<StandardPipeline>,
+                ResMut<SvgfPipeline>,
+                ResMut<AutoExposurePipeline>,
+                ResMut<ToneMappingPipeline>,
+            ),
              mut recycled_state: Local<_>,
-             mut tone_mapping_pipeline: ResMut<ToneMappingPipeline>,
-             mut render_params: SystemParamItem<StandardPipeline::RenderParams>,
+             pipeline_params: (
+                SystemParamItem<StandardPipeline::RenderParams>,
+                SystemParamItem<SvgfPipeline::RenderParams>,
+                SystemParamItem<AutoExposurePipeline::RenderParams>,
+                SystemParamItem<ToneMappingPipeline::RenderParams>,
+            ),
              cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
              blue_noise: Res<BlueNoise>,
              img_slices: Res<Assets<SlicedImageArray>>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
+                let (
+                    mut ray_tracing_pipeline,
+                    mut svgf_pipeline,
+                    mut auto_exposure_pipeline,
+                    mut tone_mapping_pipeline,
+                ) = pipelines;
+                let (
+                    ray_tracing_pipeline_params,
+                    svgf_pipeline_params,
+                    auto_exposure_pipeline_params,
+                    tone_mapping_pipeline_params,
+                ) = pipeline_params;
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
                     return;
                 };
@@ -210,13 +229,13 @@ impl Plugin for RenderSystem {
                         }, |image| swapchain_image.inner().extent() != image.extent());
 
 
-                        let mut radiance_image = rhyolite::future::use_shared_image(using!(), |_| {
+                        let (mut radiance_image, mut radiance_image_prev) = rhyolite::future::use_shared_image_flipflop(using!(), |_| {
                             (
                                 allocator
                                     .create_device_image_uninit(
                                         &ImageRequest {
                                             format: vk::Format::R32G32B32A32_SFLOAT,
-                                            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
+                                            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
                                             extent: swapchain_image.inner().extent(),
                                             ..Default::default()
                                         }
@@ -229,21 +248,22 @@ impl Plugin for RenderSystem {
                         let mut rendered = false;
                         if let Some(accel_struct) = accel_struct {
                             let accel_struct = accel_struct.await;
-                            if let Some(render) = pipeline.render(
+                            if let Some(render) = ray_tracing_pipeline.render(
                                 &mut radiance_image,
                                 &mut albedo_image,
                                 &mut normal_image,
                                 &mut depth_image,
                                 &blue_noise,
                                 &accel_struct,
-                                render_params,
+                                ray_tracing_pipeline_params,
                                 camera,
                             ) {
                                 render.await;
                                 rendered = true;
                             }
                             if rendered {
-                                let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_params).await;
+                                svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &svgf_pipeline_params).await;
+                                let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_pipeline_params).await;
                                 let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
                                 let color_space = swapchain_image.inner().color_space().clone();
                                 tone_mapping_pipeline.render(
@@ -252,13 +272,13 @@ impl Plugin for RenderSystem {
                                     &mut swapchain_image,
                                     &exposure_avg,
                                     &color_space,
-                                    &tone_mapping_params
+                                    &tone_mapping_pipeline_params
                                 ).await;
                                 retain!(exposure_avg);
                             }
                             retain!(accel_struct);
                         }
-                        retain!((radiance_image, albedo_image, normal_image, depth_image));
+                        retain!((radiance_image, albedo_image, normal_image, depth_image, radiance_image_prev));
                         if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]

@@ -15,11 +15,13 @@ mod manager;
 mod plugin;
 mod sky;
 mod standard;
+mod svgf;
 mod tone_mapping;
 
 pub use cache::*;
 pub use compute::*;
 pub use sky::Sunlight;
+pub use svgf::*;
 
 use crate::{
     material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable, ShaderModule,

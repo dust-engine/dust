@@ -24,6 +24,10 @@ layout(location = 0) rayPayloadEXT PhotonRayPayload photon;
 
 
 void main() {
+    if (sunlight_config.direction.y <= 0) {
+        // Do not emit lights during the night
+        return;
+    }
     vec2 jitter = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy - uvec2(16, 44) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xy;
     vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + jitter) / vec2(gl_LaunchSizeEXT.xy);
     pixelNDC = pixelNDC * 2.0 - 1.0;

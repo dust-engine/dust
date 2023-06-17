@@ -125,6 +125,10 @@ float ArHosekSkyModel_GetRadianceInternal(
 // dir: normalized view direction vector
 vec3 arhosek_sky_radiance(vec3 dir)
 {
+    if (sunlight_config.direction.y <= 0) {
+        // Avoid NaN problems.
+        return vec3(0);
+    }
     float cos_theta = clamp(dir.y, 0, 1);
     float cos_gamma = dot(dir, sunlight_config.direction.xyz);
     float gamma = acos(cos_gamma);

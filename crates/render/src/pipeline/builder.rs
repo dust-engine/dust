@@ -54,11 +54,7 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
                     .collect(),
             });
     }
-    pub fn build(
-        self,
-        num_frame_in_flight: u32,
-        asset_server: &AssetServer,
-    ) -> P {
+    pub fn build(self, num_frame_in_flight: u32, asset_server: &AssetServer) -> P {
         let pipeline_layout = P::pipeline_layout(self.allocator.device());
         let characteristics = RayTracingPipelineCharacteristics {
             num_frame_in_flight,
@@ -70,10 +66,6 @@ impl<P: RayTracingPipeline> RayTracingPipelineBuilder<P> {
             num_raytype: P::num_raytypes(),
             create_info: P::create_info(),
         };
-        P::new(
-            self.allocator,
-            characteristics,
-            asset_server,
-        )
+        P::new(self.allocator, characteristics, asset_server)
     }
 }

@@ -30,6 +30,9 @@ void main() {
     uint8_t faceIdU = uint8_t(min((faceId > 0 ? (faceId-1) : (6 + faceId)), 5));
 
     IrradianceCacheFace hashEntry = sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU];
+    if (hashEntry.mask == 0) {
+        return;
+    }
     uint16_t lastAccessedFrameIndex = sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[faceIdU];
 
     // irradiance, pre multiplied with albedo.

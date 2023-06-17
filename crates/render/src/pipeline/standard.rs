@@ -23,11 +23,11 @@ use rhyolite::{
 use rhyolite_bevy::StagingRingBuffer;
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 
-use crate::{Sunlight, PipelineCache};
 use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
     BlueNoise, PinholeProjection, ShaderModule, SpecializedShader,
 };
+use crate::{PipelineCache, Sunlight};
 
 use super::sky::SkyModelState;
 use super::{RayTracingPipeline, RayTracingPipelineManager};
@@ -248,10 +248,18 @@ impl StandardPipeline {
             > + 'a,
     > {
         let (shader_store, pipeline_cache, allocator, sunlight, staging_ring_buffer) = params;
-        let primary_pipeline = self.primary_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
-        let photon_pipeline = self.photon_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
-        let shadow_pipeline = self.shadow_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
-        let final_gather_pipeline = self.final_gather_ray_pipeline.get_pipeline(&pipeline_cache, &shader_store)?;
+        let primary_pipeline = self
+            .primary_ray_pipeline
+            .get_pipeline(&pipeline_cache, &shader_store)?;
+        let photon_pipeline = self
+            .photon_ray_pipeline
+            .get_pipeline(&pipeline_cache, &shader_store)?;
+        let shadow_pipeline = self
+            .shadow_ray_pipeline
+            .get_pipeline(&pipeline_cache, &shader_store)?;
+        let final_gather_pipeline = self
+            .final_gather_ray_pipeline
+            .get_pipeline(&pipeline_cache, &shader_store)?;
         self.hitgroup_sbt_manager.specify_pipelines(&[
             primary_pipeline,
             photon_pipeline,

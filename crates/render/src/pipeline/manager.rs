@@ -7,14 +7,15 @@ use std::{
 use bevy_asset::{Assets, Handle};
 use bevy_tasks::AsyncComputeTaskPool;
 use rhyolite::{
-    ash::prelude::VkResult, HasDevice, PipelineLayout, RayTracingPipeline,
-    RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo, RayTracingHitGroupType,
+    ash::prelude::VkResult, HasDevice, PipelineLayout, RayTracingHitGroupType, RayTracingPipeline,
+    RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo,
 };
 
 use crate::{
     deferred_task::{DeferredTaskPool, DeferredValue},
     material::Material,
-    shader::{ShaderModule, SpecializedShader}, CachablePipeline, PipelineBuildInfo, CachedPipeline, PipelineCache,
+    shader::{ShaderModule, SpecializedShader},
+    CachablePipeline, CachedPipeline, PipelineBuildInfo, PipelineCache,
 };
 
 use super::RayTracingPipelineCharacteristics;
@@ -138,8 +139,12 @@ impl PipelineBuildInfo for RayTracingPipelineLibraryBuildInfo {
 pub struct RayTracingPipelineBuildInfo {
     pub pipeline_characteristics: Arc<RayTracingPipelineCharacteristics>,
     pub base_shaders: Vec<SpecializedShader>,
-    pub hitgroup_shaders: Vec<(Option<SpecializedShader>, Option<SpecializedShader>, Option<SpecializedShader>, 
-        RayTracingHitGroupType)>,
+    pub hitgroup_shaders: Vec<(
+        Option<SpecializedShader>,
+        Option<SpecializedShader>,
+        Option<SpecializedShader>,
+        RayTracingHitGroupType,
+    )>,
 }
 impl CachablePipeline for rhyolite::RayTracingPipeline {
     type BuildInfo = RayTracingPipelineBuildInfo;
@@ -147,65 +152,79 @@ impl CachablePipeline for rhyolite::RayTracingPipeline {
 impl PipelineBuildInfo for RayTracingPipelineBuildInfo {
     type Pipeline = rhyolite::RayTracingPipeline;
     fn build(
-            self,
-            shader_store: &Assets<ShaderModule>,
-            pipeline_cache: Option<&Arc<rhyolite::PipelineCache>>,
-        ) -> DeferredValue<Arc<Self::Pipeline>> {
-            let layout = self.pipeline_characteristics.layout.clone();
-            let normalize_shader = |a: &SpecializedShader| {
-                let shader = shader_store.get(&a.shader)?;
-                Some(rhyolite::shader::SpecializedShader {
-                    stage: a.stage,
-                    flags: a.flags,
-                    shader: shader.inner().clone(),
-                    specialization_info: a.specialization_info.clone(),
-                    entry_point: a.entry_point,
-                })
-            };
-            let base_shaders: Option<Vec<rhyolite::shader::SpecializedShader<'_, _>>> =
-                self.base_shaders.iter().map(normalize_shader).collect();
-            let Some(base_shaders) = base_shaders else {
+        self,
+        shader_store: &Assets<ShaderModule>,
+        pipeline_cache: Option<&Arc<rhyolite::PipelineCache>>,
+    ) -> DeferredValue<Arc<Self::Pipeline>> {
+        let layout = self.pipeline_characteristics.layout.clone();
+        let normalize_shader = |a: &SpecializedShader| {
+            let shader = shader_store.get(&a.shader)?;
+            Some(rhyolite::shader::SpecializedShader {
+                stage: a.stage,
+                flags: a.flags,
+                shader: shader.inner().clone(),
+                specialization_info: a.specialization_info.clone(),
+                entry_point: a.entry_point,
+            })
+        };
+        let base_shaders: Option<Vec<rhyolite::shader::SpecializedShader<'_, _>>> =
+            self.base_shaders.iter().map(normalize_shader).collect();
+        let Some(base_shaders) = base_shaders else {
                 return DeferredValue::None;
             };
-            type Shader = rhyolite::shader::SpecializedShader<'static, Arc<rhyolite::shader::ShaderModule>>;
-            let hitgroups: Option<Vec<_>> = self.hitgroup_shaders.iter().map(|(rchit, rint, rahit, ty)| -> Option<(Option<Shader>, Option<Shader>, Option<Shader>, RayTracingHitGroupType)> {
-                Some((
-                    if let Some(rchit) = rchit.as_ref() {
-                        Some(normalize_shader(rchit)?)
-                    } else {
-                        None
-                    },if let Some(rint) = rint.as_ref() {
-                        Some(normalize_shader(rint)?)
-                    } else {
-                        None
-                    },if let Some(rahit) = rahit.as_ref() {
-                        Some(normalize_shader(rahit)?)
-                    } else {
-                        None
-                    },
-                    *ty
-                ))
-            }).collect();
-            let Some(hitgroups) = hitgroups else {
+        type Shader =
+            rhyolite::shader::SpecializedShader<'static, Arc<rhyolite::shader::ShaderModule>>;
+        let hitgroups: Option<Vec<_>> = self
+            .hitgroup_shaders
+            .iter()
+            .map(
+                |(rchit, rint, rahit, ty)| -> Option<(
+                    Option<Shader>,
+                    Option<Shader>,
+                    Option<Shader>,
+                    RayTracingHitGroupType,
+                )> {
+                    Some((
+                        if let Some(rchit) = rchit.as_ref() {
+                            Some(normalize_shader(rchit)?)
+                        } else {
+                            None
+                        },
+                        if let Some(rint) = rint.as_ref() {
+                            Some(normalize_shader(rint)?)
+                        } else {
+                            None
+                        },
+                        if let Some(rahit) = rahit.as_ref() {
+                            Some(normalize_shader(rahit)?)
+                        } else {
+                            None
+                        },
+                        *ty,
+                    ))
+                },
+            )
+            .collect();
+        let Some(hitgroups) = hitgroups else {
                 return DeferredValue::None;
             };
 
-            let create_info = self.pipeline_characteristics.create_info.clone();
-            let pipeline_cache = pipeline_cache.cloned();
-            let pipeline: bevy_tasks::Task<VkResult<Arc<RayTracingPipeline>>> =
-                AsyncComputeTaskPool::get().spawn(async move {
-                    let pipeline = rhyolite::RayTracingPipeline::create_for_shaders(
-                        layout,
-                        base_shaders.as_slice(),
-                        hitgroups.into_iter(),
-                        &create_info,
-                        pipeline_cache.as_ref().map(|a| a.as_ref()),
-                        DeferredTaskPool::get().inner().clone(),
-                    )
-                    .await?;
-                    Ok(Arc::new(pipeline))
-                });
-            pipeline.into()
+        let create_info = self.pipeline_characteristics.create_info.clone();
+        let pipeline_cache = pipeline_cache.cloned();
+        let pipeline: bevy_tasks::Task<VkResult<Arc<RayTracingPipeline>>> =
+            AsyncComputeTaskPool::get().spawn(async move {
+                let pipeline = rhyolite::RayTracingPipeline::create_for_shaders(
+                    layout,
+                    base_shaders.as_slice(),
+                    hitgroups.into_iter(),
+                    &create_info,
+                    pipeline_cache.as_ref().map(|a| a.as_ref()),
+                    DeferredTaskPool::get().inner().clone(),
+                )
+                .await?;
+                Ok(Arc::new(pipeline))
+            });
+        pipeline.into()
     }
 }
 
@@ -282,18 +301,20 @@ impl RayTracingPipelineManager {
             self.build_specialized_pipeline(full_material_mask, |_| true, pipeline_cache);
         }
 
-
-        
-        if let Some(pipeline) = self.specialized_pipelines.get_mut(&self.current_material_flag).map(|ptr| unsafe {
-            // Remove lifetime info here due to NLL limitation. This is safe and sound, passes polonius.
-            &mut *(ptr as *mut RayTracingPipelineManagerSpecializedPipelineDeferred)
-        }) {
+        if let Some(pipeline) = self
+            .specialized_pipelines
+            .get_mut(&self.current_material_flag)
+            .map(|ptr| unsafe {
+                // Remove lifetime info here due to NLL limitation. This is safe and sound, passes polonius.
+                &mut *(ptr as *mut RayTracingPipelineManagerSpecializedPipelineDeferred)
+            })
+        {
             if let Some(p) = pipeline_cache.retrieve(&mut pipeline.pipeline, shader_store) {
                 return Some(RayTracingPipelineManagerSpecializedPipeline {
                     material_mapping: &self.pipeline_characteristics.material_to_index,
                     pipeline: p,
                     hitgroup_mapping: &pipeline.hitgroup_mapping,
-                    raytypes: &self.raytypes
+                    raytypes: &self.raytypes,
                 });
             }
         }
@@ -346,9 +367,7 @@ impl RayTracingPipelineManager {
                     &self.pipeline_characteristics.materials[material_index].shaders
                         [*raytype as usize]
                 })
-                .map(|(rchit, rint, rahit)| {
-                    (rchit.clone(), rint.clone(), rahit.clone(), ty)
-                });
+                .map(|(rchit, rint, rahit)| (rchit.clone(), rint.clone(), rahit.clone(), ty));
             hitgroups.extend(material_hitgroups);
         }
 
@@ -358,7 +377,7 @@ impl RayTracingPipelineManager {
                 pipeline: pipeline_cache.add_ray_tracing_pipeline(
                     self.pipeline_characteristics.clone(),
                     self.shaders.clone(),
-                    hitgroups
+                    hitgroups,
                 ),
                 hitgroup_mapping,
             },
