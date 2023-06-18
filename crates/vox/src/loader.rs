@@ -4,6 +4,7 @@ use crate::{palette::VoxPalette, VoxGeometry};
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 use crate::{Tree, VoxBundle};
+use bevy_asset::{AssetLoader, Assets, Handle, LoadedAsset};
 use bevy_ecs::{
     prelude::{Bundle, Entity},
     world::{EntityMut, FromWorld, World},
@@ -13,7 +14,9 @@ use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, Rotation, SceneNode};
 use glam::{IVec3, UVec3, Vec3, Vec3Swizzles};
 use rayon::prelude::*;
+use rhyolite::fill_buffer;
 use rhyolite::future::RenderRes;
+use rhyolite::BufferLike;
 use rhyolite::{
     ash::vk,
     debug::DebugObject,
@@ -21,8 +24,6 @@ use rhyolite::{
     macros::commands,
     QueueRef,
 };
-
-use bevy_asset::{AssetLoader, Assets, Handle, LoadedAsset};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter};
 
 use crate::material::{DiffuseMaterial, DiffuseMaterialIrradianceCacheEntry, PaletteMaterial};
@@ -333,7 +334,7 @@ impl AssetLoader for VoxLoader {
                 .par_iter()
                 .map(|model_id| {
                     let model = &file.models[*model_id as usize];
-                    assert!(model.size.x <= 255 && model.size.y <= 255 && model.size.z <= 255);
+                    assert!(model.size.x <= 256 && model.size.y <= 256 && model.size.z <= 256);
 
                     (*model_id, self.load_model(model, palette_handle.clone()))
                 })
@@ -341,7 +342,7 @@ impl AssetLoader for VoxLoader {
             let geometry_materials = commands! {
                 let mut geometry_materials: Vec<_> = Vec::with_capacity(traverser.models.len());
                 for (model_id, future) in geometry_material_futures.into_iter() {
-                    let (geometry, material) = future.await;
+                    let (geometry, material) = future.await; // TODO: join here instead
                     geometry_materials.push((model_id, geometry, material));
                 }
                 geometry_materials
@@ -367,27 +368,48 @@ impl AssetLoader for VoxLoader {
                 );
                 models[model_id as usize] = Some((geometry_handle, material_handle, num_blocks));
             }
-            for (i, (model_id, entity)) in traverser.instances.iter().enumerate() {
-                let (geometry_handle, material_handle, num_blocks) =
-                    models[*model_id as usize].as_ref().unwrap();
+            let diffuse_materials: Vec<_> = traverser
+                .instances
+                .iter()
+                .map(|(model_id, entity_id)| {
+                    let (geometry_handle, material_handle, num_blocks) =
+                        models[*model_id as usize].as_ref().unwrap();
 
-                let mut entity = world.entity_mut(*entity);
-                *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry_handle.clone();
-                let diffuse_material = DiffuseMaterial::new(
-                    material_handle.clone(),
-                    self.allocator
-                        .create_device_buffer_uninit(
-                            (*num_blocks as usize
-                                * std::mem::size_of::<DiffuseMaterialIrradianceCacheEntry>())
-                                as u64,
-                            vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                        )
-                        .unwrap(),
-                );
+                    let mut entity = world.entity_mut(*entity_id);
+                    *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry_handle.clone();
+                    let diffuse_material = DiffuseMaterial::new(
+                        material_handle.clone(),
+                        self.allocator
+                            .create_device_buffer_uninit(
+                                (*num_blocks as usize
+                                    * std::mem::size_of::<DiffuseMaterialIrradianceCacheEntry>())
+                                    as u64,
+                                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                                    | vk::BufferUsageFlags::TRANSFER_DST, // TODO: zero-initialize this.0
+                            )
+                            .unwrap(),
+                    );
+                    (diffuse_material, *entity_id)
+                })
+                .collect();
+            let zero_initialize_future = commands! {
+                for (diffuse_material, _) in diffuse_materials.iter() {
+                    // TODO: join here instead
+                    let mut buffer = RenderRes::new(diffuse_material.irradiance_cache.raw_buffer());
+                    fill_buffer(&mut buffer, 0).await;
+                    retain!(buffer);
+                }
+            }
+            .schedule_on_queue(self.transfer_queue);
+            self.queues
+                .submit(zero_initialize_future, &mut Default::default())
+                .await;
+            for (i, (diffuse_material, entity_id)) in diffuse_materials.into_iter().enumerate() {
                 let diffuse_material_handle = load_context.set_labeled_asset(
                     &format!("DiffuseMaterial{}", i),
                     LoadedAsset::new(diffuse_material),
                 );
+                let mut entity = world.entity_mut(entity_id);
                 *entity.get_mut::<Handle<DiffuseMaterial>>().unwrap() = diffuse_material_handle;
             }
 

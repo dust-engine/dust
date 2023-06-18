@@ -69,6 +69,8 @@ impl RayTracingPipeline for StandardPipeline {
             img_normal: vk::DescriptorType::STORAGE_IMAGE,
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
             img_depth: vk::DescriptorType::STORAGE_IMAGE,
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            img_motion: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
@@ -236,6 +238,7 @@ impl StandardPipeline {
         albedo_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         normal_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         depth_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        motion_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         noise_image: &'a SlicedImageArray,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         params: SystemParamItem<'a, '_, Self::RenderParams>,
@@ -356,23 +359,24 @@ impl StandardPipeline {
                         albedo_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         normal_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         depth_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        motion_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
                     ]
                 ),
                 DescriptorSetWrite::sampled_images(
                     desc_set[0],
-                    5,
+                    6,
                     0,
                     &[noise_image.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
                 ),
                 DescriptorSetWrite::accel_structs(
                     desc_set[0],
-                    4,
+                    5,
                     0,
                     &[tlas.inner().raw()]
                 ),
                 DescriptorSetWrite::uniform_buffers(
                     desc_set[0],
-                    6,
+                    7,
                     0,
                     &[sunlight_buffer.inner().as_descriptor()],
                     false

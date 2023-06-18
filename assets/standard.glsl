@@ -15,9 +15,10 @@ layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
 layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
 layout(set = 0, binding = 2, rgba16_snorm) uniform image2D u_normal;
 layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
+layout(set = 0, binding = 4, rg16f) uniform image2D u_motion;
 
-layout(set = 0, binding = 4) uniform accelerationStructureEXT accelerationStructure;
-layout(set = 0, binding = 5) uniform texture2D blue_noise;
+layout(set = 0, binding = 5) uniform accelerationStructureEXT accelerationStructure;
+layout(set = 0, binding = 6) uniform texture2D blue_noise;
 
 #define RETENTION_FACTOR 0.95
 
@@ -97,7 +98,7 @@ struct ArHosekSkyModelChannelConfiguration {
     vec4 ldCoefficient2; // 2, 3, 4, 5
 };
 
-layout(set = 0, binding = 6, std430) uniform ArHosekSkyModelConfiguration{
+layout(set = 0, binding = 7, std430) uniform ArHosekSkyModelConfiguration{
     ArHosekSkyModelChannelConfiguration r;
     ArHosekSkyModelChannelConfiguration g;
     ArHosekSkyModelChannelConfiguration b;

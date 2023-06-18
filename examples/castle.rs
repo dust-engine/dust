@@ -2,7 +2,7 @@
 #![feature(int_roundings)]
 use std::ops::DerefMut;
 
-use bevy_app::{App, Plugin, Startup};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
@@ -93,6 +93,7 @@ fn main() {
     app.add_plugin(dust_vox::VoxPlugin);
 
     app.add_systems(Startup, setup);
+    app.add_systems(Update, teapot_move_system);
 
     app.run();
 }
@@ -102,6 +103,9 @@ pub struct NoiseResource {
     noise: bevy_asset::Handle<Image>,
 }
 
+#[derive(Component)]
+struct TeaPot;
+
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(NoiseResource {
         noise: asset_server.load("stbn_unitvec3_cosine_2Dx1D_128x128x64.png"),
@@ -110,6 +114,12 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         scene: asset_server.load("castle.vox"),
         ..Default::default()
     });
+    commands
+        .spawn(bevy_scene::SceneBundle {
+            scene: asset_server.load("teapot.vox"),
+            ..Default::default()
+        })
+        .insert(TeaPot);
     commands
         .spawn(PinholeProjection::default())
         .insert(GlobalTransform::default())
@@ -228,6 +238,20 @@ impl Plugin for RenderSystem {
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
 
+                        let mut motion_image = rhyolite::future::use_shared_image(using!(), |_| {
+                            (
+                                allocator
+                                    .create_device_image_uninit(
+                                        &ImageRequest {
+                                            format: vk::Format::R16G16_SFLOAT,
+                                            usage: vk::ImageUsageFlags::STORAGE,
+                                            extent: swapchain_image.inner().extent(),
+                                            ..Default::default()
+                                        }
+                                    ).unwrap().as_2d_view().unwrap(),
+                                vk::ImageLayout::UNDEFINED,
+                            )
+                        }, |image| swapchain_image.inner().extent() != image.extent());
 
                         let (mut radiance_image, mut radiance_image_prev) = rhyolite::future::use_shared_image_flipflop(using!(), |_| {
                             (
@@ -253,6 +277,7 @@ impl Plugin for RenderSystem {
                                 &mut albedo_image,
                                 &mut normal_image,
                                 &mut depth_image,
+                                &mut motion_image,
                                 &blue_noise,
                                 &accel_struct,
                                 ray_tracing_pipeline_params,
@@ -278,7 +303,7 @@ impl Plugin for RenderSystem {
                             }
                             retain!(accel_struct);
                         }
-                        retain!((radiance_image, albedo_image, normal_image, depth_image, radiance_image_prev));
+                        retain!((radiance_image, albedo_image, normal_image, depth_image, radiance_image_prev, motion_image));
                         if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]
@@ -334,5 +359,12 @@ fn cursor_grab_system(
     if key.just_pressed(KeyCode::Escape) {
         window.cursor.grab_mode = bevy_window::CursorGrabMode::None;
         window.cursor.visible = true;
+    }
+}
+
+fn teapot_move_system(time: Res<Time>, mut query: Query<&mut Transform, With<TeaPot>>) {
+    for mut teapot in query.iter_mut() {
+        *teapot =
+            Transform::from_translation(Vec3::new(time.elapsed_seconds().sin() * 50.0, 200.0, 0.0));
     }
 }

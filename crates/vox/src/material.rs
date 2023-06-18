@@ -32,7 +32,7 @@ impl PaletteMaterial {
 #[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0b"]
 pub struct DiffuseMaterial {
     material: Handle<PaletteMaterial>,
-    irradiance_cache: ResidentBuffer,
+    pub(crate) irradiance_cache: ResidentBuffer,
 }
 
 impl DiffuseMaterial {

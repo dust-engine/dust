@@ -23,9 +23,6 @@ void main() {
 	
 	float alpha = 0.2;
 	vec3 mixed = alpha * illuminance_curr + (1.0 - alpha) * illuminance_prev;
-	if (gl_GlobalInvocationID.x == 0 && gl_GlobalInvocationID.y == 0) {
-		debugPrintfEXT("Is %f %f\n", illuminance_prev.x, mixed.x);
-	}
 
 	imageStore(u_illuminance, ivec2(gl_GlobalInvocationID.xy), vec4(mixed, 0.0));
 }
