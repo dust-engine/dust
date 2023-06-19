@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rhyolite-bevy = { git = "https://github.com/dust-engine/rhyolite.git" }
-rhyolite = { git = "https://github.com/dust-engine/rhyolite.git" }
+rhyolite-bevy = { path = "../rhyolite_bevy" }
+rhyolite = { path = "../rhyolite" }
 bevy_tasks = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }

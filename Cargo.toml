@@ -15,8 +15,8 @@ members = [
 
 [dev-dependencies]
 pin-project = "1.0"
-rhyolite = { git = "https://github.com/dust-engine/rhyolite.git" }
-rhyolite-bevy = { git = "https://github.com/dust-engine/rhyolite.git" }
+rhyolite = { path = "./crates/rhyolite" }
+rhyolite-bevy = { path = "./crates/rhyolite_bevy" }
 dust-render = { path = "./crates/render" }
 dust-vox = { path = "./crates/vox" }
 bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }

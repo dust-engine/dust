@@ -15,8 +15,8 @@ bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885
 bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-rhyolite = { git = "https://github.com/dust-engine/rhyolite.git" }
-rhyolite-bevy = { git = "https://github.com/dust-engine/rhyolite.git" }
+rhyolite = { path = "../rhyolite" }
+rhyolite-bevy = { path = "../rhyolite_bevy" }
 dust_vdb = { path = "../vdb" }
 glam = "^0.24"
 anyhow = "*"

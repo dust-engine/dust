@@ -1,0 +1,36 @@
+#version 460
+
+
+#define WORKGROUP_SIZE 128
+layout(local_size_x = WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+layout(rgba8, set = 0, binding = 0) uniform readonly image2D imgInput;
+layout(rgba8, set = 0, binding = 1) uniform writeonly image2D imgOutput;
+
+layout(push_constant) uniform constants
+{
+    uint kernal_size;
+} PushConstants;
+
+
+#define MAX_KERNEL_SIZE 32
+shared vec3 workgroup_data[WORKGROUP_SIZE + MAX_KERNEL_SIZE * 2];
+
+void main() {
+    uint padding = MAX_KERNEL_SIZE - PushConstants.kernal_size;
+    workgroup_data[gl_LocalInvocationID.x + MAX_KERNEL_SIZE] = imageLoad(imgInput, ivec2(gl_GlobalInvocationID.xy)).rgb;
+    if (gl_LocalInvocationID.x < PushConstants.kernal_size) {
+        workgroup_data[gl_LocalInvocationID.x + padding] = imageLoad(imgInput, ivec2(gl_GlobalInvocationID.xy - ivec2(PushConstants.kernal_size, 0))).rgb;
+    }
+    if (gl_LocalInvocationID.x >= WORKGROUP_SIZE - PushConstants.kernal_size) {
+        workgroup_data[gl_LocalInvocationID.x + PushConstants.kernal_size + MAX_KERNEL_SIZE] = imageLoad(imgInput, ivec2(gl_GlobalInvocationID.xy + ivec2(PushConstants.kernal_size, 0))).rgb;
+    }
+    barrier();
+
+    vec3 value = vec3(0.0, 0.0, 0.0);
+    for (uint i = 0; i <= PushConstants.kernal_size * 2; i++) {
+        value += workgroup_data[gl_LocalInvocationID.x + MAX_KERNEL_SIZE + i - PushConstants.kernal_size];
+    }
+    value /= float(PushConstants.kernal_size * 2 + 1);
+    imageStore(imgOutput, ivec2(gl_GlobalInvocationID.xy), vec4(value, 1.0));
+}

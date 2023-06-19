@@ -1,0 +1,26 @@
+[package]
+name = "rhyolite"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/dust-engine/dust"
+license = "MIT OR Apache-2.0"
+categories = ["game-engines", "graphics", "gui", "rendering"]
+description = "A refreshingly simple data-driven game engine and app framework"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ash = "0.37"
+ash-window = "0.12"
+raw-window-handle = "0.5"
+tracing = "0.1"
+rhyolite-macro = { path = "../rhyolite_macro", version = "0.1.0" }
+vma = { git = "https://github.com/dust-engine/vk-mem-rs" }
+blocking = "1.2"
+pin-project = "1.0"
+cstr = "0.2"
+crossbeam-channel = "0.5"
+crossbeam-queue = "0.3"
+event-listener = "2.5.1"
+bytemuck = "1.13"
+glam = "0.24"
