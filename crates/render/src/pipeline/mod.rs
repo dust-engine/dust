@@ -28,11 +28,11 @@ use crate::{
 };
 pub use builder::RayTracingPipelineBuilder;
 pub use manager::{RayTracingPipelineManager, RayTracingPipelineManagerSpecializedPipeline};
-pub use tone_mapping::ToneMappingPipeline;
+pub use tone_mapping::{ToneMappingPipeline, ToneMappingPipelineRenderParams};
 
 pub use auto_exposure::*;
 pub use plugin::RayTracingPipelinePlugin;
-pub use standard::StandardPipeline;
+pub use standard::{StandardPipeline, StandardPipelineRenderParams};
 
 #[derive(Clone)]
 struct RayTracingPipelineCharacteristicsMaterialInfo {

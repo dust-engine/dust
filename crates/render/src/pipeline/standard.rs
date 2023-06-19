@@ -219,19 +219,19 @@ struct StandardPipelinePushConstant {
     frame_index: u32,
 }
 
+pub type StandardPipelineRenderParams = (
+    SRes<Assets<ShaderModule>>,
+    SRes<PipelineCache>,
+    SRes<Allocator>,
+    SRes<Sunlight>,
+    SRes<StagingRingBuffer>,
+);
 impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
     pub const PHOTON_RAYTYPE: u32 = 1;
     pub const SHADOW_RAYTYPE: u32 = 2;
     pub const FINAL_GATHER_RAYTYPE: u32 = 3;
 
-    pub type RenderParams = (
-        SRes<Assets<ShaderModule>>,
-        SRes<PipelineCache>,
-        SRes<Allocator>,
-        SRes<Sunlight>,
-        SRes<StagingRingBuffer>,
-    );
     pub fn render<'a>(
         &'a mut self,
         target_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
@@ -241,7 +241,7 @@ impl StandardPipeline {
         motion_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         noise_image: &'a SlicedImageArray,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
-        params: SystemParamItem<'a, '_, Self::RenderParams>,
+        params: SystemParamItem<'a, '_, StandardPipelineRenderParams>,
         camera: (&PinholeProjection, &GlobalTransform),
     ) -> Option<
         impl GPUCommandFuture<

@@ -93,18 +93,18 @@ impl FromWorld for SvgfPipeline {
         }
     }
 }
-impl SvgfPipeline {
-    pub type RenderParams = (
-        SRes<AssetServer>,
-        SRes<PipelineCache>,
-        SRes<Assets<ShaderModule>>,
-    );
 
+pub type SvgfPipelineRenderParams = (
+    SRes<AssetServer>,
+    SRes<PipelineCache>,
+    SRes<Assets<ShaderModule>>,
+);
+impl SvgfPipeline {
     pub fn render<'a>(
         &'a mut self,
         illuminance: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         prev_illuminance: &'a RenderImage<impl ImageViewLike + RenderData>,
-        params: &'a SystemParamItem<Self::RenderParams>,
+        params: &'a SystemParamItem<SvgfPipelineRenderParams>,
     ) -> impl GPUCommandFuture<
         Output = (),
         RetainedState: 'static + Disposable,

@@ -14,6 +14,8 @@ use bevy_window::{Cursor, PrimaryWindow, Window, WindowResolution};
 use dust_render::{
     AutoExposurePipeline, BlueNoise, ExposureSettings, PinholeProjection, StandardPipeline,
     Sunlight, SvgfPipeline, TLASStore, ToneMappingPipeline,
+    AutoExposurePipelineRenderParams, StandardPipelineRenderParams,
+    SvgfPipelineRenderParams, ToneMappingPipelineRenderParams
 };
 
 use glam::{Vec3, Vec3A};
@@ -44,11 +46,6 @@ fn main() {
             primary_window: Some(Window {
                 title: "Dust Renderer: Castle".into(),
                 resolution: WindowResolution::new(1920.0, 1080.0).with_scale_factor_override(1.0),
-                cursor: Cursor {
-                    grab_mode: bevy_window::CursorGrabMode::Locked,
-                    visible: false,
-                    ..Default::default()
-                },
                 ..Default::default()
             }),
             ..Default::default()
@@ -155,10 +152,10 @@ impl Plugin for RenderSystem {
             ),
              mut recycled_state: Local<_>,
              pipeline_params: (
-                SystemParamItem<StandardPipeline::RenderParams>,
-                SystemParamItem<SvgfPipeline::RenderParams>,
-                SystemParamItem<AutoExposurePipeline::RenderParams>,
-                SystemParamItem<ToneMappingPipeline::RenderParams>,
+                SystemParamItem<StandardPipelineRenderParams>,
+                SystemParamItem<SvgfPipelineRenderParams>,
+                SystemParamItem<AutoExposurePipelineRenderParams>,
+                SystemParamItem<ToneMappingPipelineRenderParams>,
             ),
              cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
              blue_noise: Res<BlueNoise>,

@@ -82,12 +82,14 @@ impl FromWorld for ToneMappingPipeline {
         }
     }
 }
+
+pub type ToneMappingPipelineRenderParams = (
+    SRes<AssetServer>,
+    SRes<PipelineCache>,
+    SRes<Assets<ShaderModule>>,
+);
 impl ToneMappingPipeline {
-    pub type RenderParams = (
-        SRes<AssetServer>,
-        SRes<PipelineCache>,
-        SRes<Assets<ShaderModule>>,
-    );
+
 
     pub fn render<'a>(
         &'a mut self,
@@ -96,7 +98,7 @@ impl ToneMappingPipeline {
         mut dst: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         exposure: &'a RenderRes<impl BufferLike + RenderData>,
         output_color_space: &ColorSpace,
-        params: &'a SystemParamItem<Self::RenderParams>,
+        params: &'a SystemParamItem<ToneMappingPipelineRenderParams>,
     ) -> impl GPUCommandFuture<
         Output = (),
         RetainedState: 'static + Disposable,

@@ -27,7 +27,7 @@ bevy_input = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885
 bevy_core = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_winit = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_winit = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", features = ["x11", "wayland"] }
 bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_a11y = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", features = ["filesystem_watcher"] }

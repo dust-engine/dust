@@ -109,18 +109,20 @@ impl FromWorld for AutoExposurePipeline {
     }
 }
 
+
+
+pub type AutoExposurePipelineRenderParams = (
+    SRes<Allocator>,
+    SRes<ExposureSettings>,
+    SRes<PipelineCache>,
+    SRes<Assets<ShaderModule>>,
+);
 impl AutoExposurePipeline {
-    pub type RenderParams = (
-        SRes<Allocator>,
-        SRes<ExposureSettings>,
-        SRes<PipelineCache>,
-        SRes<Assets<ShaderModule>>,
-    );
 
     pub fn render<'a>(
         &'a mut self,
         illuminance_image: &'a RenderImage<impl ImageViewLike + RenderData>,
-        params: &'a SystemParamItem<Self::RenderParams>,
+        params: &'a SystemParamItem<AutoExposurePipelineRenderParams>,
     ) -> impl GPUCommandFuture<
         Output = RenderRes<SharedDeviceState<ResidentBuffer>>,
         RetainedState: 'static + Disposable,
