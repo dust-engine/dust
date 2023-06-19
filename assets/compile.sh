@@ -6,5 +6,12 @@ glslc hit.rint ${FLAGS} -fshader-stage=rint -o hit.rint.spv
 
 
 glslc photon.rgen ${FLAGS} -fshader-stage=rgen -o photon.rgen.spv
-glslc photon.rint ${FLAGS} -fshader-stage=rint -o photon.rint.spv
 glslc photon.rchit ${FLAGS} -fshader-stage=rchit -o photon.rchit.spv
+glslc final_gather.rchit ${FLAGS} -fshader-stage=rchit -o final_gather.rchit.spv
+glslc final_gather.rgen ${FLAGS} -fshader-stage=rgen -o final_gather.rgen.spv
+glslc final_gather.rmiss ${FLAGS} -fshader-stage=rmiss -o final_gather.rmiss.spv
+glslc shadow.rmiss ${FLAGS} -fshader-stage=rmiss -o shadow.rmiss.spv
+glslc shadow.rgen ${FLAGS} -fshader-stage=rgen -o shadow.rgen.spv
+glslc auto_exposure.comp ${FLAGS} -fshader-stage=comp -o auto_exposure.comp.spv
+glslc auto_exposure_avg.comp ${FLAGS} -fshader-stage=comp -o auto_exposure_avg.comp.spv
+glslc tone_map.comp ${FLAGS} -fshader-stage=comp -o tone_map.comp.spv
