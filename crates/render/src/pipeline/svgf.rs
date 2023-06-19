@@ -179,7 +179,7 @@ impl SvgfPipeline {
                 ctx.read_image(
                     prev_illuminance,
                     vk::PipelineStageFlags2::COMPUTE_SHADER,
-                    vk::AccessFlags2::UNIFORM_READ,
+                    vk::AccessFlags2::SHADER_SAMPLED_READ,
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 );
             }).await;
