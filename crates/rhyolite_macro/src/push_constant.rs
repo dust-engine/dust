@@ -33,7 +33,7 @@ pub fn push_constant(input_token_stream: proc_macro2::TokenStream) -> proc_macro
 
     let mut current_active_stages: HashMap<String, PushConstantRange> = HashMap::new();
     for field in fields.iter_mut() {
-        let Some(stage) = field.attrs.drain_filter(|a| a.meta.path().is_ident("stage")).next() else {
+        let Some(stage) = field.attrs.extract_if(|a| a.meta.path().is_ident("stage")).next() else {
             return syn::Error::new(field.span(), "Field is missing the `stage` attribute").to_compile_error();
         };
         let stage = match stage.meta.require_list() {

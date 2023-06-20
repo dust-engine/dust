@@ -5,7 +5,7 @@
 #![feature(int_roundings)]
 #![feature(associated_type_bounds)]
 #![feature(specialization)]
-#![feature(btree_drain_filter)]
+#![feature(btree_extract_if)]
 
 use bevy_app::{Plugin, Update};
 mod blas;

@@ -1,6 +1,6 @@
 #![feature(track_path, proc_macro_span, proc_macro_diagnostic, extend_one)]
 #![feature(let_chains)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 
 use syn::parse::{Parse, ParseStream};
 
