@@ -15,11 +15,12 @@ use std::{
 use bevy_app::prelude::*;
 use bevy_asset::AddAsset;
 use bevy_ecs::prelude::*;
-
 use rhyolite::{
     ash::{self, vk},
     cstr, Instance, Version,
 };
+
+use raw_window_handle::{HasRawDisplayHandle, RawDisplayHandle};
 
 pub use self::image::*;
 pub use queue::{AsyncQueues, Frame, Queues, QueuesRouter};
@@ -54,7 +55,6 @@ impl Default for RenderPlugin {
             enabled_instance_layers: vec![],
             enabled_instance_extensions: vec![
                 ash::extensions::khr::Surface::name(),
-                ash::extensions::khr::Win32Surface::name(),
             ],
             physical_device_index: 0,
             max_frame_in_flight: 3,
@@ -90,7 +90,7 @@ impl Plugin for RenderPlugin {
 
         let entry = unsafe { ash::Entry::load().unwrap() };
         let instance = {
-            let enabled_instance_extensions: Vec<*const c_char> = self
+            let mut enabled_instance_extensions: Vec<*const c_char> = self
                 .enabled_instance_extensions
                 .iter()
                 .map(|a| a.as_ptr())
@@ -100,6 +100,17 @@ impl Plugin for RenderPlugin {
                 .iter()
                 .map(|a| a.as_ptr())
                 .collect();
+
+            let event_loop: &winit::event_loop::EventLoop<()> = app.world.get_non_send_resource().expect("Your display are not supported");
+            
+            match event_loop.raw_display_handle() {
+                RawDisplayHandle::Xlib(_) => enabled_instance_extensions.push(ash::extensions::khr::XlibSurface::name().as_ptr()),
+                RawDisplayHandle::Xcb(_) => enabled_instance_extensions.push(ash::extensions::khr::XcbSurface::name().as_ptr()),
+                RawDisplayHandle::Wayland(_) => enabled_instance_extensions.push(ash::extensions::khr::WaylandSurface::name().as_ptr()),
+                RawDisplayHandle::Windows(_) => enabled_instance_extensions.push(ash::extensions::khr::Win32Surface::name().as_ptr()),
+                _ => panic!("Your display are not supported."),
+            };
+
             Arc::new(
                 Instance::create(
                     Arc::new(entry),
