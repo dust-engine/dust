@@ -237,11 +237,11 @@ pub fn use_shared_image_flipflop<T>(
             previous.0
             .fetched
             .store(true, std::sync::atomic::Ordering::Relaxed);
-            let mut current_img = RenderImage::with_feedback(
+            let current_img = RenderImage::with_feedback(
                 SharedDeviceState(current.0.clone()),
                 current.0.get_tracking_feedback(),
             );
-            let mut prev_img = RenderImage::with_feedback(
+            let prev_img = RenderImage::with_feedback(
                 SharedDeviceState(previous.0.clone()),
                 previous.0.get_tracking_feedback(),
             );
@@ -291,6 +291,8 @@ pub fn use_shared_state_with_old<T>(
                     fetched: AtomicBool::new(true),
                 }),
             );
+            old.fetched
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             let old =
                 RenderRes::with_feedback(SharedDeviceState(old), inner.get_tracking_feedback());
             (RenderRes::new(SharedDeviceState(inner.clone())), Some(old))
