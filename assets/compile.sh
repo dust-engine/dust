@@ -15,3 +15,4 @@ glslc shadow.rgen ${FLAGS} -fshader-stage=rgen -o shadow.rgen.spv
 glslc auto_exposure.comp ${FLAGS} -fshader-stage=comp -o auto_exposure.comp.spv
 glslc auto_exposure_avg.comp ${FLAGS} -fshader-stage=comp -o auto_exposure_avg.comp.spv
 glslc tone_map.comp ${FLAGS} -fshader-stage=comp -o tone_map.comp.spv
+glslc asvgf/temporal.comp ${FLAGS} -fshader-stage=comp -o asvgf/temporal.comp.spv
