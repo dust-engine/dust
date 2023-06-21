@@ -21,7 +21,7 @@ blocking = "1.2"
 crossbeam-channel = "^0.5"
 tracing = "0.1"
 png = "0.17"
-winit = "0.28.6"
+winit = "0.28"
 raw-window-handle = "0.5.2"
 
 [dev-dependencies]

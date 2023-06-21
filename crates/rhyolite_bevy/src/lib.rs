@@ -100,15 +100,17 @@ impl Plugin for RenderPlugin {
                 .iter()
                 .map(|a| a.as_ptr())
                 .collect();
-
-            let event_loop: &winit::event_loop::EventLoop<()> = app.world.get_non_send_resource().expect("Your display are not supported");
             
-            match event_loop.raw_display_handle() {
-                RawDisplayHandle::Xlib(_) => enabled_instance_extensions.push(ash::extensions::khr::XlibSurface::name().as_ptr()),
-                RawDisplayHandle::Xcb(_) => enabled_instance_extensions.push(ash::extensions::khr::XcbSurface::name().as_ptr()),
-                RawDisplayHandle::Wayland(_) => enabled_instance_extensions.push(ash::extensions::khr::WaylandSurface::name().as_ptr()),
-                RawDisplayHandle::Windows(_) => enabled_instance_extensions.push(ash::extensions::khr::Win32Surface::name().as_ptr()),
-                _ => panic!("Your display are not supported."),
+            if let Some(event_loop) = app.world.get_non_send_resource::<winit::event_loop::EventLoop<()>>() {
+                match event_loop.raw_display_handle() {
+                    RawDisplayHandle::Xlib(_) => enabled_instance_extensions.push(ash::extensions::khr::XlibSurface::name().as_ptr()),
+                    RawDisplayHandle::Xcb(_) => enabled_instance_extensions.push(ash::extensions::khr::XcbSurface::name().as_ptr()),
+                    RawDisplayHandle::Wayland(_) => enabled_instance_extensions.push(ash::extensions::khr::WaylandSurface::name().as_ptr()),
+                    RawDisplayHandle::Windows(_) => enabled_instance_extensions.push(ash::extensions::khr::Win32Surface::name().as_ptr()),
+                    _ => tracing::warn!("Your display is not supported.")
+                };
+            } else {
+                tracing::warn!("Renderplugin inserted after WinitPlugin.")
             };
 
             Arc::new(
