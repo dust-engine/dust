@@ -69,6 +69,8 @@ impl Default for TrackingFeedback {
 /// bugs addressed, we can add a blanket implementation for all types.
 /// `impl<T> RenderData for T {}``
 pub trait RenderData {
+    // This method is called at the end of each objects lifetime when we've verified that they have completed
+    // execution on the GPU.
     fn tracking_feedback(&mut self, _feedback: &TrackingFeedback) {}
 }
 impl RenderData for () {}
