@@ -22,6 +22,9 @@ struct SharedDeviceStateInner<T> {
 unsafe impl<T> Send for SharedDeviceStateInner<T> {}
 unsafe impl<T> Sync for SharedDeviceStateInner<T> {}
 
+/// Represents a resource owned by the device.
+/// The resource most likely resides on the VRAM and it's assumed that it will never
+/// be accessed directly by the host.
 pub struct SharedDeviceStateHostContainer<T>(Arc<SharedDeviceStateInner<T>>);
 
 impl<T> SharedDeviceStateHostContainer<T> {
@@ -31,17 +34,6 @@ impl<T> SharedDeviceStateHostContainer<T> {
             tracking_feedback: Default::default(),
             fetched: AtomicBool::new(false),
         }))
-    }
-    pub fn fetch(&mut self) -> RenderRes<SharedDeviceState<T>> {
-        let inner = &mut self.0;
-
-        inner
-            .fetched
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        RenderRes::with_feedback(
-            SharedDeviceState(inner.clone()),
-            &inner.get_tracking_feedback(),
-        )
     }
 }
 
@@ -196,17 +188,111 @@ pub fn use_shared_image<T>(
     }
 }
 
+/// Create a pair of `SharedDeviceStateHostContainer`.
+/// Given resources A and B and given integer n,
+/// on frame index = 2n this returns (A, B) and on frame index = 2n + 1 this returns (B, A).
+///
+/// This setup allows you to access the data produced by the previous frame.
+/// Returns (current, prev)
+pub fn use_shared_resource_flipflop<T>(
+    this: &mut Option<(
+        SharedDeviceStateHostContainer<T>,
+        SharedDeviceStateHostContainer<T>,
+        bool,
+    )>,
+    create: impl Fn(Option<&T>) -> T,
+    should_update: impl FnOnce(&T) -> bool,
+) -> (
+    RenderRes<SharedDeviceState<T>>,
+    RenderRes<SharedDeviceState<T>>,
+) {
+    if let Some((a, b, swapped)) = this {
+        *swapped = !*swapped;
+        let mut current = a;
+        let mut previous = b;
+        if *swapped {
+            std::mem::swap(&mut current, &mut previous);
+        }
+        if should_update(&current.0.item) {
+            let item = create(Some(&current.0.item));
+            current.0 = Arc::new(SharedDeviceStateInner {
+                item,
+                tracking_feedback: Default::default(),
+                fetched: AtomicBool::new(true),
+            });
+            previous
+                .0
+                .fetched
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            let current_res = RenderRes::new(SharedDeviceState(current.0.clone()));
+            let prev_res = RenderRes::with_feedback(
+                SharedDeviceState(previous.0.clone()),
+                previous.0.get_tracking_feedback(),
+            );
+            (current_res, prev_res)
+        } else {
+            current
+                .0
+                .fetched
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            previous
+                .0
+                .fetched
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            let current_res = RenderRes::with_feedback(
+                SharedDeviceState(current.0.clone()),
+                current.0.get_tracking_feedback(),
+            );
+            let prev_res = RenderRes::with_feedback(
+                SharedDeviceState(previous.0.clone()),
+                previous.0.get_tracking_feedback(),
+            );
+            (current_res, prev_res)
+        }
+    } else {
+        let a = create(None);
+        let a = Arc::new(SharedDeviceStateInner {
+            item: a,
+            tracking_feedback: Default::default(),
+            fetched: AtomicBool::new(true),
+        });
+        let b = create(None);
+        let b = Arc::new(SharedDeviceStateInner {
+            item: b,
+            tracking_feedback: Default::default(),
+            fetched: AtomicBool::new(true),
+        });
+        *this = Some((
+            SharedDeviceStateHostContainer(a),
+            SharedDeviceStateHostContainer(b),
+            false,
+        ));
+        // When the flag is false, a is current.
 
+        let a_res = RenderRes::new(SharedDeviceState(this.as_ref().unwrap().0 .0.clone()));
+        let b_res = RenderRes::new(SharedDeviceState(this.as_ref().unwrap().1 .0.clone()));
+        (a_res, b_res)
+    }
+}
+
+/// Create a pair of `SharedDeviceStateHostContainer`.
+/// Given images A and B and given integer n,
+/// on frame index = 2n this returns (A, B) and on frame index = 2n + 1 this returns (B, A).
+///
+/// This setup allows you to access the data produced by the previous frame.
 /// Returns (current, prev)
 pub fn use_shared_image_flipflop<T>(
     this: &mut Option<(
         SharedDeviceStateHostContainer<T>,
         SharedDeviceStateHostContainer<T>,
-        bool
+        bool,
     )>,
     create: impl Fn(Option<&T>) -> (T, vk::ImageLayout),
     should_update: impl FnOnce(&T) -> bool,
-) -> (RenderImage<SharedDeviceState<T>>, RenderImage<SharedDeviceState<T>>) {
+) -> (
+    RenderImage<SharedDeviceState<T>>,
+    RenderImage<SharedDeviceState<T>>,
+) {
     if let Some((a, b, swapped)) = this {
         *swapped = !*swapped;
         let mut current = a;
@@ -221,9 +307,10 @@ pub fn use_shared_image_flipflop<T>(
                 tracking_feedback: Default::default(),
                 fetched: AtomicBool::new(true),
             });
-            previous.0
-            .fetched
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            previous
+                .0
+                .fetched
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             let current_img = RenderImage::new(SharedDeviceState(current.0.clone()), layout);
             let prev_img = RenderImage::with_feedback(
                 SharedDeviceState(previous.0.clone()),
@@ -231,12 +318,14 @@ pub fn use_shared_image_flipflop<T>(
             );
             (current_img, prev_img)
         } else {
-            current.0
-            .fetched
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-            previous.0
-            .fetched
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            current
+                .0
+                .fetched
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            previous
+                .0
+                .fetched
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             let current_img = RenderImage::with_feedback(
                 SharedDeviceState(current.0.clone()),
                 current.0.get_tracking_feedback(),
@@ -260,16 +349,24 @@ pub fn use_shared_image_flipflop<T>(
             tracking_feedback: Default::default(),
             fetched: AtomicBool::new(true),
         });
-        *this = Some((SharedDeviceStateHostContainer(a), SharedDeviceStateHostContainer(b), false));
+        *this = Some((
+            SharedDeviceStateHostContainer(a),
+            SharedDeviceStateHostContainer(b),
+            false,
+        ));
         // When the flag is false, a is current.
-        
-        let a_img = RenderImage::new(SharedDeviceState(this.as_ref().unwrap().0.0.clone()), a_layout);
-        let b_img = RenderImage::new(SharedDeviceState(this.as_ref().unwrap().1.0.clone()), b_layout);
+
+        let a_img = RenderImage::new(
+            SharedDeviceState(this.as_ref().unwrap().0 .0.clone()),
+            a_layout,
+        );
+        let b_img = RenderImage::new(
+            SharedDeviceState(this.as_ref().unwrap().1 .0.clone()),
+            b_layout,
+        );
         (a_img, b_img)
     }
 }
-
-
 
 /// Returns (new, old)
 pub fn use_shared_state_with_old<T>(

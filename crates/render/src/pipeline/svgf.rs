@@ -50,6 +50,8 @@ impl FromWorld for SvgfPipeline {
             #[shader(vk::ShaderStageFlags::COMPUTE)]
             illuminance: vk::DescriptorType::STORAGE_IMAGE,
             #[shader(vk::ShaderStageFlags::COMPUTE)]
+            motion: vk::DescriptorType::STORAGE_IMAGE,
+            #[shader(vk::ShaderStageFlags::COMPUTE)]
             prev_illuminance: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
         }
         .build(device.clone())
@@ -73,6 +75,10 @@ impl FromWorld for SvgfPipeline {
         let sampler = Sampler::new(
             device.clone(),
             &vk::SamplerCreateInfo {
+                address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
                 ..Default::default()
             },
         )
@@ -104,6 +110,7 @@ impl SvgfPipeline {
         &'a mut self,
         illuminance: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         prev_illuminance: &'a RenderImage<impl ImageViewLike + RenderData>,
+        motion: &'a RenderImage<impl ImageViewLike + RenderData>,
         params: &'a SystemParamItem<SvgfPipelineRenderParams>,
     ) -> impl GPUCommandFuture<
         Output = (),
@@ -130,11 +137,12 @@ impl SvgfPipeline {
                     0,
                     &[
                         illuminance.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        motion.inner().as_descriptor(vk::ImageLayout::GENERAL)
                     ]
                 ),
                 DescriptorSetWrite::combined_image_samplers(
                     desc_set[0],
-                    1,
+                    2,
                     0,
                     &[
                         prev_illuminance.inner().as_descriptor_with_sampler(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, sampler),

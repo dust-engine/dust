@@ -89,8 +89,6 @@ pub type ToneMappingPipelineRenderParams = (
     SRes<Assets<ShaderModule>>,
 );
 impl ToneMappingPipeline {
-
-
     pub fn render<'a>(
         &'a mut self,
         src: &'a RenderImage<impl ImageViewLike + RenderData>,

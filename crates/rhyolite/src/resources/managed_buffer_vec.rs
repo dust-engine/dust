@@ -492,9 +492,7 @@ impl<T> ManagedBufferVecStrategyStaging<T> {
             let changes = std::mem::take(&mut self.changes);
             let (changed_indices, changed_items): (Vec<usize>, Vec<T>) =
                 changes.into_iter().unzip();
-            staging_buffer
-                .contents_mut()
-                .unwrap()[0..expected_staging_size as usize]
+            staging_buffer.contents_mut().unwrap()[0..expected_staging_size as usize]
                 .copy_from_slice(unsafe {
                     std::slice::from_raw_parts(
                         changed_items.as_ptr() as *const u8,
@@ -525,7 +523,9 @@ impl<T> ManagedBufferVecStrategyStaging<T> {
                         expected_whole_buffer_size,
                         // When enlarging the buffer, we copy the contents from the old buffer to the new buffer.
                         // That's why we need the TRANSFER_SRC flag here.
-                        self.buffer_usage_flags | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::TRANSFER_SRC,
+                        self.buffer_usage_flags
+                            | vk::BufferUsageFlags::TRANSFER_DST
+                            | vk::BufferUsageFlags::TRANSFER_SRC,
                         self.alignment as u64,
                     )
                     .unwrap()

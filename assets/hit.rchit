@@ -62,4 +62,16 @@ void main() {
     imageStore(u_depth, ivec2(gl_LaunchIDEXT.xy), vec4(gl_HitTEXT));
     imageStore(u_normal, ivec2(gl_LaunchIDEXT.xy), vec4(normalWorld, 1.0));
     imageStore(u_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(albedo), 1.0));
+
+    vec3 hitPointWorld = gl_HitTEXT * gl_WorldRayDirectionEXT + gl_WorldRayOriginEXT;
+    vec2 hitPointScreen = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
+
+
+    vec4 hitPointNDCLastFrame = u_camera_last_frame.view_proj * vec4(hitPointWorld, 1.0);
+    vec3 hitPointNDCLastFrameNormalized = hitPointNDCLastFrame.xyz / hitPointNDCLastFrame.w;
+    hitPointNDCLastFrameNormalized.y *= -1.0;
+    vec2 hitPointScreenLastFrame = ((hitPointNDCLastFrameNormalized + 1.0) / 2.0).xy;
+
+    vec2 motionVector = hitPointScreenLastFrame - hitPointScreen;
+    imageStore(u_motion, ivec2(gl_LaunchIDEXT.xy), vec4(motionVector, 0.0, 0.0));
 }

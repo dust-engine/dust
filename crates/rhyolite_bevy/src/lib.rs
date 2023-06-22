@@ -53,9 +53,7 @@ impl Default for RenderPlugin {
             engine_version: Default::default(),
             api_version: Version::new(0, 1, 3, 0),
             enabled_instance_layers: vec![],
-            enabled_instance_extensions: vec![
-                ash::extensions::khr::Surface::name(),
-            ],
+            enabled_instance_extensions: vec![ash::extensions::khr::Surface::name()],
             physical_device_index: 0,
             max_frame_in_flight: 3,
             enabled_device_extensions: vec![ash::extensions::khr::Swapchain::name()],
@@ -100,14 +98,21 @@ impl Plugin for RenderPlugin {
                 .iter()
                 .map(|a| a.as_ptr())
                 .collect();
-            
-            if let Some(event_loop) = app.world.get_non_send_resource::<winit::event_loop::EventLoop<()>>() {
+
+            if let Some(event_loop) = app
+                .world
+                .get_non_send_resource::<winit::event_loop::EventLoop<()>>()
+            {
                 match event_loop.raw_display_handle() {
-                    RawDisplayHandle::Xlib(_) => enabled_instance_extensions.push(ash::extensions::khr::XlibSurface::name().as_ptr()),
-                    RawDisplayHandle::Xcb(_) => enabled_instance_extensions.push(ash::extensions::khr::XcbSurface::name().as_ptr()),
-                    RawDisplayHandle::Wayland(_) => enabled_instance_extensions.push(ash::extensions::khr::WaylandSurface::name().as_ptr()),
-                    RawDisplayHandle::Windows(_) => enabled_instance_extensions.push(ash::extensions::khr::Win32Surface::name().as_ptr()),
-                    _ => tracing::warn!("Your display is not supported.")
+                    RawDisplayHandle::Xlib(_) => enabled_instance_extensions
+                        .push(ash::extensions::khr::XlibSurface::name().as_ptr()),
+                    RawDisplayHandle::Xcb(_) => enabled_instance_extensions
+                        .push(ash::extensions::khr::XcbSurface::name().as_ptr()),
+                    RawDisplayHandle::Wayland(_) => enabled_instance_extensions
+                        .push(ash::extensions::khr::WaylandSurface::name().as_ptr()),
+                    RawDisplayHandle::Windows(_) => enabled_instance_extensions
+                        .push(ash::extensions::khr::Win32Surface::name().as_ptr()),
+                    _ => tracing::warn!("Your display is not supported."),
                 };
             } else {
                 tracing::warn!("Renderplugin inserted after WinitPlugin.")
