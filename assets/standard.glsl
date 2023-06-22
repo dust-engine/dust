@@ -21,10 +21,14 @@ layout(set = 0, binding = 5) uniform accelerationStructureEXT accelerationStruct
 layout(set = 0, binding = 6) uniform texture2D blue_noise;
 
 
-
 layout(set = 0, binding = 8, std430) uniform CameraSettingsLastFrame {
     mat4 view_proj;
+    mat4 inverse_view_proj;
 } u_camera_last_frame;
+layout(set = 0, binding = 9, std430) uniform CameraSettings {
+    mat4 view_proj;
+    mat4 inverse_view_proj;
+} u_camera;
 
 #define RETENTION_FACTOR 0.95
 

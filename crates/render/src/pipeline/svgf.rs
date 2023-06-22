@@ -75,6 +75,10 @@ impl FromWorld for SvgfPipeline {
         let sampler = Sampler::new(
             device.clone(),
             &vk::SamplerCreateInfo {
+                address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
                 ..Default::default()
             },
         )

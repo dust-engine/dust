@@ -83,6 +83,8 @@ impl RayTracingPipeline for StandardPipeline {
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
             camera_settings_prev_frame: vk::DescriptorType::UNIFORM_BUFFER,
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
+            camera_settings: vk::DescriptorType::UNIFORM_BUFFER,
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -284,9 +286,10 @@ impl StandardPipeline {
                     camera.0.near,
                 )
             };
-
+            let view_proj = proj * camera.1.compute_matrix().inverse();
             CameraSettings {
-                view_proj: proj * camera.1.compute_matrix().inverse(),
+                view_proj: view_proj,
+                inverse_view_proj: view_proj.inverse(),
             }
             .as_std430()
         };
@@ -406,7 +409,8 @@ impl StandardPipeline {
                     0,
                     &[
                         sunlight_buffer.inner().as_descriptor(),
-                        camera_setting_buffer_prev_frame.inner().as_descriptor()
+                        camera_setting_buffer_prev_frame.inner().as_descriptor(),
+                        camera_setting_buffer.inner().as_descriptor()
                     ],
                     false
                 ),
@@ -703,4 +707,5 @@ impl StandardPipeline {
 #[derive(Clone, Debug, AsStd430)]
 pub struct CameraSettings {
     pub view_proj: Mat4,
+    pub inverse_view_proj: Mat4,
 }

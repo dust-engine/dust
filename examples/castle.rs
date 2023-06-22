@@ -334,8 +334,10 @@ fn print_position(
 
     let calculated_angle =
         ((time.elapsed_seconds() * 0.4).cos() + 1.0) * std::f32::consts::FRAC_PI_2;
-    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.001 - std::f32::consts::FRAC_PI_2)
-        * Vec3A::new(0.0, 0.0, 1.0);
+    sunlight.direction = glam::Mat3A::from_axis_angle(
+        Vec3::new(1.0, 0.0, 0.0),
+        *current * 0.001 - std::f32::consts::FRAC_PI_2,
+    ) * Vec3A::new(0.0, 0.0, 1.0);
     sunlight.direction =
         glam::Mat3A::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.2) * sunlight.direction;
     let _transform = a.iter().next().unwrap();
