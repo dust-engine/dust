@@ -74,8 +74,8 @@ pub trait RenderData {
     fn tracking_feedback(&mut self, _feedback: &TrackingFeedback) {}
 }
 impl RenderData for () {}
-impl RenderData for vk::Buffer{}
-impl RenderData for vk::Image{}
+impl RenderData for vk::Buffer {}
+impl RenderData for vk::Image {}
 macro_rules! impl_tuple {
     ($($idx:tt $t:tt),+) => {
         impl<$($t,)+> RenderData for ($($t,)+)

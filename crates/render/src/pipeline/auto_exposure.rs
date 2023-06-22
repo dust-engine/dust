@@ -109,8 +109,6 @@ impl FromWorld for AutoExposurePipeline {
     }
 }
 
-
-
 pub type AutoExposurePipelineRenderParams = (
     SRes<Allocator>,
     SRes<ExposureSettings>,
@@ -118,7 +116,6 @@ pub type AutoExposurePipelineRenderParams = (
     SRes<Assets<ShaderModule>>,
 );
 impl AutoExposurePipeline {
-
     pub fn render<'a>(
         &'a mut self,
         illuminance_image: &'a RenderImage<impl ImageViewLike + RenderData>,

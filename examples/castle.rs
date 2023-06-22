@@ -12,10 +12,9 @@ use bevy_time::Time;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{Cursor, PrimaryWindow, Window, WindowResolution};
 use dust_render::{
-    AutoExposurePipeline, BlueNoise, ExposureSettings, PinholeProjection, StandardPipeline,
-    Sunlight, SvgfPipeline, TLASStore, ToneMappingPipeline,
-    AutoExposurePipelineRenderParams, StandardPipelineRenderParams,
-    SvgfPipelineRenderParams, ToneMappingPipelineRenderParams
+    AutoExposurePipeline, AutoExposurePipelineRenderParams, BlueNoise, ExposureSettings,
+    PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight, SvgfPipeline,
+    SvgfPipelineRenderParams, TLASStore, ToneMappingPipeline, ToneMappingPipelineRenderParams,
 };
 
 use glam::{Vec3, Vec3A};
@@ -84,6 +83,7 @@ fn main() {
             image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE,
             required_feature_flags: vk::FormatFeatureFlags::TRANSFER_DST
                 | vk::FormatFeatureFlags::STORAGE_IMAGE,
+            hdr: false,
             ..Default::default()
         });
 
@@ -284,7 +284,7 @@ impl Plugin for RenderSystem {
                                 rendered = true;
                             }
                             if rendered {
-                                svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &svgf_pipeline_params).await;
+                                svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &motion_image, &svgf_pipeline_params).await;
                                 let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_pipeline_params).await;
                                 let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
                                 let color_space = swapchain_image.inner().color_space().clone();
@@ -334,7 +334,7 @@ fn print_position(
 
     let calculated_angle =
         ((time.elapsed_seconds() * 0.4).cos() + 1.0) * std::f32::consts::FRAC_PI_2;
-    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.001)
+    sunlight.direction = glam::Mat3A::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), *current * 0.001 - std::f32::consts::FRAC_PI_2)
         * Vec3A::new(0.0, 0.0, 1.0);
     sunlight.direction =
         glam::Mat3A::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.2) * sunlight.direction;

@@ -62,7 +62,6 @@ impl Plugin for RenderPlugin {
             enabled_instance_extensions: vec![
                 rhyolite::ash::extensions::ext::DebugUtils::name(),
                 rhyolite::ash::extensions::khr::Surface::name(),
-                rhyolite::ash::extensions::khr::Win32Surface::name(),
             ],
             enabled_device_extensions: vec![
                 rhyolite::ash::extensions::khr::Swapchain::name(),

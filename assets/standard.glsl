@@ -20,6 +20,12 @@ layout(set = 0, binding = 4, rg16f) uniform image2D u_motion;
 layout(set = 0, binding = 5) uniform accelerationStructureEXT accelerationStructure;
 layout(set = 0, binding = 6) uniform texture2D blue_noise;
 
+
+
+layout(set = 0, binding = 8, std430) uniform CameraSettingsLastFrame {
+    mat4 view_proj;
+} u_camera_last_frame;
+
 #define RETENTION_FACTOR 0.95
 
 // TODO: make this adaptable

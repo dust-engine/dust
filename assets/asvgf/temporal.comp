@@ -1,7 +1,8 @@
 #version 460
 #extension GL_EXT_debug_printf: require
 layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
-layout(set = 0, binding = 1) uniform sampler2D u_illuminance_prev;
+layout(set = 0, binding = 1, rg16f) uniform image2D u_motion;
+layout(set = 0, binding = 2) uniform sampler2D u_illuminance_prev;
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -17,6 +18,11 @@ void main() {
 
 
 	vec2 uv = (gl_GlobalInvocationID.xy + vec2(0.5)) / imageSize(u_illuminance);
+
+	vec2 motion = imageLoad(u_motion, ivec2(gl_GlobalInvocationID.xy)).xy;
+	uv += motion;
+
+
 	vec3 illuminance_prev = texture(u_illuminance_prev, uv).xyz;
 
 	vec3 illuminance_curr = imageLoad(u_illuminance, ivec2(gl_GlobalInvocationID.xy)).xyz;

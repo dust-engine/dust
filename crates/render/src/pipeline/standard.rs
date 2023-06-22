@@ -3,11 +3,11 @@ use std::{ops::Deref, sync::Arc};
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::system::Res;
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
-use bevy_math::{Quat, Vec3};
+use bevy_math::{Mat4, Quat, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
-use rhyolite::future::{run, use_shared_state, use_state};
+use rhyolite::future::{run, use_shared_resource_flipflop, use_shared_state, use_state};
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
@@ -80,6 +80,9 @@ impl RayTracingPipeline for StandardPipeline {
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
             sunlight_settings: vk::DescriptorType::UNIFORM_BUFFER,
+
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
+            camera_settings_prev_frame: vk::DescriptorType::UNIFORM_BUFFER,
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -272,6 +275,21 @@ impl StandardPipeline {
         let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer()?;
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
 
+        let camera_settings = {
+            let proj = {
+                let extent = target_image.inner().extent();
+                Mat4::perspective_infinite_reverse_rh(
+                    camera.0.fov,
+                    extent.width as f32 / extent.height as f32,
+                    camera.0.near,
+                )
+            };
+
+            CameraSettings {
+                view_proj: proj * camera.1.compute_matrix().inverse(),
+            }
+            .as_std430()
+        };
         let camera = StandardPipelineCamera {
             camera_view_col0: camera.1.affine().matrix3.x_axis.into(),
             camera_view_col1: camera.1.affine().matrix3.y_axis.into(),
@@ -328,12 +346,20 @@ impl StandardPipeline {
             // TODO: Direct writes on integrated GPUs.
             let mut sunlight_buffer = use_shared_state(
                 using!(),
-                move |_| {
+                |_| {
                     allocator.create_device_buffer_uninit(SkyModelState::std430_size_static() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST).unwrap()
                 },
                 |_| false
             );
             staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes()).await;
+            let (mut camera_setting_buffer, camera_setting_buffer_prev_frame) = use_shared_resource_flipflop(
+                using!(),
+                |_| {
+                    allocator.create_device_buffer_uninit(CameraSettings::std430_size_static() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST).unwrap()
+                },
+                |_| false
+            );
+            staging_ring_buffer.update_buffer(&mut camera_setting_buffer, camera_settings.as_bytes()).await;
 
             let frame_index = use_state(
                 using!(),
@@ -378,9 +404,12 @@ impl StandardPipeline {
                     desc_set[0],
                     7,
                     0,
-                    &[sunlight_buffer.inner().as_descriptor()],
+                    &[
+                        sunlight_buffer.inner().as_descriptor(),
+                        camera_setting_buffer_prev_frame.inner().as_descriptor()
+                    ],
                     false
-                )
+                ),
             ]);
 
             let extent = target_image.inner().extent();
@@ -656,7 +685,7 @@ impl StandardPipeline {
             }).await;
             retain!(hitgroup_sbt_buffer);
             retain!(pipeline_sbt_buffer);
-            retain!(sunlight_buffer);
+            retain!((sunlight_buffer, camera_setting_buffer, camera_setting_buffer_prev_frame));
             retain!(
                 DisposeContainer::new((
                     primary_pipeline.pipeline().clone(),
@@ -669,4 +698,9 @@ impl StandardPipeline {
         };
         Some(fut)
     }
+}
+
+#[derive(Clone, Debug, AsStd430)]
+pub struct CameraSettings {
+    pub view_proj: Mat4,
 }
