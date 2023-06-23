@@ -64,12 +64,12 @@ void main() {
     vec3 strength = photon.energy *
     (1.0 - cos(sunlight_config.solar_intensity.w));
 
+    vec3 prevEnergy = sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance;
     if (frameDifference > 0) {
-        f16vec3 prevEnergy = sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance;
-        f16vec3 nextEnergy = prevEnergy * float16_t(pow(RETENTION_FACTOR, frameDifference)) + f16vec3(strength);
-        sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance = nextEnergy;
+        vec3 nextEnergy = prevEnergy * pow(RETENTION_FACTOR, frameDifference) + strength;
+        sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance = f16vec3(nextEnergy);
     } else {
-        sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance += f16vec3(strength);
+        sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance = f16vec3(strength + prevEnergy);
     }
 
     // Calculate projected 2d hitpoint

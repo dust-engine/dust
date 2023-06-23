@@ -29,18 +29,18 @@ void main() {
     int8_t faceId = int8_t(normalObject.x) * int8_t(3) + int8_t(normalObject.y) * int8_t(2) + int8_t(normalObject.z);
     uint8_t faceIdU = uint8_t(min((faceId > 0 ? (faceId-1) : (6 + faceId)), 5));
 
-    IrradianceCacheFace hashEntry = sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU];
-    if (hashEntry.mask == 0) {
+    uint16_t mask = sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].mask;
+    if (mask == 0) {
         return;
     }
     uint16_t lastAccessedFrameIndex = sbt.irradianceCache.entries[gl_PrimitiveID].lastAccessedFrameIndex[faceIdU];
 
     // irradiance, pre multiplied with albedo.
-    vec3 irradiance = hashEntry.irradiance * pow(RETENTION_FACTOR, uint16_t(pushConstants.frameIndex) - lastAccessedFrameIndex);
+    vec3 irradiance = vec3(sbt.irradianceCache.entries[gl_PrimitiveID].faces[faceIdU].irradiance) * pow(RETENTION_FACTOR, uint16_t(pushConstants.frameIndex) - lastAccessedFrameIndex);
 
     float scaling_factors =
     // Divide by the activated surface area of the voxel
-    (1.0 / float(bitCount(uint(hashEntry.mask)))) *
+    (1.0 / float(bitCount(uint(mask)))) *
     // Correction based on the retention factor.
     /// \sigma a^n from 0 to inf is 1 / (1 - a).
     (1.0 - RETENTION_FACTOR)

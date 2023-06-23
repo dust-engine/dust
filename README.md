@@ -27,7 +27,7 @@ That includes the following devices:
 ### Compatible operating system.
 The engine currently supports Windows only.
 
-Linux support is possible but untested. Users probably have to manually add the corresponding swapchain extensions.
+Linux support is possible but untested. If you run into any problems, please let us know on our [Discord Server](https://discord.gg/5eUGuQuX).
 
 macOS support is possible in the future through MoltenVK.
 
@@ -37,7 +37,7 @@ First, download and install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
 Before cloning the the repository, ensure that you have Git LFS installed. If you cloned
 the repository without Git LFS, manually pull the LFS files:
 ```bash
-git lfs fetch --all
+git lfs fetch
 ```
 
 Next, compile the example shaders. This shouldn't be needed once Bevy

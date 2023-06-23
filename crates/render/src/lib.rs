@@ -69,7 +69,6 @@ impl Plugin for RenderPlugin {
                 rhyolite::ash::extensions::khr::AccelerationStructure::name(),
                 rhyolite::ash::extensions::khr::RayTracingPipeline::name(),
                 rhyolite::ash::vk::KhrPipelineLibraryFn::name(),
-                rhyolite::ash::vk::ExtShaderAtomicFloatFn::name(),
             ],
             enabled_device_features: Box::new(rhyolite::PhysicalDeviceFeatures {
                 v13: vk::PhysicalDeviceVulkan13Features {
@@ -82,7 +81,6 @@ impl Plugin for RenderPlugin {
                     buffer_device_address: vk::TRUE,
                     shader_int8: vk::TRUE,
                     storage_buffer8_bit_access: vk::TRUE,
-                    shader_float16: vk::TRUE,
                     ..Default::default()
                 },
                 v11: vk::PhysicalDeviceVulkan11Features {
