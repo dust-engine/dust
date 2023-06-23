@@ -58,6 +58,11 @@ impl Debug for Version {
         Ok(())
     }
 }
+impl From<Version> for String {
+    fn from(value: Version) -> Self {
+        format!("{}.{}.{}:{}", value.major(), value.minor(), value.patch(), value.variant())
+    }
+}
 
 pub struct InstanceCreateInfo<'a> {
     pub application_name: &'a CStr,

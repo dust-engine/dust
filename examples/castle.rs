@@ -32,25 +32,8 @@ use rhyolite_bevy::{
 };
 
 fn main() {
-    use tracing_subscriber::prelude::*;
-
-    use sentry::IntoDsn;
-    let _guard = sentry::init(sentry::ClientOptions {
-        dsn: "https://6840bf87aa9e47b0ad2ef893529c49b3@o4505406277943296.ingest.sentry.io/4505406288363520".into_dsn().ok().unwrap_or_default(),
-        release: sentry::release_name!(),
-        environment: Some("development").into(),
-        traces_sample_rate: 1.0,
-        ..sentry::ClientOptions::default()
-    });
-
-    // Register the Sentry tracing layer to capture breadcrumbs, events, and spans:
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(sentry_tracing::layer())
-        .init();
-
     let mut app = App::new();
-    app.add_plugin(bevy_log::LogPlugin::default())
+    app
         .add_plugin(bevy_core::TaskPoolPlugin::default())
         .add_plugin(bevy_core::TypeRegistrationPlugin::default())
         .add_plugin(bevy_core::FrameCountPlugin::default())
@@ -82,6 +65,7 @@ fn main() {
         .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
         .add_plugin(RenderSystem)
+        .add_plugin(dust_sentry::SentryPlugin)
         .add_systems(bevy_app::Update, print_position)
         .add_systems(bevy_app::Update, cursor_grab_system)
         .init_resource::<ToneMappingPipeline>()

@@ -37,7 +37,4 @@ image = "0.24"
 glam = "^0.24"
 reqwest = { version = "*", features = ["blocking"] }
 smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "2c626db7e35eb543fb24b53e4a2b56e611421dba" }
-tracing = "0.1"
-sentry = "^0.31"
-sentry-tracing = "^0.31"
-tracing-subscriber = "^0.3"
+dust-sentry = { path = "./crates/sentry" }
