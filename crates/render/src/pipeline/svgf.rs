@@ -190,6 +190,12 @@ impl SvgfPipeline {
                     vk::AccessFlags2::SHADER_SAMPLED_READ,
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 );
+                ctx.read_image(
+                    motion,
+                    vk::PipelineStageFlags2::COMPUTE_SHADER,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
             }).await;
             retain!(
                 DisposeContainer::new((pipeline.clone(), desc_pool.handle(), desc_set)));

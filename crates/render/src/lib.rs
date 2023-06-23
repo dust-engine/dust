@@ -74,6 +74,7 @@ impl Plugin for RenderPlugin {
                 v13: vk::PhysicalDeviceVulkan13Features {
                     synchronization2: vk::TRUE,
                     inline_uniform_block: vk::TRUE,
+                    maintenance4: vk::TRUE,
                     ..Default::default()
                 },
                 v12: vk::PhysicalDeviceVulkan12Features {
