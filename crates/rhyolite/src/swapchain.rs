@@ -251,6 +251,7 @@ impl Swapchain {
                 vk::Fence::null(),
             )
         }
+        .map_err(crate::error_handler::handle_device_lost)
         .unwrap();
         let (image, view) = self.inner.images[image_indice as usize];
         let swapchain_image = SwapchainImage {

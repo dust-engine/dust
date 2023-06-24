@@ -1,12 +1,59 @@
-use std::str::FromStr;
-
 use bevy_app::Plugin;
 use rhyolite_bevy::Device;
 pub use sentry;
 
+
+#[cfg(feature = "aftermath")]
+pub extern crate aftermath_rs as aftermath;
+
 pub struct SentryPlugin;
 
 static SENTRY_GUARD: std::sync::OnceLock<sentry::ClientInitGuard> = std::sync::OnceLock::new();
+
+
+#[cfg(feature = "aftermath")]
+static AFTERMATH_GUARD: std::sync::OnceLock<aftermath::Aftermath> = std::sync::OnceLock::new();
+
+
+
+#[cfg(feature = "aftermath")]
+struct AftermathDelegate;
+
+
+
+#[cfg(feature = "aftermath")]
+impl aftermath::AftermathDelegate for AftermathDelegate {
+    fn dumped(&mut self, dump_data: &[u8]) {
+        sentry::configure_scope(|scope| {
+            scope.add_attachment(sentry::protocol::Attachment {
+                buffer: dump_data.into(),
+                filename: "dust.nv-gpudmp".to_owned(),
+                content_type: None,
+                ty: Some(sentry::protocol::AttachmentType::Attachment),
+            });
+        });
+        sentry::capture_message("Device Lost", sentry::Level::Fatal);
+    }
+
+    fn shader_debug_info(&mut self, data: &[u8]) {
+    }
+
+    fn description(&mut self, describe: &mut aftermath::DescriptionBuilder) {
+    }
+}
+
+#[cfg(feature = "aftermath")]
+fn aftermath_device_lost_handler() {
+    tracing::info!("Device Lost Detected");
+    let status = aftermath::Status::wait_for_status(Some(std::time::Duration::from_secs(5)));
+    if status != aftermath::Status::Finished {
+        panic!("Unexpected crash dump status: {:?}", status);
+    }
+    tracing::info!("Device Lost captured by Sentry");
+    sentry::end_session_with_status(sentry::protocol::SessionStatus::Crashed);
+    SENTRY_GUARD.get().unwrap().close(None);
+    std::process::exit(1);
+}
 
 impl Plugin for SentryPlugin {
     fn build(&self, app: &mut bevy_app::App) {
@@ -23,6 +70,20 @@ impl Plugin for SentryPlugin {
         if SENTRY_GUARD.set(guard).is_err() {
             panic!()
         }
+        
+        #[cfg(feature = "aftermath")]
+        {
+            let guard = aftermath::Aftermath::new(AftermathDelegate);
+            if AFTERMATH_GUARD.set(guard).is_err() {
+                panic!()
+            }
+            if rhyolite::error_handler::set_global_device_lost_handler(aftermath_device_lost_handler).is_err() {
+                panic!()
+            }
+            sentry::configure_scope(|scope| {
+                scope.set_tag("nv_aftermath", true);
+            });
+        }
 
         let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
         .or_else(|_| tracing_subscriber::EnvFilter::try_new("info"))
@@ -34,6 +95,10 @@ impl Plugin for SentryPlugin {
             .with(tracing_subscriber::fmt::layer())
             .with(sentry_tracing::layer())
             .init();
+
+        tracing::info!("Sentry Enabled");
+        #[cfg(feature = "aftermath")]
+        tracing::info!("NVIDIA Aftermath Enabled");
     }
 
     fn finish(&self, app: &mut bevy_app::App) {

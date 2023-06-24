@@ -13,3 +13,10 @@ tracing-subscriber = "^0.3"
 bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 rhyolite-bevy = { path = "../rhyolite_bevy" }
 rhyolite = { path = "../rhyolite" }
+
+
+aftermath-rs = { version = "0.1", optional = true }
+
+
+[features]
+aftermath = ["aftermath-rs"]

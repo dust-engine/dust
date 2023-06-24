@@ -291,6 +291,7 @@ impl Queues {
                     let fence = fence_pool.get();
                     self.device
                         .queue_submit2(queue, &queue_batch.submits, fence)
+                        .map_err(crate::error_handler::handle_device_lost)
                         .unwrap();
                     fences.push(fence);
                 }
@@ -298,6 +299,7 @@ impl Queues {
                     let fence = fence_pool.get();
                     self.device
                         .queue_bind_sparse(queue, &queue_batch.sparse_binds, fence)
+                        .map_err(crate::error_handler::handle_device_lost)
                         .unwrap();
                     fences.push(fence);
                 }
@@ -336,6 +338,7 @@ impl Queues {
                     self.device
                         .swapchain_loader()
                         .queue_present(queue, &info)
+                        .map_err(crate::error_handler::handle_device_lost)
                         .unwrap();
                 }
             }

@@ -3,15 +3,13 @@ name = "dust"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-
 [workspace]
 members = [
     "crates/*"
 ]
 
+[dependencies]
+dust-sentry = { path = "./crates/sentry", optional = true }
 
 [dev-dependencies]
 pin-project = "1.0"
@@ -37,4 +35,7 @@ image = "0.24"
 glam = "^0.24"
 reqwest = { version = "*", features = ["blocking"] }
 smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "2c626db7e35eb543fb24b53e4a2b56e611421dba" }
-dust-sentry = { path = "./crates/sentry" }
+
+[features]
+sentry = ["dust-sentry"]
+aftermath = ["dust-sentry/aftermath"]

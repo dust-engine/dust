@@ -56,6 +56,20 @@ Finally, compile and run the `castle` example.
 cd ..
 cargo run --release --example castle
 ```
+## What if this doesn't work
+If you encounter any issues while running this program, we highly encourage you to enable the `sentry` feature
+when compiling the program. [Sentry](https://sentry.io) helps us identify and debug issues by providing detailed crash reports.
+
+If you are experiencing a DEVICE_LOST error while using an NVIDIA GPU, we recommend enabling NVIDIA Aftermath to help us diagnose the issue. NVIDIA Aftermath provides additional information about GPU crashes and can assist in debugging.
+
+```sh
+cargo run --release --example castle --features sentry
+
+# For DEVICE_LOST crashes on NVIDIA GPUs, you may also send NVIDIA Aftermath Crash Reports
+cargo run --release --example castle --features sentry --features aftermath
+
+```
+
 
 ## Contributing
 The Dust Engine is still in very early stages of development, and we welcome and appreciate contributions of any kind.

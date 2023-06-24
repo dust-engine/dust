@@ -33,6 +33,12 @@ use rhyolite_bevy::{
 
 fn main() {
     let mut app = App::new();
+
+    #[cfg(feature = "sentry")]
+    app.add_plugin(dust_sentry::SentryPlugin);
+    #[cfg(not(feature = "sentry"))]
+    app.add_plugin(bevy_log::LogPlugin::default());
+
     app
         .add_plugin(bevy_core::TaskPoolPlugin::default())
         .add_plugin(bevy_core::TypeRegistrationPlugin::default())
@@ -65,7 +71,6 @@ fn main() {
         .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
         .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
         .add_plugin(RenderSystem)
-        .add_plugin(dust_sentry::SentryPlugin)
         .add_systems(bevy_app::Update, print_position)
         .add_systems(bevy_app::Update, cursor_grab_system)
         .init_resource::<ToneMappingPipeline>()

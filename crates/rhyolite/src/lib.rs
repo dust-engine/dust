@@ -38,6 +38,7 @@ pub mod shader;
 mod surface;
 pub mod swapchain;
 pub mod utils;
+pub mod error_handler;
 
 pub use device::{Device, HasDevice};
 pub use instance::*;
