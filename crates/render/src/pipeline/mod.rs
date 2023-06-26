@@ -1,6 +1,6 @@
 use std::{alloc::Layout, collections::HashMap, sync::Arc};
 
-use bevy_asset::{AssetServer, Handle};
+use bevy_asset::AssetServer;
 use bevy_ecs::{
     prelude::Component,
     system::{Resource, SystemParamItem},
@@ -23,9 +23,7 @@ pub use compute::*;
 pub use sky::Sunlight;
 pub use svgf::*;
 
-use crate::{
-    material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable, ShaderModule,
-};
+use crate::{material::Material, sbt::SbtIndex, shader::SpecializedShader, Renderable};
 pub use builder::RayTracingPipelineBuilder;
 pub use manager::{RayTracingPipelineManager, RayTracingPipelineManagerSpecializedPipeline};
 pub use tone_mapping::{ToneMappingPipeline, ToneMappingPipelineRenderParams};

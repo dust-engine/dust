@@ -1,14 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use bevy_app::Plugin;
 use bevy_asset::{AssetEvent, Assets, Handle};
 use bevy_ecs::{
     prelude::EventReader,
     system::{ResMut, Resource},
-    world::FromWorld,
 };
 use rhyolite::{ComputePipeline, PipelineLayout, RayTracingHitGroupType};
 
@@ -176,7 +172,7 @@ fn pipeline_cache_shader_updated_system(
 ) {
     for event in events.iter() {
         match event {
-            AssetEvent::Created { handle } => (),
+            AssetEvent::Created { handle: _ } => (),
             AssetEvent::Modified { handle } => {
                 let generation = pipeline_cache
                     .shader_generations

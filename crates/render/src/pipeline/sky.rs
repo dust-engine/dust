@@ -1,5 +1,5 @@
 use bevy_ecs::system::Resource;
-use bevy_math::{Vec2, Vec3, Vec3A, Vec4};
+use bevy_math::{Vec3, Vec3A, Vec4};
 use crevice::std430::AsStd430;
 
 #[derive(Debug, Resource)]
@@ -126,7 +126,7 @@ impl Sunlight {
                 solar_intensity.x,
                 solar_intensity.y,
                 solar_intensity.z,
-                ((0.51 * (std::f32::consts::PI / 180.0)) / 2.0),
+                (0.51 * (std::f32::consts::PI / 180.0)) / 2.0,
             ),
         }
     }

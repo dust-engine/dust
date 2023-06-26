@@ -1,16 +1,6 @@
 #version 460
 #include "standard.glsl"
 
-layout(shaderRecordEXT) buffer Sbt {
-    vec3 camera_view_col0;
-    float near;
-    vec3 camera_view_col1;
-    float far;
-    vec3 camera_view_col2;
-    float _padding;
-    vec3 camera_position;
-    float tan_half_fov;
-} sbt;
 layout(location = 0) rayPayloadEXT struct Payload {
     vec3 normal;
 } payload;
@@ -22,20 +12,9 @@ void main() {
         // Did not hit.
         return;
     }
-    const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
-
-    vec2 pixelCamera = 2 * pixelNDC - 1;
-    pixelCamera.y *= -1;
-    pixelCamera.x *= float(gl_LaunchSizeEXT.x) / float(gl_LaunchSizeEXT.y);
-    pixelCamera *= sbt.tan_half_fov;
-
-    const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
-       
-    const vec3 rayWorldDir = rotationMatrix * vec3(pixelCamera, -1);
-
     const vec3 sunDir = sunlight_config.direction.xyz;
     payload.normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
-    vec3 hitLocation = hitT * rayWorldDir + sbt.camera_position + payload.normal * 0.01;
+    vec3 hitLocation = hitT * camera_ray_dir() + camera_origin() + payload.normal * 0.01;
     // Shoot shadow ray
     traceRayEXT(
         accelerationStructure,
@@ -45,9 +24,9 @@ void main() {
         4, // SBT stride, number of ray types // TODO: Make this a shader constant
         1, // missIndex
         hitLocation,     // ray origin
-        0.0,           // ray min range
+        0.1,           // ray min range
         normalize(sunDir), // direction
-        sbt.far, // tmax
+        u_camera.far, // tmax
         0 // payload
     );
 }

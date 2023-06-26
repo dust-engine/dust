@@ -2,7 +2,6 @@ use bevy_app::Plugin;
 use rhyolite_bevy::Device;
 pub use sentry;
 
-
 #[cfg(feature = "aftermath")]
 pub extern crate aftermath_rs as aftermath;
 
@@ -10,16 +9,11 @@ pub struct SentryPlugin;
 
 static SENTRY_GUARD: std::sync::OnceLock<sentry::ClientInitGuard> = std::sync::OnceLock::new();
 
-
 #[cfg(feature = "aftermath")]
 static AFTERMATH_GUARD: std::sync::OnceLock<aftermath::Aftermath> = std::sync::OnceLock::new();
 
-
-
 #[cfg(feature = "aftermath")]
 struct AftermathDelegate;
-
-
 
 #[cfg(feature = "aftermath")]
 impl aftermath::AftermathDelegate for AftermathDelegate {
@@ -35,11 +29,9 @@ impl aftermath::AftermathDelegate for AftermathDelegate {
         sentry::capture_message("Device Lost", sentry::Level::Fatal);
     }
 
-    fn shader_debug_info(&mut self, data: &[u8]) {
-    }
+    fn shader_debug_info(&mut self, data: &[u8]) {}
 
-    fn description(&mut self, describe: &mut aftermath::DescriptionBuilder) {
-    }
+    fn description(&mut self, describe: &mut aftermath::DescriptionBuilder) {}
 }
 
 #[cfg(feature = "aftermath")]
@@ -70,14 +62,18 @@ impl Plugin for SentryPlugin {
         if SENTRY_GUARD.set(guard).is_err() {
             panic!()
         }
-        
+
         #[cfg(feature = "aftermath")]
         {
             let guard = aftermath::Aftermath::new(AftermathDelegate);
             if AFTERMATH_GUARD.set(guard).is_err() {
                 panic!()
             }
-            if rhyolite::error_handler::set_global_device_lost_handler(aftermath_device_lost_handler).is_err() {
+            if rhyolite::error_handler::set_global_device_lost_handler(
+                aftermath_device_lost_handler,
+            )
+            .is_err()
+            {
                 panic!()
             }
             sentry::configure_scope(|scope| {
@@ -86,8 +82,8 @@ impl Plugin for SentryPlugin {
         }
 
         let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
-        .or_else(|_| tracing_subscriber::EnvFilter::try_new("info"))
-        .unwrap();
+            .or_else(|_| tracing_subscriber::EnvFilter::try_new("info"))
+            .unwrap();
 
         // Register the Sentry tracing layer to capture breadcrumbs, events, and spans:
         tracing_subscriber::registry()
@@ -127,11 +123,18 @@ impl Plugin for SentryPlugin {
                     id: Some(properties.device_id.to_string()),
                     vendor_id: Some(properties.vendor_id.to_string()),
                     vendor_name: match driver_properties.driver_id {
-                        vk::DriverId::AMD_OPEN_SOURCE | vk::DriverId::AMD_PROPRIETARY | vk::DriverId::MESA_RADV => Some("AMD".into()),
-                        vk::DriverId::NVIDIA_PROPRIETARY | vk::DriverId::MESA_NVK => Some("NVIDIA".into()),
-                        vk::DriverId::INTEL_OPEN_SOURCE_MESA | vk::DriverId::INTEL_PROPRIETARY_WINDOWS => Some("Intel".into()),
+                        vk::DriverId::AMD_OPEN_SOURCE
+                        | vk::DriverId::AMD_PROPRIETARY
+                        | vk::DriverId::MESA_RADV => Some("AMD".into()),
+                        vk::DriverId::NVIDIA_PROPRIETARY | vk::DriverId::MESA_NVK => {
+                            Some("NVIDIA".into())
+                        }
+                        vk::DriverId::INTEL_OPEN_SOURCE_MESA
+                        | vk::DriverId::INTEL_PROPRIETARY_WINDOWS => Some("Intel".into()),
                         vk::DriverId::ARM_PROPRIETARY => Some("Arm".into()),
-                        vk::DriverId::GOOGLE_SWIFTSHADER | vk::DriverId::GGP_PROPRIETARY => Some("Google".into()),
+                        vk::DriverId::GOOGLE_SWIFTSHADER | vk::DriverId::GGP_PROPRIETARY => {
+                            Some("Google".into())
+                        }
                         vk::DriverId::MESA_LLVMPIPE => Some("Linux".into()),
                         vk::DriverId::MOLTENVK => Some("Apple".into()),
                         vk::DriverId::SAMSUNG_PROPRIETARY => Some("Samsung".into()),

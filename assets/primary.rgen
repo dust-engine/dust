@@ -1,31 +1,10 @@
 #version 460
 #include "standard.glsl"
 
-layout(shaderRecordEXT) buffer Sbt {
-    vec3 camera_view_col0;
-    float near;
-    vec3 camera_view_col1;
-    float far;
-    vec3 camera_view_col2;
-    float _padding;
-    vec3 camera_position;
-    float tan_half_fov;
-} sbt;
 layout(location = 0) rayPayloadEXT uint8_t _rayPayloadNotUsed;
 
 
 void main() {
-    const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
-
-    vec2 pixelCamera = 2 * pixelNDC - 1;
-    pixelCamera.y *= -1;
-    pixelCamera.x *= float(gl_LaunchSizeEXT.x) / float(gl_LaunchSizeEXT.y);
-    pixelCamera *= sbt.tan_half_fov;
-
-    const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
-
-    const vec3 pixelCameraWorld = rotationMatrix * vec3(pixelCamera, -1);
-    
     imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));
     traceRayEXT(
         accelerationStructure,
@@ -34,10 +13,10 @@ void main() {
         0, // SBT offset, ray type index
         4, // SBT stride, number of ray types
         0, // missIndex
-        sbt.camera_position,     // ray origin
-        sbt.near,           // ray min range
-        pixelCameraWorld, // direction
-        sbt.far, // tmax
+        camera_origin(),     // ray origin
+        u_camera.near,           // ray min range
+        camera_ray_dir(), // direction
+        u_camera.far, // tmax
         0 // payload
     );
 }

@@ -26,11 +26,47 @@ layout(set = 0, binding = 6) uniform texture2D blue_noise;
 layout(set = 0, binding = 8, std430) uniform CameraSettingsLastFrame {
     mat4 view_proj;
     mat4 inverse_view_proj;
+    vec3 camera_view_col0;
+    float position_x;
+    vec3 camera_view_col1;
+    float position_y;
+    vec3 camera_view_col2;
+    float position_z;
+    float tan_half_fov;
+    float far;
+    float near;
+    float padding;
 } u_camera_last_frame;
 layout(set = 0, binding = 9, std430) uniform CameraSettings {
     mat4 view_proj;
     mat4 inverse_view_proj;
+    vec3 camera_view_col0;
+    float position_x;
+    vec3 camera_view_col1;
+    float position_y;
+    vec3 camera_view_col2;
+    float position_z;
+    float tan_half_fov;
+    float far;
+    float near;
+    float padding;
 } u_camera;
+vec3 camera_origin() {
+    return vec3(u_camera.position_x, u_camera.position_y, u_camera.position_z);
+}
+vec3 camera_ray_dir() {
+    const vec2 pixelNDC = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
+
+    vec2 pixelCamera = 2 * pixelNDC - 1;
+    pixelCamera.y *= -1;
+    pixelCamera.x *= float(gl_LaunchSizeEXT.x) / float(gl_LaunchSizeEXT.y);
+    pixelCamera *= u_camera.tan_half_fov;
+
+    const mat3 rotationMatrix = mat3(u_camera.camera_view_col0, u_camera.camera_view_col1, u_camera.camera_view_col2);
+
+    const vec3 pixelCameraWorld = rotationMatrix * vec3(pixelCamera, -1);
+    return pixelCameraWorld;
+}
 
 #define RETENTION_FACTOR 0.95
 

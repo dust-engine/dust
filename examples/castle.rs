@@ -10,7 +10,7 @@ use bevy_input::mouse::MouseWheel;
 use bevy_input::prelude::{KeyCode, MouseButton};
 use bevy_time::Time;
 use bevy_transform::prelude::{GlobalTransform, Transform};
-use bevy_window::{Cursor, PrimaryWindow, Window, WindowResolution};
+use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dust_render::{
     AutoExposurePipeline, AutoExposurePipelineRenderParams, BlueNoise, ExposureSettings,
     PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight, SvgfPipeline,
@@ -39,8 +39,7 @@ fn main() {
     #[cfg(not(feature = "sentry"))]
     app.add_plugin(bevy_log::LogPlugin::default());
 
-    app
-        .add_plugin(bevy_core::TaskPoolPlugin::default())
+    app.add_plugin(bevy_core::TaskPoolPlugin::default())
         .add_plugin(bevy_core::TypeRegistrationPlugin::default())
         .add_plugin(bevy_core::FrameCountPlugin::default())
         .add_plugin(bevy_transform::TransformPlugin::default())
@@ -256,7 +255,7 @@ impl Plugin for RenderSystem {
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
 
-                        let (mut radiance_image, mut radiance_image_prev) = rhyolite::future::use_shared_image_flipflop(using!(), |_| {
+                        let (mut radiance_image, radiance_image_prev) = rhyolite::future::use_shared_image_flipflop(using!(), |_| {
                             (
                                 allocator
                                     .create_device_image_uninit(
@@ -338,7 +337,7 @@ fn print_position(
     }
     *current += 0.5 * (*target - *current);
 
-    let calculated_angle =
+    let _calculated_angle =
         ((time.elapsed_seconds() * 0.4).cos() + 1.0) * std::f32::consts::FRAC_PI_2;
     sunlight.direction = glam::Mat3A::from_axis_angle(
         Vec3::new(1.0, 0.0, 0.0),

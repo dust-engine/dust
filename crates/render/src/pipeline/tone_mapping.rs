@@ -2,22 +2,18 @@ use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::{
-    system::{
-        lifetimeless::{SRes, SResMut},
-        Resource, SystemParamItem,
-    },
+    system::{lifetimeless::SRes, Resource, SystemParamItem},
     world::{FromWorld, World},
 };
 use rhyolite::{
     ash::vk,
-    cstr,
     descriptor::{DescriptorPool, DescriptorSetWrite},
     future::{
-        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer,
-        PerFrameState, RenderData, RenderImage, RenderRes,
+        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, RenderData, RenderImage,
+        RenderRes,
     },
-    macros::{glsl_reflected, set_layout},
-    utils::retainer::{Retainer, RetainerHandle},
+    macros::set_layout,
+    utils::retainer::Retainer,
     BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
 };
 use rhyolite::{
@@ -93,7 +89,7 @@ impl ToneMappingPipeline {
         &'a mut self,
         src: &'a RenderImage<impl ImageViewLike + RenderData>,
         albedo: &'a RenderImage<impl ImageViewLike + RenderData>,
-        mut dst: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        dst: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         exposure: &'a RenderRes<impl BufferLike + RenderData>,
         output_color_space: &ColorSpace,
         params: &'a SystemParamItem<ToneMappingPipelineRenderParams>,
@@ -107,7 +103,6 @@ impl ToneMappingPipeline {
             .pipeline
             .entry(output_color_space.clone())
             .or_insert_with(|| {
-                let device = self.desc_pool.device().clone();
                 let mat = self
                     .scene_color_space
                     .primaries()

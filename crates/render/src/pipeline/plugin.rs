@@ -1,10 +1,9 @@
 use std::marker::PhantomData;
 
 use bevy_app::Plugin;
-use bevy_asset::{AssetEvent, AssetServer};
-use bevy_ecs::{prelude::EventReader, system::ResMut};
+use bevy_asset::AssetServer;
 
-use crate::{RayTracingPipeline, RayTracingPipelineBuilder, ShaderModule};
+use crate::{RayTracingPipeline, RayTracingPipelineBuilder};
 
 pub struct RayTracingPipelinePlugin<P: RayTracingPipeline> {
     _marker: PhantomData<P>,

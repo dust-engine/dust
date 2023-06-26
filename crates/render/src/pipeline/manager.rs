@@ -1,14 +1,13 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::Deref,
     sync::Arc,
 };
 
-use bevy_asset::{Assets, Handle};
+use bevy_asset::Assets;
 use bevy_tasks::AsyncComputeTaskPool;
 use rhyolite::{
     ash::prelude::VkResult, HasDevice, PipelineLayout, RayTracingHitGroupType, RayTracingPipeline,
-    RayTracingPipelineLibrary, RayTracingPipelineLibraryCreateInfo,
+    RayTracingPipelineLibrary,
 };
 
 use crate::{

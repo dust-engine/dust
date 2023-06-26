@@ -1,9 +1,9 @@
 use std::{ops::Deref, sync::Arc};
 
 use bevy_asset::{AssetServer, Assets};
-use bevy_ecs::system::Res;
+
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
-use bevy_math::{Mat4, Quat, Vec3};
+use bevy_math::{Mat4, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::AsStd430;
 use rand::Rng;
@@ -25,7 +25,7 @@ use rhyolite_bevy::{Allocator, SlicedImageArray};
 
 use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
-    BlueNoise, PinholeProjection, ShaderModule, SpecializedShader,
+    PinholeProjection, ShaderModule, SpecializedShader,
 };
 use crate::{PipelineCache, Sunlight};
 
@@ -290,48 +290,27 @@ impl StandardPipeline {
             CameraSettings {
                 view_proj: view_proj,
                 inverse_view_proj: view_proj.inverse(),
+                camera_view_col0: camera.1.affine().matrix3.x_axis.into(),
+                camera_view_col1: camera.1.affine().matrix3.y_axis.into(),
+                camera_view_col2: camera.1.affine().matrix3.z_axis.into(),
+                near: camera.0.near,
+                far: camera.0.far,
+                padding: 0.0,
+                position_x: camera.1.translation().x,
+                position_y: camera.1.translation().y,
+                position_z: camera.1.translation().z,
+                tan_half_fov: (camera.0.fov / 2.0).tan(),
             }
             .as_std430()
         };
-        let camera = StandardPipelineCamera {
-            camera_view_col0: camera.1.affine().matrix3.x_axis.into(),
-            camera_view_col1: camera.1.affine().matrix3.y_axis.into(),
-            camera_view_col2: camera.1.affine().matrix3.z_axis.into(),
-            near: camera.0.near,
-            far: camera.0.far,
-            padding: 0.0,
-            camera_position: camera.1.translation(),
-            tan_half_fov: (camera.0.fov / 2.0).tan(),
-        };
-
-        let affine = bevy_math::Affine3A::from_scale_rotation_translation(
-            Vec3::splat(500.0),
-            Quat::from_rotation_x(-2.5),
-            Vec3 {
-                x: 0.0,
-                y: 1000.0,
-                z: -500.0,
-            },
-        );
-        let photon_camera = StandardPipelinePhotonCamera {
-            camera_view_col0: affine.matrix3.x_axis.into(),
-            camera_view_col1: affine.matrix3.y_axis.into(),
-            camera_view_col2: affine.matrix3.z_axis.into(),
-            near: 0.1,
-            far: 10000.0,
-            padding: 0,
-            camera_position: (1000.0 * sunlight.direction).into(),
-            strength: 37.0,
-        };
-
         self.pipeline_sbt_manager
-            .push_raygen(primary_pipeline, camera.clone(), 0);
+            .push_raygen(primary_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
-            .push_raygen(photon_pipeline, photon_camera, 0);
+            .push_raygen(photon_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
-            .push_raygen(shadow_pipeline, camera.clone(), 0);
+            .push_raygen(shadow_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
-            .push_raygen(final_gather_pipeline, camera, 0);
+            .push_raygen(final_gather_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_miss(primary_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
@@ -714,4 +693,14 @@ impl StandardPipeline {
 pub struct CameraSettings {
     pub view_proj: Mat4,
     pub inverse_view_proj: Mat4,
+    pub camera_view_col0: Vec3,
+    pub position_x: f32,
+    pub camera_view_col1: Vec3,
+    pub position_y: f32,
+    pub camera_view_col2: Vec3,
+    pub position_z: f32,
+    pub tan_half_fov: f32,
+    pub far: f32,
+    pub near: f32,
+    pub padding: f32,
 }

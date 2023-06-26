@@ -26,6 +26,7 @@ pub mod descriptor;
 mod device;
 mod dho;
 pub use dho::*;
+pub mod error_handler;
 pub mod future;
 mod instance;
 mod physical_device;
@@ -38,7 +39,6 @@ pub mod shader;
 mod surface;
 pub mod swapchain;
 pub mod utils;
-pub mod error_handler;
 
 pub use device::{Device, HasDevice};
 pub use instance::*;

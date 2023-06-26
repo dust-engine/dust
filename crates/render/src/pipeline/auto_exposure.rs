@@ -2,28 +2,26 @@ use std::{ops::Deref, sync::Arc};
 
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::{
-    system::{lifetimeless::SRes, Res, ResMut, Resource, SystemParamItem},
+    system::{lifetimeless::SRes, Resource, SystemParamItem},
     world::{FromWorld, Mut, World},
 };
 use rhyolite::future::run;
-use rhyolite::future::GPUCommandFutureExt;
+
 use rhyolite::BufferExt;
 use rhyolite::{
     ash::vk,
-    cstr,
     descriptor::{DescriptorPool, DescriptorSetWrite},
     fill_buffer,
     future::{
         use_per_frame_state, use_shared_state, Disposable, DisposeContainer, GPUCommandFuture,
-        PerFrameContainer, PerFrameState, RenderData, RenderImage, RenderRes, SharedDeviceState,
-        SharedDeviceStateHostContainer,
+        RenderData, RenderImage, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer,
     },
-    macros::{commands, glsl_reflected, set_layout},
+    macros::{commands, set_layout},
     utils::retainer::Retainer,
-    ComputePipeline, HasDevice, ImageExt, ImageLike, ImageViewExt, ImageViewLike, PipelineLayout,
+    ComputePipeline, HasDevice, ImageLike, ImageViewExt, ImageViewLike, PipelineLayout,
     ResidentBuffer,
 };
-use rhyolite_bevy::{Allocator, Device, Queues};
+use rhyolite_bevy::{Allocator, Queues};
 
 use crate::{CachedPipeline, PipelineCache, ShaderModule, SpecializedShader};
 struct AutoExposureBuffer {
@@ -81,7 +79,7 @@ impl FromWorld for AutoExposurePipeline {
         let auto_exposure_shader = asset_server.load("auto_exposure.comp.spv");
         let auto_exposure_avg_shader = asset_server.load("auto_exposure_avg.comp.spv");
 
-        let mut pipeline_cache: Mut<PipelineCache> = world.resource_mut();
+        let pipeline_cache: Mut<PipelineCache> = world.resource_mut();
         let pipeline = pipeline_cache.add_compute_pipeline(
             layout.clone(),
             SpecializedShader::for_shader(auto_exposure_shader, vk::ShaderStageFlags::COMPUTE),

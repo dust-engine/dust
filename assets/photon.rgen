@@ -4,17 +4,6 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 #include "standard.glsl"
 
-layout(shaderRecordEXT) buffer Sbt {
-    vec3 camera_view_col0;
-    float near;
-    vec3 camera_view_col1;
-    float far;
-    vec3 camera_view_col2;
-    float strength;
-    vec3 camera_position;
-    uint _padding;
-} sbt;
-
 struct PhotonRayPayload {
     vec3 energy;
     float hitT;
@@ -35,8 +24,7 @@ void main() {
     pixelNDC.x -= 100.0;
     vec3 direction = -sunlight_config.direction.xyz;
 
-    //const mat3 rotationMatrix = mat3(sbt.camera_view_col0, sbt.camera_view_col1, sbt.camera_view_col2);
-
+    const vec3 camera_position = 1000.0 * sunlight_config.direction.xyz;
     photon.energy = sunlight_config.solar_intensity.xyz;
     photon.hitT = 0.0;
     traceRayEXT(
@@ -46,15 +34,15 @@ void main() {
         1, // SBT offset, ray type index
         4, // SBT stride, number of ray types
         -1, // missIndex
-        vec3(pixelNDC.x, 0.0, pixelNDC.y) + sbt.camera_position,     // ray origin
-        sbt.near,           // ray min range
+        vec3(pixelNDC.x, 0.0, pixelNDC.y) + camera_position,     // ray origin
+        0.1,           // ray min range
         direction, // direction
-        sbt.far, // tmax
+        1000.0, // tmax
         0 // payload
     );
 
     vec3 currentDir = direction; // Initial direction
-    vec3 currentOrigin = vec3(pixelNDC.x, 0.0, pixelNDC.y) + sbt.camera_position; // Initial origin
+    vec3 currentOrigin = vec3(pixelNDC.x, 0.0, pixelNDC.y) + camera_position; // Initial origin
     for (int i = 0; i < 1; i++) {
         if (photon.hitT == 0.0) {
             return;
@@ -82,9 +70,9 @@ void main() {
             4, // SBT stride, number of ray types
             -1, // missIndex
             currentOrigin + currentDir * photon.hitT + photon.normal * 0.001,     // ray origin
-            sbt.near,           // ray min range
+            0.1,           // ray min range
             rotatedNoiseSample, // direction
-            sbt.far, // tmax
+            1000.0, // tmax
             0 // payload
         );
     }

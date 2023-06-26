@@ -60,7 +60,13 @@ impl Debug for Version {
 }
 impl From<Version> for String {
     fn from(value: Version) -> Self {
-        format!("{}.{}.{}:{}", value.major(), value.minor(), value.patch(), value.variant())
+        format!(
+            "{}.{}.{}:{}",
+            value.major(),
+            value.minor(),
+            value.patch(),
+            value.variant()
+        )
     }
 }
 

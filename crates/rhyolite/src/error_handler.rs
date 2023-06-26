@@ -1,7 +1,6 @@
 use ash::vk;
 
-static DEVICE_LOST_HANDLER: std::sync::OnceLock<fn ()> = std::sync::OnceLock::new();
-
+static DEVICE_LOST_HANDLER: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 
 pub fn handle_device_lost(error: vk::Result) -> vk::Result {
     if error != vk::Result::ERROR_DEVICE_LOST {
@@ -10,7 +9,8 @@ pub fn handle_device_lost(error: vk::Result) -> vk::Result {
     if let Some(handler) = DEVICE_LOST_HANDLER.get() {
         (handler)();
     }
-    panic!()
+    tracing::error!("Unhandled {:?}", error);
+    std::process::exit(1);
 }
 
 pub fn set_global_device_lost_handler(handler: fn()) -> Result<(), fn()> {

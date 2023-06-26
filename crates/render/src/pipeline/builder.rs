@@ -1,8 +1,8 @@
-use std::{alloc::Layout, collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{alloc::Layout, collections::HashMap, marker::PhantomData};
 
 use bevy_asset::AssetServer;
 use bevy_ecs::{system::Resource, world::World};
-use rhyolite::{HasDevice, PipelineCache};
+use rhyolite::HasDevice;
 use rhyolite_bevy::Allocator;
 
 use crate::material::Material;

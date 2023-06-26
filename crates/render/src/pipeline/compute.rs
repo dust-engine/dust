@@ -1,11 +1,11 @@
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
-use bevy_asset::{AssetEvent, Assets};
-use bevy_ecs::prelude::EventReader;
+use bevy_asset::Assets;
+
 use bevy_tasks::AsyncComputeTaskPool;
 use rhyolite::{
     ash::{prelude::VkResult, vk},
-    PipelineCache, PipelineLayout,
+    PipelineLayout,
 };
 
 use crate::{

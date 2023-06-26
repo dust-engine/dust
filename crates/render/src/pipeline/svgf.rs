@@ -1,31 +1,21 @@
-use std::{collections::HashMap, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
 
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::{
-    system::{
-        lifetimeless::{SRes, SResMut},
-        Resource, SystemParamItem,
-    },
+    system::{lifetimeless::SRes, Resource, SystemParamItem},
     world::{FromWorld, World},
 };
 use rhyolite::{
     ash::vk,
-    cstr,
     descriptor::{DescriptorPool, DescriptorSetWrite},
     future::{
-        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, PerFrameContainer,
-        PerFrameState, RenderData, RenderImage, RenderRes,
+        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, RenderData, RenderImage,
     },
-    macros::{glsl_reflected, set_layout},
-    utils::retainer::{Retainer, RetainerHandle},
-    BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
-    Sampler,
+    macros::set_layout,
+    utils::retainer::Retainer,
+    BufferExt, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout, Sampler,
 };
-use rhyolite::{
-    future::Disposable,
-    macros::commands,
-    utils::format::{ColorSpace, ColorSpaceType},
-};
+use rhyolite::{future::Disposable, macros::commands};
 use rhyolite_bevy::Queues;
 
 use crate::{CachedPipeline, PipelineCache, ShaderModule, SpecializedShader};
@@ -100,11 +90,7 @@ impl FromWorld for SvgfPipeline {
     }
 }
 
-pub type SvgfPipelineRenderParams = (
-    SRes<AssetServer>,
-    SRes<PipelineCache>,
-    SRes<Assets<ShaderModule>>,
-);
+pub type SvgfPipelineRenderParams = (SRes<PipelineCache>, SRes<Assets<ShaderModule>>);
 impl SvgfPipeline {
     pub fn render<'a>(
         &'a mut self,
@@ -117,7 +103,7 @@ impl SvgfPipeline {
         RetainedState: 'static + Disposable,
         RecycledState: 'static + Default,
     > + 'a {
-        let (asset_server, pipeline_cache, shader_assets) = params;
+        let (pipeline_cache, shader_assets) = params;
         let desc_pool = &mut self.desc_pool;
         let pipeline = &mut self.pipeline;
         let sampler = &self.sampler;
