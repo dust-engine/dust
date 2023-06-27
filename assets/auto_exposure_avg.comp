@@ -27,26 +27,27 @@ void main() {
 
     [[unroll]]
     for (uint cutoff = (256 >> 1); cutoff > 0; cutoff >>= 1) {
-        if (gl_LocalInvocationIndex >= cutoff) {
-            return;
+        if (gl_LocalInvocationIndex < cutoff) {
+            histogramShared[gl_LocalInvocationIndex] += histogramShared[gl_LocalInvocationIndex + cutoff];
         }
-        histogramShared[gl_LocalInvocationIndex] += histogramShared[gl_LocalInvocationIndex + cutoff];
         barrier();
     }
     // Here we take our weighted sum and divide it by the number of pixels
     // that had luminance greater than zero (since the index == 0, we can
     // use countForThisBin to find the number of black pixels)
-    
-    uvec2 dim = imageSize(u_illuminance).xy;
-    uint numPixels = dim.x * dim.y;
-    float weightedLogAverage = (histogramShared[0] / max(numPixels, 1.0)) - 1.0;
 
-    // Map from our histogram space to actual luminance
-    float weightedAvgLum = exp2(((weightedLogAverage / 254.0) * u_params.logLumRange) + u_params.minLogLum);
+    if (gl_LocalInvocationIndex == 0) {
+        uvec2 dim = imageSize(u_illuminance).xy;
+        uint numPixels = dim.x * dim.y;
+        float weightedLogAverage = (histogramShared[0] / max(numPixels, 1.0)) - 1.0;
 
-    // The new stored value will be interpolated using the last frames value
-    // to prevent sudden shifts in the exposure.
-    float lumLastFrame = u_histogram.avg;
-    float adaptedLum = lumLastFrame + (weightedAvgLum - lumLastFrame) * u_params.timeCoeff;
-    u_histogram.avg = adaptedLum;
+        // Map from our histogram space to actual luminance
+        float weightedAvgLum = exp2(((weightedLogAverage / 254.0) * u_params.logLumRange) + u_params.minLogLum);
+
+        // The new stored value will be interpolated using the last frames value
+        // to prevent sudden shifts in the exposure.
+        float lumLastFrame = u_histogram.avg;
+        float adaptedLum = lumLastFrame + (weightedAvgLum - lumLastFrame) * u_params.timeCoeff;
+        u_histogram.avg = adaptedLum;
+    }
 }

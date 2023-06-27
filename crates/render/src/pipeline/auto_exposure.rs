@@ -35,8 +35,6 @@ pub struct AutoExposurePipeline {
     pipeline: CachedPipeline<ComputePipeline>,
     avg_pipeline: CachedPipeline<ComputePipeline>,
     desc_pool: Retainer<DescriptorPool>,
-
-    buffer: SharedDeviceStateHostContainer<ResidentBuffer>,
 }
 
 impl FromWorld for AutoExposurePipeline {
@@ -89,20 +87,11 @@ impl FromWorld for AutoExposurePipeline {
             layout.clone(),
             SpecializedShader::for_shader(auto_exposure_avg_shader, vk::ShaderStageFlags::COMPUTE),
         );
-
-        let allocator = world.resource::<Allocator>();
-        let buffer = allocator
-            .create_device_buffer_uninit(
-                std::mem::size_of::<AutoExposureBuffer>() as u64,
-                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::UNIFORM_BUFFER,
-            )
-            .unwrap();
         AutoExposurePipeline {
             layout,
             pipeline: pipeline,
             desc_pool: Retainer::new(desc_pool),
-            avg_pipeline: avg_pipeline,
-            buffer: SharedDeviceStateHostContainer::new(buffer),
+            avg_pipeline,
         }
     }
 }

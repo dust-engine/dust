@@ -716,7 +716,9 @@ impl ManagedBufferVecStrategyStagingUnsized {
                 self.allocator
                     .create_device_buffer_uninit_aligned(
                         expected_whole_buffer_size,
-                        self.buffer_usage_flags | vk::BufferUsageFlags::TRANSFER_DST,
+                        self.buffer_usage_flags
+                            | vk::BufferUsageFlags::TRANSFER_DST
+                            | vk::BufferUsageFlags::TRANSFER_SRC,
                         self.base_alignment as u64,
                     )
                     .unwrap()
