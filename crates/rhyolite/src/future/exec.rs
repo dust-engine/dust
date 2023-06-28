@@ -1104,8 +1104,14 @@ fn get_memory_access(
     after_access: &Access,
     had_image_layout_transfer: bool,
 ) {
-    let before_access_has_write = had_image_layout_transfer || before_access.has_write();
-    if before_access_has_write && after_access.has_write() {
+    if had_image_layout_transfer {
+        memory_barrier.src_stage_mask |= before_access.write_stages | before_access.read_stages;
+        memory_barrier.dst_stage_mask |= after_access.write_stages | after_access.read_stages;
+        memory_barrier.src_access_mask |= before_access.write_access | before_access.read_access;
+        memory_barrier.dst_access_mask |= after_access.write_access | after_access.read_access;
+        return;
+    }
+    if before_access.has_write() && after_access.has_write() {
         // Write after write
         memory_barrier.src_stage_mask |= before_access.write_stages;
         memory_barrier.dst_stage_mask |= after_access.write_stages;
@@ -1118,7 +1124,7 @@ fn get_memory_access(
         memory_barrier.dst_stage_mask |= after_access.write_stages;
         // No need for memory barrier
     }
-    if before_access_has_write && after_access.has_read() {
+    if before_access.has_write() && after_access.has_read() {
         // Read after write
         memory_barrier.src_stage_mask |= before_access.write_stages;
         memory_barrier.dst_stage_mask |= after_access.read_stages;
