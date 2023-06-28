@@ -2,6 +2,7 @@ use ash::{prelude::VkResult, vk};
 use std::{ops::DerefMut, sync::Arc};
 
 use crate::{
+    debug::DebugObject,
     future::{GPUCommandFuture, RenderData, RenderImage},
     Allocator, Device, HasDevice, SharingMode,
 };
@@ -95,6 +96,12 @@ pub struct ResidentImage {
     format: vk::Format,
     level_count: u32,
     layer_count: u32,
+}
+impl DebugObject for ResidentImage {
+    fn object_handle(&mut self) -> u64 {
+        unsafe { std::mem::transmute(self.image) }
+    }
+    const OBJECT_TYPE: vk::ObjectType = vk::ObjectType::IMAGE;
 }
 impl RenderData for ResidentImage {}
 

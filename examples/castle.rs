@@ -20,8 +20,9 @@ use dust_render::{
 use glam::{Vec3, Vec3A};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
-use rhyolite::{clear_image, BufferExt, ImageExt, ImageLike, ImageRequest};
+use rhyolite::{clear_image, cstr, BufferExt, ImageExt, ImageLike, ImageRequest};
 
+use rhyolite::debug::DebugObject;
 use rhyolite::{
     macros::{commands, gpu},
     QueueType,
@@ -257,7 +258,8 @@ impl Plugin for RenderSystem {
 
                         let (mut radiance_image, radiance_image_prev) = rhyolite::future::use_shared_image_flipflop(using!(), |_| {
                             (
-                                allocator
+                                {
+                                    let mut img = allocator
                                     .create_device_image_uninit(
                                         &ImageRequest {
                                             format: vk::Format::R32G32B32A32_SFLOAT,
@@ -265,7 +267,13 @@ impl Plugin for RenderSystem {
                                             extent: swapchain_image.inner().extent(),
                                             ..Default::default()
                                         }
-                                    ).unwrap().as_2d_view().unwrap(),
+                                    ).unwrap();
+                                    img.set_name_cstr(cstr!("Illuminance Image")).unwrap();
+
+                                    let mut img_view = img.as_2d_view().unwrap();
+                                    img_view.set_name_cstr(cstr!("Illuminance Image View")).unwrap();
+                                    img_view
+                                },
                                 vk::ImageLayout::UNDEFINED,
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());

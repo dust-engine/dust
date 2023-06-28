@@ -123,6 +123,15 @@ impl Swapchain {
         );
         self.0.recreate(create_info).unwrap()
     }
+    pub fn image_format(&self) -> vk::Format {
+        self.0.image_format()
+    }
+    pub fn image_color_space(&self) -> ColorSpace {
+        self.0.image_color_space().clone()
+    }
+    pub fn image_extent(&self) -> vk::Extent2D {
+        self.0.image_extent()
+    }
 }
 
 /// Runs in RenderSystems::SetUp

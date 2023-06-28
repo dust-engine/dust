@@ -186,6 +186,12 @@ impl ToneMappingPipeline {
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
+                ctx.read_image(
+                    albedo,
+                    vk::PipelineStageFlags2::COMPUTE_SHADER,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
                 ctx.write_image(
                     dst,
                     vk::PipelineStageFlags2::COMPUTE_SHADER,

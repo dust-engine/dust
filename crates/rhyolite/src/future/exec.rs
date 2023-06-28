@@ -6,6 +6,7 @@ use ash::vk;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
+    fmt::Debug,
     pin::Pin,
     task::Poll,
 };
@@ -104,6 +105,47 @@ pub struct RenderRes<T: RenderData> {
     pub tracking_info: RefCell<ResTrackingInfo>,
     pub inner: T,
     dispose_marker: Dispose<T>,
+}
+
+impl<T: RenderData + Debug> Debug for RenderRes<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = std::any::type_name::<Self>();
+        let mut f = f.debug_struct(name);
+
+        f.field("inner", &self.inner);
+
+        let tracking = self.tracking_info.borrow();
+        f.field(
+            "meta",
+            &format_args!(
+                "last accessed timeline# {}, stage# {}",
+                tracking.last_accessed_timeline, tracking.last_accessed_stage_index
+            ),
+        )
+        .field(
+            "access",
+            &format_args!(
+                "{:?} -> {:?}",
+                tracking.prev_stage_access, tracking.current_stage_access
+            ),
+        )
+        .field(
+            "queue_family",
+            &format_args!(
+                "{:?} -> {:?}",
+                tracking.prev_queue_family, tracking.queue_family
+            ),
+        )
+        .field(
+            "queue_index",
+            &format_args!(
+                "{:?} -> {:?}",
+                tracking.prev_queue_index, tracking.queue_index
+            ),
+        )
+        .field("untracked_semaphore", &tracking.untracked_semaphore)
+        .finish_non_exhaustive()
+    }
 }
 impl<T: RenderData> Disposable for RenderRes<T> {
     fn retire(&mut self) {
@@ -244,6 +286,50 @@ pub struct RenderImage<T: RenderData> {
     pub res: RenderRes<T>,
     pub old_layout: Cell<vk::ImageLayout>,
     pub layout: Cell<vk::ImageLayout>,
+}
+impl<T: RenderData + Debug> Debug for RenderImage<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = std::any::type_name::<Self>();
+        let mut f = f.debug_struct(name);
+
+        f.field("inner", &self.res.inner);
+
+        let tracking = self.res.tracking_info.borrow();
+        f.field(
+            "meta",
+            &format_args!(
+                "last accessed timeline# {}, stage# {}",
+                tracking.last_accessed_timeline, tracking.last_accessed_stage_index
+            ),
+        )
+        .field(
+            "access",
+            &format_args!(
+                "{:?} -> {:?}",
+                tracking.prev_stage_access, tracking.current_stage_access
+            ),
+        )
+        .field(
+            "queue_family",
+            &format_args!(
+                "{:?} -> {:?}",
+                tracking.prev_queue_family, tracking.queue_family
+            ),
+        )
+        .field(
+            "queue_index",
+            &format_args!(
+                "{:?} -> {:?}",
+                tracking.prev_queue_index, tracking.queue_index
+            ),
+        )
+        .field("untracked_semaphore", &tracking.untracked_semaphore)
+        .field(
+            "layout",
+            &format_args!("{:?} -> {:?}", self.old_layout.get(), self.layout.get()),
+        )
+        .finish_non_exhaustive()
+    }
 }
 impl<T: RenderData> Disposable for RenderImage<T> {
     fn retire(&mut self) {

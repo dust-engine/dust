@@ -1,4 +1,5 @@
 use std::cell::UnsafeCell;
+use std::fmt::Debug;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -42,6 +43,20 @@ impl<T> SharedDeviceStateHostContainer<T> {
 /// it is implied that at any given time, only one submission
 /// may hold a SharedDeviceState<T>.
 pub struct SharedDeviceState<T>(Arc<SharedDeviceStateInner<T>>);
+impl<T: Debug> Debug for SharedDeviceState<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(std::any::type_name::<Self>())
+            .field("inner", &self.0.item)
+            .field("tracking_feedback", unsafe {
+                &*self.0.tracking_feedback.get()
+            })
+            .field(
+                "fetched",
+                &self.0.fetched.load(std::sync::atomic::Ordering::Relaxed),
+            )
+            .finish()
+    }
+}
 impl<T> SharedDeviceState<T> {
     pub fn reused(&self) -> bool {
         unsafe { (&mut *self.0.tracking_feedback.get()).reused }

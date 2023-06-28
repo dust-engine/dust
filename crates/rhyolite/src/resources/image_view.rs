@@ -1,8 +1,6 @@
-use std::ops::Index;
-
 use ash::{prelude::VkResult, vk};
 
-use crate::{HasDevice, ImageLike, Sampler};
+use crate::{debug::DebugObject, HasDevice, ImageLike, Sampler};
 
 pub trait ImageViewLike: ImageLike {
     fn raw_image_view(&self) -> vk::ImageView;
@@ -33,6 +31,21 @@ impl<T> ImageViewExt for T where T: ImageViewLike {}
 pub struct ImageView<T: ImageLike> {
     image: T,
     view: vk::ImageView,
+}
+impl<T: ImageLike> std::fmt::Debug for ImageView<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(std::any::type_name::<Self>())
+            .field("image", &self.image.raw_image())
+            .field("view", &self.view)
+            .finish()
+    }
+}
+impl<T: ImageLike> DebugObject for ImageView<T> {
+    fn object_handle(&mut self) -> u64 {
+        unsafe { std::mem::transmute(self.view) }
+    }
+
+    const OBJECT_TYPE: vk::ObjectType = vk::ObjectType::IMAGE_VIEW;
 }
 
 impl<T: ImageLike> Drop for ImageView<T> {

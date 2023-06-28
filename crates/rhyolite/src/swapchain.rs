@@ -143,7 +143,13 @@ impl Swapchain {
         surface: Arc<Surface>,
         info: SwapchainCreateInfo,
     ) -> VkResult<Self> {
-        tracing::info!(format = ?info.image_format, color_space = ?info.image_color_space, usage = ?info.image_usage, "Creating swapchain");
+        tracing::info!(
+            width = %info.image_extent.width,
+            height = %info.image_extent.height,
+            format = ?info.image_format,
+            color_space = ?info.image_color_space,
+            "Creating swapchain"
+        );
         unsafe {
             let mut create_info = vk::SwapchainCreateInfoKHR {
                 flags: info.flags,
@@ -192,6 +198,13 @@ impl Swapchain {
     }
 
     pub fn recreate(&mut self, info: SwapchainCreateInfo) -> VkResult<()> {
+        tracing::info!(
+            width = %info.image_extent.width,
+            height = %info.image_extent.height,
+            format = ?info.image_format,
+            color_space = ?info.image_color_space,
+            "Recreating swapchain"
+        );
         unsafe {
             let mut create_info = vk::SwapchainCreateInfoKHR {
                 flags: info.flags,
@@ -272,6 +285,16 @@ impl Swapchain {
             image: Some(swapchain_image),
             semaphore,
         }
+    }
+
+    pub fn image_format(&self) -> vk::Format {
+        self.inner.format
+    }
+    pub fn image_color_space(&self) -> ColorSpace {
+        self.inner.color_space.clone()
+    }
+    pub fn image_extent(&self) -> vk::Extent2D {
+        self.inner.extent
     }
 }
 
