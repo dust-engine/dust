@@ -13,7 +13,7 @@ use std::{
 pub struct Instance {
     entry: Arc<ash::Entry>,
     instance: ash::Instance,
-    debug_utils: ManuallyDrop<Option<DebugUtilsMessenger>>,
+    debug_utils: ManuallyDrop<Option<Box<DebugUtilsMessenger>>>,
 
     surface_loader: Option<Box<ash::extensions::khr::Surface>>,
 }
