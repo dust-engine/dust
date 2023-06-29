@@ -683,6 +683,7 @@ impl StageContext {
         stages: vk::PipelineStageFlags2,
         accesses: vk::AccessFlags2,
     ) {
+        assert!(access_flag_is_write(accesses), "Expected write accesses");
         let access = Access {
             write_access: accesses,
             write_stages: stages,
@@ -717,6 +718,7 @@ impl StageContext {
     ) where
         T: BufferLike,
     {
+        assert!(access_flag_is_read(accesses), "Expected read accesses");
         let access = Access {
             read_access: accesses,
             read_stages: stages,
@@ -776,6 +778,7 @@ impl StageContext {
         stages: vk::PipelineStageFlags2,
         accesses: vk::AccessFlags2,
     ) {
+        assert!(access_flag_is_read(accesses), "Expected read accesses");
         let access = Access {
             read_access: accesses,
             read_stages: stages,
@@ -818,6 +821,7 @@ impl StageContext {
     ) where
         T: ImageLike,
     {
+        assert!(access_flag_is_write(accesses), "Expected write accesses");
         let access = Access {
             write_access: accesses,
             write_stages: stages,
@@ -890,6 +894,7 @@ impl StageContext {
     ) where
         T: ImageLike,
     {
+        assert!(access_flag_is_read(accesses), "Expected read accesses");
         let access = Access {
             read_access: accesses,
             read_stages: stages,
@@ -1133,6 +1138,58 @@ fn get_memory_access(
     }
 }
 
+fn access_flag_is_write(flags: vk::AccessFlags2) -> bool {
+    let all_write_bits: vk::AccessFlags2 = vk::AccessFlags2::SHADER_WRITE
+        | vk::AccessFlags2::COLOR_ATTACHMENT_WRITE
+        | vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+        | vk::AccessFlags2::TRANSFER_WRITE
+        | vk::AccessFlags2::HOST_WRITE
+        | vk::AccessFlags2::MEMORY_WRITE
+        | vk::AccessFlags2::SHADER_STORAGE_WRITE
+        | vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR
+        | vk::AccessFlags2::VIDEO_ENCODE_WRITE_KHR
+        | vk::AccessFlags2::TRANSFORM_FEEDBACK_WRITE_EXT
+        | vk::AccessFlags2::TRANSFORM_FEEDBACK_COUNTER_WRITE_EXT
+        | vk::AccessFlags2::COMMAND_PREPROCESS_WRITE_NV
+        | vk::AccessFlags2::ACCELERATION_STRUCTURE_WRITE_KHR
+        | vk::AccessFlags2::MICROMAP_WRITE_EXT
+        | vk::AccessFlags2::OPTICAL_FLOW_WRITE_NV;
+
+    // Clear all the write bits. If nothing is left, that means there's no read bits.
+    flags & !all_write_bits == vk::AccessFlags2::NONE
+}
+
+fn access_flag_is_read(flags: vk::AccessFlags2) -> bool {
+    let all_read_bits: vk::AccessFlags2 = vk::AccessFlags2::INDIRECT_COMMAND_READ
+        | vk::AccessFlags2::INDEX_READ
+        | vk::AccessFlags2::VERTEX_ATTRIBUTE_READ
+        | vk::AccessFlags2::UNIFORM_READ
+        | vk::AccessFlags2::INPUT_ATTACHMENT_READ
+        | vk::AccessFlags2::SHADER_READ
+        | vk::AccessFlags2::COLOR_ATTACHMENT_READ
+        | vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
+        | vk::AccessFlags2::TRANSFER_READ
+        | vk::AccessFlags2::HOST_READ
+        | vk::AccessFlags2::MEMORY_READ
+        | vk::AccessFlags2::SHADER_SAMPLED_READ
+        | vk::AccessFlags2::SHADER_STORAGE_READ
+        | vk::AccessFlags2::VIDEO_DECODE_READ_KHR
+        | vk::AccessFlags2::VIDEO_ENCODE_READ_KHR
+        | vk::AccessFlags2::TRANSFORM_FEEDBACK_COUNTER_READ_EXT
+        | vk::AccessFlags2::CONDITIONAL_RENDERING_READ_EXT
+        | vk::AccessFlags2::COMMAND_PREPROCESS_READ_NV
+        | vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR
+        | vk::AccessFlags2::FRAGMENT_DENSITY_MAP_READ_EXT
+        | vk::AccessFlags2::COLOR_ATTACHMENT_READ_NONCOHERENT_EXT
+        | vk::AccessFlags2::DESCRIPTOR_BUFFER_READ_EXT
+        | vk::AccessFlags2::INVOCATION_MASK_READ_HUAWEI
+        | vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR
+        | vk::AccessFlags2::MICROMAP_READ_EXT
+        | vk::AccessFlags2::OPTICAL_FLOW_READ_NV;
+
+    // Clear all the write bits. If nothing is left, that means there's no read bits.
+    flags & !all_read_bits == vk::AccessFlags2::NONE
+}
 #[cfg(any())]
 mod tests {
     use super::*;

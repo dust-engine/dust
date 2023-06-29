@@ -582,13 +582,13 @@ impl StandardPipeline {
                 ctx.read_image(
                     depth_image,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
                     normal_image,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read(
@@ -639,7 +639,7 @@ impl StandardPipeline {
                 ctx.read_image(
                     target_image,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
@@ -651,19 +651,19 @@ impl StandardPipeline {
                 ctx.read_image(
                     albedo_image,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
                     depth_image,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
                     normal_image,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read(

@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use crate::future::GPUCommandFuture;
 use crate::HasDevice;
 
-pub type DebugUtilsMessengerCallback = fn (
+pub type DebugUtilsMessengerCallback = fn(
     severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     types: vk::DebugUtilsMessageTypeFlagsEXT,
     callback_data: &DebugUtilsMessengerCallbackData,
@@ -32,7 +32,7 @@ pub struct DebugUtilsMessengerCallbackData<'a> {
 pub struct DebugUtilsMessenger {
     pub(crate) debug_utils: ext::DebugUtils,
     pub(crate) messenger: vk::DebugUtilsMessengerEXT,
-    callbacks: RwLock<Vec<DebugUtilsMessengerCallback>>
+    callbacks: RwLock<Vec<DebugUtilsMessengerCallback>>,
 }
 impl Drop for DebugUtilsMessenger {
     fn drop(&mut self) {
@@ -47,13 +47,11 @@ impl DebugUtilsMessenger {
     pub fn new(entry: &ash::Entry, instance: &ash::Instance) -> VkResult<Box<Self>> {
         let debug_utils = ext::DebugUtils::new(entry, instance);
 
-        let mut this = Box::new(
-            Self {
-                debug_utils,
-                messenger: vk::DebugUtilsMessengerEXT::default(),
-                callbacks: RwLock::new(vec![default_callback])
-            }
-        );
+        let mut this = Box::new(Self {
+            debug_utils,
+            messenger: vk::DebugUtilsMessengerEXT::default(),
+            callbacks: RwLock::new(vec![default_callback]),
+        });
         let messenger = unsafe {
             let p_user_data = this.as_mut() as *mut Self as *mut std::ffi::c_void;
             // Safety:
@@ -100,9 +98,18 @@ unsafe extern "system" fn debug_utils_callback(
         message_id_number: callback_data_raw.message_id_number,
         message_id_name: CStr::from_ptr(callback_data_raw.p_message_id_name),
         message: CStr::from_ptr(callback_data_raw.p_message),
-        queue_labels: std::slice::from_raw_parts(callback_data_raw.p_queue_labels, callback_data_raw.queue_label_count as usize),
-        cmd_buf_labels: std::slice::from_raw_parts(callback_data_raw.p_cmd_buf_labels, callback_data_raw.cmd_buf_label_count as usize),
-        objects: std::slice::from_raw_parts(callback_data_raw.p_objects, callback_data_raw.object_count as usize)
+        queue_labels: std::slice::from_raw_parts(
+            callback_data_raw.p_queue_labels,
+            callback_data_raw.queue_label_count as usize,
+        ),
+        cmd_buf_labels: std::slice::from_raw_parts(
+            callback_data_raw.p_cmd_buf_labels,
+            callback_data_raw.cmd_buf_label_count as usize,
+        ),
+        objects: std::slice::from_raw_parts(
+            callback_data_raw.p_objects,
+            callback_data_raw.object_count as usize,
+        ),
     };
     for callback in this.callbacks.read().unwrap().iter() {
         (callback)(severity, types, &callback_data)
@@ -150,7 +157,6 @@ fn default_callback(
             tracing::info!(message=?callback_data.message_id_name, id=callback_data.message_id_number, detail=?callback_data.message)
         }
     };
-
 }
 
 /// Vulkan Object that can be associated with a name and/or a tag.
