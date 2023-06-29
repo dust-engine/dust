@@ -86,6 +86,13 @@ fn material_system<T: Material>(
             .entry(handle.clone_weak())
             .or_default()
             .insert(entity);
+        if let Some(sbt_index) = store.sbt_indices.get(handle) {
+            // If this returns Some, it means `AssetEvent::Created` was already received,
+            // and the SBT entry was already created. Add that to the entity.
+            // If it does not already exist, do nothing. The SbtIndex will be added to the
+            // entity later when `AssetEvent::Created` was called.
+            commands.entity(entity).insert(*sbt_index);
+        }
     }
     for event in events.iter() {
         match event {
@@ -97,8 +104,10 @@ fn material_system<T: Material>(
 
                 } else {
                     store.sbt_indices.insert(handle.clone_weak(), sbt_index);
-                    for entity in store.entitites.get(handle).unwrap().iter() {
-                        commands.entity(*entity).insert(sbt_index);
+                    if let Some(entities) = store.entitites.get(handle) {
+                        for entity in entities.iter() {
+                            commands.entity(*entity).insert(sbt_index);
+                        }
                     }
                 }
             }
