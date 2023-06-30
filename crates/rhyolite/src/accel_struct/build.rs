@@ -280,6 +280,7 @@ impl TLASBuildInfo {
             build_info: self.build_info,
             num_instances: self.num_instances,
             build_size: self.build_size,
+            scratch_buffer: None,
         }
     }
 }
@@ -288,6 +289,7 @@ impl TLASBuildInfo {
 pub struct TLASBuildFuture<T: BufferLike + RenderData> {
     allocator: Allocator,
     input_buffer: Option<RenderRes<T>>,
+    scratch_buffer: Option<RenderRes<SharedDeviceState<ResidentBuffer>>>,
     acceleration_structure: Option<RenderRes<AccelerationStructure>>,
     geometry_info: vk::AccelerationStructureGeometryKHR,
     build_info: vk::AccelerationStructureBuildGeometryInfoKHR,
@@ -303,28 +305,7 @@ impl<T: BufferLike + Send + RenderData> GPUCommandFuture for TLASBuildFuture<T> 
         recycled_state: &mut Self::RecycledState,
     ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
         let this = self.project();
-        let alignment = this
-            .allocator
-            .device()
-            .physical_device()
-            .properties()
-            .acceleration_structure
-            .min_acceleration_structure_scratch_offset_alignment;
-        let scratch_buffer = use_shared_state(
-            recycled_state,
-            |old| {
-                let old_size = old.map(|a: &ResidentBuffer| a.size()).unwrap_or(0);
-                this.allocator
-                    .create_device_buffer_uninit_aligned(
-                        this.build_size.build_scratch_size.max(old_size),
-                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
-                            | vk::BufferUsageFlags::STORAGE_BUFFER,
-                        alignment as u64,
-                    )
-                    .unwrap()
-            },
-            |old| old.size() < this.build_size.build_scratch_size,
-        );
+        let scratch_buffer = this.scratch_buffer.take().unwrap();
         this.build_info.scratch_data = vk::DeviceOrHostAddressKHR {
             device_address: scratch_buffer.inner().device_address(),
         };
@@ -357,18 +338,67 @@ impl<T: BufferLike + Send + RenderData> GPUCommandFuture for TLASBuildFuture<T> 
 
     type RecycledState = Option<SharedDeviceStateHostContainer<ResidentBuffer>>;
 
-    fn context(mut self: std::pin::Pin<&mut Self>, ctx: &mut crate::future::StageContext) {
-        // TODO: what's the optimal access flags to use here?
+    fn init(
+        self: std::pin::Pin<&mut Self>,
+        _ctx: &mut crate::future::CommandBufferRecordContext,
+        recycled_state: &mut Self::RecycledState,
+    ) -> Option<(Self::Output, Self::RetainedState)> {
+        let this = self.project();
+
+        let alignment = this
+            .allocator
+            .device()
+            .physical_device()
+            .properties()
+            .acceleration_structure
+            .min_acceleration_structure_scratch_offset_alignment;
+
+        let scratch_buffer = use_shared_state(
+            recycled_state,
+            |old| {
+                let old_size = old.map(|a: &ResidentBuffer| a.size()).unwrap_or(0);
+                this.allocator
+                    .create_device_buffer_uninit_aligned(
+                        this.build_size.build_scratch_size.max(old_size),
+                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                            | vk::BufferUsageFlags::STORAGE_BUFFER,
+                        alignment as u64,
+                    )
+                    .unwrap()
+            },
+            |old| old.size() < this.build_size.build_scratch_size,
+        );
+
+        assert!(this.scratch_buffer.is_none());
+        *this.scratch_buffer = Some(scratch_buffer);
+        None
+    }
+
+    fn context(self: std::pin::Pin<&mut Self>, ctx: &mut crate::future::StageContext) {
+        let this = self.project();
         ctx.write(
-            self.acceleration_structure.as_mut().unwrap(),
+            this.acceleration_structure.as_mut().unwrap(),
             vk::PipelineStageFlags2::ACCELERATION_STRUCTURE_BUILD_KHR,
             vk::AccessFlags2::ACCELERATION_STRUCTURE_WRITE_KHR,
         );
+        // TODO: what's the optimal access flags to use here?
         ctx.read(
-            self.input_buffer.as_ref().unwrap(),
+            this.input_buffer.as_ref().unwrap(),
             vk::PipelineStageFlags2::ACCELERATION_STRUCTURE_BUILD_KHR,
             vk::AccessFlags2::MEMORY_READ_KHR,
         );
-        // TODO: indicate read&write on scratch buffer. Rn it's not tracked.
+
+        let scratch_buffer = this.scratch_buffer.as_mut().unwrap();
+
+        ctx.read(
+            scratch_buffer,
+            vk::PipelineStageFlags2::ACCELERATION_STRUCTURE_BUILD_KHR,
+            vk::AccessFlags2::MEMORY_READ,
+        );
+        ctx.write(
+            scratch_buffer,
+            vk::PipelineStageFlags2::ACCELERATION_STRUCTURE_BUILD_KHR,
+            vk::AccessFlags2::MEMORY_WRITE,
+        );
     }
 }
