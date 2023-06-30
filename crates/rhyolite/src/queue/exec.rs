@@ -380,6 +380,7 @@ impl<Ret: Disposable, Out> std::future::Future for QueueSubmitFuture<Ret, Out> {
         match this.task.poll(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(err) => {
+                let err = err.map_err(crate::error_handler::handle_device_lost);
                 this.retained_state.take().unwrap().dispose();
                 return Poll::Ready(err.map(|_| this.output.take().unwrap()));
             }

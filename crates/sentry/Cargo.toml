@@ -15,7 +15,7 @@ rhyolite-bevy = { path = "../rhyolite_bevy" }
 rhyolite = { path = "../rhyolite" }
 
 
-aftermath-rs = { version = "0.1", optional = true }
+aftermath-rs = { version = "0.1.2", optional = true }
 
 
 [features]

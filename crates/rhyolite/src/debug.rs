@@ -210,11 +210,17 @@ pub trait DebugObject: crate::HasDevice {
     }
 }
 
-pub struct CommandDebugFuture<'fut> {
+#[derive(PartialEq, Eq, std::marker::ConstParamTy)]
+pub enum DebugLabelType {
+    Begin,
+    End,
+    Insert,
+}
+pub struct CommandDebugFuture<'fut, const TY: DebugLabelType> {
     pub label_name: &'fut CStr,
     pub color: &'fut [f32; 4],
 }
-impl<'fut> GPUCommandFuture for CommandDebugFuture<'fut> {
+impl<'fut, const TY: DebugLabelType> GPUCommandFuture for CommandDebugFuture<'fut, TY> {
     type Output = ();
     type RetainedState = ();
     type RecycledState = ();
@@ -224,19 +230,18 @@ impl<'fut> GPUCommandFuture for CommandDebugFuture<'fut> {
         ctx: &mut crate::future::CommandBufferRecordContext,
         _recycled_state: &mut Self::RecycledState,
     ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
+        let label = vk::DebugUtilsLabelEXT {
+            p_label_name: self.label_name.as_ptr(),
+            color: *self.color,
+            ..Default::default()
+        };
         ctx.record(|ctx, buf| unsafe {
-            ctx.device()
-                .instance()
-                .debug_utils()
-                .debug_utils
-                .cmd_insert_debug_utils_label(
-                    buf,
-                    &vk::DebugUtilsLabelEXT {
-                        p_label_name: self.label_name.as_ptr(),
-                        color: *self.color,
-                        ..Default::default()
-                    },
-                );
+            let debug_utils = &ctx.device().instance().debug_utils().debug_utils;
+            match TY {
+                DebugLabelType::Begin => debug_utils.cmd_begin_debug_utils_label(buf, &label),
+                DebugLabelType::End => debug_utils.cmd_end_debug_utils_label(buf),
+                DebugLabelType::Insert => debug_utils.cmd_insert_debug_utils_label(buf, &label),
+            };
         });
         std::task::Poll::Ready(((), ()))
     }
@@ -251,10 +256,37 @@ impl<'fut> GPUCommandFuture for CommandDebugFuture<'fut> {
     }
 }
 
-pub fn command_debug(name: &CStr) -> CommandDebugFuture {
+pub fn command_debug(name: &CStr) -> CommandDebugFuture<{ DebugLabelType::Insert }> {
     command_debug_colored(name, &[0.0, 0.0, 0.0, 1.0])
 }
-pub fn command_debug_colored<'a>(name: &'a CStr, color: &'a [f32; 4]) -> CommandDebugFuture<'a> {
+pub fn command_debug_colored<'a>(
+    name: &'a CStr,
+    color: &'a [f32; 4],
+) -> CommandDebugFuture<'a, { DebugLabelType::Insert }> {
+    CommandDebugFuture {
+        label_name: name,
+        color,
+    }
+}
+pub fn command_debug_begin(name: &CStr) -> CommandDebugFuture<{ DebugLabelType::Begin }> {
+    command_debug_begin_colored(name, &[0.0, 0.0, 0.0, 1.0])
+}
+pub fn command_debug_begin_colored<'a>(
+    name: &'a CStr,
+    color: &'a [f32; 4],
+) -> CommandDebugFuture<'a, { DebugLabelType::Begin }> {
+    CommandDebugFuture {
+        label_name: name,
+        color,
+    }
+}
+pub fn command_debug_end(name: &CStr) -> CommandDebugFuture<{ DebugLabelType::End }> {
+    command_debug_end_colored(name, &[0.0, 0.0, 0.0, 1.0])
+}
+pub fn command_debug_end_colored<'a>(
+    name: &'a CStr,
+    color: &'a [f32; 4],
+) -> CommandDebugFuture<'a, { DebugLabelType::End }> {
     CommandDebugFuture {
         label_name: name,
         color,

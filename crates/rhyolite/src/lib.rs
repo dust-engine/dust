@@ -10,6 +10,7 @@
 #![feature(int_roundings)]
 #![feature(unsized_locals)]
 #![feature(associated_type_bounds)]
+#![feature(adt_const_params)]
 
 pub use bytemuck::offset_of;
 pub use cstr::cstr;

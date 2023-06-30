@@ -1190,6 +1190,42 @@ fn access_flag_is_read(flags: vk::AccessFlags2) -> bool {
     // Clear all the write bits. If nothing is left, that means there's no read bits.
     flags & !all_read_bits == vk::AccessFlags2::NONE
 }
+
+#[track_caller]
+pub fn command_buffer_scope_begin(ctx: &mut CommandBufferRecordContext) {
+    let location = std::panic::Location::caller();
+    let location_str = format!(
+        "{}:{}:{}\0",
+        location.file(),
+        location.line(),
+        location.column()
+    );
+    ctx.record(|ctx, command_buffer| unsafe {
+        let cstr = std::ffi::CStr::from_bytes_with_nul_unchecked(location_str.as_bytes());
+        ctx.device()
+            .instance()
+            .debug_utils()
+            .debug_utils
+            .cmd_begin_debug_utils_label(
+                command_buffer,
+                &vk::DebugUtilsLabelEXT {
+                    p_label_name: cstr.as_ptr(),
+                    color: [0.0, 0.0, 0.0, 1.0],
+                    ..Default::default()
+                },
+            )
+    });
+}
+pub fn command_buffer_scope_end(ctx: &mut CommandBufferRecordContext) {
+    ctx.record(|ctx, command_buffer| unsafe {
+        ctx.device()
+            .instance()
+            .debug_utils()
+            .debug_utils
+            .cmd_end_debug_utils_label(command_buffer);
+    });
+}
+
 #[cfg(any())]
 mod tests {
     use super::*;

@@ -59,7 +59,8 @@ impl CommandsTransformer for CommandsTransformState {
                         out
                     } else {
                         (__fut_global_ctx_ptr, __recycled_states) = yield ::rhyolite::future::GPUCommandGeneratorContextFetchPtr::new(fut_pinned.as_mut());
-                        loop {
+                        ::rhyolite::future::command_buffer_scope_begin(&mut *(__fut_global_ctx_ptr as *mut _));
+                        let ret = loop {
                             match ::rhyolite::future::GPUCommandFuture::record(fut_pinned.as_mut(),  &mut *(__fut_global_ctx_ptr as *mut _), &mut {&mut *__recycled_states}.#index) {
                                 ::std::task::Poll::Ready((output, retain)) => {
                                     #dispose_replace_stmt
@@ -69,7 +70,9 @@ impl CommandsTransformer for CommandsTransformState {
                                     (__fut_global_ctx_ptr, __recycled_states) = yield ::rhyolite::future::GPUCommandGeneratorContextFetchPtr::new(fut_pinned.as_mut());
                                 },
                             };
-                        }
+                        };
+                        ::rhyolite::future::command_buffer_scope_end(&mut *(__fut_global_ctx_ptr as *mut _));
+                        ret
                     }
                 }
             }
