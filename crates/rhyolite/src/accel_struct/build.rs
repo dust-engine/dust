@@ -115,13 +115,19 @@ impl<T> AccelerationStructureBatchBuilder<T> {
 
         assert_eq!(geometries.len(), total_num_geometries);
         assert_eq!(build_ranges.len(), total_num_geometries);
-        let info = self
-            .builds
-            .into_iter()
-            .map(|(info, a)| (info, a.accel_struct));
+
+        let mut accel_structs: Vec<(T, AccelerationStructure)> = Vec::with_capacity(self.builds.len());
+        let mut input_buffers: Vec<Arc<ResidentBuffer>> = Vec::with_capacity(total_num_geometries);
+        for (info, build) in self.builds.into_iter() {
+            accel_structs.push((info, build.accel_struct));
+            // TODO: Use Box<[]>::into_iter directly in Rust 2024
+            input_buffers.extend(
+                Vec::from(build.geometries).into_iter().map(|geometry| geometry.0));
+        }
         BLASBuildFuture {
             scratch_buffers,
-            accel_structs: info.collect(),
+            accel_structs,
+            input_buffers,
             geometries: geometries.into_boxed_slice(),
             build_infos,
             build_range_infos: build_ranges.into_boxed_slice(),
@@ -133,6 +139,7 @@ impl<T> AccelerationStructureBatchBuilder<T> {
 #[pin_project]
 pub struct BLASBuildFuture<T> {
     scratch_buffers: Vec<ResidentBuffer>,
+    input_buffers: Vec<Arc<ResidentBuffer>>,
     accel_structs: Vec<(T, AccelerationStructure)>,
     geometries: Box<[vk::AccelerationStructureGeometryKHR]>,
     build_infos: Box<[vk::AccelerationStructureBuildGeometryInfoKHR]>,
@@ -143,7 +150,10 @@ pub struct BLASBuildFuture<T> {
 impl<T> GPUCommandFuture for BLASBuildFuture<T> {
     type Output = Vec<(T, AccelerationStructure)>;
 
-    type RetainedState = DisposeContainer<Vec<ResidentBuffer>>;
+    type RetainedState = DisposeContainer<(
+        Vec<ResidentBuffer>,
+        Vec<Arc<ResidentBuffer>>
+    )>;
 
     type RecycledState = ();
 
@@ -168,7 +178,10 @@ impl<T> GPUCommandFuture for BLASBuildFuture<T> {
         let futs = std::mem::replace(this.accel_structs, Vec::new());
         std::task::Poll::Ready((
             futs,
-            DisposeContainer::new(std::mem::replace(this.scratch_buffers, Vec::new())),
+            DisposeContainer::new((
+                std::mem::replace(this.scratch_buffers, Vec::new()),
+                std::mem::replace(this.input_buffers, Vec::new())
+            )),
         ))
     }
 
