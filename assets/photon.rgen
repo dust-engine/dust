@@ -33,7 +33,7 @@ void main() {
         0xFF, // CullMask
         1, // SBT offset, ray type index
         4, // SBT stride, number of ray types
-        -1, // missIndex
+        3, // missIndex
         vec3(pixelNDC.x, 0.0, pixelNDC.y) + camera_position,     // ray origin
         0.1,           // ray min range
         direction, // direction
@@ -68,7 +68,7 @@ void main() {
             0xFF, // CullMask
             1, // SBT offset, ray type index
             4, // SBT stride, number of ray types
-            -1, // missIndex
+            3, // missIndex
             currentOrigin + currentDir * photon.hitT + photon.normal * 0.001,     // ray origin
             0.1,           // ray min range
             rotatedNoiseSample, // direction

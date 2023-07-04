@@ -135,7 +135,10 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("photon.rgen.spv"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                vec![],
+                vec![SpecializedShader::for_shader(
+                    asset_server.load("photon.rmiss.spv"),
+                    vk::ShaderStageFlags::MISS_KHR,
+                )],
                 Vec::new(),
             ),
             shadow_ray_pipeline: RayTracingPipelineManager::new(
@@ -317,6 +320,8 @@ impl StandardPipeline {
             .push_miss(shadow_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_miss(final_gather_pipeline, EmptyShaderRecords, 0);
+        self.pipeline_sbt_manager
+            .push_miss(photon_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_manager = &mut self.pipeline_sbt_manager;
         let desc_pool = &mut self.desc_pool;
         let sunlight = sunlight.bake().as_std430();
