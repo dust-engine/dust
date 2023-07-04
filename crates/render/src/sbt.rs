@@ -455,12 +455,12 @@ impl PipelineSbtManager {
 
     pub fn build<'a>(
         &mut self,
-        ring_buffer: &'a StagingRingBuffer,
+        ring_buffer: &StagingRingBuffer,
     ) -> impl GPUCommandFuture<
             Output = RenderRes<PipelineSbtManagerInfo>,
             RetainedState: 'static + Disposable,
             RecycledState: 'static + Default,
-        > + 'a {
+        > {
         self.align(false);
         let base_alignment = self
             .allocator
@@ -491,11 +491,14 @@ impl PipelineSbtManager {
         let num_callable = std::mem::take(&mut self.num_callable);
         let offset_strides = std::mem::take(&mut self.offset_strides);
 
-        let buffer = std::mem::take(&mut self.buffer);
+        let staging_buffer = ring_buffer.stage_changes(&self.buffer);
+        self.buffer.clear();
 
         commands! { move
             let mut device_buffer = device_buffer;
-            ring_buffer.update_buffer(&mut device_buffer, &buffer).await;
+            let staging_buffer = RenderRes::new(staging_buffer);
+            copy_buffer(&staging_buffer, &mut device_buffer).await;
+            retain!(staging_buffer);
             device_buffer.map(|a| PipelineSbtManagerInfo {
                 buffer: a,
                 num_callable,

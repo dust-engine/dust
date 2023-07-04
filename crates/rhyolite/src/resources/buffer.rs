@@ -563,14 +563,16 @@ impl Allocator {
                 // Unified: upload buffer is device-local, host-visible. direct write.
                 // BiasedUnified: upload buffer is system ram. direct write.
                 let dst_buffer = self.create_dynamic_buffer_uninit(data.len() as u64, usage, alignment)?;
-                dst_buffer.contents_mut().unwrap().copy_from_slice(data);
+                dst_buffer.contents_mut().unwrap()[0..data.len()].copy_from_slice(data);
                 (dst_buffer, false)
             },
         };
         let staging_buffer = if requires_staging_copy {
             let buffer = if data.len() > 1024 * 1024 {
                 // For anything above 1MB, use a dedicated allocation. Heuristic.
-                Either::Left(self.create_staging_buffer(data.len() as u64)?)
+                let staging_buffer = self.create_staging_buffer(data.len() as u64)?;
+                staging_buffer.contents_mut().unwrap()[0..data.len()].copy_from_slice(data);
+                Either::Left(staging_buffer)
             } else {
                 Either::Right(ring_buffer.stage_changes(data))
             };

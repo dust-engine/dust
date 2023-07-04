@@ -248,10 +248,7 @@ impl StagingRingBuffer {
         RetainedState: 'static + Disposable,
         RecycledState: 'static + Default,
     > + 'a {
-        let mut staging_buffer = self.allocate(buffer.inner().size()).unwrap();
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), staging_buffer.as_mut_ptr().unwrap() as *mut u8, data.len());
-        }
+        let staging_buffer = self.stage_changes(data);
         commands! {
             let staging_buffer = RenderRes::new(staging_buffer);
             copy_buffer(&staging_buffer, buffer).await;
