@@ -14,7 +14,7 @@ use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, Rotation, SceneNode};
 use glam::{IVec3, UVec3, Vec3, Vec3Swizzles};
 use rayon::prelude::*;
-use rhyolite::fill_buffer;
+use rhyolite::{fill_buffer, HasDevice};
 use rhyolite::future::RenderRes;
 use rhyolite::BufferLike;
 use rhyolite::{
@@ -24,7 +24,7 @@ use rhyolite::{
     macros::commands,
     QueueRef,
 };
-use rhyolite_bevy::{AsyncQueues, QueuesRouter};
+use rhyolite_bevy::{AsyncQueues, QueuesRouter, StagingRingBuffer};
 
 use crate::material::{DiffuseMaterial, DiffuseMaterialIrradianceCacheEntry, PaletteMaterial};
 
@@ -201,6 +201,7 @@ impl VoxLoader {
     fn load_palette(
         &self,
         palette: &[dot_vox::Color],
+        ring_buffer: &StagingRingBuffer
     ) -> impl GPUCommandFuture<Output = RenderRes<VoxPalette>> {
         unsafe {
             const LEN: usize = 255;
@@ -211,9 +212,11 @@ impl VoxLoader {
 
             let resident_buffer = self
                 .allocator
-                .create_device_buffer_with_data(
+                .create_static_device_buffer_with_data(
                     std::slice::from_raw_parts(mem.as_ptr() as *const u8, mem.len() * 4),
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    0,
+                    &ring_buffer
                 )
                 .unwrap();
             resident_buffer.map(|buffer| {
@@ -229,6 +232,7 @@ impl VoxLoader {
         &self,
         model: &Model,
         palette: Handle<VoxPalette>,
+        ring_buffer: &StagingRingBuffer
     ) -> impl GPUCommandFuture<Output = (VoxGeometry, PaletteMaterial)> + Send {
         let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
 
@@ -260,16 +264,14 @@ impl VoxLoader {
             leaf.material_ptr = palette_indexes.running_sum()[block_index];
         }
 
+        let palette_indexes: Vec<u8> = palette_indexes.collect();
         let material_buffer = self
             .allocator
-            .create_dynamic_asset_buffer_with_writer(
-                palette_indexes.len() as u64,
+            .create_static_device_buffer_with_data(
+                &palette_indexes,
                 vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                |slice| {
-                    for (src, dst) in palette_indexes.zip(slice.iter_mut()) {
-                        *dst = src;
-                    }
-                },
+                0,
+                &ring_buffer
             )
             .unwrap()
             .map(|buffer| {
@@ -283,6 +285,7 @@ impl VoxLoader {
             [model.size.x as u8, model.size.z as u8, model.size.y as u8],
             1.0,
             &self.allocator,
+            ring_buffer
         );
 
         let future_to_wait = material_buffer.join(geometry);
@@ -305,8 +308,9 @@ impl AssetLoader for VoxLoader {
         Box::pin(async {
             let file = dot_vox::load_bytes(bytes).map_err(|str| anyhow::Error::msg(str))?;
 
+            let staging_ring_buffer = StagingRingBuffer::new(self.allocator.device()).unwrap();
             let palette = self
-                .load_palette(&file.palette)
+                .load_palette(&file.palette, &staging_ring_buffer)
                 .schedule_on_queue(self.transfer_queue);
 
             let palette = self.queues.submit(palette, &mut Default::default()).await;
@@ -329,6 +333,7 @@ impl AssetLoader for VoxLoader {
                 None,
             );
 
+
             let geometry_material_futures: Vec<_> = traverser
                 .models
                 .par_iter()
@@ -336,7 +341,7 @@ impl AssetLoader for VoxLoader {
                     let model = &file.models[*model_id as usize];
                     assert!(model.size.x <= 256 && model.size.y <= 256 && model.size.z <= 256);
 
-                    (*model_id, self.load_model(model, palette_handle.clone()))
+                    (*model_id, self.load_model(model, palette_handle.clone(), &staging_ring_buffer))
                 })
                 .collect();
             let geometry_materials = commands! {
@@ -386,6 +391,7 @@ impl AssetLoader for VoxLoader {
                                     as u64,
                                 vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                                     | vk::BufferUsageFlags::TRANSFER_DST, // TODO: zero-initialize this.0
+                                0
                             )
                             .unwrap(),
                     );

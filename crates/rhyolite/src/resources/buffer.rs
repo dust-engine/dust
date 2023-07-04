@@ -1,7 +1,7 @@
 use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
-    task::Poll,
+    task::Poll, sync::Arc,
 };
 
 use ash::vk;
@@ -13,7 +13,7 @@ use crate::{
     future::{CommandBufferRecordContext, GPUCommandFuture, RenderData, RenderRes, StageContext},
     macros::commands,
     utils::either::Either,
-    Allocator, HasDevice, PhysicalDeviceMemoryModel, SharingMode,
+    Allocator, HasDevice, PhysicalDeviceMemoryModel, SharingMode, StagingRingBuffer,
 };
 use vma::Alloc;
 
@@ -463,29 +463,21 @@ pub struct BufferCreateInfo<'a> {
     pub sharing_mode: SharingMode<'a>,
 }
 
+/// Vocabulary:
+/// asset: large buffers
+/// static: buffers that never changes once initialized
 impl Allocator {
     pub fn create_resident_buffer(
         &self,
         buffer_info: &vk::BufferCreateInfo,
         create_info: &vma::AllocationCreateInfo,
-    ) -> VkResult<ResidentBuffer> {
-        let staging_buffer = unsafe { self.inner().create_buffer(buffer_info, create_info)? };
-        Ok(ResidentBuffer {
-            allocator: self.clone(),
-            buffer: staging_buffer.0,
-            allocation: staging_buffer.1,
-            size: buffer_info.size,
-        })
-    }
-    pub fn create_resident_buffer_aligned(
-        &self,
-        buffer_info: &vk::BufferCreateInfo,
-        create_info: &vma::AllocationCreateInfo,
         alignment: u32,
     ) -> VkResult<ResidentBuffer> {
-        let staging_buffer = unsafe {
-            self.inner()
-                .create_buffer_with_alignment(buffer_info, create_info, alignment as u64)?
+        let staging_buffer = if alignment == 0 {
+
+            unsafe { self.inner().create_buffer(buffer_info, create_info)? }
+        } else {
+            unsafe { self.inner().create_buffer_with_alignment(buffer_info, create_info, alignment as u64)? }
         };
         Ok(ResidentBuffer {
             allocator: self.clone(),
@@ -494,69 +486,15 @@ impl Allocator {
             size: buffer_info.size,
         })
     }
-    /// Create uninitialized buffer visible to the CPU and local to the GPU.
-    /// Only applicable to Bar, ReBar, Integrated memory architecture.
-    pub fn create_write_buffer_uninit(
-        &self,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-    ) -> VkResult<ResidentBuffer> {
-        let buffer_create_info = vk::BufferCreateInfo {
-            size,
-            usage,
-            ..Default::default()
-        };
-        let alloc_info = vma::AllocationCreateInfo {
-            usage: vma::MemoryUsage::AutoPreferDevice,
-            flags: vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE
-                | vma::AllocationCreateFlags::MAPPED,
-            required_flags: vk::MemoryPropertyFlags::DEVICE_LOCAL
-                | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            ..Default::default()
-        };
-        self.create_resident_buffer(&buffer_create_info, &alloc_info)
-    }
-    /// Create uninitialized buffer visible to the CPU and local to the GPU.
-    /// Only applicable to Bar, ReBar, Integrated memory architecture.
-    pub fn create_write_buffer_uninit_aligned(
-        &self,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-        min_alignment: u64,
-    ) -> VkResult<ResidentBuffer> {
-        let buffer_create_info = vk::BufferCreateInfo {
-            size,
-            usage,
-            ..Default::default()
-        };
-        let alloc_info = vma::AllocationCreateInfo {
-            usage: vma::MemoryUsage::AutoPreferDevice,
-            flags: vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE
-                | vma::AllocationCreateFlags::MAPPED,
-            required_flags: vk::MemoryPropertyFlags::DEVICE_LOCAL
-                | vk::MemoryPropertyFlags::HOST_VISIBLE,
-            ..Default::default()
-        };
 
-        let (buffer, allocation) = unsafe {
-            self.inner().create_buffer_with_alignment(
-                &buffer_create_info,
-                &alloc_info,
-                min_alignment,
-            )
-        }?;
-        Ok(ResidentBuffer {
-            allocator: self.clone(),
-            buffer,
-            allocation,
-            size,
-        })
-    }
-    /// Create uninitialized buffer only visible to the GPU.
+    /// Create large uninitialized buffer only visible to the GPU.
+    /// Discrete, Bar, ReBar, Unified: video memory.
+    /// BiasedUnified: system memory.
     pub fn create_device_buffer_uninit(
         &self,
         size: vk::DeviceSize,
         usage: vk::BufferUsageFlags,
+        alignment: u32,
     ) -> VkResult<ResidentBuffer> {
         let buffer_create_info = vk::BufferCreateInfo {
             size,
@@ -564,264 +502,92 @@ impl Allocator {
             ..Default::default()
         };
         let alloc_info = vma::AllocationCreateInfo {
-            usage: vma::MemoryUsage::AutoPreferDevice,
+            usage: match self.device().physical_device().memory_model() {
+                PhysicalDeviceMemoryModel::BiasedUnified => vma::MemoryUsage::AutoPreferHost,
+                _ => vma::MemoryUsage::AutoPreferDevice
+            },
             ..Default::default()
         };
-        self.create_resident_buffer(&buffer_create_info, &alloc_info)
+        self.create_resident_buffer(&buffer_create_info, &alloc_info, alignment)
     }
-    /// Create uninitialized buffer only visible to the GPU.
-    pub fn create_device_buffer_uninit_aligned(
-        &self,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-        min_alignment: vk::DeviceSize,
-    ) -> VkResult<ResidentBuffer> {
-        let buffer_create_info = vk::BufferCreateInfo {
-            size,
-            usage,
-            ..Default::default()
-        };
-        let alloc_info = vma::AllocationCreateInfo {
-            usage: vma::MemoryUsage::AutoPreferDevice,
-            ..Default::default()
-        };
-        let (buffer, allocation) = unsafe {
-            self.inner().create_buffer_with_alignment(
-                &buffer_create_info,
-                &alloc_info,
-                min_alignment,
-            )
-        }?;
-        Ok(ResidentBuffer {
-            allocator: self.clone(),
-            buffer,
-            allocation,
-            size,
-        })
-    }
-    /// Crate a small host-visible buffer with uninitialized data, preferably local to the GPU.
-    ///
-    /// The buffer will be device-local, host visible on ResizableBar, Bar, and UMA memory models.
-    /// The specified usage flags will be applied.
-    ///
-    /// The buffer will be host-visible on Discrete memory model. TRANSFER_SRC will be applied.
-    ///
-    /// Suitable for small amount of dynamic data, with device-local buffer created separately
-    /// and transfers manually scheduled on devices without device-local, host-visible memory.
+
+    /// Create large uninitialized buffer accessible on both CPU and GPU.
     pub fn create_dynamic_buffer_uninit(
-        &self,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-    ) -> VkResult<ResidentBuffer> {
-        let mut create_info = vk::BufferCreateInfo {
-            size,
-            usage,
-            ..Default::default()
-        };
-
-        let dst_buffer = match self.device().physical_device().memory_model() {
-            PhysicalDeviceMemoryModel::UMA
-            | PhysicalDeviceMemoryModel::Bar
-            | PhysicalDeviceMemoryModel::ResizableBar => {
-                let buf = self.create_resident_buffer(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::MAPPED
-                            | vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
-                        usage: vma::MemoryUsage::AutoPreferDevice,
-                        required_flags: vk::MemoryPropertyFlags::empty(),
-                        preferred_flags: vk::MemoryPropertyFlags::empty(),
-                        memory_type_bits: 0,
-                        user_data: 0,
-                        priority: 0.0,
-                    },
-                )?;
-                buf
-            }
-            PhysicalDeviceMemoryModel::Discrete => {
-                create_info.usage |= vk::BufferUsageFlags::TRANSFER_SRC;
-                let dst_buffer = self.create_resident_buffer(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::MAPPED
-                            | vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
-                        usage: vma::MemoryUsage::AutoPreferHost,
-                        ..Default::default()
-                    },
-                )?;
-                dst_buffer
-            }
-        };
-        Ok(dst_buffer)
-    }
-
-    pub fn create_dynamic_buffer_uninit_aligned(
-        &self,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-        alignment: u64,
-    ) -> VkResult<ResidentBuffer> {
-        let mut create_info = vk::BufferCreateInfo {
-            size,
-            usage,
-            ..Default::default()
-        };
-
-        let dst_buffer = match self.device().physical_device().memory_model() {
-            PhysicalDeviceMemoryModel::UMA
-            | PhysicalDeviceMemoryModel::Bar
-            | PhysicalDeviceMemoryModel::ResizableBar => unsafe {
-                let (buf, alloc) = self.inner().create_buffer_with_alignment(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::MAPPED
-                            | vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
-                        usage: vma::MemoryUsage::AutoPreferDevice,
-                        required_flags: vk::MemoryPropertyFlags::empty(),
-                        preferred_flags: vk::MemoryPropertyFlags::empty(),
-                        memory_type_bits: 0,
-                        user_data: 0,
-                        priority: 0.0,
-                    },
-                    alignment,
-                )?;
-                ResidentBuffer {
-                    allocator: self.clone(),
-                    buffer: buf,
-                    allocation: alloc,
-                    size,
-                }
-            },
-            PhysicalDeviceMemoryModel::Discrete => unsafe {
-                create_info.usage |= vk::BufferUsageFlags::TRANSFER_SRC;
-                let (buffer, allocation) = self.inner().create_buffer_with_alignment(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::MAPPED
-                            | vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
-                        usage: vma::MemoryUsage::AutoPreferHost,
-                        ..Default::default()
-                    },
-                    alignment,
-                )?;
-
-                ResidentBuffer {
-                    allocator: self.clone(),
-                    buffer,
-                    allocation,
-                    size,
-                }
-            },
-        };
-        Ok(dst_buffer)
-    }
-
-    /// Crate a small device-local buffer with uninitialized data, guaranteed local to the GPU.
-    /// The data will be host visible on ResizableBar, Bar, and UMA memory models.
-    /// TRANSFER_DST usage flag will be automatically added to the created buffer.
-    /// Suitable for small amount of dynamic data, with staging buffer created separately.
-    /// TODO: rename to create_dynamic_upload_buffer_uninit
-    pub fn create_upload_buffer_uninit(
         &self,
         size: vk::DeviceSize,
         usage: vk::BufferUsageFlags,
         alignment: u32,
     ) -> VkResult<ResidentBuffer> {
-        let mut create_info = vk::BufferCreateInfo {
+        let buffer_create_info = vk::BufferCreateInfo {
             size,
             usage,
             ..Default::default()
         };
-
-        let dst_buffer = match self.device().physical_device().memory_model() {
-            PhysicalDeviceMemoryModel::UMA
-            | PhysicalDeviceMemoryModel::Bar
-            | PhysicalDeviceMemoryModel::ResizableBar => {
-                let buf = self.create_resident_buffer_aligned(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::MAPPED
-                            | vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
-                        usage: vma::MemoryUsage::AutoPreferDevice,
-                        required_flags: vk::MemoryPropertyFlags::empty(),
-                        preferred_flags: vk::MemoryPropertyFlags::empty(),
-                        memory_type_bits: 0,
-                        user_data: 0,
-                        priority: 0.0,
-                    },
-                    alignment,
-                )?;
-                buf
-            }
-            PhysicalDeviceMemoryModel::Discrete => {
-                create_info.usage |= vk::BufferUsageFlags::TRANSFER_DST;
-                let dst_buffer = self.create_resident_buffer_aligned(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::empty(),
-                        usage: vma::MemoryUsage::AutoPreferDevice,
-                        ..Default::default()
-                    },
-                    alignment,
-                )?;
-                dst_buffer
-            }
+        let alloc_info = vma::AllocationCreateInfo {
+            usage: match self.device().physical_device().memory_model() {
+                PhysicalDeviceMemoryModel::BiasedUnified => vma::MemoryUsage::AutoPreferHost,
+                PhysicalDeviceMemoryModel::ReBar | PhysicalDeviceMemoryModel::Bar | PhysicalDeviceMemoryModel::Unified => vma::MemoryUsage::AutoPreferDevice,
+                PhysicalDeviceMemoryModel::Discrete => panic!("Discrete GPUs do not have device-local, host-visible memory"),
+            },
+            flags: vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE | vma::AllocationCreateFlags::MAPPED,
+            ..Default::default()
         };
-        Ok(dst_buffer)
+        self.create_resident_buffer(&buffer_create_info, &alloc_info, alignment)
     }
-
-    /// Crate a large device-local buffer with uninitialized data, guaranteed local to the GPU.
-    /// Suitable for large assets with occasionally updated regions.
-    ///
-    /// The data will be host visible on ResizableBar and UMA memory models. On these memory
-    /// architectures, the application may update the buffer directly when it's not already in use
-    /// by the GPU.
-    ///
-    /// The data will not be host visible on Bar and Discrete memory models. The application must
-    /// use a staging buffer for the updates. TRANSFER_DST usage flag will be automatically added
-    /// to the created buffer.
-    pub fn create_dynamic_asset_buffer_uninit(
+    
+    /// Create large initialized buffer only visible to the GPU.
+    /// Discrete, Bar, ReBar: video memory, copy with staging buffer
+    /// Unified: device-local, host-visible memory, direct write
+    /// BiasedUnified: system memory, direct write
+    pub fn create_static_device_buffer_with_data(
         &self,
-        size: vk::DeviceSize,
+        data: &[u8],
         usage: vk::BufferUsageFlags,
-    ) -> VkResult<ResidentBuffer> {
-        let mut create_info = vk::BufferCreateInfo {
-            size,
-            usage,
-            ..Default::default()
-        };
+        alignment: u32,
+        ring_buffer: &Arc<StagingRingBuffer>,
+    ) -> VkResult<impl GPUCommandFuture<Output = RenderRes<ResidentBuffer>>>  {
+        let (dst_buffer, requires_staging_copy) = match self.device().physical_device().memory_model() {
+            PhysicalDeviceMemoryModel::Discrete | PhysicalDeviceMemoryModel::Bar | PhysicalDeviceMemoryModel::ReBar => {
+                // Use a staging buffer for copying the initial data.
+                // Discrete: must use staging.
+                // Bar: 256MB of host visible memory is not enough for large buffers. Use staging
+                // ReBar: Can also use direct write, but the initialization only happens once,
+                // making it worthwhile to use a copy command. Memory mapping uses additional host-side address space.
 
-        let dst_buffer = match self.device().physical_device().memory_model() {
-            PhysicalDeviceMemoryModel::UMA | PhysicalDeviceMemoryModel::ResizableBar => {
-                let buf = self.create_resident_buffer(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::MAPPED
-                            | vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
-                        usage: vma::MemoryUsage::AutoPreferDevice,
-                        required_flags: vk::MemoryPropertyFlags::empty(),
-                        preferred_flags: vk::MemoryPropertyFlags::empty(),
-                        memory_type_bits: 0,
-                        user_data: 0,
-                        priority: 0.0,
-                    },
-                )?;
-                buf
-            }
-            PhysicalDeviceMemoryModel::Discrete | PhysicalDeviceMemoryModel::Bar => {
-                create_info.usage |= vk::BufferUsageFlags::TRANSFER_DST;
-                let dst_buffer = self.create_resident_buffer(
-                    &create_info,
-                    &vma::AllocationCreateInfo {
-                        flags: vma::AllocationCreateFlags::empty(),
-                        usage: vma::MemoryUsage::AutoPreferDevice,
-                        ..Default::default()
-                    },
-                )?;
-                dst_buffer
-            }
+                // dst_buffer is device-local only.
+                let dst_buffer = self.create_device_buffer_uninit(data.len() as u64, usage | vk::BufferUsageFlags::TRANSFER_DST, alignment)?;
+                (dst_buffer, true)
+            },
+            PhysicalDeviceMemoryModel::Unified | PhysicalDeviceMemoryModel::BiasedUnified => {
+                // Create upload buffer
+                // Unified: upload buffer is device-local, host-visible. direct write.
+                // BiasedUnified: upload buffer is system ram. direct write.
+                let dst_buffer = self.create_dynamic_buffer_uninit(data.len() as u64, usage, alignment)?;
+                dst_buffer.contents_mut().unwrap().copy_from_slice(data);
+                (dst_buffer, false)
+            },
         };
-        Ok(dst_buffer)
+        let staging_buffer = if requires_staging_copy {
+            let buffer = if data.len() > 1024 * 1024 {
+                // For anything above 1MB, use a dedicated allocation. Heuristic.
+                Either::Left(self.create_staging_buffer(data.len() as u64)?)
+            } else {
+                Either::Right(ring_buffer.stage_changes(data))
+            };
+            Some(buffer)
+        } else {
+            None
+        };
+        Ok(commands! { move
+            let mut dst_buffer = RenderRes::new(dst_buffer);
+            if let Some(staging_buffer) = staging_buffer {
+                let staging_buffer = RenderRes::new(staging_buffer);
+                copy_buffer(&staging_buffer, &mut dst_buffer).await;
+                retain!(staging_buffer);
+            }
+            let dst_buffer = dst_buffer;
+            dst_buffer
+        })
     }
 
     pub fn create_staging_buffer(&self, size: vk::DeviceSize) -> VkResult<ResidentBuffer> {
@@ -837,135 +603,9 @@ impl Allocator {
                 usage: vma::MemoryUsage::AutoPreferHost,
                 ..Default::default()
             },
+            0
         )
     }
 
-    /// Crate a small device-local buffer with a writer callback, only visible to the GPU.
-    /// The data will be directly written to the buffer on ResizableBar, Bar, and UMA memory models.
-    /// We will create a temporary staging buffer on Discrete GPUs with no host-accessible device-local memory.
-    /// TRANSFER_DST usage flag will be automatically added to the created buffer.
-    /// Suitable for small amount of dynamic data.
-    /// TODO: rename to create_dynamic_buffer_with_writer
-    pub fn create_device_buffer_with_writer(
-        &self,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-        writer: impl for<'a> FnOnce(&'a mut [u8]),
-    ) -> VkResult<impl GPUCommandFuture<Output = RenderRes<ResidentBuffer>>> {
-        let dst_buffer = self.create_upload_buffer_uninit(size, usage, 0)?;
-        let staging_buffer = if let Some(contents) = dst_buffer.contents_mut() {
-            writer(contents);
-            None
-        } else {
-            let staging_buffer = self.create_staging_buffer(size)?;
-            writer(staging_buffer.contents_mut().unwrap());
-            Some(staging_buffer)
-        };
-
-        Ok(commands! {
-            let mut dst_buffer = RenderRes::new(dst_buffer);
-            if let Some(staging_buffer) = staging_buffer {
-                let staging_buffer = RenderRes::new(staging_buffer);
-                copy_buffer(&staging_buffer, &mut dst_buffer).await;
-                retain!(staging_buffer);
-            }
-            dst_buffer
-        })
-    }
-
-    /// Crate a small device-local buffer with pre-populated data, only visible to the GPU.
-    /// The data will be directly written to the buffer on ResizableBar, Bar, and UMA memory models.
-    /// We will create a temporary staging buffer on Discrete GPUs with no host-accessible device-local memory.
-    /// TRANSFER_DST usage flag will be automatically added to the created buffer.
-    /// Suitable for small amount of dynamic data.
-    /// TODO: rename to create_dynamic_buffer_with_data
-    pub fn create_device_buffer_with_data(
-        &self,
-        data: &[u8],
-        usage: vk::BufferUsageFlags,
-    ) -> VkResult<impl GPUCommandFuture<Output = RenderRes<ResidentBuffer>>> {
-        let dst_buffer = self.create_upload_buffer_uninit(data.len() as u64, usage, 0)?;
-        let staging_buffer = if let Some(contents) = dst_buffer.contents_mut() {
-            contents[..data.len()].copy_from_slice(data);
-            None
-        } else {
-            let staging_buffer = self.create_staging_buffer(data.len() as u64)?;
-            staging_buffer.contents_mut().unwrap()[..data.len()].copy_from_slice(data);
-            Some(staging_buffer)
-        };
-
-        Ok(commands! {
-            let mut dst_buffer = RenderRes::new(dst_buffer);
-            if let Some(staging_buffer) = staging_buffer {
-                let staging_buffer = RenderRes::new(staging_buffer);
-                copy_buffer(&staging_buffer, &mut dst_buffer).await;
-                retain!(staging_buffer);
-            }
-            dst_buffer
-        })
-    }
-
-    /// Crate a large device-local buffer with a writer callback, only visible to the GPU.
-    /// The data will be directly written to the buffer on ResizableBar, and UMA memory models.
-    /// We will create a temporary staging buffer on Bar and Discrete GPUs with no host-accessible device-local memory.
-    /// TRANSFER_DST usage flag will be automatically added to the created buffer.
-    /// Suitable for large assets with some regions updated occasionally.
-    pub fn create_dynamic_asset_buffer_with_writer(
-        &self,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-        writer: impl for<'a> FnOnce(&'a mut [u8]),
-    ) -> VkResult<impl GPUCommandFuture<Output = RenderRes<ResidentBuffer>>> {
-        let dst_buffer = self.create_upload_buffer_uninit(size, usage, 0)?;
-        let staging_buffer = if let Some(contents) = dst_buffer.contents_mut() {
-            writer(contents);
-            None
-        } else {
-            let staging_buffer = self.create_staging_buffer(size)?;
-            writer(staging_buffer.contents_mut().unwrap());
-            Some(staging_buffer)
-        };
-
-        Ok(commands! {
-            let mut dst_buffer = RenderRes::new(dst_buffer);
-            if let Some(staging_buffer) = staging_buffer {
-                let staging_buffer = RenderRes::new(staging_buffer);
-                copy_buffer(&staging_buffer, &mut dst_buffer).await;
-                retain!(staging_buffer);
-            }
-            dst_buffer
-        })
-    }
-
-    /// Crate a large device-local buffer with a writer callback, only visible to the GPU.
-    /// The data will be directly written to the buffer on ResizableBar, and UMA memory models.
-    /// We will create a temporary staging buffer on Bar and Discrete GPUs with no host-accessible device-local memory.
-    /// TRANSFER_DST usage flag will be automatically added to the created buffer.
-    /// Suitable for large assets with some regions updated occasionally.
-    pub fn create_dynamic_asset_buffer_with_data(
-        &self,
-        data: &[u8],
-        usage: vk::BufferUsageFlags,
-        alignment: u32,
-    ) -> VkResult<impl GPUCommandFuture<Output = RenderRes<ResidentBuffer>>> {
-        let dst_buffer = self.create_upload_buffer_uninit(data.len() as u64, usage, alignment)?;
-        let staging_buffer = if let Some(contents) = dst_buffer.contents_mut() {
-            contents[..data.len()].copy_from_slice(data);
-            None
-        } else {
-            let staging_buffer = self.create_staging_buffer(data.len() as u64)?;
-            staging_buffer.contents_mut().unwrap()[..data.len()].copy_from_slice(data);
-            Some(staging_buffer)
-        };
-
-        Ok(commands! {
-            let mut dst_buffer = RenderRes::new(dst_buffer);
-            if let Some(staging_buffer) = staging_buffer {
-                let staging_buffer = RenderRes::new(staging_buffer);
-                copy_buffer(&staging_buffer, &mut dst_buffer).await;
-                retain!(staging_buffer);
-            }
-            dst_buffer
-        })
-    }
+    // TODO: create download buffer
 }

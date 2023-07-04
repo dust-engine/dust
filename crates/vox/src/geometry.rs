@@ -9,7 +9,7 @@ use rhyolite::ash::vk;
 use rhyolite::debug::DebugObject;
 use rhyolite::future::{GPUCommandFuture, GPUCommandFutureExt, UnitCommandFuture};
 use rhyolite::ResidentBuffer;
-use rhyolite_bevy::Allocator;
+use rhyolite_bevy::{Allocator, StagingRingBuffer};
 
 #[derive(bevy_reflect::TypeUuid, bevy_reflect::TypePath)]
 #[uuid = "307feebb-14b8-4135-be09-ae828decc6a4"]
@@ -57,6 +57,7 @@ impl VoxGeometry {
         size: [u8; 3],
         unit_size: f32,
         allocator: &Allocator,
+        ring_buffer: &StagingRingBuffer,
     ) -> impl GPUCommandFuture<Output = Self> {
         let leaf_extent_int = <<TreeRoot as Node>::LeafType as Node>::EXTENT;
         let leaf_extent: Vec3A = leaf_extent_int.as_vec3a();
@@ -99,11 +100,12 @@ impl VoxGeometry {
             assert_eq!(size, aabbs.len() * 24);
             let data = unsafe { std::slice::from_raw_parts(aabbs.as_ptr() as *const u8, size) };
             allocator
-                .create_dynamic_asset_buffer_with_data(
+                .create_static_device_buffer_with_data(
                     data,
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                         | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
                     16,
+                    &ring_buffer
                 )
                 .unwrap()
                 .map(|buffer| {
@@ -117,10 +119,11 @@ impl VoxGeometry {
             assert_eq!(size, nodes.len() * 24);
             let data = unsafe { std::slice::from_raw_parts(nodes.as_ptr() as *const u8, size) };
             allocator
-                .create_dynamic_asset_buffer_with_data(
+                .create_static_device_buffer_with_data(
                     data,
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                     16,
+                    &ring_buffer
                 )
                 .unwrap()
                 .map(|buffer| {

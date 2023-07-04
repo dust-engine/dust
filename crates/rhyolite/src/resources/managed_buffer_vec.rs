@@ -39,7 +39,7 @@ impl<T> ManagedBufferVec<T> {
     ) -> Self {
         use crate::PhysicalDeviceMemoryModel::*;
         match allocator.physical_device().memory_model() {
-            ResizableBar | UMA => Self::DirectWrite(ManagedBufferVecStrategyDirectWrite::new(
+            ReBar | Unified | BiasedUnified => Self::DirectWrite(ManagedBufferVecStrategyDirectWrite::new(
                 allocator,
                 buffer_usage_flags,
                 alignment,
@@ -121,7 +121,7 @@ impl ManagedBufferVecUnsized {
     ) -> Self {
         use crate::PhysicalDeviceMemoryModel::*;
         match allocator.physical_device().memory_model() {
-            ResizableBar | UMA => {
+            ReBar | Unified | BiasedUnified => {
                 Self::DirectWrite(ManagedBufferVecStrategyDirectWriteUnsized::new(
                     allocator,
                     buffer_usage_flags,
@@ -236,10 +236,10 @@ impl<T> ManagedBufferVecStrategyDirectWrite<T> {
         let create_buffer = || {
             let create_buffer = self
                 .allocator
-                .create_write_buffer_uninit_aligned(
+                .create_dynamic_buffer_uninit(
                     (self.objects.capacity() * item_size) as u64,
                     self.buffer_usage_flags,
-                    self.alignment as u64,
+                    self.alignment,
                 )
                 .unwrap();
             create_buffer.contents_mut().unwrap()[0..self.objects.len() * item_size]
@@ -374,10 +374,10 @@ impl ManagedBufferVecStrategyDirectWriteUnsized {
         let create_buffer = || {
             let create_buffer = self
                 .allocator
-                .create_write_buffer_uninit_aligned(
+                .create_dynamic_buffer_uninit(
                     self.objects_buffer.capacity() as u64,
                     self.buffer_usage_flags,
-                    self.base_alignment as u64,
+                    self.base_alignment as u32,
                 )
                 .unwrap();
             create_buffer.contents_mut().unwrap()[0..self.objects_buffer.len()]
@@ -519,14 +519,14 @@ impl<T> ManagedBufferVecStrategyStaging<T> {
             &mut self.device_buffer,
             |_| {
                 self.allocator
-                    .create_device_buffer_uninit_aligned(
+                    .create_device_buffer_uninit(
                         expected_whole_buffer_size,
                         // When enlarging the buffer, we copy the contents from the old buffer to the new buffer.
                         // That's why we need the TRANSFER_SRC flag here.
                         self.buffer_usage_flags
                             | vk::BufferUsageFlags::TRANSFER_DST
                             | vk::BufferUsageFlags::TRANSFER_SRC,
-                        self.alignment as u64,
+                        self.alignment,
                     )
                     .unwrap()
             },
@@ -714,12 +714,12 @@ impl ManagedBufferVecStrategyStagingUnsized {
             &mut self.device_buffer,
             |_| {
                 self.allocator
-                    .create_device_buffer_uninit_aligned(
+                    .create_device_buffer_uninit(
                         expected_whole_buffer_size,
                         self.buffer_usage_flags
                             | vk::BufferUsageFlags::TRANSFER_DST
                             | vk::BufferUsageFlags::TRANSFER_SRC,
-                        self.base_alignment as u64,
+                        self.base_alignment as u32,
                     )
                     .unwrap()
             },

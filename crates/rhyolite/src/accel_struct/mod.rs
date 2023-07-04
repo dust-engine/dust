@@ -77,6 +77,7 @@ impl AccelerationStructure {
             .create_device_buffer_uninit(
                 size,
                 vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR,
+                0
             )
             .unwrap();
         backing_buffer

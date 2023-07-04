@@ -317,19 +317,19 @@ impl StandardPipeline {
             .push_miss(shadow_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_miss(final_gather_pipeline, EmptyShaderRecords, 0);
-        let pipeline_sbt_info = self.pipeline_sbt_manager.build();
+        let pipeline_sbt_manager = &mut self.pipeline_sbt_manager;
         let desc_pool = &mut self.desc_pool;
         let sunlight = sunlight.bake().as_std430();
 
         let fut = commands! { move
-            let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await;
-            let pipeline_sbt_buffer = pipeline_sbt_info.await; // TODO: Make this join
+            let pipeline_sbt_buffer = pipeline_sbt_manager.build(&staging_ring_buffer).await;
+            let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await; // TODO: make this join
 
             // TODO: Direct writes on integrated GPUs.
             let mut sunlight_buffer = use_shared_state(
                 using!(),
                 |_| {
-                    allocator.create_device_buffer_uninit(SkyModelState::std430_size_static() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST).unwrap()
+                    allocator.create_device_buffer_uninit(SkyModelState::std430_size_static() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, 0).unwrap()
                 },
                 |_| false
             );
@@ -337,7 +337,7 @@ impl StandardPipeline {
             let (mut camera_setting_buffer, camera_setting_buffer_prev_frame) = use_shared_resource_flipflop(
                 using!(),
                 |_| {
-                    allocator.create_device_buffer_uninit(CameraSettings::std430_size_static() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST).unwrap()
+                    allocator.create_device_buffer_uninit(CameraSettings::std430_size_static() as u64, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, 0).unwrap()
                 },
                 |_| false
             );

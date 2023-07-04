@@ -8,13 +8,15 @@ use rhyolite::{
     copy_buffer,
     future::{
         use_per_frame_state, use_shared_state, GPUCommandFuture, PerFrameContainer, PerFrameState,
-        RenderData, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer,
+        RenderData, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer, Disposable,
     },
     macros::commands,
     utils::either::Either,
     Allocator, BufferLike, HasDevice, ManagedBufferVecUnsized, PhysicalDeviceMemoryModel,
     ResidentBuffer,
 };
+
+use rhyolite_bevy::StagingRingBuffer;
 
 use crate::{
     Material, RayTracingPipeline, RayTracingPipelineCharacteristics,
@@ -246,6 +248,15 @@ impl SbtManager {
     }
 }
 
+
+/// Manages the SBT records for raygen, miss, and callable shaders.
+/// These SBT records are typically smaller, so they're handled separately from the hitgroup
+/// sbt records. They're typically copied into GPU memory every frame.
+/// 
+/// TODO: Use suballocated buffers for "device_buffer".
+/// TODO: Create a dedicated solution for managing small, always fully updated buffers:
+/// On discrete, pair a ring staging buffer with a ring device buffer.
+/// On Bar, ReBar, Unified, BiasedUnified: Use a ring dynamic buffer.
 pub struct PipelineSbtManager {
     allocator: Allocator,
     buffer: Vec<u8>,
@@ -253,11 +264,10 @@ pub struct PipelineSbtManager {
     num_miss: u32,
     num_callable: u32,
     offset_strides: Vec<(u32, u32)>,
-    upload_buffer: PerFrameState<ResidentBuffer>,
     device_buffer: Option<SharedDeviceStateHostContainer<ResidentBuffer>>,
 }
 pub struct PipelineSbtManagerInfo {
-    buffer: Either<SharedDeviceState<ResidentBuffer>, PerFrameContainer<ResidentBuffer>>,
+    buffer: SharedDeviceState<ResidentBuffer>,
     num_raygen: u32,
     num_miss: u32,
     num_callable: u32,
@@ -338,7 +348,6 @@ impl PipelineSbtManager {
             num_miss: 0,
             num_raygen: 0,
             offset_strides: Vec::new(),
-            upload_buffer: Default::default(),
             device_buffer: None,
         }
     }
@@ -444,7 +453,14 @@ impl PipelineSbtManager {
         self.num_callable += 1;
     }
 
-    pub fn build(&mut self) -> impl GPUCommandFuture<Output = RenderRes<PipelineSbtManagerInfo>> {
+    pub fn build<'a>(
+        &mut self,
+        ring_buffer: &'a StagingRingBuffer,
+    ) -> impl GPUCommandFuture<
+            Output = RenderRes<PipelineSbtManagerInfo>,
+            RetainedState: 'static + Disposable,
+            RecycledState: 'static + Default,
+        > + 'a {
         self.align(false);
         let base_alignment = self
             .allocator
@@ -454,76 +470,33 @@ impl PipelineSbtManager {
             .ray_tracing
             .shader_group_base_alignment;
 
-        let needs_copy = matches!(
-            self.allocator.device().physical_device().memory_model(),
-            PhysicalDeviceMemoryModel::Discrete
-        );
-
-        let create_upload_buffer = || {
-            if needs_copy {
+        let device_buffer = use_shared_state(
+            &mut self.device_buffer,
+            |_prev| {
                 self.allocator
-                    .create_dynamic_buffer_uninit(
+                    .create_device_buffer_uninit(
                         self.buffer.len() as u64,
-                        vk::BufferUsageFlags::TRANSFER_SRC,
-                    )
-                    .unwrap()
-            } else {
-                self.allocator
-                    .create_dynamic_buffer_uninit_aligned(
-                        self.buffer.len() as u64,
-                        vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
+                        vk::BufferUsageFlags::TRANSFER_DST
+                            | vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
                             | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                        base_alignment as u64,
+                        base_alignment as u32,
                     )
                     .unwrap()
-            }
-        };
-        let upload_buffer = use_per_frame_state(&mut self.upload_buffer, create_upload_buffer)
-            .reuse(|old| {
-                if old.size() < self.buffer.len() as u64 {
-                    *old = create_upload_buffer();
-                }
-            });
-        upload_buffer.contents_mut().unwrap()[0..self.buffer.len()].copy_from_slice(&self.buffer);
-
-        let device_buffer = if needs_copy {
-            let device_buffer = use_shared_state(
-                &mut self.device_buffer,
-                |_prev| {
-                    self.allocator
-                        .create_device_buffer_uninit_aligned(
-                            self.buffer.len() as u64,
-                            vk::BufferUsageFlags::TRANSFER_DST
-                                | vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
-                                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                            base_alignment as u64,
-                        )
-                        .unwrap()
-                },
-                |prev| prev.size() != self.buffer.len() as u64,
-            );
-            Some(device_buffer)
-        } else {
-            None
-        };
+            },
+            |prev| prev.size() != self.buffer.len() as u64,
+        );
 
         let num_raygen = std::mem::take(&mut self.num_raygen);
         let num_miss = std::mem::take(&mut self.num_miss);
         let num_callable = std::mem::take(&mut self.num_callable);
         let offset_strides = std::mem::take(&mut self.offset_strides);
-        self.buffer.clear();
+
+        let buffer = std::mem::take(&mut self.buffer);
 
         commands! { move
-            let upload_buffer = RenderRes::new(upload_buffer);
-            let buffer = if let Some(device_buffer) = device_buffer {
-                let mut device_buffer = device_buffer;
-                copy_buffer(&upload_buffer, &mut device_buffer).await;
-                retain!(upload_buffer);
-                device_buffer.map(|a| Either::Left(a))
-            }  else {
-                upload_buffer.map(|a| Either::Right(a))
-            };
-            buffer.map(|a| PipelineSbtManagerInfo {
+            let mut device_buffer = device_buffer;
+            ring_buffer.update_buffer(&mut device_buffer, &buffer).await;
+            device_buffer.map(|a| PipelineSbtManagerInfo {
                 buffer: a,
                 num_callable,
                 num_miss,

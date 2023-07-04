@@ -101,7 +101,7 @@ impl BufferLike for StagingRingBufferSlice {
 }
 
 impl StagingRingBuffer {
-    const BLOCK_SIZE: usize = 1024 * 1024; // 1MB block size.
+    const BLOCK_SIZE: usize = 8 * 1024 * 1024; // 8MB block size.
     pub fn new(device: Arc<Device>) -> VkResult<Self> {
         if let Some((memory_type_index, _)) = device
             .physical_device()
@@ -191,7 +191,7 @@ impl StagingRingBuffer {
                 size,
                 alignment: 0,
                 user_data: 0,
-                flags: vma::VirtualAllocationCreateFlags::VMA_VIRTUAL_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT
+                flags: vma::VirtualAllocationCreateFlags::VMA_VIRTUAL_ALLOCATION_CREATE_STRATEGY_MIN_TIME_BIT
             })
         } {
             return Ok(StagingRingBufferSlice {
@@ -206,14 +206,14 @@ impl StagingRingBuffer {
             // Block out-of-space. Try again.
             let mut current_guard = self.current.lock().unwrap();
             *current_guard = unsafe { self.add_new_block().map(|a| Some(Arc::new(a)))? };
-            let current: Arc<StagingRingBufferBlockTeleporter> = current.clone();
+            let current: Arc<StagingRingBufferBlockTeleporter> = current_guard.clone().unwrap();
             drop(current_guard);
             let (allocation, offset) = unsafe {
                 current.0.as_ref().unwrap().block.allocate(vma::VirtualAllocationCreateInfo {
                 size,
                 alignment: 0,
                 user_data: 0,
-                flags: vma::VirtualAllocationCreateFlags::VMA_VIRTUAL_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT
+                flags: vma::VirtualAllocationCreateFlags::VMA_VIRTUAL_ALLOCATION_CREATE_STRATEGY_MIN_TIME_BIT
             }).unwrap()
             };
             return Ok(StagingRingBufferSlice {
@@ -227,23 +227,32 @@ impl StagingRingBuffer {
         }
     }
 
+    pub fn stage_changes<'a>(
+        self: &Arc<Self>,
+        data: &[u8],
+    ) -> StagingRingBufferSlice {
+        let mut staging_buffer = self.allocate(data.len() as u64).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), staging_buffer.as_mut_ptr().unwrap() as *mut u8, data.len());
+        }
+        staging_buffer
+    }
+
     /// Update buffer with host-side data.
-    /// If the buffer is host visible and mapped, this function will directly write to it.
-    /// Otherwise, we use the staging ring buffer.
     pub fn update_buffer<'a>(
-        self: &'a Arc<Self>,
+        self: &Arc<Self>,
         buffer: &'a mut RenderRes<impl BufferLike + RenderData>,
-        data: &'a [u8],
+        data: &[u8],
     ) -> impl GPUCommandFuture<
         Output = (),
         RetainedState: 'static + Disposable,
         RecycledState: 'static + Default,
     > + 'a {
+        let mut staging_buffer = self.allocate(buffer.inner().size()).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), staging_buffer.as_mut_ptr().unwrap() as *mut u8, data.len());
+        }
         commands! {
-            let mut staging_buffer = self.allocate(buffer.inner().size()).unwrap();
-            unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), staging_buffer.as_mut_ptr().unwrap() as *mut u8, data.len());
-            }
             let staging_buffer = RenderRes::new(staging_buffer);
             copy_buffer(&staging_buffer, buffer).await;
             retain!(staging_buffer);

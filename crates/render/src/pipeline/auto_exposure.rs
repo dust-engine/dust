@@ -118,7 +118,8 @@ impl AutoExposurePipeline {
             let mut buffer = use_shared_state(using!(), |_| {
                 let buffer = allocator.create_device_buffer_uninit(
                     std::mem::size_of::<AutoExposureBuffer>() as u64,
-                    vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST
+                    vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                    0
                 ).unwrap();
                 buffer
             }, |_| false);

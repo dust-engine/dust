@@ -36,10 +36,20 @@ impl<'a, F: Fn(u32) -> Vec<f32>> DeviceCreateInfo<'a, F> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum PhysicalDeviceMemoryModel {
+    /// Completely separated VRAM and system RAM. No device-local memory is host visible.
     Discrete,
+    /// Like `Discrete`, but 256MB of the VRAM is also host-visible. The CPU may map this
+    /// memory into system memory range and `memcpy` into it directly.
     Bar,
-    ResizableBar,
-    UMA,
+    /// Discrete GPUs where all of its VRAM can be made host-visible.
+    ReBar,
+    /// Integrated GPUs with one large memory pool that is both device local and host-visible.
+    Unified,
+    /// Integrated GPUs with smaller device-local memory pool.
+    /// Examples:
+    /// [256MB DEVICE_LOCAL] [32GB HOST_VISIBLE] [256MB DEVICE_LOCAL|HOST_VISIBLE] (AMD APU)
+    /// [256MB DEVICE_LOCAL] [32GB HOST_VISIBLE] (also AMD APU)
+    BiasedUnified,
 }
 
 impl PhysicalDevice {
@@ -66,27 +76,41 @@ impl PhysicalDevice {
                 let heaps = &memory_properties.memory_heaps
                     [0..memory_properties.memory_heap_count as usize];
 
+                let bar_heap = types
+                    .iter()
+                    .find(|ty| {
+                        ty.property_flags.contains(
+                            vk::MemoryPropertyFlags::DEVICE_LOCAL
+                                | vk::MemoryPropertyFlags::HOST_VISIBLE,
+                        ) && heaps[ty.heap_index as usize]
+                            .flags
+                            .contains(vk::MemoryHeapFlags::DEVICE_LOCAL)
+                    })
+                    .map(|a| &heaps[a.heap_index as usize]);
                 let memory_model =
                     if properties.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU {
-                        PhysicalDeviceMemoryModel::UMA
+                        if let Some(bar_heap) = bar_heap {
+                            if bar_heap.size <= 256 * 1024 * 1024 {
+                                // regular 256MB bar
+                                PhysicalDeviceMemoryModel::BiasedUnified
+                            } else {
+                                PhysicalDeviceMemoryModel::Unified
+                            }
+                        } else {
+                            // Can't find a BAR heap
+                            // Note: this case doesn't exist in real life.
+                            // We select BiasedUnified based on the assumption that when requesting
+                            // DEVICE_LOCAL | HOST_VISIBLE memory, the allocator will fallback to
+                            // non-device-local memory.
+                            PhysicalDeviceMemoryModel::BiasedUnified
+                        }
                     } else {
-                        let bar_heap = types
-                            .iter()
-                            .find(|ty| {
-                                ty.property_flags.contains(
-                                    vk::MemoryPropertyFlags::DEVICE_LOCAL
-                                        | vk::MemoryPropertyFlags::HOST_VISIBLE,
-                                ) && heaps[ty.heap_index as usize]
-                                    .flags
-                                    .contains(vk::MemoryHeapFlags::DEVICE_LOCAL)
-                            })
-                            .map(|a| &heaps[a.heap_index as usize]);
                         if let Some(bar_heap) = bar_heap {
                             if bar_heap.size <= 256 * 1024 * 1024 {
                                 // regular 256MB bar
                                 PhysicalDeviceMemoryModel::Bar
                             } else {
-                                PhysicalDeviceMemoryModel::ResizableBar
+                                PhysicalDeviceMemoryModel::ReBar
                             }
                         } else {
                             // Can't find a BAR heap

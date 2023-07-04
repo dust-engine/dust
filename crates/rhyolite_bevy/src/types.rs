@@ -1,6 +1,7 @@
 use std::{ops::Deref, sync::Arc};
 
 use bevy_ecs::{system::Resource, world::FromWorld};
+use rhyolite::ash::prelude::VkResult;
 
 #[derive(Resource, Clone)]
 pub struct Allocator(rhyolite::Allocator);
@@ -76,5 +77,11 @@ impl FromWorld for StagingRingBuffer {
         Self(Arc::new(
             rhyolite::StagingRingBuffer::new(device.inner().clone()).unwrap(),
         ))
+    }
+}
+impl StagingRingBuffer {
+    pub fn new(device: &Arc<rhyolite::Device>) -> VkResult<Self> {
+        let ring_buffer = rhyolite::StagingRingBuffer::new(device.clone())?;
+        Ok(Self(Arc::new(ring_buffer)))
     }
 }

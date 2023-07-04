@@ -59,11 +59,11 @@ impl<T> AccelerationStructureBatchBuilder<T> {
             .map(|(_, build)| {
                 let mut scratch_buffer = self
                     .allocator
-                    .create_device_buffer_uninit_aligned(
+                    .create_device_buffer_uninit(
                         build.build_size.build_scratch_size,
                         vk::BufferUsageFlags::STORAGE_BUFFER
                             | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                        scratch_buffer_alignment as u64,
+                        scratch_buffer_alignment as u32,
                     )
                     .unwrap();
                 scratch_buffer
@@ -371,11 +371,11 @@ impl<T: BufferLike + Send + RenderData> GPUCommandFuture for TLASBuildFuture<T> 
             |old| {
                 let old_size = old.map(|a: &ResidentBuffer| a.size()).unwrap_or(0);
                 this.allocator
-                    .create_device_buffer_uninit_aligned(
+                    .create_device_buffer_uninit(
                         this.build_size.build_scratch_size.max(old_size),
                         vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                             | vk::BufferUsageFlags::STORAGE_BUFFER,
-                        alignment as u64,
+                        alignment,
                     )
                     .unwrap()
             },
