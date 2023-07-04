@@ -15,7 +15,7 @@ ash-window = "0.12"
 raw-window-handle = "0.5"
 tracing = "0.1"
 rhyolite-macro = { path = "../rhyolite_macro", version = "0.1.0" }
-vma = { git = "https://github.com/dust-engine/vk-mem-rs" }
+vma = "0.3.1"
 blocking = "1.2"
 pin-project = "1.0"
 cstr = "0.2"

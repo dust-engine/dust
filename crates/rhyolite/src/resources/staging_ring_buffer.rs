@@ -16,7 +16,7 @@ use vma::Alloc;
 struct StagingRingBufferBlock {
     device: Arc<Device>,
     parent: Weak<StagingRingBuffer>,
-    block: vma::VirtualBlock,
+    block: Mutex<vma::VirtualBlock>,
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
     ptr: *mut u8,
@@ -68,11 +68,14 @@ unsafe impl Sync for StagingRingBufferSlice {}
 impl Drop for StagingRingBufferSlice {
     fn drop(&mut self) {
         unsafe {
-            self.block
+            let mut virtual_block = self.block
                 .0
                 .as_ref()
                 .unwrap()
                 .block
+                .lock()
+                .unwrap();
+            virtual_block
                 .free(&mut self.allocation)
         }
     }
@@ -139,7 +142,7 @@ impl StagingRingBuffer {
         let mut block = StagingRingBufferBlock {
             device: self.device.clone(),
             parent: Arc::downgrade(self),
-            block,
+            block: Mutex::new(block),
             buffer: vk::Buffer::null(),
             memory: vk::DeviceMemory::null(),
             ptr: std::ptr::null_mut(),
@@ -185,9 +188,11 @@ impl StagingRingBuffer {
         };
         let current: Arc<StagingRingBufferBlockTeleporter> = current.clone();
         drop(current_guard);
+        let current_block = current.0.as_ref().unwrap();
 
         if let Ok((allocation, offset)) = unsafe {
-            current.0.as_ref().unwrap().block.allocate(vma::VirtualAllocationCreateInfo {
+            let mut virtual_block = current_block.block.lock().unwrap();
+            virtual_block.allocate(vma::VirtualAllocationCreateInfo {
                 size,
                 alignment: 0,
                 user_data: 0,
@@ -195,8 +200,8 @@ impl StagingRingBuffer {
             })
         } {
             return Ok(StagingRingBufferSlice {
-                buffer: current.0.as_ref().unwrap().buffer,
-                ptr: unsafe { current.0.as_ref().unwrap().ptr.add(offset as usize) },
+                buffer: current_block.buffer,
+                ptr: unsafe { current_block.ptr.add(offset as usize) },
                 block: current,
                 allocation,
                 offset,
@@ -208,8 +213,10 @@ impl StagingRingBuffer {
             *current_guard = unsafe { self.add_new_block().map(|a| Some(Arc::new(a)))? };
             let current: Arc<StagingRingBufferBlockTeleporter> = current_guard.clone().unwrap();
             drop(current_guard);
+            let current_block = current.0.as_ref().unwrap();
             let (allocation, offset) = unsafe {
-                current.0.as_ref().unwrap().block.allocate(vma::VirtualAllocationCreateInfo {
+                let mut virtual_block = current_block.block.lock().unwrap();
+                virtual_block.allocate(vma::VirtualAllocationCreateInfo {
                 size,
                 alignment: 0,
                 user_data: 0,
@@ -217,8 +224,8 @@ impl StagingRingBuffer {
             }).unwrap()
             };
             return Ok(StagingRingBufferSlice {
-                ptr: unsafe { current.0.as_ref().unwrap().ptr.add(offset as usize) },
-                buffer: current.0.as_ref().unwrap().buffer,
+                ptr: unsafe { current_block.ptr.add(offset as usize) },
+                buffer: current_block.buffer,
                 block: current,
                 allocation,
                 offset,
