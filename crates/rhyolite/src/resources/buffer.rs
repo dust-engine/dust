@@ -1,7 +1,8 @@
 use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
-    task::Poll, sync::Arc,
+    sync::Arc,
+    task::Poll,
 };
 
 use ash::vk;
@@ -474,10 +475,15 @@ impl Allocator {
         alignment: u32,
     ) -> VkResult<ResidentBuffer> {
         let staging_buffer = if alignment == 0 {
-
             unsafe { self.inner().create_buffer(buffer_info, create_info)? }
         } else {
-            unsafe { self.inner().create_buffer_with_alignment(buffer_info, create_info, alignment as u64)? }
+            unsafe {
+                self.inner().create_buffer_with_alignment(
+                    buffer_info,
+                    create_info,
+                    alignment as u64,
+                )?
+            }
         };
         Ok(ResidentBuffer {
             allocator: self.clone(),
@@ -504,7 +510,7 @@ impl Allocator {
         let alloc_info = vma::AllocationCreateInfo {
             usage: match self.device().physical_device().memory_model() {
                 PhysicalDeviceMemoryModel::BiasedUnified => vma::MemoryUsage::AutoPreferHost,
-                _ => vma::MemoryUsage::AutoPreferDevice
+                _ => vma::MemoryUsage::AutoPreferDevice,
             },
             ..Default::default()
         };
@@ -526,15 +532,20 @@ impl Allocator {
         let alloc_info = vma::AllocationCreateInfo {
             usage: match self.device().physical_device().memory_model() {
                 PhysicalDeviceMemoryModel::BiasedUnified => vma::MemoryUsage::AutoPreferHost,
-                PhysicalDeviceMemoryModel::ReBar | PhysicalDeviceMemoryModel::Bar | PhysicalDeviceMemoryModel::Unified => vma::MemoryUsage::AutoPreferDevice,
-                PhysicalDeviceMemoryModel::Discrete => panic!("Discrete GPUs do not have device-local, host-visible memory"),
+                PhysicalDeviceMemoryModel::ReBar
+                | PhysicalDeviceMemoryModel::Bar
+                | PhysicalDeviceMemoryModel::Unified => vma::MemoryUsage::AutoPreferDevice,
+                PhysicalDeviceMemoryModel::Discrete => {
+                    panic!("Discrete GPUs do not have device-local, host-visible memory")
+                }
             },
-            flags: vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE | vma::AllocationCreateFlags::MAPPED,
+            flags: vma::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE
+                | vma::AllocationCreateFlags::MAPPED,
             ..Default::default()
         };
         self.create_resident_buffer(&buffer_create_info, &alloc_info, alignment)
     }
-    
+
     /// Create large initialized buffer only visible to the GPU.
     /// Discrete, Bar, ReBar: video memory, copy with staging buffer
     /// Unified: device-local, host-visible memory, direct write
@@ -545,28 +556,36 @@ impl Allocator {
         usage: vk::BufferUsageFlags,
         alignment: u32,
         ring_buffer: &Arc<StagingRingBuffer>,
-    ) -> VkResult<impl GPUCommandFuture<Output = RenderRes<ResidentBuffer>>>  {
-        let (dst_buffer, requires_staging_copy) = match self.device().physical_device().memory_model() {
-            PhysicalDeviceMemoryModel::Discrete | PhysicalDeviceMemoryModel::Bar | PhysicalDeviceMemoryModel::ReBar => {
-                // Use a staging buffer for copying the initial data.
-                // Discrete: must use staging.
-                // Bar: 256MB of host visible memory is not enough for large buffers. Use staging
-                // ReBar: Can also use direct write, but the initialization only happens once,
-                // making it worthwhile to use a copy command. Memory mapping uses additional host-side address space.
+    ) -> VkResult<impl GPUCommandFuture<Output = RenderRes<ResidentBuffer>>> {
+        let (dst_buffer, requires_staging_copy) =
+            match self.device().physical_device().memory_model() {
+                PhysicalDeviceMemoryModel::Discrete
+                | PhysicalDeviceMemoryModel::Bar
+                | PhysicalDeviceMemoryModel::ReBar => {
+                    // Use a staging buffer for copying the initial data.
+                    // Discrete: must use staging.
+                    // Bar: 256MB of host visible memory is not enough for large buffers. Use staging
+                    // ReBar: Can also use direct write, but the initialization only happens once,
+                    // making it worthwhile to use a copy command. Memory mapping uses additional host-side address space.
 
-                // dst_buffer is device-local only.
-                let dst_buffer = self.create_device_buffer_uninit(data.len() as u64, usage | vk::BufferUsageFlags::TRANSFER_DST, alignment)?;
-                (dst_buffer, true)
-            },
-            PhysicalDeviceMemoryModel::Unified | PhysicalDeviceMemoryModel::BiasedUnified => {
-                // Create upload buffer
-                // Unified: upload buffer is device-local, host-visible. direct write.
-                // BiasedUnified: upload buffer is system ram. direct write.
-                let dst_buffer = self.create_dynamic_buffer_uninit(data.len() as u64, usage, alignment)?;
-                dst_buffer.contents_mut().unwrap()[0..data.len()].copy_from_slice(data);
-                (dst_buffer, false)
-            },
-        };
+                    // dst_buffer is device-local only.
+                    let dst_buffer = self.create_device_buffer_uninit(
+                        data.len() as u64,
+                        usage | vk::BufferUsageFlags::TRANSFER_DST,
+                        alignment,
+                    )?;
+                    (dst_buffer, true)
+                }
+                PhysicalDeviceMemoryModel::Unified | PhysicalDeviceMemoryModel::BiasedUnified => {
+                    // Create upload buffer
+                    // Unified: upload buffer is device-local, host-visible. direct write.
+                    // BiasedUnified: upload buffer is system ram. direct write.
+                    let dst_buffer =
+                        self.create_dynamic_buffer_uninit(data.len() as u64, usage, alignment)?;
+                    dst_buffer.contents_mut().unwrap()[0..data.len()].copy_from_slice(data);
+                    (dst_buffer, false)
+                }
+            };
         let staging_buffer = if requires_staging_copy {
             let buffer = if data.len() > 1024 * 1024 {
                 // For anything above 1MB, use a dedicated allocation. Heuristic.
@@ -605,7 +624,7 @@ impl Allocator {
                 usage: vma::MemoryUsage::AutoPreferHost,
                 ..Default::default()
             },
-            0
+            0,
         )
     }
 

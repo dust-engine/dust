@@ -7,13 +7,11 @@ use rhyolite::{
     ash::vk,
     copy_buffer,
     future::{
-        use_per_frame_state, use_shared_state, GPUCommandFuture, PerFrameContainer, PerFrameState,
-        RenderData, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer, Disposable,
+        use_shared_state, Disposable, GPUCommandFuture, RenderData, RenderRes, SharedDeviceState,
+        SharedDeviceStateHostContainer,
     },
     macros::commands,
-    utils::either::Either,
-    Allocator, BufferLike, HasDevice, ManagedBufferVecUnsized, PhysicalDeviceMemoryModel,
-    ResidentBuffer,
+    Allocator, BufferLike, HasDevice, ManagedBufferVecUnsized, ResidentBuffer,
 };
 
 use rhyolite_bevy::StagingRingBuffer;
@@ -202,7 +200,7 @@ impl SbtManager {
     }
     pub fn hitgroup_sbt_buffer(
         &mut self,
-    ) -> Option<impl GPUCommandFuture<Output = RenderRes<impl BufferLike + RenderData>>> {
+    ) -> impl GPUCommandFuture<Output = RenderRes<impl BufferLike + RenderData>> {
         self.buffer.buffer()
     }
     pub fn hitgroup_stride(&self) -> usize {
@@ -248,11 +246,10 @@ impl SbtManager {
     }
 }
 
-
 /// Manages the SBT records for raygen, miss, and callable shaders.
 /// These SBT records are typically smaller, so they're handled separately from the hitgroup
 /// sbt records. They're typically copied into GPU memory every frame.
-/// 
+///
 /// TODO: Use suballocated buffers for "device_buffer".
 /// TODO: Create a dedicated solution for managing small, always fully updated buffers:
 /// On discrete, pair a ring staging buffer with a ring device buffer.
@@ -457,10 +454,10 @@ impl PipelineSbtManager {
         &mut self,
         ring_buffer: &StagingRingBuffer,
     ) -> impl GPUCommandFuture<
-            Output = RenderRes<PipelineSbtManagerInfo>,
-            RetainedState: 'static + Disposable,
-            RecycledState: 'static + Default,
-        > {
+        Output = RenderRes<PipelineSbtManagerInfo>,
+        RetainedState: 'static + Disposable,
+        RecycledState: 'static + Default,
+    > {
         self.align(false);
         let base_alignment = self
             .allocator

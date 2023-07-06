@@ -3,7 +3,7 @@ use std::{
     marker::PhantomData,
 };
 
-use bevy_app::{Plugin, Update};
+use bevy_app::{Plugin, PostUpdate};
 use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
 use bevy_ecs::{
     prelude::{Entity, EventReader},
@@ -53,7 +53,7 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
                     pipeline_builder.register_material::<M>(world.resource());
                 },
             );
-        app.add_systems(Update, material_system::<M>);
+        app.add_systems(PostUpdate, material_system::<M>);
     }
 }
 

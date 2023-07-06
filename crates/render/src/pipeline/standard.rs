@@ -1,13 +1,22 @@
 use std::{ops::Deref, sync::Arc};
 
+use bevy_app::{Plugin, PostUpdate};
 use bevy_asset::{AssetServer, Assets};
 
+use bevy_ecs::prelude::{Component, Entity};
+use bevy_ecs::query::{Added, Changed, Or};
+use bevy_ecs::schedule::IntoSystemConfigs;
+use bevy_ecs::system::lifetimeless::SResMut;
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
+use bevy_ecs::system::{Commands, Query};
 use bevy_math::{Mat4, Vec3};
 use bevy_transform::prelude::GlobalTransform;
-use crevice::std430::AsStd430;
+
+use crevice::std430::{AsStd430, Std430};
 use rand::Rng;
-use rhyolite::future::{run, use_shared_resource_flipflop, use_shared_state, use_state};
+use rhyolite::future::{
+    run, use_shared_resource_flipflop, use_shared_state, use_state, GPUCommandFutureExt,
+};
 use rhyolite::{
     accel_struct::AccelerationStructure,
     ash::vk,
@@ -20,14 +29,15 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
-use rhyolite_bevy::StagingRingBuffer;
 use rhyolite_bevy::{Allocator, SlicedImageArray};
+use rhyolite_bevy::{RenderSystems, StagingRingBuffer};
 
+use crate::accel_struct::instance_vec::{InstanceVecPlugin, InstanceVecStore};
 use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
     PinholeProjection, ShaderModule, SpecializedShader,
 };
-use crate::{PipelineCache, Sunlight};
+use crate::{PipelineCache, Renderable, Sunlight};
 
 use super::sky::SkyModelState;
 use super::{RayTracingPipeline, RayTracingPipelineManager};
@@ -85,6 +95,8 @@ impl RayTracingPipeline for StandardPipeline {
             camera_settings_prev_frame: vk::DescriptorType::UNIFORM_BUFFER,
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
             camera_settings: vk::DescriptorType::UNIFORM_BUFFER,
+            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
+            instances: vk::DescriptorType::STORAGE_BUFFER,
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -232,6 +244,7 @@ pub type StandardPipelineRenderParams = (
     SRes<PipelineCache>,
     SRes<Allocator>,
     SRes<Sunlight>,
+    SResMut<InstanceVecStore<PreviousFrameGlobalTransform>>,
     SRes<StagingRingBuffer>,
 );
 impl StandardPipeline {
@@ -258,7 +271,14 @@ impl StandardPipeline {
                 RecycledState: 'static + Default,
             > + 'a,
     > {
-        let (shader_store, pipeline_cache, allocator, sunlight, staging_ring_buffer) = params;
+        let (
+            shader_store,
+            pipeline_cache,
+            allocator,
+            sunlight,
+            mut instances_buffer,
+            staging_ring_buffer,
+        ) = params;
         let primary_pipeline = self
             .primary_ray_pipeline
             .get_pipeline(&pipeline_cache, &shader_store)?;
@@ -277,8 +297,9 @@ impl StandardPipeline {
             shadow_pipeline,
             final_gather_pipeline,
         ]);
-        let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer()?;
+        let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer();
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
+        let instances_buffer = instances_buffer.buffer.buffer();
 
         let camera_settings = {
             let proj = {
@@ -327,8 +348,8 @@ impl StandardPipeline {
         let sunlight = sunlight.bake().as_std430();
 
         let fut = commands! { move
-            let pipeline_sbt_buffer = pipeline_sbt_manager.build(&staging_ring_buffer).await;
-            let hitgroup_sbt_buffer = hitgroup_sbt_buffer.await; // TODO: make this join
+            let instances_buffer = instances_buffer.await;
+            let (pipeline_sbt_buffer, hitgroup_sbt_buffer) = pipeline_sbt_manager.build(&staging_ring_buffer).join(hitgroup_sbt_buffer).await;
 
             // TODO: Direct writes on integrated GPUs.
             let mut sunlight_buffer = use_shared_state(
@@ -338,7 +359,6 @@ impl StandardPipeline {
                 },
                 |_| false
             );
-            staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes()).await;
             let (mut camera_setting_buffer, camera_setting_buffer_prev_frame) = use_shared_resource_flipflop(
                 using!(),
                 |_| {
@@ -346,7 +366,9 @@ impl StandardPipeline {
                 },
                 |_| false
             );
-            staging_ring_buffer.update_buffer(&mut camera_setting_buffer, camera_settings.as_bytes()).await;
+            staging_ring_buffer.update_buffer(&mut camera_setting_buffer, camera_settings.as_bytes()).join(
+                            staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes())
+            ).await;
 
             let frame_index = use_state(
                 using!(),
@@ -395,6 +417,15 @@ impl StandardPipeline {
                         sunlight_buffer.inner().as_descriptor(),
                         camera_setting_buffer_prev_frame.inner().as_descriptor(),
                         camera_setting_buffer.inner().as_descriptor()
+                    ],
+                    false
+                ),
+                DescriptorSetWrite::storage_buffers(
+                    desc_set[0],
+                    10,
+                    0,
+                    &[
+                        instances_buffer.inner().as_descriptor(),
                     ],
                     false
                 ),
@@ -539,6 +570,7 @@ impl StandardPipeline {
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::UNIFORM_READ,
                 );
+                ctx.read(&instances_buffer, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR, vk::AccessFlags2::SHADER_STORAGE_READ)
             }).await;
 
             run(|ctx, command_buffer| unsafe {
@@ -677,9 +709,14 @@ impl StandardPipeline {
                     vk::AccessFlags2::UNIFORM_READ,
                 );
             }).await;
-            retain!(hitgroup_sbt_buffer);
-            retain!(pipeline_sbt_buffer);
-            retain!((sunlight_buffer, camera_setting_buffer, camera_setting_buffer_prev_frame));
+            retain!((
+                sunlight_buffer,
+                camera_setting_buffer,
+                camera_setting_buffer_prev_frame,
+                pipeline_sbt_buffer,
+                hitgroup_sbt_buffer,
+                instances_buffer
+            ));
             retain!(
                 DisposeContainer::new((
                     primary_pipeline.pipeline().clone(),
@@ -708,4 +745,55 @@ pub struct CameraSettings {
     pub far: f32,
     pub near: f32,
     pub padding: f32,
+}
+
+pub struct StandardPipelinePlugin;
+impl Plugin for StandardPipelinePlugin {
+    fn build(&self, app: &mut bevy_app::App) {
+        app.add_systems(
+            PostUpdate,
+            extract_global_transforms.in_set(RenderSystems::CleanUp),
+        );
+        app.add_plugin(
+            InstanceVecPlugin::<PreviousFrameGlobalTransform, Renderable>::new(
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                0,
+            ),
+        );
+    }
+}
+
+#[derive(Component, Debug)]
+pub struct PreviousFrameGlobalTransform {
+    mat: GlobalTransform,
+}
+impl crate::accel_struct::instance_vec::InstanceVecItem for PreviousFrameGlobalTransform {
+    type Data = Mat4;
+    fn data(&self) -> Self::Data {
+        self.mat.compute_matrix()
+    }
+}
+
+pub fn extract_global_transforms(
+    mut commands: Commands,
+    mut query: Query<
+        (
+            Entity,
+            &GlobalTransform,
+            Option<&mut PreviousFrameGlobalTransform>,
+        ),
+        Or<(Changed<GlobalTransform>, Added<GlobalTransform>)>,
+    >,
+) {
+    for (entity, global_transform, previous_frame_global_transform) in query.iter_mut() {
+        if let Some(mut previous_frame_global_transform) = previous_frame_global_transform {
+            previous_frame_global_transform.mat = global_transform.clone()
+        } else {
+            commands
+                .entity(entity)
+                .insert(PreviousFrameGlobalTransform {
+                    mat: global_transform.clone(),
+                });
+        }
+    }
 }

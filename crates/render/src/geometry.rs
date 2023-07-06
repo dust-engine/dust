@@ -1,12 +1,12 @@
 use std::{alloc::Layout, marker::PhantomData, sync::Arc};
 
-use bevy_app::{Plugin, Update};
+use bevy_app::{Plugin, PostUpdate};
 use bevy_ecs::schedule::IntoSystemConfigs;
 use bevy_reflect::{TypePath, TypeUuid};
 use rhyolite::{ash::vk, future::GPUCommandFuture, ResidentBuffer};
 use rhyolite_bevy::RenderSystems;
 
-use crate::blas::build_blas_system;
+use crate::accel_struct::blas::build_blas_system;
 
 pub enum GeometryType {
     AABBs,
@@ -44,8 +44,8 @@ impl<G: Geometry> Default for GeometryPlugin<G> {
 impl<G: Geometry> Plugin for GeometryPlugin<G> {
     fn build(&self, app: &mut bevy_app::App) {
         app.add_systems(
-            Update,
-            (crate::blas::geometry_normalize_system::<G>
+            PostUpdate,
+            (crate::accel_struct::blas::geometry_normalize_system::<G>
                 .in_set(RenderSystems::SetUp)
                 .before(build_blas_system),),
         );

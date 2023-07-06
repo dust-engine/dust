@@ -535,7 +535,7 @@ where
     fn record(
         mut self: std::pin::Pin<&mut Self>,
         ctx: &mut rhyolite::future::CommandBufferRecordContext,
-        recycled_state: &mut Self::RecycledState,
+        _recycled_state: &mut Self::RecycledState,
     ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
         ctx.record(self.command.take().unwrap());
         std::task::Poll::Ready(((), ()))

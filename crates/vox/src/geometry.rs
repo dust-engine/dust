@@ -105,7 +105,7 @@ impl VoxGeometry {
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                         | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
                     16,
-                    &ring_buffer
+                    &ring_buffer,
                 )
                 .unwrap()
                 .map(|buffer| {
@@ -123,7 +123,7 @@ impl VoxGeometry {
                     data,
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                     16,
-                    &ring_buffer
+                    &ring_buffer,
                 )
                 .unwrap()
                 .map(|buffer| {

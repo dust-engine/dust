@@ -399,9 +399,7 @@ impl RayTracingPipeline {
             })
             .map(|lib| lib.raw())
             .collect();
-        let Some(device) = device else {
-            panic!()
-        };
+        let Some(device) = device else { panic!() };
         let layout = layout.unwrap();
         unsafe {
             async move {

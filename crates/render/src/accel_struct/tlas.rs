@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use bevy_app::{Plugin, Update};
+use bevy_app::{Plugin, PostUpdate};
 use bevy_ecs::{
     prelude::{Component, Entity},
     query::{Changed, Or, With},
@@ -17,7 +17,7 @@ use rhyolite::{
 use rhyolite_bevy::{Allocator, RenderSystems};
 
 use crate::{
-    blas::{build_blas_system, BLAS},
+    accel_struct::blas::{build_blas_system, BLAS},
     sbt::SbtIndex,
     Renderable,
 };
@@ -36,10 +36,8 @@ pub struct TLASStore<M = Renderable> {
 impl<M> TLASStore<M> {
     pub fn accel_struct(
         &mut self,
-    ) -> Option<impl GPUCommandFuture<Output = RenderRes<Arc<AccelerationStructure>>>> {
-        let Some(buffer) = self.buffer.buffer() else {
-            return None;
-        };
+    ) -> impl GPUCommandFuture<Output = RenderRes<Arc<AccelerationStructure>>> {
+        let buffer = self.buffer.buffer();
 
         let requires_rebuild = std::mem::replace(&mut self.requires_rebuild, false);
         let accel_struct = TLASBuildInfo::new(
@@ -48,7 +46,7 @@ impl<M> TLASStore<M> {
             self.geometry_flags,
             self.build_flags,
         );
-        let fut = commands! { move
+        commands! { move
             let old_tlas: &mut Option<Arc<AccelerationStructure>> = using!();
             let buffer = buffer.await;
             if !requires_rebuild && let Some(old_tlas) = old_tlas.as_ref() {
@@ -63,8 +61,7 @@ impl<M> TLASStore<M> {
                 *old_tlas = Some(new_tlas.clone());
                 new_tlas
             })
-        };
-        Some(fut)
+        }
     }
 }
 impl<M> HasDevice for TLASStore<M> {
@@ -75,11 +72,11 @@ impl<M> HasDevice for TLASStore<M> {
 
 #[derive(Component)]
 pub struct TLASIndex<M> {
-    index: u32,
+    pub index: u32,
     _marker: PhantomData<M>,
 }
 
-fn tlas_system<M: Component>(
+pub(super) fn tlas_system<M: Component>(
     mut commands: Commands,
     mut store: ResMut<TLASStore<M>>,
     mut query: Query<
@@ -159,7 +156,7 @@ impl<M: Component> Plugin for TLASPlugin<M> {
     fn build(&self, app: &mut bevy_app::App) {
         let allocator = app.world.resource::<Allocator>().clone();
         app.add_systems(
-            Update,
+            PostUpdate,
             tlas_system::<M>
                 .after(build_blas_system)
                 .in_set(RenderSystems::SetUp),

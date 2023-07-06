@@ -111,7 +111,7 @@ impl PipelineBuildInfo for RayTracingPipelineLibraryBuildInfo {
         let shaders: Option<Vec<rhyolite::shader::SpecializedShader<'_, _>>> =
             self.shaders.iter().map(normalize_shader).collect();
         let Some(shaders) = shaders else {
-            return DeferredValue::None
+            return DeferredValue::None;
         };
         let layout = self.pipeline_characteristics.layout.clone();
         let create_info = self.pipeline_characteristics.create_info.clone();
@@ -169,8 +169,8 @@ impl PipelineBuildInfo for RayTracingPipelineBuildInfo {
         let base_shaders: Option<Vec<rhyolite::shader::SpecializedShader<'_, _>>> =
             self.base_shaders.iter().map(normalize_shader).collect();
         let Some(base_shaders) = base_shaders else {
-                return DeferredValue::None;
-            };
+            return DeferredValue::None;
+        };
         type Shader =
             rhyolite::shader::SpecializedShader<'static, Arc<rhyolite::shader::ShaderModule>>;
         let hitgroups: Option<Vec<_>> = self
@@ -205,8 +205,8 @@ impl PipelineBuildInfo for RayTracingPipelineBuildInfo {
             )
             .collect();
         let Some(hitgroups) = hitgroups else {
-                return DeferredValue::None;
-            };
+            return DeferredValue::None;
+        };
 
         let create_info = self.pipeline_characteristics.create_info.clone();
         let pipeline_cache = pipeline_cache.cloned();

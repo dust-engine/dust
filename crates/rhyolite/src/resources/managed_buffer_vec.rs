@@ -13,6 +13,7 @@ use crate::{
     Allocator, BufferLike, HasDevice, ResidentBuffer,
 };
 use ash::vk;
+
 use rhyolite::macros::commands;
 
 type ManagedBufferVecInner =
@@ -39,11 +40,9 @@ impl<T> ManagedBufferVec<T> {
     ) -> Self {
         use crate::PhysicalDeviceMemoryModel::*;
         match allocator.physical_device().memory_model() {
-            ReBar | Unified | BiasedUnified => Self::DirectWrite(ManagedBufferVecStrategyDirectWrite::new(
-                allocator,
-                buffer_usage_flags,
-                alignment,
-            )),
+            ReBar | Unified | BiasedUnified => Self::DirectWrite(
+                ManagedBufferVecStrategyDirectWrite::new(allocator, buffer_usage_flags, alignment),
+            ),
             Discrete | Bar => Self::StagingBuffer(ManagedBufferVecStrategyStaging::new(
                 allocator,
                 buffer_usage_flags,
@@ -76,15 +75,13 @@ impl<T> ManagedBufferVec<T> {
         }
     }
 
-    pub fn buffer(
-        &mut self,
-    ) -> Option<impl GPUCommandFuture<Output = RenderRes<ManagedBufferVecInner>>> {
+    pub fn buffer(&mut self) -> impl GPUCommandFuture<Output = RenderRes<ManagedBufferVecInner>> {
         let buffer = match self {
-            Self::DirectWrite(strategy) => strategy.buffer().map(|b| Either::Left(b)),
-            Self::StagingBuffer(strategy) => strategy.buffer().map(|b| Either::Right(b)),
-        }?;
+            Self::DirectWrite(strategy) => Either::Left(strategy.buffer()),
+            Self::StagingBuffer(strategy) => Either::Right(strategy.buffer()),
+        };
 
-        let fut = commands! {
+        commands! {
             match buffer {
                 Either::Left(buffer) => {
                     RenderRes::new(Either::Left(buffer))
@@ -94,8 +91,7 @@ impl<T> ManagedBufferVec<T> {
                     result.map(|a| Either::Right(a))
                 }
             }
-        };
-        Some(fut)
+        }
     }
 }
 
@@ -164,13 +160,13 @@ impl ManagedBufferVecUnsized {
 
     pub fn buffer(
         &mut self,
-    ) -> Option<impl GPUCommandFuture<Output = RenderRes<impl BufferLike + RenderData>>> {
+    ) -> impl GPUCommandFuture<Output = RenderRes<impl BufferLike + RenderData>> {
         let buffer = match self {
-            Self::DirectWrite(strategy) => strategy.buffer().map(|b| Either::Left(b)),
-            Self::StagingBuffer(strategy) => strategy.buffer().map(|b| Either::Right(b)),
-        }?;
+            Self::DirectWrite(strategy) => Either::Left(strategy.buffer()),
+            Self::StagingBuffer(strategy) => Either::Right(strategy.buffer()),
+        };
 
-        let fut = commands! {
+        commands! {
             match buffer {
                 Either::Left(buffer) => {
                     RenderRes::new(Either::Left(buffer))
@@ -180,8 +176,7 @@ impl ManagedBufferVecUnsized {
                     result.map(|a| Either::Right(a))
                 }
             }
-        };
-        Some(fut)
+        }
     }
 }
 
@@ -222,22 +217,23 @@ impl<T> ManagedBufferVecStrategyDirectWrite<T> {
         }
     }
     pub fn set(&mut self, index: usize, item: T) {
+        self.objects
+            .resize_with(self.objects.len().max(index + 1), || unsafe {
+                std::mem::MaybeUninit::uninit().assume_init()
+            });
         self.objects[index] = item;
         for changes in self.changeset.values_mut() {
             changes.insert(index);
         }
     }
 
-    pub fn buffer(&mut self) -> Option<PerFrameContainer<ResidentBuffer>> {
+    pub fn buffer(&mut self) -> PerFrameContainer<ResidentBuffer> {
         let item_size = std::alloc::Layout::new::<T>().pad_to_align().size();
-        if self.objects.is_empty() {
-            return None;
-        }
         let create_buffer = || {
             let create_buffer = self
                 .allocator
                 .create_dynamic_buffer_uninit(
-                    (self.objects.capacity() * item_size) as u64,
+                    (self.objects.capacity().max(8) * item_size) as u64,
                     self.buffer_usage_flags,
                     self.alignment,
                 )
@@ -284,7 +280,7 @@ impl<T> ManagedBufferVecStrategyDirectWrite<T> {
                     }
                 }
             });
-        Some(buf)
+        buf
     }
 }
 
@@ -366,16 +362,13 @@ impl ManagedBufferVecStrategyDirectWriteUnsized {
         }
     }
 
-    pub fn buffer(&mut self) -> Option<PerFrameContainer<ResidentBuffer>> {
+    pub fn buffer(&mut self) -> PerFrameContainer<ResidentBuffer> {
         let item_size = self.layout.pad_to_align().size();
-        if self.num_items == 0 {
-            return None;
-        }
         let create_buffer = || {
             let create_buffer = self
                 .allocator
                 .create_dynamic_buffer_uninit(
-                    self.objects_buffer.capacity() as u64,
+                    self.objects_buffer.capacity().max(8) as u64,
                     self.buffer_usage_flags,
                     self.base_alignment as u32,
                 )
@@ -385,8 +378,7 @@ impl ManagedBufferVecStrategyDirectWriteUnsized {
             create_buffer
         };
 
-        let buf = self
-            .buffers
+        self.buffers
             .use_state(|| {
                 let new_buffer = create_buffer();
                 self.changeset
@@ -416,8 +408,7 @@ impl ManagedBufferVecStrategyDirectWriteUnsized {
                         })
                     }
                 }
-            });
-        Some(buf)
+            })
     }
 }
 
@@ -458,16 +449,14 @@ impl<T> ManagedBufferVecStrategyStaging<T> {
         self.num_items += 1;
     }
     pub fn set(&mut self, index: usize, item: T) {
+        self.num_items = self.num_items.max(index + 1);
         self.changes.insert(index, item);
     }
 
     pub fn buffer(
         &mut self,
-    ) -> Option<impl GPUCommandFuture<Output = RenderRes<SharedDeviceState<ResidentBuffer>>>> {
+    ) -> impl GPUCommandFuture<Output = RenderRes<SharedDeviceState<ResidentBuffer>>> {
         let item_size = std::alloc::Layout::new::<T>().pad_to_align().size();
-        if self.num_items == 0 {
-            return None;
-        }
         let staging_buffer_copy = if !self.changes.is_empty() {
             let expected_staging_size = (item_size * self.changes.len()) as u64;
 
@@ -515,12 +504,13 @@ impl<T> ManagedBufferVecStrategyStaging<T> {
         };
 
         let expected_whole_buffer_size = self.num_items as u64 * item_size as u64;
+        let actual_whole_buffer_size = self.num_items.max(8) as u64 * item_size as u64;
         let (device_buffer, old_device_buffer) = use_shared_state_with_old(
             &mut self.device_buffer,
             |_| {
                 self.allocator
                     .create_device_buffer_uninit(
-                        expected_whole_buffer_size,
+                        actual_whole_buffer_size,
                         // When enlarging the buffer, we copy the contents from the old buffer to the new buffer.
                         // That's why we need the TRANSFER_SRC flag here.
                         self.buffer_usage_flags
@@ -532,8 +522,7 @@ impl<T> ManagedBufferVecStrategyStaging<T> {
             },
             |buf| buf.size() < expected_whole_buffer_size,
         );
-
-        let fut = commands! {
+        commands! {
             let mut device_buffer = device_buffer;
 
             if let Some(old_buffer) = old_device_buffer {
@@ -548,8 +537,7 @@ impl<T> ManagedBufferVecStrategyStaging<T> {
             }
 
             device_buffer
-        };
-        Some(fut)
+        }
     }
 }
 
@@ -646,11 +634,8 @@ impl ManagedBufferVecStrategyStagingUnsized {
 
     pub fn buffer(
         &mut self,
-    ) -> Option<impl GPUCommandFuture<Output = RenderRes<SharedDeviceState<ResidentBuffer>>>> {
+    ) -> impl GPUCommandFuture<Output = RenderRes<SharedDeviceState<ResidentBuffer>>> {
         let item_size = self.layout.pad_to_align().size();
-        if self.num_items == 0 {
-            return None;
-        }
         let staging_buffer_copy = if !self.change_buffer.is_empty() {
             let expected_staging_size = self.change_buffer.len() as u64;
             let staging_buffer = self
@@ -710,12 +695,13 @@ impl ManagedBufferVecStrategyStagingUnsized {
         };
 
         let expected_whole_buffer_size = self.num_items as u64 * item_size as u64;
+        let actual_whole_buffer_size = self.num_items.max(8) as u64 * item_size as u64;
         let (device_buffer, old_device_buffer) = use_shared_state_with_old(
             &mut self.device_buffer,
             |_| {
                 self.allocator
                     .create_device_buffer_uninit(
-                        expected_whole_buffer_size,
+                        actual_whole_buffer_size,
                         self.buffer_usage_flags
                             | vk::BufferUsageFlags::TRANSFER_DST
                             | vk::BufferUsageFlags::TRANSFER_SRC,
@@ -726,7 +712,7 @@ impl ManagedBufferVecStrategyStagingUnsized {
             |buf| buf.size() < expected_whole_buffer_size,
         );
 
-        let fut = commands! {
+        commands! {
             let mut device_buffer = device_buffer;
 
             if let Some(old_buffer) = old_device_buffer {
@@ -741,7 +727,6 @@ impl ManagedBufferVecStrategyStagingUnsized {
             }
 
             device_buffer
-        };
-        Some(fut)
+        }
     }
 }

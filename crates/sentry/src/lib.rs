@@ -48,7 +48,7 @@ fn aftermath_device_lost_handler() {
 }
 
 impl Plugin for SentryPlugin {
-    fn build(&self, app: &mut bevy_app::App) {
+    fn build(&self, _app: &mut bevy_app::App) {
         use tracing_subscriber::prelude::*;
 
         use sentry::IntoDsn;

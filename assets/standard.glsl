@@ -51,6 +51,9 @@ layout(set = 0, binding = 9, std430) uniform CameraSettings {
     float near;
     float padding;
 } u_camera;
+layout(set = 0, binding = 10, std430) buffer InstanceData {
+    mat4 last_frame_transforms[];
+} s_instances;
 vec3 camera_origin() {
     return vec3(u_camera.position_x, u_camera.position_y, u_camera.position_z);
 }

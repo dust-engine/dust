@@ -82,9 +82,15 @@ pub enum RenderSystems {
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        app.configure_set(Update, RenderSystems::SetUp)
-            .configure_set(Update, RenderSystems::Render.after(RenderSystems::SetUp))
-            .configure_set(Update, RenderSystems::CleanUp.after(RenderSystems::Render));
+        app.configure_set(PostUpdate, RenderSystems::SetUp)
+            .configure_set(
+                PostUpdate,
+                RenderSystems::Render.after(RenderSystems::SetUp),
+            )
+            .configure_set(
+                PostUpdate,
+                RenderSystems::CleanUp.after(RenderSystems::Render),
+            );
 
         let entry = unsafe { ash::Entry::load().unwrap() };
         let instance = {
@@ -173,7 +179,7 @@ impl Plugin for RenderPlugin {
             .init_resource::<StagingRingBuffer>()
             .insert_non_send_resource(swapchain::NonSendResource::default())
             .add_systems(
-                Update,
+                PostUpdate,
                 (
                     swapchain::extract_windows.in_set(RenderSystems::SetUp),
                     queue::flush_async_queue_system.in_set(RenderSystems::CleanUp),

@@ -6,7 +6,7 @@ use std::{
 use crate::{
     copy_buffer,
     future::{Disposable, GPUCommandFuture, RenderData, RenderRes},
-    Allocator, BufferLike, Device, HasDevice, PhysicalDeviceMemoryModel,
+    BufferLike, Device, HasDevice,
 };
 use ash::{prelude::VkResult, vk};
 use macros::commands;
@@ -68,15 +68,8 @@ unsafe impl Sync for StagingRingBufferSlice {}
 impl Drop for StagingRingBufferSlice {
     fn drop(&mut self) {
         unsafe {
-            let mut virtual_block = self.block
-                .0
-                .as_ref()
-                .unwrap()
-                .block
-                .lock()
-                .unwrap();
-            virtual_block
-                .free(&mut self.allocation)
+            let mut virtual_block = self.block.0.as_ref().unwrap().block.lock().unwrap();
+            virtual_block.free(&mut self.allocation)
         }
     }
 }
@@ -234,13 +227,14 @@ impl StagingRingBuffer {
         }
     }
 
-    pub fn stage_changes<'a>(
-        self: &Arc<Self>,
-        data: &[u8],
-    ) -> StagingRingBufferSlice {
+    pub fn stage_changes<'a>(self: &Arc<Self>, data: &[u8]) -> StagingRingBufferSlice {
         let mut staging_buffer = self.allocate(data.len() as u64).unwrap();
         unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), staging_buffer.as_mut_ptr().unwrap() as *mut u8, data.len());
+            std::ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                staging_buffer.as_mut_ptr().unwrap() as *mut u8,
+                data.len(),
+            );
         }
         staging_buffer
     }

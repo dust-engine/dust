@@ -116,13 +116,17 @@ impl<T> AccelerationStructureBatchBuilder<T> {
         assert_eq!(geometries.len(), total_num_geometries);
         assert_eq!(build_ranges.len(), total_num_geometries);
 
-        let mut accel_structs: Vec<(T, AccelerationStructure)> = Vec::with_capacity(self.builds.len());
+        let mut accel_structs: Vec<(T, AccelerationStructure)> =
+            Vec::with_capacity(self.builds.len());
         let mut input_buffers: Vec<Arc<ResidentBuffer>> = Vec::with_capacity(total_num_geometries);
         for (info, build) in self.builds.into_iter() {
             accel_structs.push((info, build.accel_struct));
             // TODO: Use Box<[]>::into_iter directly in Rust 2024
             input_buffers.extend(
-                Vec::from(build.geometries).into_iter().map(|geometry| geometry.0));
+                Vec::from(build.geometries)
+                    .into_iter()
+                    .map(|geometry| geometry.0),
+            );
         }
         BLASBuildFuture {
             scratch_buffers,
@@ -150,10 +154,7 @@ pub struct BLASBuildFuture<T> {
 impl<T> GPUCommandFuture for BLASBuildFuture<T> {
     type Output = Vec<(T, AccelerationStructure)>;
 
-    type RetainedState = DisposeContainer<(
-        Vec<ResidentBuffer>,
-        Vec<Arc<ResidentBuffer>>
-    )>;
+    type RetainedState = DisposeContainer<(Vec<ResidentBuffer>, Vec<Arc<ResidentBuffer>>)>;
 
     type RecycledState = ();
 
@@ -180,7 +181,7 @@ impl<T> GPUCommandFuture for BLASBuildFuture<T> {
             futs,
             DisposeContainer::new((
                 std::mem::replace(this.scratch_buffers, Vec::new()),
-                std::mem::replace(this.input_buffers, Vec::new())
+                std::mem::replace(this.input_buffers, Vec::new()),
             )),
         ))
     }
@@ -315,7 +316,7 @@ impl<T: BufferLike + Send + RenderData> GPUCommandFuture for TLASBuildFuture<T> 
     fn record(
         self: std::pin::Pin<&mut Self>,
         ctx: &mut crate::future::CommandBufferRecordContext,
-        recycled_state: &mut Self::RecycledState,
+        _recycled_state: &mut Self::RecycledState,
     ) -> std::task::Poll<(Self::Output, Self::RetainedState)> {
         let this = self.project();
         let scratch_buffer = this.scratch_buffer.take().unwrap();

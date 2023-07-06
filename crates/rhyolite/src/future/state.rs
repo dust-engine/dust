@@ -438,14 +438,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 
 use ash::vk;
-use macros::commands;
 
 use crate::BufferLike;
 use crate::HasDevice;
 use crate::ImageLike;
 use crate::ImageViewLike;
 
-use super::GPUCommandFuture;
 use super::RenderData;
 use super::RenderImage;
 use super::RenderRes;

@@ -7,8 +7,8 @@
 #![feature(specialization)]
 #![feature(btree_extract_if)]
 
-use bevy_app::{Plugin, Update};
-mod blas;
+use bevy_app::{Plugin, PostUpdate};
+mod accel_struct;
 mod deferred_task;
 mod geometry;
 mod material;
@@ -17,11 +17,11 @@ mod pipeline;
 mod projection;
 mod sbt;
 mod shader;
-mod tlas;
+use accel_struct::blas::{build_blas_system, BlasStore};
+pub use accel_struct::tlas::*;
 use bevy_asset::AddAsset;
 use bevy_ecs::{prelude::Component, reflect::ReflectComponent, schedule::IntoSystemConfigs};
 use bevy_reflect::Reflect;
-use blas::{build_blas_system, BlasStore};
 use deferred_task::DeferredTaskPool;
 pub use geometry::*;
 pub use material::*;
@@ -31,7 +31,6 @@ pub use projection::*;
 use rhyolite::ash::vk;
 use rhyolite_bevy::RenderSystems;
 pub use shader::*;
-pub use tlas::*;
 
 pub struct RenderPlugin {
     /// When true, the RenderPlugin will add TLASPlugin<Renderable>. As a result,
@@ -109,7 +108,7 @@ impl Plugin for RenderPlugin {
         })
         .add_plugin(PipelineCachePlugin::default())
         .register_type::<Renderable>()
-        .add_systems(Update, build_blas_system.in_set(RenderSystems::SetUp))
+        .add_systems(PostUpdate, build_blas_system.in_set(RenderSystems::SetUp))
         .init_resource::<BlasStore>()
         .add_asset::<ShaderModule>()
         .init_resource::<BlueNoise>()
@@ -123,7 +122,8 @@ impl Plugin for RenderPlugin {
             app.add_plugin(TLASPlugin::<Renderable>::default());
         }
         if self.use_standard_pipeline {
-            app.add_plugin(RayTracingPipelinePlugin::<StandardPipeline>::default());
+            app.add_plugin(StandardPipelinePlugin)
+                .add_plugin(RayTracingPipelinePlugin::<StandardPipeline>::default());
         }
     }
 }

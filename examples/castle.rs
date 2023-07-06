@@ -280,39 +280,37 @@ impl Plugin for RenderSystem {
 
 
                         let mut rendered = false;
-                        if let Some(accel_struct) = accel_struct {
-                            let accel_struct = accel_struct.await;
-                            if let Some(render) = ray_tracing_pipeline.render(
-                                &mut radiance_image,
-                                &mut albedo_image,
-                                &mut normal_image,
-                                &mut depth_image,
-                                &mut motion_image,
-                                &blue_noise,
-                                &accel_struct,
-                                ray_tracing_pipeline_params,
-                                camera,
-                            ) {
-                                render.await;
-                                rendered = true;
-                            }
-                            if rendered {
-                                svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &motion_image, &svgf_pipeline_params).await;
-                                let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_pipeline_params).await;
-                                let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
-                                let color_space = swapchain_image.inner().color_space().clone();
-                                tone_mapping_pipeline.render(
-                                    &radiance_image,
-                                    &albedo_image,
-                                    &mut swapchain_image,
-                                    &exposure_avg,
-                                    &color_space,
-                                    &tone_mapping_pipeline_params
-                                ).await;
-                                retain!(exposure_avg);
-                            }
-                            retain!(accel_struct);
+                        let accel_struct = accel_struct.await;
+                        if let Some(render) = ray_tracing_pipeline.render(
+                            &mut radiance_image,
+                            &mut albedo_image,
+                            &mut normal_image,
+                            &mut depth_image,
+                            &mut motion_image,
+                            &blue_noise,
+                            &accel_struct,
+                            ray_tracing_pipeline_params,
+                            camera,
+                        ) {
+                            render.await;
+                            rendered = true;
                         }
+                        if rendered {
+                            svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &motion_image, &svgf_pipeline_params).await;
+                            let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_pipeline_params).await;
+                            let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
+                            let color_space = swapchain_image.inner().color_space().clone();
+                            tone_mapping_pipeline.render(
+                                &radiance_image,
+                                &albedo_image,
+                                &mut swapchain_image,
+                                &exposure_avg,
+                                &color_space,
+                                &tone_mapping_pipeline_params
+                            ).await;
+                            retain!(exposure_avg);
+                        }
+                        retain!(accel_struct);
                         retain!((radiance_image, albedo_image, normal_image, depth_image, radiance_image_prev, motion_image));
                         if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {

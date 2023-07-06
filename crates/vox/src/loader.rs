@@ -4,7 +4,7 @@ use crate::{palette::VoxPalette, VoxGeometry};
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 use crate::{Tree, VoxBundle};
-use bevy_asset::{AssetLoader, Assets, Handle, LoadedAsset};
+use bevy_asset::{AssetLoader, Handle, LoadedAsset};
 use bevy_ecs::{
     prelude::{Bundle, Entity},
     world::{EntityMut, FromWorld, World},
@@ -12,9 +12,8 @@ use bevy_ecs::{
 use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, Rotation, SceneNode};
-use glam::{IVec3, UVec3, Vec3, Vec3Swizzles};
+use glam::{IVec3, UVec3, Vec3Swizzles};
 use rayon::prelude::*;
-use rhyolite::{fill_buffer, HasDevice};
 use rhyolite::future::RenderRes;
 use rhyolite::BufferLike;
 use rhyolite::{
@@ -24,6 +23,7 @@ use rhyolite::{
     macros::commands,
     QueueRef,
 };
+use rhyolite::{fill_buffer, HasDevice};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter, StagingRingBuffer};
 
 use crate::material::{DiffuseMaterial, DiffuseMaterialIrradianceCacheEntry, PaletteMaterial};
@@ -201,7 +201,7 @@ impl VoxLoader {
     fn load_palette(
         &self,
         palette: &[dot_vox::Color],
-        ring_buffer: &StagingRingBuffer
+        ring_buffer: &StagingRingBuffer,
     ) -> impl GPUCommandFuture<Output = RenderRes<VoxPalette>> {
         unsafe {
             const LEN: usize = 255;
@@ -216,7 +216,7 @@ impl VoxLoader {
                     std::slice::from_raw_parts(mem.as_ptr() as *const u8, mem.len() * 4),
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                     0,
-                    &ring_buffer
+                    &ring_buffer,
                 )
                 .unwrap();
             resident_buffer.map(|buffer| {
@@ -232,7 +232,7 @@ impl VoxLoader {
         &self,
         model: &Model,
         palette: Handle<VoxPalette>,
-        ring_buffer: &StagingRingBuffer
+        ring_buffer: &StagingRingBuffer,
     ) -> impl GPUCommandFuture<Output = (VoxGeometry, PaletteMaterial)> + Send {
         let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
 
@@ -271,7 +271,7 @@ impl VoxLoader {
                 &palette_indexes,
                 vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                 0,
-                &ring_buffer
+                &ring_buffer,
             )
             .unwrap()
             .map(|buffer| {
@@ -285,7 +285,7 @@ impl VoxLoader {
             [model.size.x as u8, model.size.z as u8, model.size.y as u8],
             1.0,
             &self.allocator,
-            ring_buffer
+            ring_buffer,
         );
 
         let future_to_wait = material_buffer.join(geometry);
@@ -333,7 +333,6 @@ impl AssetLoader for VoxLoader {
                 None,
             );
 
-
             let geometry_material_futures: Vec<_> = traverser
                 .models
                 .par_iter()
@@ -341,7 +340,10 @@ impl AssetLoader for VoxLoader {
                     let model = &file.models[*model_id as usize];
                     assert!(model.size.x <= 256 && model.size.y <= 256 && model.size.z <= 256);
 
-                    (*model_id, self.load_model(model, palette_handle.clone(), &staging_ring_buffer))
+                    (
+                        *model_id,
+                        self.load_model(model, palette_handle.clone(), &staging_ring_buffer),
+                    )
                 })
                 .collect();
             let geometry_materials = commands! {
@@ -391,7 +393,7 @@ impl AssetLoader for VoxLoader {
                                     as u64,
                                 vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                                     | vk::BufferUsageFlags::TRANSFER_DST, // TODO: zero-initialize this.0
-                                0
+                                0,
                             )
                             .unwrap(),
                     );

@@ -14,7 +14,7 @@ use rhyolite::{
     fill_buffer,
     future::{
         use_per_frame_state, use_shared_state, Disposable, DisposeContainer, GPUCommandFuture,
-        RenderData, RenderImage, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer,
+        RenderData, RenderImage, RenderRes, SharedDeviceState,
     },
     macros::{commands, set_layout},
     utils::retainer::Retainer,

@@ -210,7 +210,7 @@ impl Plugin for PipelineCachePlugin {
         };
         app.insert_resource(cache);
         if self.shader_hot_reload {
-            app.add_systems(bevy_app::PreUpdate, pipeline_cache_shader_updated_system);
+            app.add_systems(bevy_app::Update, pipeline_cache_shader_updated_system);
         }
     }
 }
