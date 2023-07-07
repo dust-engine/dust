@@ -12,7 +12,7 @@ use bevy_ecs::{
 use bevy_hierarchy::{BuildWorldChildren, WorldChildBuilder};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use dot_vox::{Color, DotVoxData, Model, Rotation, SceneNode};
-use glam::{IVec3, UVec3, Vec3Swizzles};
+use glam::{IVec3, UVec3, Vec3A, Vec3Swizzles};
 use rayon::prelude::*;
 use rhyolite::future::RenderRes;
 use rhyolite::BufferLike;
@@ -188,9 +188,15 @@ impl<'a> SceneGraphTraverser<'a> {
         let quat = glam::Quat::from_xyzw(quat.x, quat.z, -quat.y, quat.w);
         let scale = glam::Vec3A::from_array(scale).xzy(); // no need to negate scale.y because scale is not a coordinate
 
+        let offset = Vec3A::new(
+            if size.x % 2 == 0 { 0.0 } else { 0.5 },
+            if size.z % 2 == 0 { 0.0 } else { 0.5 },
+            if size.y % 2 == 0 { 0.0 } else { -0.5 },
+        );
+
         let center = quat * (size.xzy().as_vec3a() / 2.0);
         Transform {
-            translation: (translation - center * scale).into(),
+            translation: (translation - center * scale + offset).into(),
             rotation: quat,
             scale: scale.into(),
         }
@@ -241,7 +247,7 @@ impl VoxLoader {
             let voxel = dot_vox::Voxel {
                 x: voxel.x,
                 y: voxel.z,
-                z: model.size.y as u8 - voxel.y,
+                z: (model.size.y - voxel.y as u32 - 1) as u8,
                 i: voxel.i,
             };
             let coords: UVec3 = UVec3 {

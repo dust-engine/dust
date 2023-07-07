@@ -82,8 +82,8 @@ impl Plugin for RenderSystem {
              mut recycled_state: Local<_>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
-            return;
-        };
+                    return;
+                };
 
                 let _transfer_queue = queue_router.of_type(QueueType::Transfer);
                 let graphics_queue = queue_router.of_type(QueueType::Graphics);

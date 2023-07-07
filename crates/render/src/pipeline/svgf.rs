@@ -68,6 +68,8 @@ impl FromWorld for SvgfPipeline {
                 address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
                 address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
                 address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+                mag_filter: vk::Filter::LINEAR,
+                min_filter: vk::Filter::LINEAR,
                 border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
                 ..Default::default()
             },
