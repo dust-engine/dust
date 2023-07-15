@@ -14,6 +14,9 @@ void main() {
     }
     const vec3 sunDir = sunlight_config.direction.xyz;
     payload.normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
+    if (dot(sunDir, payload.normal) < 0) {
+        return;
+    }
     vec3 hitLocation = hitT * camera_ray_dir() + camera_origin() + payload.normal * 0.01;
     // Shoot shadow ray
     traceRayEXT(
