@@ -44,13 +44,20 @@ void main() {
         uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
         u8vec4 color = sbt.paletteInfo.palette[palette_index];
 
-        photon.energy *= vec3(color.xyz) / 255.0;
+        vec3 albedo = color.xyz / 255.0;
+        albedo.x = SRGBToLinear(albedo.x);
+        albedo.y = SRGBToLinear(albedo.y);
+        albedo.z = SRGBToLinear(albedo.z);
+        albedo = SRGBToXYZ(albedo);
+
+        photon.energy *= albedo;
     }
 
     // Calculate normal
-    vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT - block.position.xyz;
+    vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
     vec3 offsetInBox = vec3(hitAttributes.voxelId >> 4, (hitAttributes.voxelId >> 2) & 3, hitAttributes.voxelId & 3);
-    vec3 normalObject = CubedNormalize(hitPointObject - offsetInBox - vec3(0.5));
+    vec3 boxCenterObject = block.position.xyz + offsetInBox + vec3(0.5);
+    vec3 normalObject = CubedNormalize(hitPointObject - boxCenterObject);
     photon.normal = gl_ObjectToWorldEXT * vec4(normalObject, 0.0);
 
     int8_t faceId = int8_t(normalObject.x) * int8_t(3) + int8_t(normalObject.y) * int8_t(2) + int8_t(normalObject.z);

@@ -71,7 +71,7 @@ vec3 camera_ray_dir() {
     return pixelCameraWorld;
 }
 
-#define RETENTION_FACTOR 0.95
+#define RETENTION_FACTOR 0.99
 
 // TODO: make this adaptable
 //#define SHADER_INT_64 
@@ -272,3 +272,17 @@ vec3 arhosek_sun_radiance(
     return sunlight_config.solar_intensity.xyz * darkeningFactor;
 }
 
+float SRGBToLinear(float color)
+{
+    // Approximately pow(color, 2.2)
+    return color < 0.04045 ? color / 12.92 : pow(abs(color + 0.055) / 1.055, 2.4);
+}
+
+vec3 SRGBToXYZ(vec3 srgb) {
+    mat3 transform = mat3(
+        0.4124564, 0.2126729, 0.0193339,
+        0.3575761, 0.7151522, 0.1191920,
+        0.1804375, 0.0721750, 0.9503041
+    );
+    return transform * srgb;
+}

@@ -43,7 +43,7 @@ void main() {
 
     vec3 currentDir = direction; // Initial direction
     vec3 currentOrigin = vec3(pixelNDC.x, 0.0, pixelNDC.y) + camera_position; // Initial origin
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < 3; i++) {
         if (photon.hitT == 0.0) {
             return;
         }
@@ -60,6 +60,7 @@ void main() {
         if (dot(rotatedNoiseSample, vec3(photon.normal)) < 0.0) {
             rotatedNoiseSample = -rotatedNoiseSample;
         }
+        currentOrigin += currentDir * photon.hitT + photon.normal * 0.001;
         
         photon.hitT = 0.0;
         traceRayEXT(
@@ -69,7 +70,7 @@ void main() {
             1, // SBT offset, ray type index
             4, // SBT stride, number of ray types
             3, // missIndex
-            currentOrigin + currentDir * photon.hitT + photon.normal * 0.001,     // ray origin
+            currentOrigin,     // ray origin
             0.1,           // ray min range
             rotatedNoiseSample, // direction
             1000.0, // tmax
