@@ -18,7 +18,7 @@ shared uint histogramShared[256];
 // For a given color and luminance range, return the histogram bin index
 uint colorToBin(vec3 hdrColor) {
   // Convert our RGB value to Luminance, see note for RGB_TO_LUM macro above
-  float lum = dot(hdrColor, vec3(0.2125, 0.7154, 0.0721));
+  float lum = hdrColor.y;
 
   // Avoid taking the log of zero
   if (lum < 0.005) {

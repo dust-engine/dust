@@ -157,7 +157,8 @@ void main() {
     vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
     float exposure = 1.0 / (9.6*u_histogram.avg);
-    exposure = 0.05;
+    exposure *= 9.6;
+    //exposure = 0.05;
 
     // Tone mapping
     vec3 mapped = in_value.xyz * albedo.xyz * exposure;

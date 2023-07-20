@@ -14,6 +14,7 @@ use bevy_transform::prelude::GlobalTransform;
 
 use crevice::std430::{AsStd430, Std430};
 use rand::Rng;
+use rhyolite::{fill_buffer, initialize_buffer};
 use rhyolite::future::{
     run, use_shared_resource_flipflop, use_shared_state, use_state, GPUCommandFutureExt,
 };
@@ -95,8 +96,10 @@ impl RayTracingPipeline for StandardPipeline {
             camera_settings_prev_frame: vk::DescriptorType::UNIFORM_BUFFER,
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
             camera_settings: vk::DescriptorType::UNIFORM_BUFFER,
-            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
+            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR)]
             instances: vk::DescriptorType::STORAGE_BUFFER,
+            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
+            reservoirs: vk::DescriptorType::STORAGE_BUFFER,
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -229,12 +232,14 @@ struct StandardPipelinePhotonCamera {
 struct StandardPipelinePushConstant {
     #[stage(
         vk::ShaderStageFlags::RAYGEN_KHR,
-        vk::ShaderStageFlags::CLOSEST_HIT_KHR
+        vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+        vk::ShaderStageFlags::MISS_KHR
     )]
     rand: u32,
     #[stage(
         vk::ShaderStageFlags::RAYGEN_KHR,
-        vk::ShaderStageFlags::CLOSEST_HIT_KHR
+        vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+        vk::ShaderStageFlags::MISS_KHR
     )]
     frame_index: u32,
 }
@@ -359,6 +364,17 @@ impl StandardPipeline {
                 },
                 |_| false
             );
+            let mut reservoir_buffer = use_shared_state(
+                using!(),
+                |_| {
+                    allocator.create_device_buffer_uninit((Reservoir::std430_size_static() *
+                    target_image.inner().extent().width as usize *
+                    target_image.inner().extent().height as usize * 2 ) as u64, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, 0).unwrap()
+                },
+                |_| false
+            );
+
+
             let (mut camera_setting_buffer, camera_setting_buffer_prev_frame) = use_shared_resource_flipflop(
                 using!(),
                 |_| {
@@ -368,6 +384,8 @@ impl StandardPipeline {
             );
             staging_ring_buffer.update_buffer(&mut camera_setting_buffer, camera_settings.as_bytes()).join(
                             staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes())
+            ).join(
+                initialize_buffer(&mut reservoir_buffer, 0)
             ).await;
 
             let frame_index = use_state(
@@ -426,6 +444,7 @@ impl StandardPipeline {
                     0,
                     &[
                         instances_buffer.inner().as_descriptor(),
+                        reservoir_buffer.inner().as_descriptor()
                     ],
                     false
                 ),
@@ -438,14 +457,14 @@ impl StandardPipeline {
                 device.cmd_push_constants(
                     command_buffer,
                     primary_pipeline.layout().raw(),
-                    vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                    vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR,
                     0,
                     std::slice::from_raw_parts(&rand as *const _ as *const u8, 4),
                 );
                 device.cmd_push_constants(
                     command_buffer,
                     primary_pipeline.layout().raw(),
-                    vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                    vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR,
                     4,
                     std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4),
                 );
@@ -472,8 +491,8 @@ impl StandardPipeline {
                         size: hitgroup_sbt_buffer.inner.size(),
                     },
                     &vk::StridedDeviceAddressRegionKHR::default(),
-                    1024,
-                    1024,
+                    2048,
+                    2048,
                     1,
                 );
             }, |ctx: &mut rhyolite::future::StageContext| {
@@ -715,7 +734,8 @@ impl StandardPipeline {
                 camera_setting_buffer_prev_frame,
                 pipeline_sbt_buffer,
                 hitgroup_sbt_buffer,
-                instances_buffer
+                instances_buffer,
+                reservoir_buffer
             ));
             retain!(
                 DisposeContainer::new((
@@ -796,4 +816,22 @@ pub fn extract_global_transforms(
                 });
         }
     }
+}
+
+
+
+#[derive(PartialEq, Clone, AsStd430)]
+struct Sample {
+    visible_point: Vec3,
+    visible_point_normal: Vec3,
+    sample_point: Vec3,
+    sample_point_normal: Vec3,
+    outgoing_radiance: Vec3,
+}
+
+#[derive(PartialEq, Clone, AsStd430)]
+struct Reservoir {
+    current_sample: Sample,
+    total_weight: f32,
+    sample_count: f32,
 }

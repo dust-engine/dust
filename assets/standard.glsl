@@ -13,6 +13,7 @@
 #extension GL_EXT_debug_printf : enable
 // Illuminance: total luminous flux incident on a surface, per unit area.
 // Unit: lux (lm / m^2)
+// Stores the incoming radiance at primary ray hit points.
 layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
 layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
 layout(set = 0, binding = 2, rgba16_snorm) uniform image2D u_normal;
@@ -286,3 +287,92 @@ vec3 SRGBToXYZ(vec3 srgb) {
     );
     return transform * srgb;
 }
+
+
+uint hash1(uint x) {
+	x += (x << 10u);
+	x ^= (x >>  6u);
+	x += (x <<  3u);
+	x ^= (x >> 11u);
+	x += (x << 15u);
+	return x;
+}
+
+uint hash1_mut(inout uint h) {
+    uint res = h;
+    h = hash1(h);
+    return res;
+}
+
+uint hash_combine2(uint x, uint y) {
+    const uint M = 1664525u, C = 1013904223u;
+    uint seed = (x * M + y + C) * M;
+
+    // Tempering (from Matsumoto)
+    seed ^= (seed >> 11u);
+    seed ^= (seed << 7u) & 0x9d2c5680u;
+    seed ^= (seed << 15u) & 0xefc60000u;
+    seed ^= (seed >> 18u);
+    return seed;
+}
+
+uint hash2(uvec2 v) {
+	return hash_combine2(v.x, hash1(v.y));
+}
+
+uint hash3(uvec3 v) {
+	return hash_combine2(v.x, hash2(v.yz));
+}
+
+uint hash4(uvec4 v) {
+	return hash_combine2(v.x, hash3(v.yzw));
+}
+
+
+float uint_to_u01_float(uint h) {
+	const uint mantissaMask = 0x007FFFFFu;
+	const uint one = 0x3F800000u;
+
+	h &= mantissaMask;
+	h |= one;
+
+	float  r2 = uintBitsToFloat( h );
+	return r2 - 1.0;
+}
+
+struct Sample {
+    vec3 visible_point; // The primary ray hit point
+    vec3 visible_point_normal; // The normal at the primary ray hit point in world space
+    vec3 sample_point; // The final gather ray / secondary ray hit point
+    vec3 sample_point_normal; // The normal at the secondary ray hit point in world space
+    vec3 outgoing_radiance; // Outgoing radiance at the sample point in XYZ color space
+};
+
+struct Reservoir {
+    Sample current_sample;      // z
+    float total_weight; // w
+    uint sample_count; // M
+};
+
+void ReservoirUpdate(inout Reservoir self, Sample new_sample, float sample_weight, inout uint rng) {
+    self.total_weight += sample_weight;
+    self.sample_count += 1;
+    const float dart = uint_to_u01_float(hash1_mut(rng));
+
+    if ((self.sample_count == 1) || (dart < sample_weight / self.total_weight)) {
+        self.current_sample = new_sample;
+    }
+}
+
+// Adds `newReservoir` into `reservoir`, returns true if the new reservoir's sample was selected.
+// This function assumes the newReservoir has been normalized, so its weightSum means "1/g * 1/M * \sum{g/p}"
+// and the targetPdf is a conversion factor from the newReservoir's space to the reservoir's space (integrand).
+void ReservoirMerge(inout Reservoir self, Reservoir other, float target_pdf, inout uint rng) {
+    uint total_sample_count = self.sample_count + other.sample_count;
+    ReservoirUpdate(self, other.current_sample, target_pdf * other.total_weight * other.sample_count, rng);
+    self.sample_count = total_sample_count;
+}
+
+layout(set = 0, binding = 11, std430) buffer ReservoirData {
+    Reservoir reservoirs[];
+} s_reservoirs;
