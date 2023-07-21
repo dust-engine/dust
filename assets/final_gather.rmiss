@@ -15,7 +15,20 @@ float sample_target_pdf(Sample s) {
 }
 
 Reservoir TemporalResampling(Sample initial_sample, inout uint rng) {
-    Reservoir reservoir = s_reservoirs.reservoirs[gl_LaunchIDEXT.x * gl_LaunchSizeEXT.y + gl_LaunchIDEXT.y];
+	vec2 uv = (gl_LaunchIDEXT.xy + vec2(0.5)) / gl_LaunchSizeEXT.xy;
+	vec2 motion = imageLoad(u_motion, ivec2(gl_LaunchIDEXT.xy)).xy;
+	uv += motion;
+    
+    Reservoir reservoir;
+	if ((uv.x < 0.0) || (uv.x > 1.0) || (uv.y < 0.0) || (uv.y > 1.0)) {
+        // disocclusion
+        reservoir.sample_count = 0;
+        reservoir.total_weight = 0;
+        reservoir.current_sample = initial_sample;
+	} else {
+        uvec2 pos = uvec2(uv * vec2(gl_LaunchSizeEXT.xy));
+        reservoir = s_reservoirs_prev.reservoirs[pos.x * imageSize(u_illuminance).y + pos.y];
+    }
     if (reservoir.sample_count > 20) {
         reservoir.total_weight *= 20 / float(reservoir.sample_count);
         reservoir.sample_count = 20;
@@ -24,9 +37,10 @@ Reservoir TemporalResampling(Sample initial_sample, inout uint rng) {
     ReservoirUpdate(reservoir, initial_sample, w, rng);
 
     // TODO: now, store Rreservoir.
-    s_reservoirs.reservoirs[gl_LaunchIDEXT.x * gl_LaunchSizeEXT.y + gl_LaunchIDEXT.y] = reservoir;
+    s_reservoirs.reservoirs[gl_LaunchIDEXT.x * imageSize(u_illuminance).y + gl_LaunchIDEXT.y] = reservoir;
     return reservoir;
-}   
+}
+
 
 
 void main() {

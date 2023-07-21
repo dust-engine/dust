@@ -296,7 +296,7 @@ impl Plugin for RenderSystem {
                             rendered = true;
                         }
                         if rendered {
-                            svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &motion_image, &svgf_pipeline_params).await;
+                            //svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &motion_image, &svgf_pipeline_params).await;
                             let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_pipeline_params).await;
                             let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
                             let color_space = swapchain_image.inner().color_space().clone();

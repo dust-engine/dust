@@ -100,6 +100,8 @@ impl RayTracingPipeline for StandardPipeline {
             instances: vk::DescriptorType::STORAGE_BUFFER,
             #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
             reservoirs: vk::DescriptorType::STORAGE_BUFFER,
+            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
+            reservoirs_prev: vk::DescriptorType::STORAGE_BUFFER,
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -364,12 +366,12 @@ impl StandardPipeline {
                 },
                 |_| false
             );
-            let mut reservoir_buffer = use_shared_state(
+            let (mut reservoir_buffer, mut reservoir_buffer_prev) = use_shared_resource_flipflop(
                 using!(),
                 |_| {
                     allocator.create_device_buffer_uninit((Reservoir::std430_size_static() *
                     target_image.inner().extent().width as usize *
-                    target_image.inner().extent().height as usize * 2 ) as u64, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, 0).unwrap()
+                    target_image.inner().extent().height as usize ) as u64, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, 0).unwrap()
                 },
                 |_| false
             );
@@ -386,6 +388,7 @@ impl StandardPipeline {
                             staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes())
             ).join(
                 initialize_buffer(&mut reservoir_buffer, 0)
+                .join(initialize_buffer(&mut reservoir_buffer_prev, 0))
             ).await;
 
             let frame_index = use_state(
@@ -444,7 +447,8 @@ impl StandardPipeline {
                     0,
                     &[
                         instances_buffer.inner().as_descriptor(),
-                        reservoir_buffer.inner().as_descriptor()
+                        reservoir_buffer.inner().as_descriptor(),
+                        reservoir_buffer_prev.inner().as_descriptor()
                     ],
                     false
                 ),
@@ -722,6 +726,12 @@ impl StandardPipeline {
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
+                ctx.read_image(
+                    motion_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
                 ctx.read(
                     &sunlight_buffer,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -735,7 +745,8 @@ impl StandardPipeline {
                 pipeline_sbt_buffer,
                 hitgroup_sbt_buffer,
                 instances_buffer,
-                reservoir_buffer
+                reservoir_buffer,
+                reservoir_buffer_prev
             ));
             retain!(
                 DisposeContainer::new((

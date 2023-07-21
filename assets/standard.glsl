@@ -376,3 +376,7 @@ void ReservoirMerge(inout Reservoir self, Reservoir other, float target_pdf, ino
 layout(set = 0, binding = 11, std430) buffer ReservoirData {
     Reservoir reservoirs[];
 } s_reservoirs;
+
+layout(set = 0, binding = 12, std430) buffer ReservoirDataPrev {
+    Reservoir reservoirs[];
+} s_reservoirs_prev;
