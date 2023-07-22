@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use bevy_asset::{AssetEvent, Assets, Handle, HandleUntyped};
+use bevy_asset::{AssetEvent, Assets, Handle, UntypedHandle, UntypedAssetId};
 use bevy_ecs::{
     prelude::{Component, Entity, EventReader},
     query::{Added, Without},
@@ -30,7 +30,7 @@ use crate::{geometry::Geometry, Renderable};
 pub struct BlasStore {
     /// Maintains relationship between Geometry handles and Entity.
     /// entities[asset_handle] are entities using
-    entities: HashMap<HandleUntyped, HashSet<Entity>>,
+    entities: HashMap<UntypedAssetId, HashSet<Entity>>,
 }
 
 pub struct NormalizedGeometryInner {
@@ -83,7 +83,7 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
         commands.entity(entity).insert(NormalizedGeometry(None));
         let entities = store
             .entities
-            .entry(handle.clone_weak_untyped())
+            .entry(handle.id().untyped())
             .or_default();
         entities.insert(entity);
     }
@@ -92,14 +92,14 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
     let mut upload_futures = Vec::new();
     for event in events.iter() {
         match event {
-            AssetEvent::Created { handle } | AssetEvent::Modified { handle } => {
-                let Some(entities) = store.entities.get(&handle.clone_weak_untyped()) else {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                let Some(entities) = store.entities.get(&id.untyped()) else {
                     // Asset was loaded but never added to any entity
                     continue;
                 };
                 for entity in entities.iter() {
                     let entity = *entity;
-                    let asset = assets.get(handle).unwrap();
+                    let asset = assets.get(id.untyped()).unwrap();
                     let flags = asset.geometry_flags();
                     let layout = asset.layout();
                     upload_futures.push(
@@ -109,9 +109,10 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
                     );
                 }
             }
-            AssetEvent::Removed { handle } => {
-                store.entities.remove(&handle.clone_weak_untyped());
-            }
+            AssetEvent::Removed { id } => {
+                store.entities.remove(&id.untyped());
+            },
+            _ => ()
         }
     }
     if upload_futures.len() == 0 {

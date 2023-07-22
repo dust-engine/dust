@@ -4,7 +4,7 @@ use std::{
 };
 
 use bevy_app::{Plugin, PostUpdate};
-use bevy_asset::{AssetEvent, AssetServer, Assets, Handle};
+use bevy_asset::{AssetEvent, AssetServer, Assets, Handle, Asset, AssetId};
 use bevy_ecs::{
     prelude::{Entity, EventReader},
     query::Changed,
@@ -19,7 +19,7 @@ use crate::{
 
 pub type MaterialType = rhyolite::RayTracingHitGroupType;
 // Handle<Material> is a component
-pub trait Material: Send + Sync + 'static + TypeUuid + TypePath {
+pub trait Material: Send + Sync + 'static + Asset + TypePath {
     type Pipeline: RayTracingPipeline;
     const TYPE: MaterialType;
     fn rahit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader>;
@@ -58,8 +58,8 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 }
 
 struct MaterialStore<T: Material> {
-    sbt_indices: HashMap<Handle<T>, SbtIndex>,
-    entitites: HashMap<Handle<T>, HashSet<Entity>>,
+    sbt_indices: HashMap<AssetId<T>, SbtIndex>,
+    entitites: HashMap<AssetId<T>, HashSet<Entity>>,
 }
 impl<T: Material> Default for MaterialStore<T> {
     fn default() -> Self {
@@ -83,10 +83,10 @@ fn material_system<T: Material>(
     for (entity, handle) in query.iter() {
         store
             .entitites
-            .entry(handle.clone_weak())
+            .entry(handle.id())
             .or_default()
             .insert(entity);
-        if let Some(sbt_index) = store.sbt_indices.get(handle) {
+        if let Some(sbt_index) = store.sbt_indices.get(&handle.id()) {
             // If this returns Some, it means `AssetEvent::Created` was already received,
             // and the SBT entry was already created. Add that to the entity.
             // If it does not already exist, do nothing. The SbtIndex will be added to the
@@ -96,24 +96,25 @@ fn material_system<T: Material>(
     }
     for event in events.iter() {
         match event {
-            AssetEvent::Created { handle } | AssetEvent::Modified { handle } => {
-                let material = materials.get(handle).unwrap();
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                let material = materials.get(*id).unwrap();
                 let sbt_index = pipeline.material_instance_added(material, &mut params);
                 // Now, for all entities with Handle<T>, add SbtIndex.
-                if let Some(old_sbt_index) = store.sbt_indices.get(handle) && old_sbt_index == &sbt_index {
+                if let Some(old_sbt_index) = store.sbt_indices.get(id) && old_sbt_index == &sbt_index {
 
                 } else {
-                    store.sbt_indices.insert(handle.clone_weak(), sbt_index);
-                    if let Some(entities) = store.entitites.get(handle) {
+                    store.sbt_indices.insert(*id, sbt_index);
+                    if let Some(entities) = store.entitites.get(id) {
                         for entity in entities.iter() {
                             commands.entity(*entity).insert(sbt_index);
                         }
                     }
                 }
             }
-            AssetEvent::Removed { handle: _ } => {
+            AssetEvent::Removed { id: _ } => {
                 todo!()
             }
+            _ => ()
         }
     }
 }

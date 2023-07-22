@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::{Tree, TreeRoot};
 
+use bevy_asset::Asset;
 use dust_render::Geometry;
 use dust_vdb::{IsLeaf, Node};
 use glam::{UVec3, Vec3A};
@@ -11,8 +12,7 @@ use rhyolite::future::{GPUCommandFuture, GPUCommandFutureExt, UnitCommandFuture}
 use rhyolite::ResidentBuffer;
 use rhyolite_bevy::{Allocator, StagingRingBuffer};
 
-#[derive(bevy_reflect::TypeUuid, bevy_reflect::TypePath)]
-#[uuid = "307feebb-14b8-4135-be09-ae828decc6a4"]
+#[derive(bevy_reflect::TypePath, Asset)]
 pub struct VoxGeometry {
     tree: Tree,
     size: [u8; 3],

@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display};
 
-use crate::{AsyncQueues, QueuesRouter};
-use bevy_asset::{AssetLoader, LoadedAsset};
+use crate::{AsyncQueues, QueuesRouter, SlicedImageArray};
+use bevy_asset::{AssetLoader, LoadedAsset, AsyncReadExt};
 use bevy_ecs::world::{FromWorld, World};
 use rhyolite::ensure_image_layout;
 use rhyolite::{
@@ -45,13 +45,19 @@ impl Display for UnsupportedPngColorTypeError {
 impl std::error::Error for UnsupportedPngColorTypeError {}
 
 impl AssetLoader for PngLoader {
+    // TODO: make different loaders for png img arrays and single images
+    type Asset = SlicedImageArray;
+    type Settings = ();
     fn load<'a>(
         &'a self,
-        bytes: &'a [u8],
+        reader: &'a mut bevy_asset::io::Reader,
+        settings: &'a Self::Settings,
         load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<(), bevy_asset::Error>> {
+    ) -> bevy_asset::BoxedFuture<'a, Result<SlicedImageArray, bevy_asset::Error>> {
         Box::pin(async move {
-            let decoder = png::Decoder::new(bytes);
+            let mut img_data = Vec::new();
+            reader.read_to_end(&mut img_data).await?;
+            let decoder = png::Decoder::new(img_data.as_slice());
             let mut reader = decoder.read_info().unwrap();
             let color_type = reader.output_color_type();
 
@@ -170,14 +176,7 @@ impl AssetLoader for PngLoader {
                 .submit(img, &mut Default::default())
                 .await
                 .into_inner();
-            if img.subresource_range().layer_count == 1 {
-                load_context.set_default_asset(LoadedAsset::new(crate::Image::new(img)));
-            } else {
-                load_context
-                    .set_default_asset(LoadedAsset::new(crate::SlicedImageArray::new(img)?));
-            }
-
-            Ok(())
+            Ok(crate::SlicedImageArray::new(img)?)
         })
     }
 

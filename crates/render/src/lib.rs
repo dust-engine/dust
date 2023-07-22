@@ -19,7 +19,7 @@ mod sbt;
 mod shader;
 use accel_struct::blas::{build_blas_system, BlasStore};
 pub use accel_struct::tlas::*;
-use bevy_asset::AddAsset;
+use bevy_asset::AssetApp;
 use bevy_ecs::{prelude::Component, reflect::ReflectComponent, schedule::IntoSystemConfigs};
 use bevy_reflect::Reflect;
 use deferred_task::DeferredTaskPool;
@@ -110,13 +110,13 @@ impl Plugin for RenderPlugin {
         .register_type::<Renderable>()
         .add_systems(PostUpdate, build_blas_system.in_set(RenderSystems::SetUp))
         .init_resource::<BlasStore>()
-        .add_asset::<ShaderModule>()
+        .init_asset::<ShaderModule>()
         .init_resource::<BlueNoise>()
         .init_resource::<Sunlight>();
 
         let device = app.world.resource::<rhyolite_bevy::Device>();
         DeferredTaskPool::init(device.inner().clone());
-        app.add_asset_loader(SpirvLoader::new(device.clone()));
+        app.register_asset_loader(SpirvLoader::new(device.clone()));
 
         if self.tlas_include_all {
             app.add_plugin(TLASPlugin::<Renderable>::default());

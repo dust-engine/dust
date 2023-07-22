@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use bevy_app::Plugin;
-use bevy_asset::{AssetEvent, Assets, Handle};
+use bevy_asset::{AssetEvent, Assets, Handle, AssetId};
 use bevy_ecs::{
     prelude::EventReader,
     system::{ResMut, Resource},
@@ -18,7 +18,7 @@ use super::manager::RayTracingPipelineBuildInfo;
 #[derive(Resource)]
 pub struct PipelineCache {
     cache: Option<Arc<rhyolite::PipelineCache>>,
-    shader_generations: HashMap<Handle<ShaderModule>, u32>,
+    shader_generations: HashMap<AssetId<ShaderModule>, u32>,
     hot_reload_enabled: bool,
 }
 
@@ -26,7 +26,7 @@ pub struct CachedPipeline<T: CachablePipeline> {
     build_info: Option<T::BuildInfo>,
     pipeline: Option<Arc<T>>,
     task: DeferredValue<Arc<T>>,
-    shader_generations: HashMap<Handle<ShaderModule>, u32>,
+    shader_generations: HashMap<AssetId<ShaderModule>, u32>,
 }
 
 pub trait CachablePipeline {
@@ -57,7 +57,7 @@ impl PipelineCache {
         CachedPipeline {
             shader_generations: if self.hot_reload_enabled {
                 let mut map = HashMap::new();
-                map.insert(shader.shader.clone_weak(), 0);
+                map.insert(shader.shader.id(), 0);
                 map
             } else {
                 Default::default()
@@ -85,7 +85,7 @@ impl PipelineCache {
                     .chain(hitgroup_shaders.iter().flat_map(|(rchit, rint, rahit, _)| {
                         rchit.into_iter().chain(rint).chain(rahit)
                     }))
-                    .map(|shader| (shader.shader.clone_weak(), 0))
+                    .map(|shader| (shader.shader.id(), 0))
                     .collect()
             } else {
                 Default::default()
@@ -172,17 +172,18 @@ fn pipeline_cache_shader_updated_system(
 ) {
     for event in events.iter() {
         match event {
-            AssetEvent::Created { handle: _ } => (),
-            AssetEvent::Modified { handle } => {
+            AssetEvent::Added { id: _ } => (),
+            AssetEvent::Modified { id } => {
                 let generation = pipeline_cache
                     .shader_generations
-                    .entry(handle.clone_weak())
+                    .entry(*id)
                     .or_default();
                 *generation += 1;
             }
-            AssetEvent::Removed { handle } => {
-                pipeline_cache.shader_generations.remove(handle);
-            }
+            AssetEvent::Removed { id } => {
+                pipeline_cache.shader_generations.remove(id);
+            },
+            _ => ()
         }
     }
 }

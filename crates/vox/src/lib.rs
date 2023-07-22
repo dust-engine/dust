@@ -5,7 +5,7 @@ mod collector;
 mod loader;
 mod palette;
 
-use bevy_asset::{AddAsset, Handle};
+use bevy_asset::{AssetApp, Handle};
 mod geometry;
 mod material;
 
@@ -25,10 +25,10 @@ pub struct VoxPlugin;
 impl bevy_app::Plugin for VoxPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.init_asset_loader::<loader::VoxLoader>()
-            .add_asset::<VoxPalette>()
-            .add_asset::<VoxGeometry>()
-            .add_asset::<PaletteMaterial>()
-            .add_asset::<DiffuseMaterial>()
+            .init_asset::<VoxPalette>()
+            .init_asset::<VoxGeometry>()
+            .init_asset::<PaletteMaterial>()
+            .init_asset::<DiffuseMaterial>()
             .add_plugin(GeometryPlugin::<VoxGeometry>::default())
             .add_plugin(MaterialPlugin::<DiffuseMaterial>::default());
     }

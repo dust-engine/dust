@@ -4,7 +4,7 @@ use crate::{palette::VoxPalette, VoxGeometry};
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 use crate::{Tree, VoxBundle};
-use bevy_asset::{AssetLoader, Handle, LoadedAsset};
+use bevy_asset::{AssetLoader, Handle, LoadedAsset, AsyncReadExt};
 use bevy_ecs::{
     prelude::{Bundle, Entity},
     world::{EntityMut, FromWorld, World},
@@ -306,13 +306,18 @@ impl VoxLoader {
 }
 
 impl AssetLoader for VoxLoader {
+    type Asset = bevy_scene::Scene;
+    type Settings = ();
     fn load<'a>(
         &'a self,
-        bytes: &'a [u8],
+        reader: &'a mut bevy_asset::io::Reader,
+        settings: &'a Self::Settings,
         load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<(), anyhow::Error>> {
+    ) -> bevy_asset::BoxedFuture<'a, Result<bevy_scene::Scene, anyhow::Error>> {
         Box::pin(async {
-            let file = dot_vox::load_bytes(bytes).map_err(|str| anyhow::Error::msg(str))?;
+            let mut buffer = Vec::new();
+            reader.read_to_end(&mut buffer).await?;
+            let file = dot_vox::load_bytes(buffer.as_slice()).map_err(|str| anyhow::Error::msg(str))?;
 
             let staging_ring_buffer = StagingRingBuffer::new(self.allocator.device()).unwrap();
             let palette = self
@@ -322,7 +327,7 @@ impl AssetLoader for VoxLoader {
             let palette = self.queues.submit(palette, &mut Default::default()).await;
 
             let palette_handle =
-                load_context.set_labeled_asset("palette", LoadedAsset::new(palette.into_inner()));
+                load_context.add_labeled_asset("palette".into(), palette.into_inner());
 
             let mut world = World::default();
             let mut traverser = SceneGraphTraverser {
@@ -370,15 +375,9 @@ impl AssetLoader for VoxLoader {
                 vec![None; file.models.len()];
             for (model_id, geometry, mut material) in geometry_materials.into_iter() {
                 let num_blocks = geometry.num_blocks;
-                let geometry_handle = load_context.set_labeled_asset(
-                    &format!("Geometry{}", model_id),
-                    LoadedAsset::new(geometry),
-                );
+                let geometry_handle = load_context.add_labeled_asset(format!("Geometry{}", model_id), geometry);
                 material.geometry = geometry_handle.clone();
-                let material_handle = load_context.set_labeled_asset(
-                    &format!("Material{}", model_id),
-                    LoadedAsset::new(material),
-                );
+                let material_handle = load_context.add_labeled_asset(format!("Material{}", model_id), material);
                 models[model_id as usize] = Some((geometry_handle, material_handle, num_blocks));
             }
             let diffuse_materials: Vec<_> = traverser
@@ -419,17 +418,13 @@ impl AssetLoader for VoxLoader {
                 .submit(zero_initialize_future, &mut Default::default())
                 .await;
             for (i, (diffuse_material, entity_id)) in diffuse_materials.into_iter().enumerate() {
-                let diffuse_material_handle = load_context.set_labeled_asset(
-                    &format!("DiffuseMaterial{}", i),
-                    LoadedAsset::new(diffuse_material),
-                );
+                let diffuse_material_handle = load_context.add_labeled_asset(format!("DiffuseMaterial{}", i), diffuse_material);
                 let mut entity = world.entity_mut(entity_id);
                 *entity.get_mut::<Handle<DiffuseMaterial>>().unwrap() = diffuse_material_handle;
             }
 
             let scene = bevy_scene::Scene::new(world);
-            load_context.set_default_asset(LoadedAsset::new(scene));
-            Ok(())
+            Ok(scene)
         })
     }
 

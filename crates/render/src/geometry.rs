@@ -1,6 +1,7 @@
 use std::{alloc::Layout, marker::PhantomData, sync::Arc};
 
 use bevy_app::{Plugin, PostUpdate};
+use bevy_asset::Asset;
 use bevy_ecs::schedule::IntoSystemConfigs;
 use bevy_reflect::{TypePath, TypeUuid};
 use rhyolite::{ash::vk, future::GPUCommandFuture, ResidentBuffer};
@@ -13,7 +14,7 @@ pub enum GeometryType {
     Triangles,
 }
 
-pub trait Geometry: Send + Sync + 'static + TypeUuid + TypePath {
+pub trait Geometry: Send + Sync + 'static + Asset + TypePath {
     const TYPE: GeometryType;
 
     type BLASInputBufferFuture: GPUCommandFuture<Output = Arc<ResidentBuffer>>;

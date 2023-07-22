@@ -1,4 +1,4 @@
-use bevy_asset::{AssetServer, Assets, Handle};
+use bevy_asset::{AssetServer, Assets, Handle, Asset};
 use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use dust_render::{MaterialType, StandardPipeline};
 
@@ -6,8 +6,7 @@ use crate::{VoxGeometry, VoxPalette};
 use dust_render::SpecializedShader;
 use rhyolite::{ash::vk, BufferLike, ResidentBuffer};
 
-#[derive(bevy_reflect::TypeUuid, bevy_reflect::TypePath)]
-#[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0a"]
+#[derive(bevy_reflect::TypePath, Asset)]
 pub struct PaletteMaterial {
     palette: Handle<VoxPalette>,
     pub(crate) geometry: Handle<VoxGeometry>,
@@ -28,8 +27,7 @@ impl PaletteMaterial {
     }
 }
 
-#[derive(bevy_reflect::TypeUuid, bevy_reflect::TypePath)]
-#[uuid = "a830cefc-beee-4ee9-89af-3436c0eefe0b"]
+#[derive(bevy_reflect::TypePath, Asset)]
 pub struct DiffuseMaterial {
     material: Handle<PaletteMaterial>,
     pub(crate) irradiance_cache: ResidentBuffer,

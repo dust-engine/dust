@@ -28,7 +28,7 @@ bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a
 bevy_winit = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", features = ["x11", "wayland"] }
 bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_a11y = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", features = ["filesystem_watcher"] }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", default-features=false }
 bevy_diagnostic = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
 image = "0.24"
@@ -39,3 +39,26 @@ smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-camera
 [features]
 sentry = ["dust-sentry"]
 aftermath = ["dust-sentry/aftermath"]
+
+[patch."https://github.com/bevyengine/bevy.git"]
+bevy_asset = { path = "../bevy/crates/bevy_asset" }
+bevy = { path = "../bevy" }
+bevy_app = { path = "../bevy/crates/bevy_app" }
+bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
+bevy_log = { path = "../bevy/crates/bevy_log" }
+bevy_window = { path = "../bevy/crates/bevy_window" }
+bevy_input = { path = "../bevy/crates/bevy_input" }
+bevy_core = { path = "../bevy/crates/bevy_core" }
+bevy_hierarchy = { path = "../bevy/crates/bevy_hierarchy" }
+bevy_transform = { path = "../bevy/crates/bevy_transform" }
+bevy_winit = { path = "../bevy/crates/bevy_winit" }
+bevy_time = { path = "../bevy/crates/bevy_time" }
+bevy_a11y = { path = "../bevy/crates/bevy_a11y" }
+bevy_scene = { path = "../bevy/crates/bevy_scene" }
+bevy_diagnostic = { path = "../bevy/crates/bevy_diagnostic" }
+bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
+bevy_math = { path = "../bevy/crates/bevy_math" }
+bevy_tasks = { path = "../bevy/crates/bevy_tasks" }
+
+[patch."https://github.com/Neo-Zhixing/smooth-bevy-cameras"]
+smooth-bevy-cameras = { path = "../smooth-bevy-cameras" }

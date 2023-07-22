@@ -1,11 +1,11 @@
 use std::{ffi::CStr, sync::Arc};
 
-use bevy_asset::{AssetLoader, Handle, LoadedAsset};
+use bevy_asset::{AssetLoader, Handle, LoadedAsset, Asset};
 use bevy_reflect::{TypePath, TypeUuid};
+use futures_lite::AsyncReadExt;
 use rhyolite::{ash::vk, cstr, shader::SpecializationInfo};
 
-#[derive(TypeUuid, TypePath)]
-#[uuid = "10c440f6-ca49-435b-998a-ee2c351044c4"]
+#[derive(TypePath, Asset)]
 pub struct ShaderModule(Arc<rhyolite::shader::ShaderModule>);
 impl ShaderModule {
     pub fn inner(&self) -> &Arc<rhyolite::shader::ShaderModule> {
@@ -47,19 +47,23 @@ impl SpirvLoader {
     }
 }
 impl AssetLoader for SpirvLoader {
+    type Asset = ShaderModule;
+    type Settings = ();
     fn load<'a>(
         &'a self,
-        bytes: &'a [u8],
+        reader: &'a mut bevy_asset::io::Reader,
+        settings: &'a Self::Settings,
         load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<(), bevy_asset::Error>> {
-        assert!(bytes.len() % 4 == 0);
-        let bytes =
-            unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, bytes.len() / 4) };
+    ) -> bevy_asset::BoxedFuture<'a, Result<ShaderModule, bevy_asset::Error>> {
         let device = self.device.inner().clone();
         return Box::pin(async move {
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await?;
+            assert!(bytes.len() % 4 == 0);
+            let bytes =
+            unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, bytes.len() / 4) };
             let shader = rhyolite::shader::SpirvShader { data: bytes }.build(device)?;
-            load_context.set_default_asset(LoadedAsset::new(ShaderModule(Arc::new(shader))));
-            Ok(())
+            Ok(ShaderModule(Arc::new(shader)))
         });
     }
 

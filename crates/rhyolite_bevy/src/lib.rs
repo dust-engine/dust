@@ -13,7 +13,7 @@ use std::{
 };
 
 use bevy_app::prelude::*;
-use bevy_asset::AddAsset;
+use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
 use rhyolite::{
     ash::{self, vk},
@@ -185,8 +185,8 @@ impl Plugin for RenderPlugin {
                     queue::flush_async_queue_system.in_set(RenderSystems::CleanUp),
                 ),
             )
-            .add_asset::<SlicedImageArray>()
-            .add_asset::<Image>()
+            .init_asset::<SlicedImageArray>()
+            .init_asset::<Image>()
             .init_asset_loader::<loaders::PngLoader>();
     }
 }
