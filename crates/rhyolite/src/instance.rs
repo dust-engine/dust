@@ -37,6 +37,9 @@ impl Version {
     pub fn variant(&self) -> u32 {
         vk::api_version_patch(self.0)
     }
+    pub fn as_raw(&self) -> u32 {
+        self.0
+    }
 }
 impl Default for Version {
     fn default() -> Self {

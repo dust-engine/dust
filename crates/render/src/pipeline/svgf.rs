@@ -77,7 +77,7 @@ impl FromWorld for SvgfPipeline {
         .unwrap();
 
         let asset_server: &AssetServer = world.resource();
-        let shader = asset_server.load("asvgf/temporal.comp.spv");
+        let shader = asset_server.load("asvgf/temporal.comp");
         let pipeline_cache: &PipelineCache = world.resource();
         let pipeline = pipeline_cache.add_compute_pipeline(
             layout.clone(),

@@ -82,15 +82,15 @@ impl dust_render::Material for DiffuseMaterial {
     fn rchit_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
         match ray_type {
             Self::Pipeline::PRIMARY_RAYTYPE => Some(SpecializedShader::for_shader(
-                asset_server.load("hit.rchit.spv"),
+                asset_server.load("hit.rchit"),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )),
             Self::Pipeline::PHOTON_RAYTYPE => Some(SpecializedShader::for_shader(
-                asset_server.load("photon.rchit.spv"),
+                asset_server.load("photon.rchit"),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )),
             Self::Pipeline::FINAL_GATHER_RAYTYPE => Some(SpecializedShader::for_shader(
-                asset_server.load("final_gather.rchit.spv"),
+                asset_server.load("final_gather.rchit"),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )),
             _ => None,
@@ -102,7 +102,7 @@ impl dust_render::Material for DiffuseMaterial {
         asset_server: &AssetServer,
     ) -> Option<SpecializedShader> {
         Some(SpecializedShader::for_shader(
-            asset_server.load("hit.rint.spv"),
+            asset_server.load("hit.rint"),
             vk::ShaderStageFlags::INTERSECTION_KHR,
         ))
     }

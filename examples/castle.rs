@@ -20,7 +20,7 @@ use dust_render::{
 use glam::{Vec3, Vec3A};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
-use rhyolite::{clear_image, cstr, BufferExt, ImageExt, ImageLike, ImageRequest};
+use rhyolite::{clear_image, cstr, BufferExt, ImageExt, ImageLike, ImageRequest, ImageArraySliceView, ImageArraySlicedViews};
 
 use rhyolite::debug::DebugObject;
 use rhyolite::{
@@ -57,7 +57,7 @@ fn main() {
         })
         .add_plugin(bevy_a11y::AccessibilityPlugin)
         .add_plugin(bevy_winit::WinitPlugin::default())
-        .add_plugin(bevy_asset::AssetPlugin::unprocessed().watch_for_changes())
+        .add_plugin(bevy_asset::AssetPlugin::processed_dev().watch_for_changes())
         .add_plugin(dust_render::RenderPlugin::default())
         .add_plugin(bevy_time::TimePlugin::default())
         .add_plugin(bevy_scene::ScenePlugin::default())
@@ -96,18 +96,10 @@ fn main() {
     app.run();
 }
 
-#[derive(Resource)]
-pub struct NoiseResource {
-    noise: bevy_asset::Handle<Image>,
-}
-
 #[derive(Component)]
 struct TeaPot;
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.insert_resource(NoiseResource {
-        noise: asset_server.load("stbn_unitvec3_cosine_2Dx1D_128x128x64.png"),
-    });
     commands.spawn(bevy_scene::SceneBundle {
         scene: asset_server.load("castle.vox"),
         ..Default::default()

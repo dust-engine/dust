@@ -1,6 +1,6 @@
 use std::{ffi::CStr, sync::Arc};
 
-use bevy_asset::{AssetLoader, Handle, LoadedAsset, Asset};
+use bevy_asset::{AssetLoader, Handle, LoadedAsset, Asset, saver::AssetSaver};
 use bevy_reflect::{TypePath, TypeUuid};
 use futures_lite::AsyncReadExt;
 use rhyolite::{ash::vk, cstr, shader::SpecializationInfo};
