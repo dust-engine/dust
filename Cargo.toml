@@ -34,31 +34,28 @@ bevy_diagnostic = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3
 image = "0.24"
 glam = "^0.24"
 reqwest = { version = "*", features = ["blocking"] }
-smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "2c626db7e35eb543fb24b53e4a2b56e611421dba" }
+smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "2e50cb99547e737713fdded245d3e729b0c73b49" }
 
 [features]
 sentry = ["dust-sentry"]
 aftermath = ["dust-sentry/aftermath"]
 
 [patch."https://github.com/bevyengine/bevy.git"]
-bevy_asset = { path = "../bevy/crates/bevy_asset" }
-bevy = { path = "../bevy" }
-bevy_app = { path = "../bevy/crates/bevy_app" }
-bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
-bevy_log = { path = "../bevy/crates/bevy_log" }
-bevy_window = { path = "../bevy/crates/bevy_window" }
-bevy_input = { path = "../bevy/crates/bevy_input" }
-bevy_core = { path = "../bevy/crates/bevy_core" }
-bevy_hierarchy = { path = "../bevy/crates/bevy_hierarchy" }
-bevy_transform = { path = "../bevy/crates/bevy_transform" }
-bevy_winit = { path = "../bevy/crates/bevy_winit" }
-bevy_time = { path = "../bevy/crates/bevy_time" }
-bevy_a11y = { path = "../bevy/crates/bevy_a11y" }
-bevy_scene = { path = "../bevy/crates/bevy_scene" }
-bevy_diagnostic = { path = "../bevy/crates/bevy_diagnostic" }
-bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
-bevy_math = { path = "../bevy/crates/bevy_math" }
-bevy_tasks = { path = "../bevy/crates/bevy_tasks" }
-
-[patch."https://github.com/Neo-Zhixing/smooth-bevy-cameras"]
-smooth-bevy-cameras = { path = "../smooth-bevy-cameras" }
+bevy_asset = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_app = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_ecs = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_log = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_window = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_input = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_core = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_hierarchy = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_transform = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_winit = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_time = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_a11y = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_scene = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_diagnostic = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_reflect = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_math = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
+bevy_tasks = { git = "https://github.com/dust-engine/bevy.git", branch = "bevy_asset_v2" }
