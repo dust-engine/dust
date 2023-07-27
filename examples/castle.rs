@@ -266,7 +266,7 @@ impl Plugin for RenderSystem {
                         }, |image| swapchain_image.inner().extent() != image.extent());
 
 
-                        let mut rendered = false;
+                        let mut reservoir_buffer = None;
                         let accel_struct = accel_struct.await;
                         if let Some(render) = ray_tracing_pipeline.render(
                             &mut radiance_image,
@@ -279,11 +279,10 @@ impl Plugin for RenderSystem {
                             ray_tracing_pipeline_params,
                             camera,
                         ) {
-                            render.await;
-                            rendered = true;
+                            reservoir_buffer = Some(render.await);
                         }
-                        if rendered {
-                            //svgf_pipeline.render(&mut radiance_image, &radiance_image_prev, &motion_image, &svgf_pipeline_params).await;
+                        if let Some(reservoir_buffer) = reservoir_buffer {
+                            svgf_pipeline.render(&mut radiance_image, &reservoir_buffer, &svgf_pipeline_params).await;
                             let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_pipeline_params).await;
                             let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
                             let color_space = swapchain_image.inner().color_space().clone();
@@ -295,7 +294,7 @@ impl Plugin for RenderSystem {
                                 &color_space,
                                 &tone_mapping_pipeline_params
                             ).await;
-                            retain!(exposure_avg);
+                            retain!((exposure_avg, reservoir_buffer));
                         }
                         retain!(accel_struct);
                         retain!((radiance_image, albedo_image, normal_image, depth_image, radiance_image_prev, motion_image));

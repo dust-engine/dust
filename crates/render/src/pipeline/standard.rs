@@ -14,9 +14,9 @@ use bevy_transform::prelude::GlobalTransform;
 
 use crevice::std430::{AsStd430, Std430};
 use rand::Rng;
-use rhyolite::{fill_buffer, initialize_buffer};
+use rhyolite::{fill_buffer, initialize_buffer, ResidentBuffer};
 use rhyolite::future::{
-    run, use_shared_resource_flipflop, use_shared_state, use_state, GPUCommandFutureExt,
+    run, use_shared_resource_flipflop, use_shared_state, use_state, GPUCommandFutureExt, SharedDeviceState,
 };
 use rhyolite::{
     accel_struct::AccelerationStructure,
@@ -273,7 +273,7 @@ impl StandardPipeline {
         camera: (&PinholeProjection, &GlobalTransform),
     ) -> Option<
         impl GPUCommandFuture<
-                Output = (),
+                Output = RenderRes<SharedDeviceState<ResidentBuffer>>,
                 RetainedState: 'static + Disposable,
                 RecycledState: 'static + Default,
             > + 'a,
@@ -745,7 +745,6 @@ impl StandardPipeline {
                 pipeline_sbt_buffer,
                 hitgroup_sbt_buffer,
                 instances_buffer,
-                reservoir_buffer,
                 reservoir_buffer_prev
             ));
             retain!(
@@ -757,6 +756,7 @@ impl StandardPipeline {
                     desc_pool.handle(),
                     desc_set,
                 )));
+            reservoir_buffer
         };
         Some(fut)
     }

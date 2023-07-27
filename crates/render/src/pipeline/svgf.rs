@@ -5,15 +5,17 @@ use bevy_ecs::{
     system::{lifetimeless::SRes, Resource, SystemParamItem},
     world::{FromWorld, World},
 };
+use crevice::std430::AsStd430;
+use rand::Rng;
 use rhyolite::{
     ash::vk,
-    descriptor::{DescriptorPool, DescriptorSetWrite},
+    descriptor::{DescriptorPool, DescriptorSetWrite, PushConstants},
     future::{
-        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, RenderData, RenderImage,
+        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, RenderData, RenderImage, RenderRes, use_state,
     },
     macros::set_layout,
     utils::retainer::Retainer,
-    BufferExt, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout, Sampler,
+    BufferExt, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout, Sampler, BufferLike,
 };
 use rhyolite::{future::Disposable, macros::commands};
 use rhyolite_bevy::Queues;
@@ -25,7 +27,19 @@ pub struct SvgfPipeline {
     layout: Arc<PipelineLayout>,
     pipeline: CachedPipeline<ComputePipeline>,
     desc_pool: Retainer<DescriptorPool>,
-    sampler: Sampler,
+}
+
+
+#[derive(AsStd430, Default, PushConstants)]
+struct SvgfPushConstant {
+    #[stage(
+        vk::ShaderStageFlags::COMPUTE
+    )]
+    rand: u32,
+    #[stage(
+        vk::ShaderStageFlags::COMPUTE
+    )]
+    frame_index: u32,
 }
 
 impl FromWorld for SvgfPipeline {
@@ -40,9 +54,7 @@ impl FromWorld for SvgfPipeline {
             #[shader(vk::ShaderStageFlags::COMPUTE)]
             illuminance: vk::DescriptorType::STORAGE_IMAGE,
             #[shader(vk::ShaderStageFlags::COMPUTE)]
-            motion: vk::DescriptorType::STORAGE_IMAGE,
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            prev_illuminance: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            reservoirs: vk::DescriptorType::STORAGE_BUFFER,
         }
         .build(device.clone())
         .unwrap();
@@ -50,7 +62,7 @@ impl FromWorld for SvgfPipeline {
             rhyolite::PipelineLayout::new(
                 device.clone(),
                 vec![Arc::new(set)],
-                Default::default(),
+                SvgfPushConstant::ranges().as_slice(),
                 vk::PipelineLayoutCreateFlags::empty(),
             )
             .unwrap(),
@@ -62,22 +74,8 @@ impl FromWorld for SvgfPipeline {
         )
         .unwrap();
 
-        let sampler = Sampler::new(
-            device.clone(),
-            &vk::SamplerCreateInfo {
-                address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-                address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-                address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
-                mag_filter: vk::Filter::LINEAR,
-                min_filter: vk::Filter::LINEAR,
-                border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
         let asset_server: &AssetServer = world.resource();
-        let shader = asset_server.load("asvgf/temporal.comp");
+        let shader = asset_server.load("restir_spatial.comp");
         let pipeline_cache: &PipelineCache = world.resource();
         let pipeline = pipeline_cache.add_compute_pipeline(
             layout.clone(),
@@ -87,7 +85,6 @@ impl FromWorld for SvgfPipeline {
             layout,
             pipeline,
             desc_pool: Retainer::new(desc_pool),
-            sampler,
         }
     }
 }
@@ -97,8 +94,7 @@ impl SvgfPipeline {
     pub fn render<'a>(
         &'a mut self,
         illuminance: &'a mut RenderImage<impl ImageViewLike + RenderData>,
-        prev_illuminance: &'a RenderImage<impl ImageViewLike + RenderData>,
-        motion: &'a RenderImage<impl ImageViewLike + RenderData>,
+        reservoirs: &'a RenderRes<impl BufferLike + RenderData>,
         params: &'a SystemParamItem<SvgfPipelineRenderParams>,
     ) -> impl GPUCommandFuture<
         Output = (),
@@ -108,7 +104,6 @@ impl SvgfPipeline {
         let (pipeline_cache, shader_assets) = params;
         let desc_pool = &mut self.desc_pool;
         let pipeline = &mut self.pipeline;
-        let sampler = &self.sampler;
         commands! { move
             let Some(pipeline) = pipeline_cache.retrieve(pipeline, shader_assets) else {
                 return;
@@ -125,25 +120,46 @@ impl SvgfPipeline {
                     0,
                     &[
                         illuminance.inner().as_descriptor(vk::ImageLayout::GENERAL),
-                        motion.inner().as_descriptor(vk::ImageLayout::GENERAL)
                     ]
                 ),
-                DescriptorSetWrite::combined_image_samplers(
+                DescriptorSetWrite::storage_buffers(
                     desc_set[0],
-                    2,
+                    1,
                     0,
                     &[
-                        prev_illuminance.inner().as_descriptor_with_sampler(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, sampler),
+                        reservoirs.inner().as_descriptor(),
                     ],
+                    false
                 ),
             ]);
             let extent = illuminance.inner().extent();
+            
+            let frame_index = use_state(
+                using!(),
+                || 0,
+                |a| *a += 1
+            );
             run(|ctx, command_buffer| unsafe {
                 let device = ctx.device();
                 device.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::COMPUTE,
                     pipeline.raw(),
+                );
+                let rand: u32 = rand::thread_rng().gen();
+                device.cmd_push_constants(
+                    command_buffer,
+                    pipeline.layout().raw(),
+                    vk::ShaderStageFlags::COMPUTE,
+                    0,
+                    std::slice::from_raw_parts(&rand as *const _ as *const u8, 4),
+                );
+                device.cmd_push_constants(
+                    command_buffer,
+                    pipeline.layout().raw(),
+                    vk::ShaderStageFlags::COMPUTE,
+                    4,
+                    std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4),
                 );
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
@@ -172,17 +188,10 @@ impl SvgfPipeline {
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
-                ctx.read_image(
-                    prev_illuminance,
-                    vk::PipelineStageFlags2::COMPUTE_SHADER,
-                    vk::AccessFlags2::SHADER_SAMPLED_READ,
-                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                );
-                ctx.read_image(
-                    motion,
+                ctx.read(
+                    reservoirs,
                     vk::PipelineStageFlags2::COMPUTE_SHADER,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
-                    vk::ImageLayout::GENERAL,
                 );
             }).await;
             retain!(

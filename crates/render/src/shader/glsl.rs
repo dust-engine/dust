@@ -4,7 +4,6 @@ use bevy_app::Plugin;
 use bevy_reflect::TypePath;
 use bevy_asset::{Asset, saver::AssetSaver, AssetLoader, ReadAssetBytesError, Handle, processor::ProcessContext};
 use futures_lite::{AsyncReadExt, AsyncWriteExt};
-use serde::{Deserialize, Serialize};
 use shaderc::ResolvedInclude;
 use crate::shader;
 
