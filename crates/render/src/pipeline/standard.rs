@@ -833,10 +833,7 @@ pub fn extract_global_transforms(
 
 #[derive(PartialEq, Clone, AsStd430)]
 struct Sample {
-    visible_point: Vec3,
     visible_point_normal: Vec3,
-    sample_point: Vec3,
-    sample_point_normal: Vec3,
     outgoing_radiance: Vec3,
 }
 

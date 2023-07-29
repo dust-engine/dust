@@ -49,9 +49,6 @@ void main() {
     uint rng = hash1(hash2(gl_LaunchIDEXT.xy) + pushConstants.rand);
     
     Sample initialSample;
-    initialSample.sample_point = vec3(0.0);
-    initialSample.sample_point_normal = vec3(0.0);
-    initialSample.visible_point = gl_WorldRayOriginEXT;
     initialSample.visible_point_normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
     initialSample.outgoing_radiance = sky_illuminance;
 

@@ -83,9 +83,6 @@ void main() {
     vec3 radiance = irradiance * scaling_factors;
 
     Sample initialSample;
-    initialSample.sample_point = gl_HitTEXT * gl_WorldRayDirectionEXT + gl_WorldRayOriginEXT;
-    initialSample.sample_point_normal = gl_ObjectToWorldEXT * vec4(normalObject, 0.0);
-    initialSample.visible_point = gl_WorldRayOriginEXT;
     initialSample.visible_point_normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
     initialSample.outgoing_radiance = radiance;
 

@@ -50,10 +50,7 @@ float uint_to_u01_float(uint h) {
 
 
 struct Sample {
-    vec3 visible_point; // The primary ray hit point
     vec3 visible_point_normal; // The normal at the primary ray hit point in world space
-    vec3 sample_point; // The final gather ray / secondary ray hit point
-    vec3 sample_point_normal; // The normal at the secondary ray hit point in world space
     vec3 outgoing_radiance; // Outgoing radiance at the sample point in XYZ color space
 };
 
@@ -121,7 +118,7 @@ void main() {
     vec4 illuminance = imageLoad(u_illuminance, ivec2(gl_GlobalInvocationID.xy));
     const float ang_off = (pushConstants.frameIndex * 23) % 32 * M_TAU + interleaved_gradient_noise(gl_GlobalInvocationID.xy) * M_PI;
 
-    const float sample_count = 8;
+    const float sample_count = 4;
     uint rng = hash3(uvec3(gl_GlobalInvocationID.xy, pushConstants.rand));
     float sample_radius_offset = uint_to_u01_float(hash1_mut(rng));
     const vec2 dist_to_edge_xy = min(vec2(gl_GlobalInvocationID.xy), imageSize(u_illuminance).xy - gl_GlobalInvocationID.xy);

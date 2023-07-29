@@ -341,10 +341,7 @@ float uint_to_u01_float(uint h) {
 }
 
 struct Sample {
-    vec3 visible_point; // The primary ray hit point
     vec3 visible_point_normal; // The normal at the primary ray hit point in world space
-    vec3 sample_point; // The final gather ray / secondary ray hit point
-    vec3 sample_point_normal; // The normal at the secondary ray hit point in world space
     vec3 outgoing_radiance; // Outgoing radiance at the sample point in XYZ color space
 };
 
