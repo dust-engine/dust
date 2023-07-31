@@ -21,4 +21,13 @@ void main() {
 
     vec2 motionVector = hitPointScreenLastFrame - hitPointScreen;
     imageStore(u_motion, ivec2(gl_LaunchIDEXT.xy), vec4(motionVector, 0.0, 0.0));
+
+
+
+    Reservoir reservoir;
+    reservoir.sample_count = 0;
+    reservoir.total_weight = 0;
+    reservoir.current_sample.voxel_id = 0xFFFFFFFF;
+    s_reservoirs_prev.reservoirs[gl_LaunchIDEXT.x * gl_LaunchSizeEXT.y + gl_LaunchIDEXT.y] = reservoir;
+
 }

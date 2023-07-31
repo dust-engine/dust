@@ -63,5 +63,4 @@ void main() {
     // min(1e-8) to avoid NaN
     float W = reservoir.total_weight / max(1e-8, reservoir.sample_count * sample_target_pdf(reservoir.current_sample));
     vec3 resampled_radiance = W * reservoir.current_sample.outgoing_radiance;
-    //imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(payload.illuminance + resampled_radiance, 1.0));
 }
