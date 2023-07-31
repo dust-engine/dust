@@ -51,6 +51,7 @@ void main() {
     Sample initialSample;
     initialSample.visible_point_normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
     initialSample.outgoing_radiance = sky_illuminance;
+    initialSample.voxel_id = 0xFFFFFFFF;
 
 
     Reservoir reservoir = TemporalResampling(initialSample, rng);

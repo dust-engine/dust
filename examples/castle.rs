@@ -242,6 +242,20 @@ impl Plugin for RenderSystem {
                                 vk::ImageLayout::UNDEFINED,
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
+                        let mut voxel_id_image = rhyolite::future::use_shared_image(using!(), |_| {
+                            (
+                                allocator
+                                    .create_device_image_uninit(
+                                        &ImageRequest {
+                                            format: vk::Format::R32_UINT,
+                                            usage: vk::ImageUsageFlags::STORAGE,
+                                            extent: swapchain_image.inner().extent(),
+                                            ..Default::default()
+                                        }
+                                    ).unwrap().as_2d_view().unwrap(),
+                                vk::ImageLayout::UNDEFINED,
+                            )
+                        }, |image| swapchain_image.inner().extent() != image.extent());
 
                         let (mut radiance_image, radiance_image_prev) = rhyolite::future::use_shared_image_flipflop(using!(), |_| {
                             (
@@ -274,6 +288,7 @@ impl Plugin for RenderSystem {
                             &mut normal_image,
                             &mut depth_image,
                             &mut motion_image,
+                            &mut voxel_id_image,
                             &blue_noise,
                             &accel_struct,
                             ray_tracing_pipeline_params,
@@ -297,7 +312,7 @@ impl Plugin for RenderSystem {
                             retain!((exposure_avg, reservoir_buffer));
                         }
                         retain!(accel_struct);
-                        retain!((radiance_image, albedo_image, normal_image, depth_image, radiance_image_prev, motion_image));
+                        retain!((radiance_image, albedo_image, normal_image, depth_image, radiance_image_prev, motion_image, voxel_id_image));
                         if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]

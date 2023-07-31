@@ -22,18 +22,56 @@ float sample_target_pdf(Sample s) {
     return s.outgoing_radiance.y;
 }
 
+bool check_disocclusion(Sample initial_sample, vec2 uv) {
+    if ((uv.x < 0.0) || (uv.x > 1.0) || (uv.y < 0.0) || (uv.y > 1.0)) {
+        // reprojected to outside the screen, disocclusion
+        return true;
+	}    
+
+    uvec2 reprojected_pos = uvec2(uv * vec2(gl_LaunchSizeEXT.xy));
+    uint reprojected_voxel_info = imageLoad(u_voxel_id, ivec2(reprojected_pos.xy)).x;
+
+    uint reprojected_voxel_id = reprojected_voxel_info >> 24;
+
+    
+    uint initial_voxel_id = initial_sample.voxel_id >> 24;
+    if (initial_voxel_id == reprojected_voxel_id) {
+        // If inside the same voxel (TODO: and the same face), def not disocclusion
+        return false;
+    }
+
+    // They're in different voxels.
+    uint reprojected_instance_id = reprojected_voxel_info & 0xFFFF;
+    uint initial_instance_id = initial_sample.voxel_id & 0xFFFF;
+    if (initial_instance_id != reprojected_instance_id) {
+        // If inside different instances, def disocclusion
+        return true;
+    }
+    uint reprojected_palette_id = ((reprojected_voxel_info) >> 16) & 0xFF;
+    uint initial_palette_id = ((initial_sample.voxel_id) >> 16) & 0xFF;
+    if (initial_palette_id == reprojected_palette_id) {
+        // If same instance, and same palette id, maybe not disocclusion? need more tests.
+        // TODO Tests:
+        // - Normal test
+        // - Depth test
+        return false;
+    }
+    return false;
+}
+
+
 Reservoir TemporalResampling(Sample initial_sample, inout uint rng) {
 	vec2 uv = (gl_LaunchIDEXT.xy + vec2(0.5)) / gl_LaunchSizeEXT.xy;
 	vec2 motion = imageLoad(u_motion, ivec2(gl_LaunchIDEXT.xy)).xy;
 	uv += motion;
     
     Reservoir reservoir;
-	if ((uv.x < 0.0) || (uv.x > 1.0) || (uv.y < 0.0) || (uv.y > 1.0)) {
+    if (check_disocclusion(initial_sample, uv)) {
         // disocclusion
         reservoir.sample_count = 0;
         reservoir.total_weight = 0;
         reservoir.current_sample = initial_sample;
-	} else {
+    } else {
         uvec2 pos = uvec2(uv * vec2(gl_LaunchSizeEXT.xy));
         reservoir = s_reservoirs_prev.reservoirs[pos.x * imageSize(u_illuminance).y + pos.y];
     }
@@ -85,8 +123,7 @@ void main() {
     Sample initialSample;
     initialSample.visible_point_normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
     initialSample.outgoing_radiance = radiance;
-
-
+    initialSample.voxel_id = imageLoad(u_voxel_id, ivec2(gl_LaunchIDEXT.xy)).x;
 
     Reservoir reservoir = TemporalResampling(initialSample, rng);
 
@@ -99,3 +136,4 @@ void main() {
     vec3 resampled_radiance = W * reservoir.current_sample.outgoing_radiance;
     //imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(payload.illuminance + resampled_radiance, 1.0));
 }
+ 

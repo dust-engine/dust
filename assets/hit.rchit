@@ -48,6 +48,10 @@ void main() {
     imageStore(u_normal, ivec2(gl_LaunchIDEXT.xy), vec4(normalWorld, 1.0));
     imageStore(u_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(albedo), 1.0));
 
+    // Saved: | 8 bit voxel id | 8 bit palette_index | 16 bit instance id |
+    uint voxel_id_info = (uint(hitAttributes.voxelId) << 24) | uint(gl_InstanceID & 0xFFFF) | (uint(palette_index) << 16);
+    imageStore(u_voxel_id, ivec2(gl_LaunchIDEXT.xy), uvec4(voxel_id_info, 0, 0, 0));
+
     vec3 hitPointWorld = gl_HitTEXT * gl_WorldRayDirectionEXT + gl_WorldRayOriginEXT;
     vec3 hitPointModel = gl_WorldToObjectEXT * vec4(hitPointWorld, 1.0);
     vec4 hitPointWorldLastFrameH = s_instances.last_frame_transforms[gl_InstanceID] * vec4(hitPointModel, 1.0);

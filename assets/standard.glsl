@@ -19,8 +19,9 @@ layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
 layout(set = 0, binding = 2, rgba16_snorm) uniform image2D u_normal;
 layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
 layout(set = 0, binding = 4, rg16f) uniform image2D u_motion;
+layout(set = 0, binding = 5, r32ui) uniform uimage2D u_voxel_id;
 
-layout(set = 0, binding = 5) uniform accelerationStructureEXT accelerationStructure;
+layout(set = 0, binding = 13) uniform accelerationStructureEXT accelerationStructure;
 layout(set = 0, binding = 6) uniform texture2D blue_noise;
 
 
@@ -342,7 +343,9 @@ float uint_to_u01_float(uint h) {
 
 struct Sample {
     vec3 visible_point_normal; // The normal at the primary ray hit point in world space
+    uint voxel_id;
     vec3 outgoing_radiance; // Outgoing radiance at the sample point in XYZ color space
+    uint reserved;
 };
 
 struct Reservoir {

@@ -82,9 +82,8 @@ impl RayTracingPipeline for StandardPipeline {
             img_depth: vk::DescriptorType::STORAGE_IMAGE,
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
             img_motion: vk::DescriptorType::STORAGE_IMAGE,
-
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
-            accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            img_voxel_id: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
             noise_unitvec3_cosine: vk::DescriptorType::SAMPLED_IMAGE,
@@ -102,6 +101,8 @@ impl RayTracingPipeline for StandardPipeline {
             reservoirs: vk::DescriptorType::STORAGE_BUFFER,
             #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
             reservoirs_prev: vk::DescriptorType::STORAGE_BUFFER,
+            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
+            accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
         };
 
         let set1 = set1.build(device.clone()).unwrap();
@@ -267,6 +268,7 @@ impl StandardPipeline {
         normal_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         depth_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         motion_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        voxel_id_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
         noise_image: &'a SlicedImageArray,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         params: SystemParamItem<'a, '_, StandardPipelineRenderParams>,
@@ -416,6 +418,7 @@ impl StandardPipeline {
                         normal_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         depth_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         motion_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        voxel_id_image.inner().as_descriptor(vk::ImageLayout::GENERAL)
                     ]
                 ),
                 DescriptorSetWrite::sampled_images(
@@ -423,12 +426,6 @@ impl StandardPipeline {
                     6,
                     0,
                     &[noise_image.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
-                ),
-                DescriptorSetWrite::accel_structs(
-                    desc_set[0],
-                    5,
-                    0,
-                    &[tlas.inner().raw()]
                 ),
                 DescriptorSetWrite::uniform_buffers(
                     desc_set[0],
@@ -451,6 +448,12 @@ impl StandardPipeline {
                         reservoir_buffer_prev.inner().as_descriptor()
                     ],
                     false
+                ),
+                DescriptorSetWrite::accel_structs(
+                    desc_set[0],
+                    13,
+                    0,
+                    &[tlas.inner().raw()]
                 ),
             ]);
 
@@ -584,6 +587,12 @@ impl StandardPipeline {
                 );
                 ctx.write_image(
                     motion_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
+                    voxel_id_image,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
@@ -737,6 +746,18 @@ impl StandardPipeline {
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::UNIFORM_READ,
                 );
+                ctx.write_image(
+                    voxel_id_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    voxel_id_image,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
             }).await;
             retain!((
                 sunlight_buffer,
@@ -834,7 +855,9 @@ pub fn extract_global_transforms(
 #[derive(PartialEq, Clone, AsStd430)]
 struct Sample {
     visible_point_normal: Vec3,
+    voxel_id: u32,
     outgoing_radiance: Vec3,
+    reserved: u32,
 }
 
 #[derive(PartialEq, Clone, AsStd430)]
