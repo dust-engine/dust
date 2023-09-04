@@ -20,7 +20,10 @@ use dust_render::{
 use glam::{Vec3, Vec3A};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
-use rhyolite::{clear_image, cstr, BufferExt, ImageExt, ImageLike, ImageRequest, ImageArraySliceView, ImageArraySlicedViews};
+use rhyolite::{
+    clear_image, cstr, BufferExt, ImageArraySliceView, ImageArraySlicedViews, ImageExt, ImageLike,
+    ImageRequest,
+};
 
 use rhyolite::debug::DebugObject;
 use rhyolite::{

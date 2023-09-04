@@ -38,6 +38,26 @@ impl DescriptorPool {
         };
         unsafe { self.device.allocate_descriptor_sets(&info) }
     }
+    pub fn new(
+        device: Arc<Device>,
+        max_sets: u32,
+        pool_sizes: &[vk::DescriptorPoolSize],
+        flags: vk::DescriptorPoolCreateFlags,
+    ) -> VkResult<Self> {
+        let pool = unsafe {
+            device.create_descriptor_pool(
+                &vk::DescriptorPoolCreateInfo {
+                    flags,
+                    max_sets,
+                    pool_size_count: pool_sizes.len() as u32,
+                    p_pool_sizes: pool_sizes.as_ptr(),
+                    ..Default::default()
+                },
+                None,
+            )?
+        };
+        Ok(Self { device, pool })
+    }
     /// Create a descriptor pool just big enough to accommodate one of each pipeline layout,
     /// for `multiplier` times. This is useful when you have multiple pipeline layouts, each
     /// having distinct descriptor layouts and bindings. `multiplier` would generally match the
@@ -102,9 +122,12 @@ impl DescriptorPool {
         if inline_uniform_block_create_info.max_inline_uniform_block_bindings > 0 {
             info.p_next = &mut inline_uniform_block_create_info as *mut _ as *mut c_void;
         }
-        let device = device.expect("Expects at least one pipeline layout.");
-        let pool = unsafe { device.create_descriptor_pool(&info, None)? };
-        Ok(Self { device, pool })
+        Self::new(
+            device.expect("Expects at least one pipeline layout."),
+            max_sets * multiplier,
+            &pool_sizes,
+            Default::default(),
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 use std::{ffi::CStr, sync::Arc};
 
-use bevy_asset::{AssetLoader, Handle, LoadedAsset, Asset, saver::AssetSaver};
+use bevy_asset::{saver::AssetSaver, Asset, AssetLoader, Handle, LoadedAsset};
 use bevy_reflect::{TypePath, TypeUuid};
 use futures_lite::AsyncReadExt;
 use rhyolite::{ash::vk, cstr, shader::SpecializationInfo};
@@ -60,8 +60,9 @@ impl AssetLoader for SpirvLoader {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
             assert!(bytes.len() % 4 == 0);
-            let bytes =
-            unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, bytes.len() / 4) };
+            let bytes = unsafe {
+                std::slice::from_raw_parts(bytes.as_ptr() as *const u32, bytes.len() / 4)
+            };
             let shader = rhyolite::shader::SpirvShader { data: bytes }.build(device)?;
             Ok(ShaderModule(Arc::new(shader)))
         });

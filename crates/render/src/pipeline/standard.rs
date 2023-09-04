@@ -14,9 +14,9 @@ use bevy_transform::prelude::GlobalTransform;
 
 use crevice::std430::{AsStd430, Std430};
 use rand::Rng;
-use rhyolite::{fill_buffer, initialize_buffer, ResidentBuffer};
 use rhyolite::future::{
-    run, use_shared_resource_flipflop, use_shared_state, use_state, GPUCommandFutureExt, SharedDeviceState,
+    run, use_shared_resource_flipflop, use_shared_state, use_state, GPUCommandFutureExt,
+    SharedDeviceState,
 };
 use rhyolite::{
     accel_struct::AccelerationStructure,
@@ -30,6 +30,7 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
+use rhyolite::{fill_buffer, initialize_buffer, ResidentBuffer};
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 use rhyolite_bevy::{RenderSystems, StagingRingBuffer};
 
@@ -849,8 +850,6 @@ pub fn extract_global_transforms(
         }
     }
 }
-
-
 
 #[derive(PartialEq, Clone, AsStd430)]
 struct Sample {

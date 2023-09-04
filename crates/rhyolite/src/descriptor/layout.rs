@@ -51,7 +51,8 @@ impl Drop for DescriptorSetLayout {
 }
 impl DescriptorSetLayout {
     /// Users should obtain the layout from the cache.
-    fn new(
+    /// TODO: Actually cache this, or not.
+    pub fn new(
         device: Arc<Device>,
         binding_infos: Vec<DescriptorSetLayoutBindingInfo>,
         flags: vk::DescriptorSetLayoutCreateFlags,

@@ -4,7 +4,7 @@ use std::{
 };
 
 use bevy_app::{Plugin, PostUpdate};
-use bevy_asset::{AssetEvent, AssetServer, Assets, Handle, Asset, AssetId};
+use bevy_asset::{Asset, AssetEvent, AssetId, AssetServer, Assets, Handle};
 use bevy_ecs::{
     prelude::{Entity, EventReader},
     query::Changed,
@@ -114,7 +114,7 @@ fn material_system<T: Material>(
             AssetEvent::Removed { id: _ } => {
                 todo!()
             }
-            _ => ()
+            _ => (),
         }
     }
 }

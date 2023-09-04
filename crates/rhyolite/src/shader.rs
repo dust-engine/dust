@@ -15,17 +15,7 @@ pub struct SpirvShader<T: Deref<Target = [u32]>> {
 
 impl<T: Deref<Target = [u32]>> SpirvShader<T> {
     pub fn build(self, device: Arc<Device>) -> VkResult<ShaderModule> {
-        let module = unsafe {
-            device.create_shader_module(
-                &vk::ShaderModuleCreateInfo {
-                    code_size: std::mem::size_of_val(self.data.as_ref()),
-                    p_code: self.data.as_ref().as_ptr(),
-                    ..Default::default()
-                },
-                None,
-            )
-        }?;
-        Ok(ShaderModule { device, module })
+        ShaderModule::new(device, &self.data)
     }
 }
 
@@ -121,6 +111,19 @@ impl Debug for ShaderModule {
     }
 }
 impl ShaderModule {
+    pub fn new(device: Arc<Device>, data: &[u32]) -> VkResult<Self> {
+        let module = unsafe {
+            device.create_shader_module(
+                &vk::ShaderModuleCreateInfo {
+                    code_size: std::mem::size_of_val(data),
+                    p_code: data.as_ptr(),
+                    ..Default::default()
+                },
+                None,
+            )
+        }?;
+        Ok(Self { device, module })
+    }
     pub fn raw(&self) -> vk::ShaderModule {
         self.module
     }

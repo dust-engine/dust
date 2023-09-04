@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use bevy_app::Plugin;
-use bevy_asset::{AssetEvent, Assets, Handle, AssetId};
+use bevy_asset::{AssetEvent, AssetId, Assets, Handle};
 use bevy_ecs::{
     prelude::EventReader,
     system::{ResMut, Resource},
@@ -174,16 +174,13 @@ fn pipeline_cache_shader_updated_system(
         match event {
             AssetEvent::Added { id: _ } => (),
             AssetEvent::Modified { id } => {
-                let generation = pipeline_cache
-                    .shader_generations
-                    .entry(*id)
-                    .or_default();
+                let generation = pipeline_cache.shader_generations.entry(*id).or_default();
                 *generation += 1;
             }
             AssetEvent::Removed { id } => {
                 pipeline_cache.shader_generations.remove(id);
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
 }

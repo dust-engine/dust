@@ -126,7 +126,7 @@ impl Plugin for RenderPlugin {
                 .add_plugin(RayTracingPipelinePlugin::<StandardPipeline>::default());
         }
 
-        #[cfg(feature="glsl")]
+        #[cfg(feature = "glsl")]
         app.add_plugins(shader::glsl::GlslPlugin);
     }
 }

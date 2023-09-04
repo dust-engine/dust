@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use bevy_asset::{AssetEvent, Assets, Handle, UntypedHandle, UntypedAssetId};
+use bevy_asset::{AssetEvent, Assets, Handle, UntypedAssetId, UntypedHandle};
 use bevy_ecs::{
     prelude::{Component, Entity, EventReader},
     query::{Added, Without},
@@ -81,10 +81,7 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
     }
     for (entity, handle) in new_geometry_handle_query.iter() {
         commands.entity(entity).insert(NormalizedGeometry(None));
-        let entities = store
-            .entities
-            .entry(handle.id().untyped())
-            .or_default();
+        let entities = store.entities.entry(handle.id().untyped()).or_default();
         entities.insert(entity);
     }
     //TODO: remove detection
@@ -111,8 +108,8 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
             }
             AssetEvent::Removed { id } => {
                 store.entities.remove(&id.untyped());
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
     if upload_futures.len() == 0 {

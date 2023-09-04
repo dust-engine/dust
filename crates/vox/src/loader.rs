@@ -4,7 +4,7 @@ use crate::{palette::VoxPalette, VoxGeometry};
 /// MagicaVoxel trees are 256x256x256 max, so the numbers in the
 /// hierarchy must sum up to 8 where 2^8 = 256.
 use crate::{Tree, VoxBundle};
-use bevy_asset::{AssetLoader, Handle, LoadedAsset, AsyncReadExt};
+use bevy_asset::{AssetLoader, AsyncReadExt, Handle, LoadedAsset};
 use bevy_ecs::{
     prelude::{Bundle, Entity},
     world::{EntityMut, FromWorld, World},
@@ -317,7 +317,8 @@ impl AssetLoader for VoxLoader {
         Box::pin(async {
             let mut buffer = Vec::new();
             reader.read_to_end(&mut buffer).await?;
-            let file = dot_vox::load_bytes(buffer.as_slice()).map_err(|str| anyhow::Error::msg(str))?;
+            let file =
+                dot_vox::load_bytes(buffer.as_slice()).map_err(|str| anyhow::Error::msg(str))?;
 
             let staging_ring_buffer = StagingRingBuffer::new(self.allocator.device()).unwrap();
             let palette = self
@@ -375,9 +376,11 @@ impl AssetLoader for VoxLoader {
                 vec![None; file.models.len()];
             for (model_id, geometry, mut material) in geometry_materials.into_iter() {
                 let num_blocks = geometry.num_blocks;
-                let geometry_handle = load_context.add_labeled_asset(format!("Geometry{}", model_id), geometry);
+                let geometry_handle =
+                    load_context.add_labeled_asset(format!("Geometry{}", model_id), geometry);
                 material.geometry = geometry_handle.clone();
-                let material_handle = load_context.add_labeled_asset(format!("Material{}", model_id), material);
+                let material_handle =
+                    load_context.add_labeled_asset(format!("Material{}", model_id), material);
                 models[model_id as usize] = Some((geometry_handle, material_handle, num_blocks));
             }
             let diffuse_materials: Vec<_> = traverser
@@ -418,7 +421,8 @@ impl AssetLoader for VoxLoader {
                 .submit(zero_initialize_future, &mut Default::default())
                 .await;
             for (i, (diffuse_material, entity_id)) in diffuse_materials.into_iter().enumerate() {
-                let diffuse_material_handle = load_context.add_labeled_asset(format!("DiffuseMaterial{}", i), diffuse_material);
+                let diffuse_material_handle = load_context
+                    .add_labeled_asset(format!("DiffuseMaterial{}", i), diffuse_material);
                 let mut entity = world.entity_mut(entity_id);
                 *entity.get_mut::<Handle<DiffuseMaterial>>().unwrap() = diffuse_material_handle;
             }

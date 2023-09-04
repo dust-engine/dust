@@ -11,7 +11,10 @@ use pin_project::pin_project;
 
 use crate::{
     debug::DebugObject,
-    future::{CommandBufferRecordContext, GPUCommandFuture, RenderData, RenderRes, StageContext, SharedDeviceState},
+    future::{
+        CommandBufferRecordContext, GPUCommandFuture, RenderData, RenderRes, SharedDeviceState,
+        StageContext,
+    },
     macros::commands,
     utils::either::Either,
     Allocator, HasDevice, PhysicalDeviceMemoryModel, SharingMode, StagingRingBuffer,
@@ -364,15 +367,16 @@ pub fn fill_buffer<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes
     FillBufferFuture { dst, data }
 }
 
-
-
 #[pin_project]
-pub struct InitializeBufferFuture<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceState<T>>>> {
+pub struct InitializeBufferFuture<
+    T: BufferLike + RenderData,
+    TRef: DerefMut<Target = RenderRes<SharedDeviceState<T>>>,
+> {
     pub dst: TRef,
     data: u32,
 }
-impl<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceState<T>>>> GPUCommandFuture
-    for InitializeBufferFuture<T, TRef>
+impl<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceState<T>>>>
+    GPUCommandFuture for InitializeBufferFuture<T, TRef>
 {
     type Output = ();
     type RetainedState = ();
@@ -389,10 +393,7 @@ impl<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceS
         let dst = this.dst.deref_mut().inner_mut();
         let data: u32 = *this.data;
         ctx.record(|ctx, command_buffer| unsafe {
-            println!(
-                
-                "Initialized buffer"
-            );
+            println!("Initialized buffer");
             ctx.device()
                 .cmd_fill_buffer(command_buffer, dst.raw_buffer(), offset, size, data);
         });
@@ -408,10 +409,10 @@ impl<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceS
         );
     }
     fn init(
-            self: Pin<&mut Self>,
-            _ctx: &mut CommandBufferRecordContext,
-            _recycled_state: &mut Self::RecycledState,
-        ) -> Option<(Self::Output, Self::RetainedState)> {
+        self: Pin<&mut Self>,
+        _ctx: &mut CommandBufferRecordContext,
+        _recycled_state: &mut Self::RecycledState,
+    ) -> Option<(Self::Output, Self::RetainedState)> {
         let this = self.project();
         if this.dst.inner().reused() {
             // If the buffer is reused, early terminate and do not fill buffer.
@@ -422,13 +423,15 @@ impl<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceS
 }
 
 // For a shared device state buffer, initialize on the gpu side when it was first allocated.
-pub fn initialize_buffer<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceState<T>>>>(
+pub fn initialize_buffer<
+    T: BufferLike + RenderData,
+    TRef: DerefMut<Target = RenderRes<SharedDeviceState<T>>>,
+>(
     dst: TRef,
     data: u32,
 ) -> InitializeBufferFuture<T, TRef> {
     InitializeBufferFuture { dst, data }
 }
-
 
 pub struct ResidentBuffer {
     allocator: Allocator,

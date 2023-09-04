@@ -11,11 +11,13 @@ use rhyolite::{
     ash::vk,
     descriptor::{DescriptorPool, DescriptorSetWrite, PushConstants},
     future::{
-        run, use_per_frame_state, DisposeContainer, GPUCommandFuture, RenderData, RenderImage, RenderRes, use_state,
+        run, use_per_frame_state, use_state, DisposeContainer, GPUCommandFuture, RenderData,
+        RenderImage, RenderRes,
     },
     macros::set_layout,
     utils::retainer::Retainer,
-    BufferExt, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout, Sampler, BufferLike,
+    BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
+    Sampler,
 };
 use rhyolite::{future::Disposable, macros::commands};
 use rhyolite_bevy::Queues;
@@ -29,16 +31,11 @@ pub struct SvgfPipeline {
     desc_pool: Retainer<DescriptorPool>,
 }
 
-
 #[derive(AsStd430, Default, PushConstants)]
 struct SvgfPushConstant {
-    #[stage(
-        vk::ShaderStageFlags::COMPUTE
-    )]
+    #[stage(vk::ShaderStageFlags::COMPUTE)]
     rand: u32,
-    #[stage(
-        vk::ShaderStageFlags::COMPUTE
-    )]
+    #[stage(vk::ShaderStageFlags::COMPUTE)]
     frame_index: u32,
 }
 
@@ -133,7 +130,7 @@ impl SvgfPipeline {
                 ),
             ]);
             let extent = illuminance.inner().extent();
-            
+
             let frame_index = use_state(
                 using!(),
                 || 0,

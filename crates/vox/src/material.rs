@@ -1,4 +1,4 @@
-use bevy_asset::{AssetServer, Assets, Handle, Asset};
+use bevy_asset::{Asset, AssetServer, Assets, Handle};
 use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use dust_render::{MaterialType, StandardPipeline};
 

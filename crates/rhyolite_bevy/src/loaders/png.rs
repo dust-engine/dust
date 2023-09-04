@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Display};
 
 use crate::{AsyncQueues, QueuesRouter, SlicedImageArray};
-use bevy_asset::{AssetLoader, LoadedAsset, AsyncReadExt};
+use bevy_asset::{AssetLoader, AsyncReadExt, LoadedAsset};
 use bevy_ecs::world::{FromWorld, World};
 use rhyolite::ensure_image_layout;
 use rhyolite::{
