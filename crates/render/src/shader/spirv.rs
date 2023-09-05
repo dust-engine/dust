@@ -1,7 +1,7 @@
 use std::{ffi::CStr, sync::Arc};
 
-use bevy_asset::{saver::AssetSaver, Asset, AssetLoader, Handle, LoadedAsset};
-use bevy_reflect::{TypePath, TypeUuid};
+use bevy_asset::{Asset, AssetLoader, Handle};
+use bevy_reflect::TypePath;
 use futures_lite::AsyncReadExt;
 use rhyolite::{ash::vk, cstr, shader::SpecializationInfo};
 
@@ -52,8 +52,8 @@ impl AssetLoader for SpirvLoader {
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
-        settings: &'a Self::Settings,
-        load_context: &'a mut bevy_asset::LoadContext,
+        _settings: &'a Self::Settings,
+        _load_context: &'a mut bevy_asset::LoadContext,
     ) -> bevy_asset::BoxedFuture<'a, Result<ShaderModule, bevy_asset::Error>> {
         let device = self.device.inner().clone();
         return Box::pin(async move {

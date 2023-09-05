@@ -3,7 +3,7 @@ use std::{alloc::Layout, marker::PhantomData, sync::Arc};
 use bevy_app::{Plugin, PostUpdate};
 use bevy_asset::Asset;
 use bevy_ecs::schedule::IntoSystemConfigs;
-use bevy_reflect::{TypePath, TypeUuid};
+use bevy_reflect::TypePath;
 use rhyolite::{ash::vk, future::GPUCommandFuture, ResidentBuffer};
 use rhyolite_bevy::RenderSystems;
 

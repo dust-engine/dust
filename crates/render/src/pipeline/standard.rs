@@ -30,7 +30,7 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
-use rhyolite::{fill_buffer, initialize_buffer, ResidentBuffer};
+use rhyolite::{initialize_buffer, ResidentBuffer};
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 use rhyolite_bevy::{RenderSystems, StagingRingBuffer};
 

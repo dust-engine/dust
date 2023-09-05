@@ -10,7 +10,7 @@ use bevy_ecs::{
     query::Changed,
     system::{Commands, Local, Query, Res, ResMut, SystemParam, SystemParamItem},
 };
-use bevy_reflect::{TypePath, TypeUuid};
+use bevy_reflect::TypePath;
 
 use crate::{
     pipeline::RayTracingPipeline, pipeline::RayTracingPipelineBuilder, sbt::SbtIndex,

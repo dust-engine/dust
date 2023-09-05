@@ -1,13 +1,9 @@
-use std::{collections::BTreeMap, ops::Deref};
-
-use bevy_ecs::world::FromWorld;
 use nrd::TextureDesc;
 use rhyolite::ash::prelude::VkResult;
 use rhyolite::ash::vk;
 use rhyolite::future::{
-    run, use_per_frame_state, use_shared_image, use_shared_state, use_state, Disposable,
-    GPUCommandFuture, RenderData, RenderImage, RenderRes, SharedDeviceStateHostContainer,
-    StageContext,
+    run, use_shared_image, use_shared_state, use_state, Disposable, GPUCommandFuture, RenderData,
+    RenderImage, RenderRes, SharedDeviceStateHostContainer, StageContext,
 };
 use rhyolite::macros::commands;
 use rhyolite::smallvec::{smallvec, SmallVec};
@@ -15,7 +11,7 @@ use rhyolite::{
     copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
     ImageViewLike, ResidentImage,
 };
-use rhyolite_bevy::{Allocator, Device, StagingRingBuffer};
+use rhyolite_bevy::{Allocator, StagingRingBuffer};
 use std::sync::Arc;
 
 use rhyolite::descriptor::{DescriptorSetLayoutBindingInfo, DescriptorSetWrite};
@@ -329,7 +325,7 @@ impl ReblurPipeline {
                                         vk::ImageLayout::UNDEFINED
                                     )
                                 },
-                                |old| false // TODO: resize when needed
+                                |_old| false // TODO: resize when needed
                             );
                             let view = img.inner().raw_image_view();
                             img_to_access.push(img);

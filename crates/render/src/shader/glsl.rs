@@ -1,10 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
-use crate::shader;
 use bevy_app::Plugin;
-use bevy_asset::{
-    processor::ProcessContext, saver::AssetSaver, Asset, AssetLoader, Handle, ReadAssetBytesError,
-};
+use bevy_asset::{processor::ProcessContext, saver::AssetSaver, Asset, AssetLoader};
 use bevy_reflect::TypePath;
 use futures_lite::{AsyncReadExt, AsyncWriteExt};
 use shaderc::ResolvedInclude;
@@ -52,7 +49,7 @@ impl AssetLoader for GlslLoader {
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
-        settings: &'a Self::Settings,
+        _settings: &'a Self::Settings,
         load_context: &'a mut bevy_asset::LoadContext,
     ) -> bevy_asset::BoxedFuture<'a, Result<Self::Asset, bevy_asset::Error>> {
         let kind = if let Some(ext) = load_context.asset_path().get_full_extension() {
@@ -96,7 +93,7 @@ impl AssetSaver for GlslCompiler {
         &'a self,
         writer: &'a mut bevy_asset::io::Writer,
         asset: bevy_asset::saver::SavedAsset<'a, Self::Asset>,
-        settings: &'a Self::Settings,
+        _settings: &'a Self::Settings,
         ctx: &'a mut ProcessContext,
     ) -> bevy_asset::BoxedFuture<'a, Result<Self::Settings, bevy_asset::Error>> {
         use shaderc::ShaderKind as SK;
@@ -125,7 +122,7 @@ impl AssetSaver for GlslCompiler {
 
             while !pending_sources.is_empty() {
                 let (filename, source) = pending_sources.pop().unwrap();
-                for (included_filename, ty) in source.lines().filter_map(match_include_line) {
+                for (included_filename, _ty) in source.lines().filter_map(match_include_line) {
                     if includes.contains_key(included_filename) {
                         continue;
                     }
@@ -143,7 +140,7 @@ impl AssetSaver for GlslCompiler {
             }
 
             use shaderc::{CompileOptions, Compiler};
-            let mut compiler = Compiler::new().unwrap();
+            let compiler = Compiler::new().unwrap();
 
             let binary = {
                 let mut options = CompileOptions::new().unwrap();
@@ -152,7 +149,7 @@ impl AssetSaver for GlslCompiler {
                     shaderc::TargetEnv::Vulkan,
                     rhyolite::Version::new(0, 1, 3, 0).as_raw(),
                 );
-                options.set_include_callback(|source_name, ty, _, include_depth| {
+                options.set_include_callback(|source_name, _ty, _, _include_depth| {
                     Ok(ResolvedInclude {
                         resolved_name: source_name.to_string(),
                         content: includes.get(source_name).ok_or("file not found")?.clone(),

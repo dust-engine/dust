@@ -24,7 +24,7 @@ tracing = "0.1"
 crevice = { git = "https://github.com/LPGhatguy/crevice", features = ["glam"] }
 rand = "0.8"
 
-nrd = { path = "C:\\Users\\neo\\Developer\\NRD" }
+nrd = { git = "https://github.com/dust-engine/nrd" }
 bytemuck = "1.13"
 
 # Processor dependencies

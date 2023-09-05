@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use bevy_app::Plugin;
-use bevy_asset::{AssetEvent, AssetId, Assets, Handle};
+use bevy_asset::{AssetEvent, AssetId, Assets};
 use bevy_ecs::{
     prelude::EventReader,
     system::{ResMut, Resource},

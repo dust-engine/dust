@@ -17,7 +17,6 @@ use rhyolite::{
     macros::set_layout,
     utils::retainer::Retainer,
     BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
-    Sampler,
 };
 use rhyolite::{future::Disposable, macros::commands};
 use rhyolite_bevy::Queues;

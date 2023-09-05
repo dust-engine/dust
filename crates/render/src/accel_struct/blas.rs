@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use bevy_asset::{AssetEvent, Assets, Handle, UntypedAssetId, UntypedHandle};
+use bevy_asset::{AssetEvent, Assets, Handle, UntypedAssetId};
 use bevy_ecs::{
     prelude::{Component, Entity, EventReader},
     query::{Added, Without},
