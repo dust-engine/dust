@@ -74,7 +74,7 @@ impl PipelineLayout {
             },
         })
     }
-    pub unsafe fn raw(&self) -> vk::PipelineLayout {
+    pub fn raw(&self) -> vk::PipelineLayout {
         self.inner
     }
 }

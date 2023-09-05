@@ -195,7 +195,7 @@ impl Plugin for RenderSystem {
                                             extent: swapchain_image.inner().extent(),
                                             ..Default::default()
                                         }
-                                    ).unwrap().as_2d_view().unwrap(),
+                                    ).unwrap().with_2d_view().unwrap(),
                                 vk::ImageLayout::UNDEFINED
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
@@ -210,7 +210,7 @@ impl Plugin for RenderSystem {
                                             extent: swapchain_image.inner().extent(),
                                             ..Default::default()
                                         }
-                                    ).unwrap().as_2d_view().unwrap(),
+                                    ).unwrap().with_2d_view().unwrap(),
                                 vk::ImageLayout::UNDEFINED,
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
@@ -226,7 +226,7 @@ impl Plugin for RenderSystem {
                                             extent: swapchain_image.inner().extent(),
                                             ..Default::default()
                                         }
-                                    ).unwrap().as_2d_view().unwrap(),
+                                    ).unwrap().with_2d_view().unwrap(),
                                 vk::ImageLayout::UNDEFINED,
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
@@ -241,7 +241,7 @@ impl Plugin for RenderSystem {
                                             extent: swapchain_image.inner().extent(),
                                             ..Default::default()
                                         }
-                                    ).unwrap().as_2d_view().unwrap(),
+                                    ).unwrap().with_2d_view().unwrap(),
                                 vk::ImageLayout::UNDEFINED,
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
@@ -255,7 +255,7 @@ impl Plugin for RenderSystem {
                                             extent: swapchain_image.inner().extent(),
                                             ..Default::default()
                                         }
-                                    ).unwrap().as_2d_view().unwrap(),
+                                    ).unwrap().with_2d_view().unwrap(),
                                 vk::ImageLayout::UNDEFINED,
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
@@ -274,7 +274,7 @@ impl Plugin for RenderSystem {
                                     ).unwrap();
                                     img.set_name_cstr(cstr!("Illuminance Image")).unwrap();
 
-                                    let mut img_view = img.as_2d_view().unwrap();
+                                    let mut img_view = img.with_2d_view().unwrap();
                                     img_view.set_name_cstr(cstr!("Illuminance Image View")).unwrap();
                                     img_view
                                 },

@@ -55,3 +55,5 @@ pub use swapchain::*;
 pub use allocator::Allocator;
 // TODO: Test two consequtive reads, with different image layouts.
 pub use shader::ReflectedShaderModule;
+
+pub use smallvec;

@@ -139,7 +139,7 @@ pub fn set_layout(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
                     descriptor_type: #descriptor_type,
                     descriptor_count: #descriptor_count,
                     stage_flags: #shader_flags,
-                    immutable_samplers: Vec::new(),
+                    immutable_samplers: Default::default()
                 }
             }
         });

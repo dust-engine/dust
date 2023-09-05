@@ -1,5 +1,6 @@
 use ash::prelude::VkResult;
 use ash::vk;
+use smallvec::SmallVec;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::ops::Deref;
@@ -51,7 +52,7 @@ impl<T: Deref<Target = [u32]>> ReflectedSpirvShader<T> {
         entry_point: &str,
         set_id: u32,
         binding_id: u32,
-        samplers: Vec<Arc<Sampler>>,
+        samplers: SmallVec<[Arc<Sampler>; 1]>,
     ) {
         let binding = self
             .entry_points

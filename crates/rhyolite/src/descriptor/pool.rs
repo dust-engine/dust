@@ -3,6 +3,8 @@ use std::{collections::BTreeMap, ffi::c_void, sync::Arc};
 
 use crate::{Device, HasDevice, PipelineLayout};
 
+use super::DescriptorSetLayout;
+
 pub struct DescriptorPool {
     device: Arc<Device>,
     pool: vk::DescriptorPool,
@@ -37,6 +39,25 @@ impl DescriptorPool {
             ..Default::default()
         };
         unsafe { self.device.allocate_descriptor_sets(&info) }
+    }
+    pub fn allocate_for_set_layout(
+        &mut self,
+        set_layout: &DescriptorSetLayout,
+    ) -> VkResult<vk::DescriptorSet> {
+        unsafe {
+            let mut result = vk::DescriptorSet::null();
+            (self.device.fp_v1_0().allocate_descriptor_sets)(
+                self.device.handle(),
+                &vk::DescriptorSetAllocateInfo {
+                    descriptor_pool: self.pool,
+                    descriptor_set_count: 1,
+                    p_set_layouts: &set_layout.raw,
+                    ..Default::default()
+                },
+                &mut result,
+            )
+            .result_with_success(result)
+        }
     }
     pub fn new(
         device: Arc<Device>,

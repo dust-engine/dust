@@ -13,6 +13,7 @@ mod cache;
 mod compute;
 mod manager;
 mod plugin;
+mod reblur;
 mod sky;
 mod standard;
 mod svgf;

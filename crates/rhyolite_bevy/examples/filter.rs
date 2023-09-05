@@ -312,7 +312,7 @@ impl Plugin for RenderSystem {
                                         extent: swapchain_image.inner().extent(),
                                         ..Default::default()
                                     }
-                                ).unwrap().as_2d_view().unwrap(),
+                                ).unwrap().with_2d_view().unwrap(),
                             vk::ImageLayout::UNDEFINED,
                         )
                     }, |image| swapchain_image.inner().extent() != image.extent());

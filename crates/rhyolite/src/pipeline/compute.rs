@@ -17,10 +17,10 @@ impl ComputePipeline {
     pub fn layout(&self) -> &Arc<PipelineLayout> {
         &self.layout
     }
-    pub unsafe fn raw(&self) -> vk::Pipeline {
+    pub fn raw(&self) -> vk::Pipeline {
         self.pipeline
     }
-    pub unsafe fn raw_layout(&self) -> vk::PipelineLayout {
+    pub fn raw_layout(&self) -> vk::PipelineLayout {
         self.layout.raw()
     }
 }

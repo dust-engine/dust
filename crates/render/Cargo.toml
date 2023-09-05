@@ -24,6 +24,9 @@ tracing = "0.1"
 crevice = { git = "https://github.com/LPGhatguy/crevice", features = ["glam"] }
 rand = "0.8"
 
+nrd = { path = "C:\\Users\\neo\\Developer\\NRD" }
+bytemuck = "1.13"
+
 # Processor dependencies
 shaderc = { version = "0.8", optional = true }
 

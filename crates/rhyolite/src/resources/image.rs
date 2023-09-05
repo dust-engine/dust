@@ -41,7 +41,7 @@ pub trait ImageExt {
             offset,
         }
     }
-    fn as_2d_view(self) -> VkResult<super::image_view::ImageView<Self>>
+    fn with_2d_view(self) -> VkResult<super::image_view::ImageView<Self>>
     where
         Self: ImageLike + Sized,
     {

@@ -1,5 +1,6 @@
-use crate::{sampler::Sampler, Device, HasDevice};
+use crate::{sampler::Sampler, Device};
 use ash::{prelude::VkResult, vk};
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -8,7 +9,7 @@ pub struct DescriptorSetLayoutBindingInfo {
     pub descriptor_type: vk::DescriptorType,
     pub descriptor_count: u32,
     pub stage_flags: vk::ShaderStageFlags,
-    pub immutable_samplers: Vec<Arc<Sampler>>,
+    pub immutable_samplers: SmallVec<[Arc<Sampler>; 1]>,
 }
 impl std::hash::Hash for DescriptorSetLayoutBindingInfo {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -39,7 +40,7 @@ impl Eq for DescriptorSetLayoutBindingInfo {}
 
 pub struct DescriptorSetLayout {
     device: Arc<Device>,
-    raw: vk::DescriptorSetLayout,
+    pub(crate) raw: vk::DescriptorSetLayout,
     pub binding_infos: Vec<DescriptorSetLayoutBindingInfo>,
 }
 impl Drop for DescriptorSetLayout {

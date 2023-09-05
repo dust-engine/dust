@@ -1,5 +1,5 @@
 use std::{
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     sync::{Arc, Weak},
 };
 
@@ -62,6 +62,18 @@ pub struct StagingRingBufferSlice {
     offset: vk::DeviceSize,
     size: vk::DeviceSize,
     ptr: *mut u8,
+}
+impl Deref for StagingRingBufferSlice {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.size as usize) }
+    }
+}
+impl DerefMut for StagingRingBufferSlice {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.size as usize) }
+    }
 }
 unsafe impl Send for StagingRingBufferSlice {}
 unsafe impl Sync for StagingRingBufferSlice {}
