@@ -1,3 +1,4 @@
+use bevy_ecs::world::FromWorld;
 use nrd::TextureDesc;
 use rhyolite::ash::prelude::VkResult;
 use rhyolite::ash::vk;
@@ -11,7 +12,7 @@ use rhyolite::{
     copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
     ImageViewLike, ResidentImage,
 };
-use rhyolite_bevy::{Allocator, StagingRingBuffer};
+use rhyolite_bevy::{Allocator, StagingRingBuffer, Device};
 use std::sync::Arc;
 
 use rhyolite::descriptor::{DescriptorSetLayoutBindingInfo, DescriptorSetWrite};
@@ -23,16 +24,27 @@ pub struct NRDPipeline {
     transient_pool: Vec<TextureDesc>,
     permanent_pool: Vec<TextureDesc>,
     binding_offsets: nrd::SPIRVBindingOffsets,
+    dimensions: (u16, u16)
 }
 const REBLUR_IDENTIFIER: nrd::Identifier = nrd::Identifier(0);
 
+impl FromWorld for NRDPipeline {
+    fn from_world(world: &mut bevy_ecs::world::World) -> Self {
+        let device = world.resource::<Device>();
+        Self::new(device, 1920, 1080)
+    }
+}
 impl NRDPipeline {
-    pub fn new(device: &Arc<rhyolite::Device>) -> Self {
+    pub fn new(
+        device: &Arc<rhyolite::Device>,
+        width: u16,
+        height: u16,
+    ) -> Self {
         let instance = nrd::Instance::new(&[nrd::DenoiserDesc {
             identifier: REBLUR_IDENTIFIER,
             denoiser: nrd::Denoiser::ReblurDiffuse,
-            render_width: 0,
-            render_height: 0,
+            render_width: width,
+            render_height: height,
         }])
         .unwrap();
         let library_desc = nrd::Instance::library_desc();
@@ -232,7 +244,26 @@ impl NRDPipeline {
             permanent_pool: desc.permanent_pool().iter().cloned().collect(),
             binding_offsets: library_desc.spirv_binding_offsets.clone(),
             instance,
+            dimensions: (width, height)
         }
+    }
+    pub fn resize(&mut self, width: u16, height: u16) {
+        if self.dimensions == (width, height) {
+            return;
+        }
+        let instance = nrd::Instance::new(&[nrd::DenoiserDesc {
+            identifier: REBLUR_IDENTIFIER,
+            denoiser: nrd::Denoiser::ReblurDiffuse,
+            render_width: width,
+            render_height: height,
+        }])
+        .unwrap();
+        let desc = instance.desc();
+        assert_eq!(desc.pipelines().len(), self.pipelines.len());
+
+        
+        self.transient_pool = desc.transient_pool().iter().cloned().collect();
+        self.permanent_pool = desc.permanent_pool().iter().cloned().collect();
     }
 }
 
@@ -241,16 +272,21 @@ impl NRDPipeline {
         &'a mut self,
         allocator: &'a Allocator,
         staging_ring: &'a StagingRingBuffer,
+        common_settings: &nrd::CommonSettings,
+        denoiser_settings: &impl nrd::DenoiserSettings,
         input_images: impl (Fn(nrd::ResourceType) -> &'b RenderImage<T>) + 'a,
         output_images: impl (Fn(nrd::ResourceType) -> &'b mut RenderImage<T>) + 'a,
+        dimensions: (u16, u16),
     ) -> impl GPUCommandFuture<
         Output = (),
         RetainedState: 'static + Disposable,
         RecycledState: 'static + Default,
     > + 'a {
-        if false {
-            *self = Self::new(allocator.device());
+        if self.dimensions != dimensions {
+            self.resize(dimensions.0, dimensions.1);
         }
+        self.instance.set_common_settings(common_settings).unwrap();
+        self.instance.set_denoiser_settings(REBLUR_IDENTIFIER, denoiser_settings);
         let dispatches = self
             .instance
             .get_compute_dispatches(&[REBLUR_IDENTIFIER])
