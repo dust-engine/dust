@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use rhyolite::descriptor::{DescriptorSetLayoutBindingInfo, DescriptorSetWrite};
 
-pub struct ReblurPipeline {
+pub struct NRDPipeline {
     instance: nrd::Instance,
     pipelines: Vec<(rhyolite::ComputePipeline, SmallVec<[vk::DescriptorSet; 4]>)>,
     desc_pool: rhyolite::descriptor::DescriptorPool,
@@ -24,10 +24,9 @@ pub struct ReblurPipeline {
     permanent_pool: Vec<TextureDesc>,
     binding_offsets: nrd::SPIRVBindingOffsets,
 }
-
 const REBLUR_IDENTIFIER: nrd::Identifier = nrd::Identifier(0);
 
-impl ReblurPipeline {
+impl NRDPipeline {
     pub fn new(device: &Arc<rhyolite::Device>) -> Self {
         let instance = nrd::Instance::new(&[nrd::DenoiserDesc {
             identifier: REBLUR_IDENTIFIER,
@@ -237,11 +236,13 @@ impl ReblurPipeline {
     }
 }
 
-impl ReblurPipeline {
-    pub fn render<'a>(
+impl NRDPipeline {
+    pub fn render<'a, 'b, T: ImageViewLike + RenderData + 'b>(
         &'a mut self,
         allocator: &'a Allocator,
         staging_ring: &'a StagingRingBuffer,
+        input_images: impl (Fn(nrd::ResourceType) -> &'b RenderImage<T>) + 'a,
+        output_images: impl (Fn(nrd::ResourceType) -> &'b mut RenderImage<T>) + 'a,
     ) -> impl GPUCommandFuture<
         Output = (),
         RetainedState: 'static + Disposable,
@@ -258,6 +259,8 @@ impl ReblurPipeline {
         // An offset into the `resources` array. Increments inside the iterator
 
         commands! {
+            let input_images = input_images;
+            let output_images = output_images;
             let mut constant_buffer_size: u32 = 0;
             const UNIFORM_ALIGNMENT: u32 = 4 * 4;
             for dispatch in dispatches.iter() {
@@ -312,6 +315,8 @@ impl ReblurPipeline {
 
                 let mut img_to_access = Vec::new();
                 let mut img_to_access_readwrite = Vec::new();
+                let mut borrowed_img_to_access = Vec::new();
+
                 for resource in dispatch.resources() {
                     let has_write = matches!(resource.state_needed, nrd::DescriptorType::StorageTexture);
                     let image_view = match resource.ty {
@@ -349,7 +354,14 @@ impl ReblurPipeline {
                             img_to_access_readwrite.push(has_write);
                             view
                         },
-                        _ => todo!()
+                        _ => {
+                            borrowed_img_to_access.push((resource.ty, has_write));
+                            if has_write {
+                                output_images(resource.ty).inner().raw_image_view()
+                            } else {
+                                input_images(resource.ty).inner().raw_image_view()
+                            }
+                        }
                     };
                     match resource.state_needed {
                         nrd::DescriptorType::Texture => {
@@ -423,16 +435,23 @@ impl ReblurPipeline {
                         1,
                     );
                 }, |ctx| {
-                    fn record_accesses<T: RenderData + ImageLike>(res: &mut RenderImage<T>, has_write: bool, ctx: &mut StageContext) {
-                        if has_write {
-                            ctx.read_image(res, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
-                            ctx.write_image(res, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                    for (img, has_write) in img_to_access.iter_mut().zip(img_to_access_readwrite.iter()) {
+                        if *has_write {
+                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
+                            ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
                         } else {
-                            ctx.read_image(res, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
                         }
                     }
-                    for (img, has_write) in img_to_access.iter_mut().zip(img_to_access_readwrite.iter()) {
-                        record_accesses(img, *has_write, ctx);
+                    for (img_ty, has_write) in borrowed_img_to_access.iter_mut() {
+                        if *has_write {
+                            let img = output_images(*img_ty);
+                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
+                            ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                        } else {
+                            let img = input_images(*img_ty);
+                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                        }
                     }
                 }).await;
                 retain!(img_to_access);
@@ -511,5 +530,3 @@ fn create_image(
         .with_2d_view()?;
     Ok(image)
 }
-
-// TODO: Properly handle texture IOs.
