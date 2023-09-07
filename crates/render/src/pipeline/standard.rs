@@ -98,10 +98,6 @@ impl RayTracingPipeline for StandardPipeline {
             camera_settings: vk::DescriptorType::UNIFORM_BUFFER,
             #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR)]
             instances: vk::DescriptorType::STORAGE_BUFFER,
-            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
-            reservoirs: vk::DescriptorType::STORAGE_BUFFER,
-            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
-            reservoirs_prev: vk::DescriptorType::STORAGE_BUFFER,
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
         };
@@ -276,7 +272,7 @@ impl StandardPipeline {
         camera: (&PinholeProjection, &GlobalTransform),
     ) -> Option<
         impl GPUCommandFuture<
-                Output = RenderRes<SharedDeviceState<ResidentBuffer>>,
+                Output = (),
                 RetainedState: 'static + Disposable,
                 RecycledState: 'static + Default,
             > + 'a,
@@ -369,16 +365,6 @@ impl StandardPipeline {
                 },
                 |_| false
             );
-            let (mut reservoir_buffer, mut reservoir_buffer_prev) = use_shared_resource_flipflop(
-                using!(),
-                |_| {
-                    allocator.create_device_buffer_uninit((Reservoir::std430_size_static() *
-                    target_image.inner().extent().width as usize *
-                    target_image.inner().extent().height as usize ) as u64, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, 0).unwrap()
-                },
-                |_| false
-            );
-
 
             let (mut camera_setting_buffer, camera_setting_buffer_prev_frame) = use_shared_resource_flipflop(
                 using!(),
@@ -389,9 +375,6 @@ impl StandardPipeline {
             );
             staging_ring_buffer.update_buffer(&mut camera_setting_buffer, camera_settings.as_bytes()).join(
                             staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes())
-            ).join(
-                initialize_buffer(&mut reservoir_buffer, 0)
-                .join(initialize_buffer(&mut reservoir_buffer_prev, 0))
             ).await;
 
             let frame_index = use_state(
@@ -445,14 +428,12 @@ impl StandardPipeline {
                     0,
                     &[
                         instances_buffer.inner().as_descriptor(),
-                        reservoir_buffer.inner().as_descriptor(),
-                        reservoir_buffer_prev.inner().as_descriptor()
                     ],
                     false
                 ),
                 DescriptorSetWrite::accel_structs(
                     desc_set[0],
-                    13,
+                    11,
                     0,
                     &[tlas.inner().raw()]
                 ),
@@ -767,7 +748,6 @@ impl StandardPipeline {
                 pipeline_sbt_buffer,
                 hitgroup_sbt_buffer,
                 instances_buffer,
-                reservoir_buffer_prev
             ));
             retain!(
                 DisposeContainer::new((
@@ -778,7 +758,6 @@ impl StandardPipeline {
                     desc_pool.handle(),
                     desc_set,
                 )));
-            reservoir_buffer
         };
         Some(fut)
     }
@@ -849,19 +828,4 @@ pub fn extract_global_transforms(
                 });
         }
     }
-}
-
-#[derive(PartialEq, Clone, AsStd430)]
-struct Sample {
-    visible_point_normal: Vec3,
-    voxel_id: u32,
-    outgoing_radiance: Vec3,
-    reserved: u32,
-}
-
-#[derive(PartialEq, Clone, AsStd430)]
-struct Reservoir {
-    current_sample: Sample,
-    total_weight: f32,
-    sample_count: f32,
 }

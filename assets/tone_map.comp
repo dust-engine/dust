@@ -145,6 +145,26 @@ vec3 SwapchainOETF(vec3 normalizedLinearValue) {
 }
 
 
+vec3 _NRD_YCoCgToLinear( vec3 color )
+{
+    float t = color.x - color.z;
+
+    vec3 r;
+    r.y = color.x + color.z;
+    r.x = t + color.y;
+    r.z = t - color.y;
+
+    return max( r, 0.0 );
+}
+vec4 REBLUR_BackEnd_UnpackRadianceAndNormHitDist( vec4 data )
+{
+    data.xyz = _NRD_YCoCgToLinear( data.xyz );
+
+    return data;
+}
+
+
+
 void main() {
     uvec2 dim = min(imageSize(u_src_img).xy, imageSize(u_dst_img).xy);
 
@@ -154,9 +174,10 @@ void main() {
     }
 
     vec4 in_value = imageLoad(u_src_img, ivec2(gl_GlobalInvocationID.xy));
+    in_value = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(in_value);
     vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
-    float exposure = 1.0 / (9.6*u_histogram.avg);
+    float exposure = 0.01; //1.0 / (9.6*u_histogram.avg);
     exposure *= 9.6;
     //exposure = 0.05;
 
@@ -177,5 +198,5 @@ void main() {
     // Apply OETF coorection
     vec3 corrected = SwapchainOETF(mapped);
 
-    imageStore(u_dst_img, ivec2(gl_GlobalInvocationID.xy), vec4(corrected, in_value.a));
+    imageStore(u_dst_img, ivec2(gl_GlobalInvocationID.xy), vec4(corrected, 1.0));
 }

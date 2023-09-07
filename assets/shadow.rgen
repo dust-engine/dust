@@ -13,7 +13,9 @@ void main() {
         return;
     }
     const vec3 sunDir = sunlight_config.direction.xyz;
-    payload.normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
+    
+    float unused;
+    payload.normal = NRD_FrontEnd_UnpackNormalAndRoughness(imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)), unused).xyz;
     if (dot(sunDir, payload.normal) < 0) {
         return;
     }

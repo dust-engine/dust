@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 use rhyolite::descriptor::{DescriptorSetLayoutBindingInfo, DescriptorSetWrite};
 
+use crate::PinholeProjection;
+
 pub struct NRDPipeline {
     instance: nrd::Instance,
     pipelines: Vec<(rhyolite::ComputePipeline, SmallVec<[vk::DescriptorSet; 4]>)>,

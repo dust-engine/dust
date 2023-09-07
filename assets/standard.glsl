@@ -21,7 +21,7 @@ layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
 layout(set = 0, binding = 4, rg16f) uniform image2D u_motion;
 layout(set = 0, binding = 5, r32ui) uniform uimage2D u_voxel_id;
 
-layout(set = 0, binding = 13) uniform accelerationStructureEXT accelerationStructure;
+layout(set = 0, binding = 11) uniform accelerationStructureEXT accelerationStructure;
 layout(set = 0, binding = 6) uniform texture2D blue_noise;
 
 
@@ -288,95 +288,117 @@ vec3 SRGBToXYZ(vec3 srgb) {
     );
     return transform * srgb;
 }
+vec2 _NRD_EncodeUnitVector( vec3 v, const bool bSigned )
+{
+    v /= dot( abs( v ), vec3(1.0) );
 
+    vec2 octWrap = ( 1.0 - abs( v.yx ) ) * ( step( 0.0, v.xy ) * 2.0 - 1.0 );
+    v.xy = v.z >= 0.0 ? v.xy : octWrap;
 
-uint hash1(uint x) {
-	x += (x << 10u);
-	x ^= (x >>  6u);
-	x += (x <<  3u);
-	x ^= (x >> 11u);
-	x += (x << 15u);
-	return x;
+    return bSigned ? v.xy : v.xy * 0.5 + 0.5;
 }
 
-uint hash1_mut(inout uint h) {
-    uint res = h;
-    h = hash1(h);
-    return res;
+#define NRD_NORMAL_ENCODING NRD_NORMAL_ENCODING_R10G10B10A2_UNORM
+vec4 NRD_FrontEnd_PackNormalAndRoughness(vec3 N, float roughness, float materialID )
+{
+    vec4 p;
+
+    #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
+        roughness = sqrt( clamp( roughness, 0, 1 ) );
+    #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
+        roughness *= roughness;
+    #endif
+
+    #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
+        p.xy = _NRD_EncodeUnitVector( N, false );
+        p.z = roughness;
+        p.w = clamp( materialID / 3.0, 0.0, 1.0 );
+    #else
+        // Best fit ( optional )
+        N /= max( abs( N.x ), max( abs( N.y ), abs( N.z ) ) );
+
+        #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA8_UNORM || NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA16_UNORM )
+            N = N * 0.5 + 0.5;
+        #endif
+
+        p.xyz = N;
+        p.w = roughness;
+    #endif
+
+    return p;
 }
 
-uint hash_combine2(uint x, uint y) {
-    const uint M = 1664525u, C = 1013904223u;
-    uint seed = (x * M + y + C) * M;
+vec3 _NRD_DecodeUnitVector( vec2 p, const bool bSigned, const bool bNormalize )
+{
+    p = bSigned ? p : ( p * 2.0 - 1.0 );
 
-    // Tempering (from Matsumoto)
-    seed ^= (seed >> 11u);
-    seed ^= (seed << 7u) & 0x9d2c5680u;
-    seed ^= (seed << 15u) & 0xefc60000u;
-    seed ^= (seed >> 18u);
-    return seed;
+    // https://twitter.com/Stubbesaurus/status/937994790553227264
+    vec3 n = vec3( p.xy, 1.0 - abs( p.x ) - abs( p.y ) );
+    float t = clamp( -n.z, 0.0, 1.0 );
+    n.xy -= t * ( step( 0.0, n.xy ) * 2.0 - 1.0 );
+
+    return bNormalize ? normalize( n ) : n;
 }
 
-uint hash2(uvec2 v) {
-	return hash_combine2(v.x, hash1(v.y));
+vec4 NRD_FrontEnd_UnpackNormalAndRoughness( vec4 p, out float materialID )
+{
+    vec4 r;
+    #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
+        r.xyz = _NRD_DecodeUnitVector( p.xy, false, false );
+        r.w = p.z;
+
+        materialID = p.w;
+    #else
+        #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA8_UNORM || NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA16_UNORM )
+            p.xyz = p.xyz * 2.0 - 1.0;
+        #endif
+
+        r.xyz = p.xyz;
+        r.w = p.w;
+
+        materialID = 0;
+    #endif
+
+    r.xyz = normalize( r.xyz );
+
+    #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
+        r.w *= r.w;
+    #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
+        r.w = sqrt( r.w );
+    #endif
+
+    return r;
 }
 
-uint hash3(uvec3 v) {
-	return hash_combine2(v.x, hash2(v.yz));
+
+#define NRD_FP16_MIN 1e-7 // min allowed hitDist (0 = no data)
+
+vec3 _NRD_LinearToYCoCg( vec3 color )
+{
+    float Y = dot( color, vec3( 0.25, 0.5, 0.25 ) );
+    float Co = dot( color, vec3( 0.5, 0.0, -0.5 ) );
+    float Cg = dot( color, vec3( -0.25, 0.5, -0.25 ) );
+
+    return vec3( Y, Co, Cg );
 }
 
-uint hash4(uvec4 v) {
-	return hash_combine2(v.x, hash3(v.yzw));
-}
 
-
-float uint_to_u01_float(uint h) {
-	const uint mantissaMask = 0x007FFFFFu;
-	const uint one = 0x3F800000u;
-
-	h &= mantissaMask;
-	h |= one;
-
-	float  r2 = uintBitsToFloat( h );
-	return r2 - 1.0;
-}
-
-struct Sample {
-    vec3 visible_point_normal; // The normal at the primary ray hit point in world space
-    uint voxel_id;
-    vec3 outgoing_radiance; // Outgoing radiance at the sample point in XYZ color space
-    uint reserved;
-};
-
-struct Reservoir {
-    Sample current_sample;      // z
-    float total_weight; // w
-    uint sample_count; // M
-};
-
-void ReservoirUpdate(inout Reservoir self, Sample new_sample, float sample_weight, inout uint rng) {
-    self.total_weight += sample_weight;
-    self.sample_count += 1;
-    const float dart = uint_to_u01_float(hash1_mut(rng));
-
-    if ((self.sample_count == 1) || (dart < sample_weight / self.total_weight)) {
-        self.current_sample = new_sample;
+vec4 REBLUR_FrontEnd_PackRadianceAndNormHitDist( vec3 radiance, float normHitDist)
+{
+    /*
+    if( sanitize )
+    {
+        radiance = any( isnan( radiance ) | isinf( radiance ) ) ? 0 : clamp( radiance, 0, NRD_FP16_MAX );
+        normHitDist = ( isnan( normHitDist ) | isinf( normHitDist ) ) ? 0 : saturate( normHitDist );
     }
+    */
+
+    // "0" is reserved to mark "no data" samples, skipped due to probabilistic sampling
+    if( normHitDist != 0 )
+        normHitDist = max( normHitDist, NRD_FP16_MIN );
+
+    radiance = _NRD_LinearToYCoCg( radiance );
+
+    return vec4( radiance, normHitDist );
 }
 
-// Adds `newReservoir` into `reservoir`, returns true if the new reservoir's sample was selected.
-// This function assumes the newReservoir has been normalized, so its weightSum means "1/g * 1/M * \sum{g/p}"
-// and the targetPdf is a conversion factor from the newReservoir's space to the reservoir's space (integrand).
-void ReservoirMerge(inout Reservoir self, Reservoir other, float target_pdf, inout uint rng) {
-    uint total_sample_count = self.sample_count + other.sample_count;
-    ReservoirUpdate(self, other.current_sample, target_pdf * other.total_weight * other.sample_count, rng);
-    self.sample_count = total_sample_count;
-}
-
-layout(set = 0, binding = 11, std430) buffer ReservoirData {
-    Reservoir reservoirs[];
-} s_reservoirs;
-
-layout(set = 0, binding = 12, std430) buffer ReservoirDataPrev {
-    Reservoir reservoirs[];
-} s_reservoirs_prev;

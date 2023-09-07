@@ -15,83 +15,8 @@ layout(location = 0) rayPayloadInEXT struct RayPayload {
     vec3 illuminance;
 } payload;
 
-float sample_source_pdf(Sample s) {
-    return max(0.0, dot(s.visible_point_normal, gl_WorldRayDirectionEXT));
-}
-float sample_target_pdf(Sample s) {
-    return s.outgoing_radiance.y;
-}
-
-bool check_disocclusion(Sample initial_sample, vec2 uv) {
-    if ((uv.x < 0.0) || (uv.x > 1.0) || (uv.y < 0.0) || (uv.y > 1.0)) {
-        // reprojected to outside the screen, disocclusion
-        return true;
-	}    
-
-    uvec2 reprojected_pos = uvec2(uv * vec2(gl_LaunchSizeEXT.xy));
-    uint reprojected_voxel_info = imageLoad(u_voxel_id, ivec2(reprojected_pos.xy)).x;
-
-    uint reprojected_voxel_id = reprojected_voxel_info >> 24;
-
-    
-    uint initial_voxel_id = initial_sample.voxel_id >> 24;
-    if (initial_voxel_id == reprojected_voxel_id) {
-        // If inside the same voxel (TODO: and the same face), def not disocclusion
-        return false;
-    }
-
-    // They're in different voxels.
-    uint reprojected_instance_id = reprojected_voxel_info & 0xFFFF;
-    uint initial_instance_id = initial_sample.voxel_id & 0xFFFF;
-    if (initial_instance_id != reprojected_instance_id) {
-        // If inside different instances, def disocclusion
-        return true;
-    }
-    uint reprojected_palette_id = ((reprojected_voxel_info) >> 16) & 0xFF;
-    uint initial_palette_id = ((initial_sample.voxel_id) >> 16) & 0xFF;
-    if (initial_palette_id == reprojected_palette_id) {
-        // If same instance, and same palette id, maybe not disocclusion? need more tests.
-        // TODO Tests:
-        // - Normal test
-        // - Depth test
-        return false;
-    }
-    return false;
-}
-
-
-Reservoir TemporalResampling(Sample initial_sample, inout uint rng) {
-	vec2 uv = (gl_LaunchIDEXT.xy + vec2(0.5)) / gl_LaunchSizeEXT.xy;
-	vec2 motion = imageLoad(u_motion, ivec2(gl_LaunchIDEXT.xy)).xy;
-	uv += motion;
-    
-    Reservoir reservoir;
-    if (check_disocclusion(initial_sample, uv)) {
-        // disocclusion
-        reservoir.sample_count = 0;
-        reservoir.total_weight = 0;
-        reservoir.current_sample = initial_sample;
-    } else {
-        uvec2 pos = uvec2(uv * vec2(gl_LaunchSizeEXT.xy));
-        reservoir = s_reservoirs_prev.reservoirs[pos.x * imageSize(u_illuminance).y + pos.y];
-    }
-    if (reservoir.sample_count > 20) {
-        reservoir.total_weight *= 20 / float(reservoir.sample_count);
-        reservoir.sample_count = 20;
-    }
-    float w = sample_target_pdf(initial_sample) / sample_source_pdf(initial_sample);
-    ReservoirUpdate(reservoir, initial_sample, w, rng);
-
-    // TODO: now, store Rreservoir.
-    s_reservoirs.reservoirs[gl_LaunchIDEXT.x * imageSize(u_illuminance).y + gl_LaunchIDEXT.y] = reservoir;
-    return reservoir;
-}
 
 void main() {
-    
-    uint rng = hash1(hash2(gl_LaunchIDEXT.xy) + pushConstants.rand);
-
-
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
 
     vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
@@ -120,19 +45,8 @@ void main() {
     ;
     vec3 radiance = irradiance * scaling_factors;
 
-    Sample initialSample;
-    initialSample.visible_point_normal = imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)).xyz;
-    initialSample.outgoing_radiance = radiance;
-    initialSample.voxel_id = imageLoad(u_voxel_id, ivec2(gl_LaunchIDEXT.xy)).x;
 
-    Reservoir reservoir = TemporalResampling(initialSample, rng);
-
-    // Equation 6, where the spatial reservoir’s W weight gives all of the
-    // factors other than f(y), which is evaluated as the product of the
-    // BSDF, cosine factor, and the reservoir sample’s outgoing radiance
-
-    // min(1e-8) to avoid NaN
-    float W = reservoir.total_weight / max(1e-8, reservoir.sample_count * sample_target_pdf(reservoir.current_sample));
-    vec3 resampled_radiance = W * reservoir.current_sample.outgoing_radiance;
+    
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance + payload.illuminance, 0.0);
+    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
 }
- 
