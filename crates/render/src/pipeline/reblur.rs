@@ -1,5 +1,10 @@
+use bevy_ecs::event::{Event, EventReader};
+use bevy_ecs::system::lifetimeless::SRes;
+use bevy_ecs::system::{Local, Resource, SystemParamItem};
 use bevy_ecs::world::FromWorld;
-use nrd::TextureDesc;
+use bevy_math::Mat4;
+use bevy_transform::components::GlobalTransform;
+use nrd::{Denoiser, TextureDesc};
 use rhyolite::ash::prelude::VkResult;
 use rhyolite::ash::vk;
 use rhyolite::future::{
@@ -12,12 +17,14 @@ use rhyolite::{
     copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
     ImageViewLike, ResidentImage,
 };
-use rhyolite_bevy::{Allocator, StagingRingBuffer, Device};
+use rhyolite_bevy::{Allocator, Device, StagingRingBuffer};
+use std::borrow::Cow;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use rhyolite::descriptor::{DescriptorSetLayoutBindingInfo, DescriptorSetWrite};
 
-use crate::PinholeProjection;
+use crate::{PinholeProjection, StandardPipelineRenderParams};
 
 pub struct NRDPipeline {
     instance: nrd::Instance,
@@ -26,7 +33,7 @@ pub struct NRDPipeline {
     transient_pool: Vec<TextureDesc>,
     permanent_pool: Vec<TextureDesc>,
     binding_offsets: nrd::SPIRVBindingOffsets,
-    dimensions: (u16, u16)
+    dimensions: (u16, u16),
 }
 const REBLUR_IDENTIFIER: nrd::Identifier = nrd::Identifier(0);
 
@@ -37,11 +44,7 @@ impl FromWorld for NRDPipeline {
     }
 }
 impl NRDPipeline {
-    pub fn new(
-        device: &Arc<rhyolite::Device>,
-        width: u16,
-        height: u16,
-    ) -> Self {
+    pub fn new(device: &Arc<rhyolite::Device>, width: u16, height: u16) -> Self {
         let instance = nrd::Instance::new(&[nrd::DenoiserDesc {
             identifier: REBLUR_IDENTIFIER,
             denoiser: nrd::Denoiser::ReblurDiffuse,
@@ -246,7 +249,7 @@ impl NRDPipeline {
             permanent_pool: desc.permanent_pool().iter().cloned().collect(),
             binding_offsets: library_desc.spirv_binding_offsets.clone(),
             instance,
-            dimensions: (width, height)
+            dimensions: (width, height),
         }
     }
     pub fn resize(&mut self, width: u16, height: u16) {
@@ -263,32 +266,115 @@ impl NRDPipeline {
         let desc = instance.desc();
         assert_eq!(desc.pipelines().len(), self.pipelines.len());
 
-        
         self.transient_pool = desc.transient_pool().iter().cloned().collect();
         self.permanent_pool = desc.permanent_pool().iter().cloned().collect();
     }
 }
 
+#[derive(Default)]
+pub struct NDRPipelineLocalState {
+    frame_index: u32,
+    view_to_clip_matrix: [f32; 16],
+    world_to_view_matrix: [f32; 16],
+}
+pub type NDRPipelineRenderParams = (
+    SRes<Allocator>,
+    SRes<StagingRingBuffer>,
+    Option<SRes<ReblurSettings>>,
+    SRes<bevy_time::Time>,
+    Local<'static, NDRPipelineLocalState>,
+    EventReader<'static, 'static, DenoiserEvent>,
+);
 impl NRDPipeline {
     pub fn render<'a, 'b, T: ImageViewLike + RenderData + 'b>(
         &'a mut self,
-        allocator: &'a Allocator,
-        staging_ring: &'a StagingRingBuffer,
-        common_settings: &nrd::CommonSettings,
-        denoiser_settings: &impl nrd::DenoiserSettings,
+        params: SystemParamItem<'a, '_, NDRPipelineRenderParams>,
         input_images: impl (Fn(nrd::ResourceType) -> &'b RenderImage<T>) + 'a,
         output_images: impl (Fn(nrd::ResourceType) -> &'b mut RenderImage<T>) + 'a,
+        camera: (&PinholeProjection, &GlobalTransform),
         dimensions: (u16, u16),
     ) -> impl GPUCommandFuture<
         Output = (),
         RetainedState: 'static + Disposable,
         RecycledState: 'static + Default,
     > + 'a {
+        let (allocator, staging_ring, reblur_settings, time, mut local_state, mut denoiser_events) =
+            params;
+        let reblur_settings = reblur_settings
+            .as_ref()
+            .map(|a| Cow::Borrowed(a.deref()))
+            .unwrap_or_default();
         if self.dimensions != dimensions {
             self.resize(dimensions.0, dimensions.1);
         }
-        self.instance.set_common_settings(common_settings).unwrap();
-        self.instance.set_denoiser_settings(REBLUR_IDENTIFIER, denoiser_settings);
+        let common_settings = nrd::CommonSettings {
+            view_to_clip_matrix: Mat4::perspective_infinite_reverse_rh(
+                camera.0.fov,
+                dimensions.0 as f32 / dimensions.1 as f32,
+                camera.0.near,
+            )
+            .to_cols_array(),
+            view_to_clip_matrix_prev: local_state.view_to_clip_matrix,
+            world_to_view_matrix: camera.1.compute_matrix().to_cols_array(),
+            world_to_view_matrix_prev: local_state.world_to_view_matrix,
+            world_prev_to_world_matrix: nrd::CommonSettings::default().world_prev_to_world_matrix,
+            motion_vector_scale: reblur_settings.common_settings.motion_vector_scale,
+            camera_jitter: [0.0, 0.0],
+            camera_jitter_prev: [0.0, 0.0], // TODO
+            resolution_scale: [1.0, 1.0],
+            resolution_scale_prev: [1.0, 1.0],
+            time_delta_between_frames: time.delta().as_secs_f32() * 1000.0,
+            denoising_range: reblur_settings.common_settings.denoising_range,
+            disocclusion_threshold: reblur_settings.common_settings.disocclusion_threshold,
+            disocclusion_threshold_alternate: reblur_settings
+                .common_settings
+                .disocclusion_threshold_alternate,
+            split_screen: reblur_settings.common_settings.split_screen,
+            debug: reblur_settings.common_settings.debug,
+            input_subrect_origin: reblur_settings.common_settings.input_subrect_origin,
+            frame_index: local_state.frame_index,
+            accumulation_mode: {
+                let mut should_reset = false;
+                let mut should_clear = false;
+                for event in denoiser_events.iter() {
+                    match event {
+                        DenoiserEvent::Restart => should_reset = true,
+                        DenoiserEvent::ClearAndRestart => {
+                            should_clear = true;
+                            should_reset = true;
+                        }
+                    }
+                }
+                match (should_reset, should_clear) {
+                    (true, false) => nrd::AccumulationMode::Restart,
+                    (true, true) => nrd::AccumulationMode::ClearAndRestart,
+                    _ => nrd::AccumulationMode::Continue,
+                }
+            },
+            is_motion_vector_in_world_space: reblur_settings
+                .common_settings
+                .is_motion_vector_in_world_space,
+            is_history_confidence_available: reblur_settings
+                .common_settings
+                .is_history_confidence_available,
+            is_disocclusion_threshold_mix_available: reblur_settings
+                .common_settings
+                .is_disocclusion_threshold_mix_available,
+            is_base_color_metalness_available: reblur_settings
+                .common_settings
+                .is_base_color_metalness_available,
+            enable_validation: reblur_settings.common_settings.enable_validation,
+        };
+        self.instance.set_common_settings(&common_settings).unwrap();
+        self.instance
+            .set_denoiser_settings(REBLUR_IDENTIFIER, &reblur_settings)
+            .unwrap();
+        {
+            // update local state
+            local_state.frame_index += 1;
+            local_state.view_to_clip_matrix = common_settings.view_to_clip_matrix;
+            local_state.world_to_view_matrix = common_settings.world_to_view_matrix;
+        }
         let dispatches = self
             .instance
             .get_compute_dispatches(&[REBLUR_IDENTIFIER])
@@ -299,6 +385,8 @@ impl NRDPipeline {
         commands! {
             let input_images = input_images;
             let output_images = output_images;
+            let staging_ring = staging_ring;
+            let allocator = allocator;
             let mut constant_buffer_size: u32 = 0;
             const UNIFORM_ALIGNMENT: u32 = 4 * 4;
             for dispatch in dispatches.iter() {
@@ -364,7 +452,7 @@ impl NRDPipeline {
                                 &mut transient_images[resource.index_in_pool as usize],
                                 |_| {
                                     (
-                                        create_image(texture_desc, allocator).unwrap(),
+                                        create_image(texture_desc, &allocator).unwrap(),
                                         vk::ImageLayout::UNDEFINED
                                     )
                                 },
@@ -381,7 +469,7 @@ impl NRDPipeline {
                                 &mut permanent_images[resource.index_in_pool as usize],
                                 |_| {
                                     (
-                                        create_image(texture_desc, allocator).unwrap(),
+                                        create_image(texture_desc, &allocator).unwrap(),
                                         vk::ImageLayout::UNDEFINED
                                     )
                                 },
@@ -567,4 +655,88 @@ fn create_image(
         })?
         .with_2d_view()?;
     Ok(image)
+}
+
+#[derive(Clone)]
+pub struct CommonSettings {
+    // used as "IN_MV * motionVectorScale" (use .z = 0 for 2D screen-space motion)
+    pub motion_vector_scale: [f32; 3],
+
+    // (units) > 0 - use TLAS or tracing range (max value = NRD_FP16_MAX / NRD_FP16_VIEWZ_SCALE - 1 = 524031)
+    pub denoising_range: f32,
+
+    // (normalized %) - if relative distance difference is greater than threshold, history gets reset (0.5-2.5% works well)
+    pub disocclusion_threshold: f32,
+
+    // (normalized %) - alternative disocclusion threshold, which is mixed to based on IN_DISOCCLUSION_THRESHOLD_MIX
+    pub disocclusion_threshold_alternate: f32,
+
+    // [0; 1] - enables "noisy input / denoised output" comparison
+    pub split_screen: f32,
+
+    // For internal needs
+    pub debug: f32,
+
+    // (pixels) - data rectangle origin in ALL input textures
+    pub input_subrect_origin: [u32; 2],
+
+    // If "true" IN_MV is 3D motion in world-space (0 should be everywhere if the scene is static),
+    // otherwise it's 2D (+ optional Z delta) screen-space motion (0 should be everywhere if the camera doesn't move) (recommended value = true)
+    pub is_motion_vector_in_world_space: bool,
+
+    // If "true" IN_DIFF_CONFIDENCE and IN_SPEC_CONFIDENCE are available
+    pub is_history_confidence_available: bool,
+
+    // If "true" IN_DISOCCLUSION_THRESHOLD_MIX is available
+    pub is_disocclusion_threshold_mix_available: bool,
+
+    // If "true" IN_BASECOLOR_METALNESS is available
+    pub is_base_color_metalness_available: bool,
+
+    // Enables debug overlay in OUT_VALIDATION, requires "InstanceCreationDesc::allowValidation = true"
+    pub enable_validation: bool,
+}
+impl Default for CommonSettings {
+    fn default() -> Self {
+        let default = nrd::CommonSettings::default();
+        Self {
+            motion_vector_scale: default.motion_vector_scale,
+            denoising_range: default.denoising_range,
+            disocclusion_threshold: default.disocclusion_threshold,
+            disocclusion_threshold_alternate: default.disocclusion_threshold_alternate,
+            split_screen: default.split_screen,
+            debug: default.debug,
+            input_subrect_origin: default.input_subrect_origin,
+            is_motion_vector_in_world_space: default.is_motion_vector_in_world_space,
+            is_history_confidence_available: default.is_history_confidence_available,
+            is_disocclusion_threshold_mix_available: default
+                .is_disocclusion_threshold_mix_available,
+            is_base_color_metalness_available: default.is_base_color_metalness_available,
+            enable_validation: default.enable_validation,
+        }
+    }
+}
+
+#[derive(Event, Clone, Copy)]
+pub enum DenoiserEvent {
+    // Discards history and resets accumulation
+    Restart,
+
+    // Like RESTART, but additionally clears resources from potential garbage
+    ClearAndRestart,
+}
+
+#[derive(Resource, Clone)]
+pub struct ReblurSettings {
+    pub common_settings: CommonSettings,
+    pub reblur_settings: nrd::ReblurSettings,
+}
+
+impl Default for ReblurSettings {
+    fn default() -> Self {
+        Self {
+            common_settings: Default::default(),
+            reblur_settings: Default::default(),
+        }
+    }
 }

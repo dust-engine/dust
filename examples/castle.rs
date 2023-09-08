@@ -13,8 +13,8 @@ use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dust_render::{
     AutoExposurePipeline, AutoExposurePipelineRenderParams, BlueNoise, ExposureSettings,
-    PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight,
-    TLASStore, ToneMappingPipeline, ToneMappingPipelineRenderParams,
+    PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight, TLASStore,
+    ToneMappingPipeline, ToneMappingPipelineRenderParams,
 };
 
 use glam::{Vec3, Vec3A};
