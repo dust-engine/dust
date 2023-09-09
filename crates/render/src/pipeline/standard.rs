@@ -387,7 +387,7 @@ impl StandardPipeline {
                     .unwrap()
             });
 
-            primary_pipeline.device().write_descriptor_sets([
+            primary_pipeline.device().write_descriptor_sets(&[
                 DescriptorSetWrite::storage_images(
                     desc_set[0],
                     0,
@@ -845,35 +845,44 @@ impl<T: Disposable> Disposable for GBuffer<T> {
         self.voxel_id.dispose();
         self.radiance.dispose();
     }
+    fn retire(&mut self) {
+        self.albedo.retire();
+        self.depth.retire();
+        self.normal.retire();
+        self.motion.retire();
+        self.voxel_id.retire();
+        self.radiance.retire();
+    }
 }
 
 pub fn use_gbuffer(
     this: &mut GBuffer<Option<SharedDeviceStateHostContainer<ImageView<ResidentImage>>>>,
     allocator: &Allocator,
     size: UVec2,
-) -> GBuffer<RenderImage<SharedDeviceState<ImageView<ResidentImage>>>>{
+) -> GBuffer<RenderImage<SharedDeviceState<ImageView<ResidentImage>>>> {
     let extent = vk::Extent3D {
         width: size.x,
         height: size.y,
         depth: 1,
     };
-    let create_image = move |format: vk::Format, usage: vk::ImageUsageFlags, name: &CStr, view_name: &CStr| {
-        use rhyolite::{debug::DebugObject, ImageExt, ImageRequest};
+    let create_image =
+        move |format: vk::Format, usage: vk::ImageUsageFlags, name: &CStr, view_name: &CStr| {
+            use rhyolite::{debug::DebugObject, ImageExt, ImageRequest};
 
-        let mut img = allocator
-            .create_device_image_uninit(&ImageRequest {
-                format,
-                usage,
-                extent,
-                ..Default::default()
-            })
-            .unwrap();
-        img.set_name_cstr(name).unwrap();
+            let mut img = allocator
+                .create_device_image_uninit(&ImageRequest {
+                    format,
+                    usage,
+                    extent,
+                    ..Default::default()
+                })
+                .unwrap();
+            img.set_name_cstr(name).unwrap();
 
-        let mut img_view = img.with_2d_view().unwrap();
-        img_view.set_name_cstr(view_name).unwrap();
-        (img_view, vk::ImageLayout::UNDEFINED)
-    };
+            let mut img_view = img.with_2d_view().unwrap();
+            img_view.set_name_cstr(view_name).unwrap();
+            (img_view, vk::ImageLayout::UNDEFINED)
+        };
     use rhyolite::cstr;
     let should_update = |image: &ImageView<ResidentImage>| extent != image.extent();
     let albedo = use_shared_image(
@@ -893,7 +902,9 @@ pub fn use_gbuffer(
         |_| {
             create_image(
                 vk::Format::R32_SFLOAT,
-                vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
+                vk::ImageUsageFlags::STORAGE
+                    | vk::ImageUsageFlags::TRANSFER_DST
+                    | vk::ImageUsageFlags::SAMPLED,
                 cstr!("GBuffer Depth Image"),
                 cstr!("GBuffer Depth Image View"),
             )
@@ -905,7 +916,7 @@ pub fn use_gbuffer(
         |_| {
             create_image(
                 vk::Format::A2B10G10R10_UNORM_PACK32,
-                vk::ImageUsageFlags::STORAGE,
+                vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
                 cstr!("GBuffer Normal Image"),
                 cstr!("GBuffer Normal Image View"),
             )
@@ -917,7 +928,7 @@ pub fn use_gbuffer(
         |_| {
             create_image(
                 vk::Format::R16G16B16A16_SFLOAT,
-                vk::ImageUsageFlags::STORAGE,
+                vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
                 cstr!("GBuffer Motion Image"),
                 cstr!("GBuffer Motion Image View"),
             )
@@ -941,7 +952,7 @@ pub fn use_gbuffer(
         |_| {
             create_image(
                 vk::Format::R32G32B32A32_SFLOAT,
-                vk::ImageUsageFlags::STORAGE,
+                vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
                 cstr!("GBuffer Noisy Radiance Image"),
                 cstr!("GBuffer Noisy Radiance Image View"),
             )

@@ -136,7 +136,7 @@ impl ToneMappingPipeline {
                     .allocate_for_pipeline_layout(pipeline.layout())
                     .unwrap()
             });
-            pipeline.device().write_descriptor_sets([
+            pipeline.device().write_descriptor_sets(&[
                 DescriptorSetWrite::storage_images(
                     desc_set[0],
                     0,

@@ -334,86 +334,92 @@ pub enum DescriptorSetWriteType<'a> {
 }
 
 impl Device {
-    pub fn write_descriptor_sets<const N: usize>(&self, mut writes: [DescriptorSetWrite; N]) {
-        let mut write_results: [vk::WriteDescriptorSet; N] = [Default::default(); N];
-        for (i, a) in writes.iter_mut().enumerate() {
-            let mut write = vk::WriteDescriptorSet {
-                dst_set: a.dst_set,
-                dst_binding: a.dst_binding,
-                dst_array_element: a.dst_array_element,
-                descriptor_type: match &a.ty {
-                    DescriptorSetWriteType::Sampler(_) => vk::DescriptorType::SAMPLER,
-                    DescriptorSetWriteType::CombinedImageSampler(_) => {
-                        vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+    pub fn write_descriptor_sets(&self, writes: &[DescriptorSetWrite]) {
+        let write_results: Vec<_> = writes
+            .iter()
+            .map(|a| {
+                let mut write = vk::WriteDescriptorSet {
+                    dst_set: a.dst_set,
+                    dst_binding: a.dst_binding,
+                    dst_array_element: a.dst_array_element,
+                    descriptor_type: match &a.ty {
+                        DescriptorSetWriteType::Sampler(_) => vk::DescriptorType::SAMPLER,
+                        DescriptorSetWriteType::CombinedImageSampler(_) => {
+                            vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+                        }
+                        DescriptorSetWriteType::SampledImage(_) => {
+                            vk::DescriptorType::SAMPLED_IMAGE
+                        }
+                        DescriptorSetWriteType::StorageImage(_) => {
+                            vk::DescriptorType::STORAGE_IMAGE
+                        }
+                        DescriptorSetWriteType::UniformTexelBuffer(_) => {
+                            vk::DescriptorType::UNIFORM_TEXEL_BUFFER
+                        }
+                        DescriptorSetWriteType::StorageTexelBuffer(_) => {
+                            vk::DescriptorType::STORAGE_TEXEL_BUFFER
+                        }
+                        DescriptorSetWriteType::UniformBuffer(_) => {
+                            vk::DescriptorType::UNIFORM_BUFFER
+                        }
+                        DescriptorSetWriteType::StorageBuffer(_) => {
+                            vk::DescriptorType::STORAGE_BUFFER
+                        }
+                        DescriptorSetWriteType::UniformBufferDynamic(_) => {
+                            vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC
+                        }
+                        DescriptorSetWriteType::StorageBufferDynamic(_) => {
+                            vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
+                        }
+                        DescriptorSetWriteType::InputAttachment(_) => {
+                            vk::DescriptorType::INPUT_ATTACHMENT
+                        }
+                        DescriptorSetWriteType::InlineUniformBlock { .. } => {
+                            vk::DescriptorType::INLINE_UNIFORM_BLOCK
+                        }
+                        DescriptorSetWriteType::AccelerationStructure { .. } => {
+                            vk::DescriptorType::ACCELERATION_STRUCTURE_KHR
+                        }
+                    },
+                    ..Default::default()
+                };
+                match &a.ty {
+                    DescriptorSetWriteType::StorageImage(image_writes)
+                    | DescriptorSetWriteType::SampledImage(image_writes)
+                    | DescriptorSetWriteType::CombinedImageSampler(image_writes)
+                    | DescriptorSetWriteType::InputAttachment(image_writes)
+                    | DescriptorSetWriteType::Sampler(image_writes) => {
+                        write.descriptor_count = image_writes.len() as u32;
+                        write.p_image_info = (*image_writes).as_ptr();
                     }
-                    DescriptorSetWriteType::SampledImage(_) => vk::DescriptorType::SAMPLED_IMAGE,
-                    DescriptorSetWriteType::StorageImage(_) => vk::DescriptorType::STORAGE_IMAGE,
-                    DescriptorSetWriteType::UniformTexelBuffer(_) => {
-                        vk::DescriptorType::UNIFORM_TEXEL_BUFFER
+                    DescriptorSetWriteType::StorageBufferDynamic(buffer_writes)
+                    | DescriptorSetWriteType::UniformBufferDynamic(buffer_writes)
+                    | DescriptorSetWriteType::StorageBuffer(buffer_writes)
+                    | DescriptorSetWriteType::UniformBuffer(buffer_writes) => {
+                        write.descriptor_count = buffer_writes.len() as u32;
+                        write.p_buffer_info = (*buffer_writes).as_ptr();
                     }
-                    DescriptorSetWriteType::StorageTexelBuffer(_) => {
-                        vk::DescriptorType::STORAGE_TEXEL_BUFFER
+                    DescriptorSetWriteType::StorageTexelBuffer(buffer_views)
+                    | DescriptorSetWriteType::UniformTexelBuffer(buffer_views) => {
+                        write.descriptor_count = buffer_views.len() as u32;
+                        write.p_texel_buffer_view = (*buffer_views).as_ptr();
                     }
-                    DescriptorSetWriteType::UniformBuffer(_) => vk::DescriptorType::UNIFORM_BUFFER,
-                    DescriptorSetWriteType::StorageBuffer(_) => vk::DescriptorType::STORAGE_BUFFER,
-                    DescriptorSetWriteType::UniformBufferDynamic(_) => {
-                        vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC
+                    DescriptorSetWriteType::AccelerationStructure {
+                        info,
+                        accel_structs,
+                    } => {
+                        write.descriptor_count = accel_structs.len() as u32;
+                        write.p_next = info as *const _ as *const _;
                     }
-                    DescriptorSetWriteType::StorageBufferDynamic(_) => {
-                        vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
+                    DescriptorSetWriteType::InlineUniformBlock { info, data } => {
+                        let data: &[u32] = *data;
+                        write.descriptor_count = std::mem::size_of_val(data) as u32;
+                        write.p_next = info as *const _ as *const _;
                     }
-                    DescriptorSetWriteType::InputAttachment(_) => {
-                        vk::DescriptorType::INPUT_ATTACHMENT
-                    }
-                    DescriptorSetWriteType::InlineUniformBlock { .. } => {
-                        vk::DescriptorType::INLINE_UNIFORM_BLOCK
-                    }
-                    DescriptorSetWriteType::AccelerationStructure { .. } => {
-                        vk::DescriptorType::ACCELERATION_STRUCTURE_KHR
-                    }
-                },
-                ..Default::default()
-            };
-            match &mut a.ty {
-                DescriptorSetWriteType::StorageImage(image_writes)
-                | DescriptorSetWriteType::SampledImage(image_writes)
-                | DescriptorSetWriteType::CombinedImageSampler(image_writes)
-                | DescriptorSetWriteType::InputAttachment(image_writes)
-                | DescriptorSetWriteType::Sampler(image_writes) => {
-                    write.descriptor_count = image_writes.len() as u32;
-                    write.p_image_info = (*image_writes).as_ptr();
                 }
-                DescriptorSetWriteType::StorageBufferDynamic(buffer_writes)
-                | DescriptorSetWriteType::UniformBufferDynamic(buffer_writes)
-                | DescriptorSetWriteType::StorageBuffer(buffer_writes)
-                | DescriptorSetWriteType::UniformBuffer(buffer_writes) => {
-                    write.descriptor_count = buffer_writes.len() as u32;
-                    write.p_buffer_info = (*buffer_writes).as_ptr();
-                }
-                DescriptorSetWriteType::StorageTexelBuffer(buffer_views)
-                | DescriptorSetWriteType::UniformTexelBuffer(buffer_views) => {
-                    write.descriptor_count = buffer_views.len() as u32;
-                    write.p_texel_buffer_view = (*buffer_views).as_ptr();
-                }
-                DescriptorSetWriteType::AccelerationStructure {
-                    info,
-                    accel_structs,
-                } => {
-                    write.descriptor_count = accel_structs.len() as u32;
-                    info.p_acceleration_structures = (*accel_structs).as_ptr();
-                    info.acceleration_structure_count = accel_structs.len() as u32;
-                    write.p_next = info as *const _ as *const _;
-                }
-                DescriptorSetWriteType::InlineUniformBlock { info, data } => {
-                    let data: &[u32] = *data;
-                    write.descriptor_count = std::mem::size_of_val(data) as u32;
-                    info.p_data = data.as_ptr() as *const _;
-                    info.data_size = std::mem::size_of_val(data) as u32;
-                    write.p_next = info as *const _ as *const _;
-                }
-            }
-            write_results[i] = write;
-        }
+                write
+            })
+            .collect();
         unsafe {
             self.update_descriptor_sets(&write_results, &[]);
         }

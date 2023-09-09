@@ -141,7 +141,7 @@ impl AutoExposurePipeline {
                     .allocate_for_pipeline_layout(&self.layout)
                     .unwrap()
             });
-            self.layout.device().write_descriptor_sets([
+            self.layout.device().write_descriptor_sets(&[
                 DescriptorSetWrite::storage_images(
                     desc_set[0],
                     0,

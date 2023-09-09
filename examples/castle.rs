@@ -11,15 +11,15 @@ use bevy_input::prelude::{KeyCode, MouseButton};
 use bevy_time::Time;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
-use dust_render::nrd::NRDPipeline;
+use dust_render::nrd::{DenoiserEvent, NRDPipeline};
 use dust_render::use_gbuffer;
 use dust_render::{
-    AutoExposurePipeline, AutoExposurePipelineRenderParams, BlueNoise, ExposureSettings,
-    PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight, TLASStore,
-    ToneMappingPipeline, ToneMappingPipelineRenderParams, pipeline::CachablePipeline
+    pipeline::CachablePipeline, AutoExposurePipeline, AutoExposurePipelineRenderParams, BlueNoise,
+    ExposureSettings, PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight,
+    TLASStore, ToneMappingPipeline, ToneMappingPipelineRenderParams,
 };
 
-use glam::{Vec3, Vec3A, UVec2};
+use glam::{UVec2, Vec3, Vec3A};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
 use rhyolite::{
@@ -76,7 +76,8 @@ fn main() {
         .init_resource::<ToneMappingPipeline>()
         .init_resource::<AutoExposurePipeline>()
         .init_resource::<ExposureSettings>()
-        .init_resource::<NRDPipeline>();
+        .init_resource::<NRDPipeline>()
+        .add_event::<DenoiserEvent>();
     let main_window = app
         .world
         .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -253,6 +254,7 @@ impl Plugin for RenderSystem {
 
                         retain!(exposure_avg);
                         retain!(accel_struct);
+                        retain!((gbuffer, denoised_radiance_image));
                         if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]

@@ -43,6 +43,12 @@ pub struct DescriptorSetLayout {
     pub(crate) raw: vk::DescriptorSetLayout,
     pub binding_infos: Vec<DescriptorSetLayoutBindingInfo>,
 }
+impl std::fmt::Debug for DescriptorSetLayout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DescriptorSetLayout")?;
+        f.debug_list().entries(self.binding_infos.iter()).finish()
+    }
+}
 impl Drop for DescriptorSetLayout {
     fn drop(&mut self) {
         unsafe {

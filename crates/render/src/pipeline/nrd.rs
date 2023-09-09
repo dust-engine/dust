@@ -153,6 +153,10 @@ impl NRDPipeline {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
                     descriptor_count: desc.descriptor_pool_desc.storage_textures_max_num,
                 },
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::SAMPLER,
+                    descriptor_count: desc.descriptor_pool_desc.samplers_max_num,
+                }, // https://github.com/KhronosGroup/Vulkan-Docs/issues/1395
             ],
             vk::DescriptorPoolCreateFlags::empty(),
         )
@@ -169,7 +173,7 @@ impl NRDPipeline {
                     pipeline_desc
                         .resource_ranges()
                         .iter()
-                        .map(|resource_range| {
+                        .flat_map(|resource_range| {
                             // texture bindings
                             let (offset, ty) = match resource_range.descriptor_type {
                                 nrd::DescriptorType::Texture => (
@@ -183,13 +187,15 @@ impl NRDPipeline {
                                     vk::DescriptorType::STORAGE_IMAGE,
                                 ),
                             };
-                            DescriptorSetLayoutBindingInfo {
-                                binding: resource_range.base_register_index + offset,
-                                descriptor_type: ty,
-                                descriptor_count: resource_range.descriptors_num,
-                                stage_flags: vk::ShaderStageFlags::COMPUTE,
-                                immutable_samplers: Default::default(),
-                            }
+                            (0..resource_range.descriptors_num).map(move |i| {
+                                DescriptorSetLayoutBindingInfo {
+                                    binding: resource_range.base_register_index + offset + i,
+                                    descriptor_type: ty,
+                                    descriptor_count: 1,
+                                    stage_flags: vk::ShaderStageFlags::COMPUTE,
+                                    immutable_samplers: Default::default(),
+                                }
+                            })
                         })
                         .chain(sampler_bindings.iter().cloned())
                         .chain(
@@ -397,7 +403,7 @@ impl NRDPipeline {
             let mut const_buffer = use_shared_state(using!(), |_| {
                 allocator.create_device_buffer_uninit(
                     constant_buffer_size as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
+                    vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                     UNIFORM_ALIGNMENT
                 ).unwrap()
             }, |old| (old.size() as u32) < constant_buffer_size);
@@ -405,6 +411,9 @@ impl NRDPipeline {
             let mut constant_buffer_staging_data = staging_ring.allocate(constant_buffer_size as u64).unwrap();
             for dispatch in dispatches.iter() {
                 let new_buffer = dispatch.constant_buffer();
+                if new_buffer.is_empty() {
+                    continue;
+                }
                 constant_buffer_staging_data[current_buffer_offset .. current_buffer_offset + new_buffer.len()].copy_from_slice(new_buffer);
                 current_buffer_offset += new_buffer.len();
                 current_buffer_offset = current_buffer_offset.next_multiple_of(UNIFORM_ALIGNMENT as usize);
@@ -435,9 +444,10 @@ impl NRDPipeline {
                 let desc_set = desc_set[*desc_set_index as usize];
                 *desc_set_index += 1;
 
-                current_buffer_offset += dispatch.constant_buffer().len();
-                current_buffer_offset = current_buffer_offset.next_multiple_of(UNIFORM_ALIGNMENT as usize);
-
+                if !dispatch.constant_buffer().is_empty() {
+                    current_buffer_offset += dispatch.constant_buffer().len();
+                    current_buffer_offset = current_buffer_offset.next_multiple_of(UNIFORM_ALIGNMENT as usize);
+                }
 
                 let mut img_to_access = Vec::new();
                 let mut img_to_access_readwrite = Vec::new();
@@ -510,34 +520,39 @@ impl NRDPipeline {
                     };
                 }
 
-                let desc_writes = (
-                    DescriptorSetWrite::sampled_images(
-                        desc_set,
-                        self.binding_offsets.sampler_offset,
-                        0,
-                        &sampled_image_writes,
-                    ),
-                    DescriptorSetWrite::storage_images(
-                        desc_set,
-                        self.binding_offsets.storage_texture_and_buffer_offset,
-                        0,
-                        &storage_image_writes,
-                    ),
-                );
-                if dispatch.constant_buffer().is_empty() {
-                    self.desc_pool.device().write_descriptor_sets(desc_writes.into());
-                } else {
-                    self.desc_pool.device().write_descriptor_sets([
-                        DescriptorSetWrite::uniform_buffers(
+                {
+                    let buffer_writes = [vk::DescriptorBufferInfo {
+                        buffer: const_buffer.inner().raw_buffer(),
+                        offset: current_buffer_offset as u64,
+                        range: dispatch.constant_buffer().len() as u64
+                    }];
+                    let mut desc_writes = arrayvec::ArrayVec::<DescriptorSetWrite, 3>::new();
+                    if !sampled_image_writes.is_empty() {
+                        desc_writes.push(DescriptorSetWrite::sampled_images(
+                            desc_set,
+                            self.binding_offsets.texture_offset,
+                            0,
+                            &sampled_image_writes,
+                        ));
+                    }
+                    if !storage_image_writes.is_empty() {
+                        desc_writes.push(DescriptorSetWrite::storage_images(
+                            desc_set,
+                            self.binding_offsets.storage_texture_and_buffer_offset,
+                            0,
+                            &storage_image_writes,
+                        ));
+                    }
+                    if !dispatch.constant_buffer().is_empty() {
+                        desc_writes.push(DescriptorSetWrite::uniform_buffers(
                             desc_set,
                             self.binding_offsets.constant_buffer_offset,
                             0,
-                            &[],
+                            &buffer_writes,
                             false
-                        ),
-                        desc_writes.0,
-                        desc_writes.1
-                    ]);
+                        ));
+                    }
+                    self.desc_pool.device().write_descriptor_sets(&desc_writes);
                 }
                 sampled_image_writes.clear();
                 storage_image_writes.clear();
@@ -583,6 +598,7 @@ impl NRDPipeline {
                                 nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness,
                                 nrd::ResourceType::IN_VIEWZ => in_viewz,
                                 nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance,
+                                nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance,
                                 _ => panic!()
                             };
                             ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);

@@ -29,7 +29,9 @@ pub use tone_mapping::{ToneMappingPipeline, ToneMappingPipelineRenderParams};
 
 pub use auto_exposure::*;
 pub use plugin::RayTracingPipelinePlugin;
-pub use standard::{StandardPipeline, StandardPipelinePlugin, StandardPipelineRenderParams, use_gbuffer};
+pub use standard::{
+    use_gbuffer, StandardPipeline, StandardPipelinePlugin, StandardPipelineRenderParams,
+};
 
 #[derive(Clone)]
 struct RayTracingPipelineCharacteristicsMaterialInfo {
