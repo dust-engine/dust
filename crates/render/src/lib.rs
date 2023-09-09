@@ -13,7 +13,7 @@ mod deferred_task;
 mod geometry;
 mod material;
 mod noise;
-mod pipeline;
+pub mod pipeline;
 mod projection;
 mod sbt;
 mod shader;

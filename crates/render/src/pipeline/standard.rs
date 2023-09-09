@@ -1,3 +1,4 @@
+use std::ffi::CStr;
 use std::{ops::Deref, sync::Arc};
 
 use bevy_app::{Plugin, PostUpdate};
@@ -9,14 +10,14 @@ use bevy_ecs::schedule::IntoSystemConfigs;
 use bevy_ecs::system::lifetimeless::SResMut;
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
 use bevy_ecs::system::{Commands, Query};
-use bevy_math::{Mat4, Vec3};
+use bevy_math::{Mat4, UVec2, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 
 use crevice::std430::{AsStd430, Std430};
 use rand::Rng;
 use rhyolite::future::{
-    run, use_shared_resource_flipflop, use_shared_state, use_state, GPUCommandFutureExt,
-    SharedDeviceState,
+    run, use_shared_image, use_shared_resource_flipflop, use_shared_state, use_state,
+    GPUCommandFutureExt, SharedDeviceState, SharedDeviceStateHostContainer,
 };
 use rhyolite::{
     accel_struct::AccelerationStructure,
@@ -30,7 +31,7 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
-use rhyolite::{initialize_buffer, ResidentBuffer};
+use rhyolite::{initialize_buffer, ImageView, ResidentBuffer, ResidentImage};
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 use rhyolite_bevy::{RenderSystems, StagingRingBuffer};
 
@@ -260,12 +261,7 @@ impl StandardPipeline {
 
     pub fn render<'a>(
         &'a mut self,
-        target_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
-        albedo_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
-        normal_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
-        depth_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
-        motion_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
-        voxel_id_image: &'a mut RenderImage<impl ImageViewLike + RenderData>,
+        gbuffer: &'a mut GBuffer<RenderImage<impl ImageViewLike + RenderData>>,
         noise_image: &'a SlicedImageArray,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         params: SystemParamItem<'a, '_, StandardPipelineRenderParams>,
@@ -309,7 +305,7 @@ impl StandardPipeline {
 
         let camera_settings = {
             let proj = {
-                let extent = target_image.inner().extent();
+                let extent = gbuffer.radiance.inner().extent();
                 Mat4::perspective_infinite_reverse_rh(
                     camera.0.fov,
                     extent.width as f32 / extent.height as f32,
@@ -397,12 +393,12 @@ impl StandardPipeline {
                     0,
                     0,
                     &[
-                        target_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
-                        albedo_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
-                        normal_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
-                        depth_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
-                        motion_image.inner().as_descriptor(vk::ImageLayout::GENERAL),
-                        voxel_id_image.inner().as_descriptor(vk::ImageLayout::GENERAL)
+                        gbuffer.radiance.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        gbuffer.albedo.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        gbuffer.normal.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        gbuffer.depth.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        gbuffer.motion.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        gbuffer.voxel_id.inner().as_descriptor(vk::ImageLayout::GENERAL)
                     ]
                 ),
                 DescriptorSetWrite::sampled_images(
@@ -439,7 +435,7 @@ impl StandardPipeline {
                 ),
             ]);
 
-            let extent = target_image.inner().extent();
+            let extent = gbuffer.radiance.inner().extent();
             run(|ctx: &rhyolite::future::CommandBufferRecordContext, command_buffer: vk::CommandBuffer| unsafe {
                 let device = ctx.device();
                 let rand: u32 = rand::thread_rng().gen();
@@ -480,8 +476,8 @@ impl StandardPipeline {
                         size: hitgroup_sbt_buffer.inner.size(),
                     },
                     &vk::StridedDeviceAddressRegionKHR::default(),
-                    2048,
-                    2048,
+                    512,
+                    512,
                     1,
                 );
             }, |ctx: &mut rhyolite::future::StageContext| {
@@ -544,37 +540,37 @@ impl StandardPipeline {
                     vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
                 );
                 ctx.write_image(
-                    albedo_image,
+                    &mut gbuffer.albedo,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
-                    depth_image,
+                    &mut gbuffer.depth,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
-                    normal_image,
+                    &mut gbuffer.normal,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
-                    target_image,
+                    &mut gbuffer.radiance,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
-                    motion_image,
+                    &mut gbuffer.motion,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
-                    voxel_id_image,
+                    &mut gbuffer.voxel_id,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
@@ -625,19 +621,19 @@ impl StandardPipeline {
                     vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
                 );
                 ctx.write_image(
-                    target_image,
+                    &mut gbuffer.radiance,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
-                    depth_image,
+                    &gbuffer.depth,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
-                    normal_image,
+                    &gbuffer.normal,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
@@ -688,37 +684,37 @@ impl StandardPipeline {
                     vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
                 );
                 ctx.read_image(
-                    target_image,
+                    &gbuffer.radiance,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
-                    target_image,
+                    &mut gbuffer.radiance,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
-                    albedo_image,
+                    &gbuffer.albedo,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
-                    depth_image,
+                    &gbuffer.depth,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
-                    normal_image,
+                    &gbuffer.normal,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
-                    motion_image,
+                    &gbuffer.motion,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
@@ -729,13 +725,13 @@ impl StandardPipeline {
                     vk::AccessFlags2::UNIFORM_READ,
                 );
                 ctx.write_image(
-                    voxel_id_image,
+                    &mut gbuffer.voxel_id,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(
-                    voxel_id_image,
+                    &gbuffer.voxel_id,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
@@ -827,5 +823,137 @@ pub fn extract_global_transforms(
                     mat: global_transform.clone(),
                 });
         }
+    }
+}
+
+#[derive(Default)]
+pub struct GBuffer<T> {
+    pub albedo: T,
+    pub depth: T,
+    pub normal: T,
+    pub motion: T,
+    pub voxel_id: T,
+    pub radiance: T,
+}
+
+impl<T: Disposable> Disposable for GBuffer<T> {
+    fn dispose(self) {
+        self.albedo.dispose();
+        self.depth.dispose();
+        self.normal.dispose();
+        self.motion.dispose();
+        self.voxel_id.dispose();
+        self.radiance.dispose();
+    }
+}
+
+pub fn use_gbuffer(
+    this: &mut GBuffer<Option<SharedDeviceStateHostContainer<ImageView<ResidentImage>>>>,
+    allocator: &Allocator,
+    size: UVec2,
+) -> GBuffer<RenderImage<SharedDeviceState<ImageView<ResidentImage>>>>{
+    let extent = vk::Extent3D {
+        width: size.x,
+        height: size.y,
+        depth: 1,
+    };
+    let create_image = move |format: vk::Format, usage: vk::ImageUsageFlags, name: &CStr, view_name: &CStr| {
+        use rhyolite::{debug::DebugObject, ImageExt, ImageRequest};
+
+        let mut img = allocator
+            .create_device_image_uninit(&ImageRequest {
+                format,
+                usage,
+                extent,
+                ..Default::default()
+            })
+            .unwrap();
+        img.set_name_cstr(name).unwrap();
+
+        let mut img_view = img.with_2d_view().unwrap();
+        img_view.set_name_cstr(view_name).unwrap();
+        (img_view, vk::ImageLayout::UNDEFINED)
+    };
+    use rhyolite::cstr;
+    let should_update = |image: &ImageView<ResidentImage>| extent != image.extent();
+    let albedo = use_shared_image(
+        &mut this.albedo,
+        |_| {
+            create_image(
+                vk::Format::A2B10G10R10_UNORM_PACK32,
+                vk::ImageUsageFlags::STORAGE,
+                cstr!("GBuffer Albedo Image"),
+                cstr!("GBuffer Albedo Image View"),
+            )
+        },
+        should_update,
+    );
+    let depth = use_shared_image(
+        &mut this.depth,
+        |_| {
+            create_image(
+                vk::Format::R32_SFLOAT,
+                vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
+                cstr!("GBuffer Depth Image"),
+                cstr!("GBuffer Depth Image View"),
+            )
+        },
+        should_update,
+    );
+    let normal = use_shared_image(
+        &mut this.normal,
+        |_| {
+            create_image(
+                vk::Format::A2B10G10R10_UNORM_PACK32,
+                vk::ImageUsageFlags::STORAGE,
+                cstr!("GBuffer Normal Image"),
+                cstr!("GBuffer Normal Image View"),
+            )
+        },
+        should_update,
+    );
+    let motion = use_shared_image(
+        &mut this.motion,
+        |_| {
+            create_image(
+                vk::Format::R16G16B16A16_SFLOAT,
+                vk::ImageUsageFlags::STORAGE,
+                cstr!("GBuffer Motion Image"),
+                cstr!("GBuffer Motion Image View"),
+            )
+        },
+        should_update,
+    );
+    let voxel_id = use_shared_image(
+        &mut this.voxel_id,
+        |_| {
+            create_image(
+                vk::Format::R32_UINT,
+                vk::ImageUsageFlags::STORAGE,
+                cstr!("GBuffer Voxel ID Image"),
+                cstr!("GBuffer Voxel ID Image View"),
+            )
+        },
+        should_update,
+    );
+    let radiance = use_shared_image(
+        &mut this.radiance,
+        |_| {
+            create_image(
+                vk::Format::R32G32B32A32_SFLOAT,
+                vk::ImageUsageFlags::STORAGE,
+                cstr!("GBuffer Noisy Radiance Image"),
+                cstr!("GBuffer Noisy Radiance Image View"),
+            )
+        },
+        should_update,
+    );
+    GBuffer {
+        albedo,
+        depth,
+        normal,
+        motion,
+        voxel_id,
+        radiance,
     }
 }

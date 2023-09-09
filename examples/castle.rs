@@ -11,13 +11,15 @@ use bevy_input::prelude::{KeyCode, MouseButton};
 use bevy_time::Time;
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
+use dust_render::nrd::NRDPipeline;
+use dust_render::use_gbuffer;
 use dust_render::{
     AutoExposurePipeline, AutoExposurePipelineRenderParams, BlueNoise, ExposureSettings,
     PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight, TLASStore,
-    ToneMappingPipeline, ToneMappingPipelineRenderParams,
+    ToneMappingPipeline, ToneMappingPipelineRenderParams, pipeline::CachablePipeline
 };
 
-use glam::{Vec3, Vec3A};
+use glam::{Vec3, Vec3A, UVec2};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
 use rhyolite::{
@@ -73,7 +75,8 @@ fn main() {
         .add_systems(bevy_app::Update, cursor_grab_system)
         .init_resource::<ToneMappingPipeline>()
         .init_resource::<AutoExposurePipeline>()
-        .init_resource::<ExposureSettings>();
+        .init_resource::<ExposureSettings>()
+        .init_resource::<NRDPipeline>();
     let main_window = app
         .world
         .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -143,12 +146,14 @@ impl Plugin for RenderSystem {
                 ResMut<StandardPipeline>,
                 ResMut<AutoExposurePipeline>,
                 ResMut<ToneMappingPipeline>,
+                ResMut<dust_render::pipeline::nrd::NRDPipeline>,
             ),
              mut recycled_state: Local<_>,
              pipeline_params: (
                 SystemParamItem<StandardPipelineRenderParams>,
                 SystemParamItem<AutoExposurePipelineRenderParams>,
                 SystemParamItem<ToneMappingPipelineRenderParams>,
+                SystemParamItem<dust_render::pipeline::nrd::NDRPipelineRenderParams>,
             ),
              cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
              blue_noise: Res<BlueNoise>,
@@ -158,11 +163,13 @@ impl Plugin for RenderSystem {
                     mut ray_tracing_pipeline,
                     mut auto_exposure_pipeline,
                     mut tone_mapping_pipeline,
+                    mut nrd_pipeline,
                 ) = pipelines;
                 let (
                     ray_tracing_pipeline_params,
                     auto_exposure_pipeline_params,
                     tone_mapping_pipeline_params,
+                    nrd_pipeline_params,
                 ) = pipeline_params;
                 let Some((_, mut swapchain)) = windows.iter_mut().next() else {
                     return;
@@ -180,82 +187,12 @@ impl Plugin for RenderSystem {
                 let future = gpu! {
                     let mut swapchain_image = swapchain_image.await;
                     commands! {
-                        let mut albedo_image = rhyolite::future::use_shared_image(using!(), |_| {
-                            (
-                                allocator
-                                    .create_device_image_uninit(
-                                        &ImageRequest {
-                                            format: vk::Format::A2B10G10R10_UNORM_PACK32, // TODO: try bgr?
-                                            usage: vk::ImageUsageFlags::STORAGE,
-                                            extent: swapchain_image.inner().extent(),
-                                            ..Default::default()
-                                        }
-                                    ).unwrap().with_2d_view().unwrap(),
-                                vk::ImageLayout::UNDEFINED
-                            )
-                        }, |image| swapchain_image.inner().extent() != image.extent());
-
-                        let mut depth_image = rhyolite::future::use_shared_image(using!(), |_| {
-                            (
-                                allocator
-                                    .create_device_image_uninit(
-                                        &ImageRequest {
-                                            format: vk::Format::R32_SFLOAT,
-                                            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
-                                            extent: swapchain_image.inner().extent(),
-                                            ..Default::default()
-                                        }
-                                    ).unwrap().with_2d_view().unwrap(),
-                                vk::ImageLayout::UNDEFINED,
-                            )
-                        }, |image| swapchain_image.inner().extent() != image.extent());
-
-
-                        let mut normal_image = rhyolite::future::use_shared_image(using!(), |_| {
-                            (
-                                allocator
-                                    .create_device_image_uninit(
-                                        &ImageRequest {
-                                            format: vk::Format::A2B10G10R10_UNORM_PACK32, // Or RGB?
-                                            usage: vk::ImageUsageFlags::STORAGE,
-                                            extent: swapchain_image.inner().extent(),
-                                            ..Default::default()
-                                        }
-                                    ).unwrap().with_2d_view().unwrap(),
-                                vk::ImageLayout::UNDEFINED,
-                            )
-                        }, |image| swapchain_image.inner().extent() != image.extent());
-
-                        let mut motion_image = rhyolite::future::use_shared_image(using!(), |_| {
-                            (
-                                allocator
-                                    .create_device_image_uninit(
-                                        &ImageRequest {
-                                            format: vk::Format::R16G16B16A16_SFLOAT,
-                                            usage: vk::ImageUsageFlags::STORAGE,
-                                            extent: swapchain_image.inner().extent(),
-                                            ..Default::default()
-                                        }
-                                    ).unwrap().with_2d_view().unwrap(),
-                                vk::ImageLayout::UNDEFINED,
-                            )
-                        }, |image| swapchain_image.inner().extent() != image.extent());
-                        let mut voxel_id_image = rhyolite::future::use_shared_image(using!(), |_| {
-                            (
-                                allocator
-                                    .create_device_image_uninit(
-                                        &ImageRequest {
-                                            format: vk::Format::R32_UINT,
-                                            usage: vk::ImageUsageFlags::STORAGE,
-                                            extent: swapchain_image.inner().extent(),
-                                            ..Default::default()
-                                        }
-                                    ).unwrap().with_2d_view().unwrap(),
-                                vk::ImageLayout::UNDEFINED,
-                            )
-                        }, |image| swapchain_image.inner().extent() != image.extent());
-
-                        let mut radiance_image = rhyolite::future::use_shared_image(using!(), |_| {
+                        let mut gbuffer = use_gbuffer(
+                            using!(),
+                            &allocator,
+                            UVec2::new(swapchain_image.inner().extent().width, swapchain_image.inner().extent().height),
+                        );
+                        let mut denoised_radiance_image = rhyolite::future::use_shared_image(using!(), |_| {
                             (
                                 {
                                     let mut img = allocator
@@ -267,24 +204,20 @@ impl Plugin for RenderSystem {
                                             ..Default::default()
                                         }
                                     ).unwrap();
-                                    img.set_name_cstr(cstr!("Illuminance Image")).unwrap();
+                                    img.set_name_cstr(cstr!("Denoised Radiance Image")).unwrap();
 
                                     let mut img_view = img.with_2d_view().unwrap();
-                                    img_view.set_name_cstr(cstr!("Illuminance Image View")).unwrap();
+                                    img_view.set_name_cstr(cstr!("Denoised Radiance View")).unwrap();
                                     img_view
                                 },
                                 vk::ImageLayout::UNDEFINED,
                             )
                         }, |image| swapchain_image.inner().extent() != image.extent());
 
+
                         let accel_struct = accel_struct.await;
                         if let Some(render) = ray_tracing_pipeline.render(
-                            &mut radiance_image,
-                            &mut albedo_image,
-                            &mut normal_image,
-                            &mut depth_image,
-                            &mut motion_image,
-                            &mut voxel_id_image,
+                            &mut gbuffer,
                             &blue_noise,
                             &accel_struct,
                             ray_tracing_pipeline_params,
@@ -292,12 +225,26 @@ impl Plugin for RenderSystem {
                         ) {
                             render.await;
                         }
-                        let exposure = auto_exposure_pipeline.render(&radiance_image, &auto_exposure_pipeline_params).await;
+                        {
+                            let size = swapchain_image.inner().extent();
+                            nrd_pipeline.render(
+                                nrd_pipeline_params,
+                                &gbuffer.motion,
+                                &gbuffer.normal,
+                                &gbuffer.depth,
+                                &gbuffer.radiance,
+                                &mut denoised_radiance_image,
+                                camera,
+                                (size.width as u16, size.height as u16)
+                            ).await;
+                        }
+
+                        let exposure = auto_exposure_pipeline.render(&denoised_radiance_image, &auto_exposure_pipeline_params).await;
                         let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
                         let color_space = swapchain_image.inner().color_space().clone();
                         tone_mapping_pipeline.render(
-                            &radiance_image,
-                            &albedo_image,
+                            &denoised_radiance_image,
+                            &gbuffer.albedo,
                             &mut swapchain_image,
                             &exposure_avg,
                             &color_space,
@@ -306,7 +253,6 @@ impl Plugin for RenderSystem {
 
                         retain!(exposure_avg);
                         retain!(accel_struct);
-                        retain!((radiance_image, albedo_image, normal_image, depth_image, motion_image, voxel_id_image));
                         if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]

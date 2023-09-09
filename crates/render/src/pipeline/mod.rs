@@ -12,8 +12,8 @@ mod builder;
 mod cache;
 mod compute;
 mod manager;
+pub mod nrd;
 mod plugin;
-mod reblur;
 mod sky;
 mod standard;
 mod tone_mapping;
@@ -29,7 +29,7 @@ pub use tone_mapping::{ToneMappingPipeline, ToneMappingPipelineRenderParams};
 
 pub use auto_exposure::*;
 pub use plugin::RayTracingPipelinePlugin;
-pub use standard::{StandardPipeline, StandardPipelinePlugin, StandardPipelineRenderParams};
+pub use standard::{StandardPipeline, StandardPipelinePlugin, StandardPipelineRenderParams, use_gbuffer};
 
 #[derive(Clone)]
 struct RayTracingPipelineCharacteristicsMaterialInfo {

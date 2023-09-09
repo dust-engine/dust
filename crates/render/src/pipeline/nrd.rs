@@ -4,7 +4,7 @@ use bevy_ecs::system::{Local, Resource, SystemParamItem};
 use bevy_ecs::world::FromWorld;
 use bevy_math::Mat4;
 use bevy_transform::components::GlobalTransform;
-use nrd::{Denoiser, TextureDesc};
+pub use nrd::*;
 use rhyolite::ash::prelude::VkResult;
 use rhyolite::ash::vk;
 use rhyolite::future::{
@@ -26,6 +26,7 @@ use rhyolite::descriptor::{DescriptorSetLayoutBindingInfo, DescriptorSetWrite};
 
 use crate::{PinholeProjection, StandardPipelineRenderParams};
 
+#[derive(Resource)]
 pub struct NRDPipeline {
     instance: nrd::Instance,
     pipelines: Vec<(rhyolite::ComputePipeline, SmallVec<[vk::DescriptorSet; 4]>)>,
@@ -286,11 +287,14 @@ pub type NDRPipelineRenderParams = (
     EventReader<'static, 'static, DenoiserEvent>,
 );
 impl NRDPipeline {
-    pub fn render<'a, 'b, T: ImageViewLike + RenderData + 'b>(
+    pub fn render<'a, T: ImageViewLike + RenderData + 'a>(
         &'a mut self,
         params: SystemParamItem<'a, '_, NDRPipelineRenderParams>,
-        input_images: impl (Fn(nrd::ResourceType) -> &'b RenderImage<T>) + 'a,
-        output_images: impl (Fn(nrd::ResourceType) -> &'b mut RenderImage<T>) + 'a,
+        in_motion: &'a RenderImage<T>,
+        in_normal_roughness: &'a RenderImage<T>,
+        in_viewz: &'a RenderImage<T>,
+        in_radiance: &'a RenderImage<T>,
+        out_radiance: &'a mut RenderImage<T>,
         camera: (&PinholeProjection, &GlobalTransform),
         dimensions: (u16, u16),
     ) -> impl GPUCommandFuture<
@@ -375,18 +379,14 @@ impl NRDPipeline {
             local_state.view_to_clip_matrix = common_settings.view_to_clip_matrix;
             local_state.world_to_view_matrix = common_settings.world_to_view_matrix;
         }
-        let dispatches = self
-            .instance
-            .get_compute_dispatches(&[REBLUR_IDENTIFIER])
-            .unwrap();
 
         // An offset into the `resources` array. Increments inside the iterator
 
-        commands! {
-            let input_images = input_images;
-            let output_images = output_images;
-            let staging_ring = staging_ring;
-            let allocator = allocator;
+        commands! { move
+            let dispatches = self
+            .instance
+            .get_compute_dispatches(&[REBLUR_IDENTIFIER])
+            .unwrap();
             let mut constant_buffer_size: u32 = 0;
             const UNIFORM_ALIGNMENT: u32 = 4 * 4;
             for dispatch in dispatches.iter() {
@@ -482,10 +482,13 @@ impl NRDPipeline {
                         },
                         _ => {
                             borrowed_img_to_access.push((resource.ty, has_write));
-                            if has_write {
-                                output_images(resource.ty).inner().raw_image_view()
-                            } else {
-                                input_images(resource.ty).inner().raw_image_view()
+                            match resource.ty {
+                                nrd::ResourceType::IN_MV => in_motion.inner().raw_image_view(),
+                                nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness.inner().raw_image_view(),
+                                nrd::ResourceType::IN_VIEWZ => in_viewz.inner().raw_image_view(),
+                                nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance.inner().raw_image_view(),
+                                nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance.inner().raw_image_view(),
+                                _ => panic!()
                             }
                         }
                     };
@@ -571,11 +574,17 @@ impl NRDPipeline {
                     }
                     for (img_ty, has_write) in borrowed_img_to_access.iter_mut() {
                         if *has_write {
-                            let img = output_images(*img_ty);
-                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
-                            ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                            matches!(*img_ty, nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST);
+                            ctx.read_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
+                            ctx.write_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
                         } else {
-                            let img = input_images(*img_ty);
+                            let img = match img_ty {
+                                nrd::ResourceType::IN_MV => in_motion,
+                                nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness,
+                                nrd::ResourceType::IN_VIEWZ => in_viewz,
+                                nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance,
+                                _ => panic!()
+                            };
                             ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
                         }
                     }

@@ -52,7 +52,7 @@ impl CommandsTransformer for CommandsTransformState {
         let tokens = quote::quote_spanned! {input.span()=>
             {
                 let mut fut = #base;
-                unsafe {
+                let a = unsafe {
                     let mut fut_pinned = std::pin::Pin::new_unchecked(&mut fut);
                     if let Some((out, retain)) = ::rhyolite::future::GPUCommandFuture::init(fut_pinned.as_mut(), &mut *(__fut_global_ctx_ptr as *mut _), &mut {&mut *__recycled_states}.#index) {
                         #dispose_replace_stmt
@@ -74,7 +74,9 @@ impl CommandsTransformer for CommandsTransformState {
                         ::rhyolite::future::command_buffer_scope_end(&mut *(__fut_global_ctx_ptr as *mut _));
                         ret
                     }
-                }
+                };
+                drop(fut);
+                a
             }
         };
         syn::Expr::Verbatim(tokens)
