@@ -39,6 +39,7 @@ pub struct Device {
     rtx_loader: Option<Box<ash::extensions::khr::RayTracingPipeline>>,
     accel_struct_loader: Option<Box<ash::extensions::khr::AccelerationStructure>>,
     deferred_host_operation_loader: Option<Box<ash::extensions::khr::DeferredHostOperations>>,
+    push_descriptor_loader: Option<Box<ash::extensions::khr::PushDescriptor>>,
 
     queue_info: QueueInfo,
 }
@@ -66,6 +67,11 @@ impl Device {
         self.deferred_host_operation_loader
             .as_ref()
             .expect("VkDeferredHostOperation extension was not enabled")
+    }
+    pub fn push_descriptor_loader(&self) -> &ash::extensions::khr::PushDescriptor {
+        self.push_descriptor_loader
+            .as_ref()
+            .expect("VkKHRPushDescriptorLoader extension was not enabled")
     }
     pub(crate) fn new(
         instance: Arc<Instance>,
@@ -117,6 +123,14 @@ impl Device {
                 None
             };
 
+        let push_descriptor_loader =
+            if extensions.contains(ash::extensions::khr::PushDescriptor::name()) {
+                Some(Box::new(ash::extensions::khr::PushDescriptor::new(
+                    &instance, &device,
+                )))
+            } else {
+                None
+            };
         Ok(Self {
             instance,
             physical_device,
@@ -125,6 +139,7 @@ impl Device {
             rtx_loader,
             accel_struct_loader,
             deferred_host_operation_loader,
+            push_descriptor_loader,
             queue_info,
         })
     }

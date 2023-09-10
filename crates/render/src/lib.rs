@@ -67,6 +67,7 @@ impl Plugin for RenderPlugin {
                 rhyolite::ash::extensions::khr::DeferredHostOperations::name(),
                 rhyolite::ash::extensions::khr::AccelerationStructure::name(),
                 rhyolite::ash::extensions::khr::RayTracingPipeline::name(),
+                rhyolite::ash::extensions::khr::PushDescriptor::name(),
                 rhyolite::ash::vk::KhrPipelineLibraryFn::name(),
             ],
             enabled_device_features: Box::new(rhyolite::PhysicalDeviceFeatures {

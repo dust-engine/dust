@@ -235,15 +235,21 @@ pub trait CommandsTransformer {
                 }
             }
             Expr::Struct(s) => Expr::Struct(syn::ExprStruct {
-                fields: s
-                    .fields
-                    .iter()
-                    .map(|f| syn::FieldValue {
-                        member: f.member.clone(),
-                        expr: self.transform_expr(&f.expr, is_inloop),
-                        ..f.clone()
-                    })
-                    .collect(),
+                fields: {
+                    let mut fields: syn::punctuated::Punctuated<syn::FieldValue, syn::Token![,]> =
+                        s.fields
+                            .iter()
+                            .map(|f| syn::FieldValue {
+                                member: f.member.clone(),
+                                expr: self.transform_expr(&f.expr, is_inloop),
+                                ..f.clone()
+                            })
+                            .collect();
+                    if s.fields.last().is_some() {
+                        fields.push_punct(Default::default());
+                    }
+                    fields
+                },
                 ..s.clone()
             }),
             Expr::Try(s) => Expr::Try(syn::ExprTry {

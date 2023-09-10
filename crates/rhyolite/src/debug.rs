@@ -188,6 +188,13 @@ pub trait DebugObject: crate::HasDevice {
         self.set_name_cstr(cstr.as_c_str())?;
         Ok(())
     }
+    fn with_name(mut self, name: &str) -> VkResult<Self>
+    where
+        Self: Sized,
+    {
+        self.set_name(name)?;
+        Ok(self)
+    }
     fn remove_name(&mut self) {
         unsafe {
             let raw_device = self.device().handle();

@@ -7,6 +7,7 @@ use bevy_transform::components::GlobalTransform;
 pub use nrd::*;
 use rhyolite::ash::prelude::VkResult;
 use rhyolite::ash::vk;
+use rhyolite::debug::DebugObject;
 use rhyolite::future::{
     run, use_shared_image, use_shared_state, use_state, Disposable, GPUCommandFuture, RenderData,
     RenderImage, RenderRes, SharedDeviceStateHostContainer, StageContext,
@@ -14,7 +15,7 @@ use rhyolite::future::{
 use rhyolite::macros::commands;
 use rhyolite::smallvec::{smallvec, SmallVec};
 use rhyolite::{
-    copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
+    copy_buffer, cstr, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
     ImageViewLike, ResidentImage,
 };
 use rhyolite_bevy::{Allocator, Device, StagingRingBuffer};
@@ -29,8 +30,7 @@ use crate::{PinholeProjection, StandardPipelineRenderParams};
 #[derive(Resource)]
 pub struct NRDPipeline {
     instance: nrd::Instance,
-    pipelines: Vec<(rhyolite::ComputePipeline, SmallVec<[vk::DescriptorSet; 4]>)>,
-    desc_pool: rhyolite::descriptor::DescriptorPool,
+    pipelines: Vec<rhyolite::ComputePipeline>,
     transient_pool: Vec<TextureDesc>,
     permanent_pool: Vec<TextureDesc>,
     binding_offsets: nrd::SPIRVBindingOffsets,
@@ -136,32 +136,6 @@ impl NRDPipeline {
             })
             .collect();
 
-        // Creating descriptor pool
-        let mut desc_pool = rhyolite::descriptor::DescriptorPool::new(
-            device.clone(),
-            desc.descriptor_pool_desc.sets_max_num,
-            &[
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::SAMPLED_IMAGE,
-                    descriptor_count: desc.descriptor_pool_desc.textures_max_num,
-                },
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::UNIFORM_BUFFER,
-                    descriptor_count: desc.descriptor_pool_desc.constant_buffers_max_num,
-                },
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::STORAGE_IMAGE,
-                    descriptor_count: desc.descriptor_pool_desc.storage_textures_max_num,
-                },
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::SAMPLER,
-                    descriptor_count: desc.descriptor_pool_desc.samplers_max_num,
-                }, // https://github.com/KhronosGroup/Vulkan-Docs/issues/1395
-            ],
-            vk::DescriptorPoolCreateFlags::empty(),
-        )
-        .unwrap();
-
         // Create pipelines, allocate descriptor sets
         let pipelines = desc
             .pipelines()
@@ -216,12 +190,9 @@ impl NRDPipeline {
                             ),
                         )
                         .collect(),
-                    Default::default(),
+                    vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR,
                 )
                 .unwrap();
-                let desc_set: SmallVec<[_; 4]> = (0..pipeline_desc.max_repeat_num)
-                    .map(|_| desc_pool.allocate_for_set_layout(&desc_layout).unwrap())
-                    .collect();
                 let pipeline_layout = rhyolite::PipelineLayout::new(
                     device.clone(),
                     vec![Arc::new(desc_layout)],
@@ -246,12 +217,12 @@ impl NRDPipeline {
                     None,
                 )
                 .unwrap();
-                (pipeline, desc_set)
+                pipeline
             })
             .collect();
         Self {
             pipelines,
-            desc_pool,
+            //desc_pool,
             transient_pool: desc.transient_pool().iter().cloned().collect(),
             permanent_pool: desc.permanent_pool().iter().cloned().collect(),
             binding_offsets: library_desc.spirv_binding_offsets.clone(),
@@ -405,7 +376,7 @@ impl NRDPipeline {
                     constant_buffer_size as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                     UNIFORM_ALIGNMENT
-                ).unwrap()
+                ).unwrap().with_name("NRD Constant Buffer").unwrap()
             }, |old| (old.size() as u32) < constant_buffer_size);
             let mut current_buffer_offset: usize = 0;
             let mut constant_buffer_staging_data = staging_ring.allocate(constant_buffer_size as u64).unwrap();
@@ -432,17 +403,13 @@ impl NRDPipeline {
                 || std::iter::repeat_with(|| None).take(self.permanent_pool.len()).collect(),
                 |_| {},
             );
-            let mut pipeline_desc_sets = vec![0_u32; self.pipelines.len()].into_boxed_slice();
             let mut sampled_image_writes: Vec<vk::DescriptorImageInfo> = Vec::new();
             let mut storage_image_writes: Vec<vk::DescriptorImageInfo> = Vec::new();
             current_buffer_offset = 0;
             for dispatch in dispatches.iter() {
-                let (pipeline, desc_set) = &self.pipelines[dispatch.pipeline_index as usize];
+                let pipeline = &self.pipelines[dispatch.pipeline_index as usize];
                 let layout  = pipeline.raw_layout();
                 let pipeline = pipeline.raw();
-                let desc_set_index = &mut pipeline_desc_sets[dispatch.pipeline_index as usize];
-                let desc_set = desc_set[*desc_set_index as usize];
-                *desc_set_index += 1;
 
                 if !dispatch.constant_buffer().is_empty() {
                     current_buffer_offset += dispatch.constant_buffer().len();
@@ -520,42 +487,44 @@ impl NRDPipeline {
                     };
                 }
 
-                {
-                    let buffer_writes = [vk::DescriptorBufferInfo {
-                        buffer: const_buffer.inner().raw_buffer(),
-                        offset: current_buffer_offset as u64,
-                        range: dispatch.constant_buffer().len() as u64
-                    }];
-                    let mut desc_writes = arrayvec::ArrayVec::<DescriptorSetWrite, 3>::new();
-                    if !sampled_image_writes.is_empty() {
-                        desc_writes.push(DescriptorSetWrite::sampled_images(
-                            desc_set,
-                            self.binding_offsets.texture_offset,
-                            0,
-                            &sampled_image_writes,
-                        ));
-                    }
-                    if !storage_image_writes.is_empty() {
-                        desc_writes.push(DescriptorSetWrite::storage_images(
-                            desc_set,
-                            self.binding_offsets.storage_texture_and_buffer_offset,
-                            0,
-                            &storage_image_writes,
-                        ));
-                    }
-                    if !dispatch.constant_buffer().is_empty() {
-                        desc_writes.push(DescriptorSetWrite::uniform_buffers(
-                            desc_set,
-                            self.binding_offsets.constant_buffer_offset,
-                            0,
-                            &buffer_writes,
-                            false
-                        ));
-                    }
-                    self.desc_pool.device().write_descriptor_sets(&desc_writes);
+
+                let buffer_writes = vk::DescriptorBufferInfo {
+                    buffer: const_buffer.inner().raw_buffer(),
+                    offset: current_buffer_offset as u64,
+                    range: dispatch.constant_buffer().len() as u64
+                };
+                let mut desc_writes = arrayvec::ArrayVec::<vk::WriteDescriptorSet, 3>::new();
+                if !sampled_image_writes.is_empty() {
+                    desc_writes.push(vk::WriteDescriptorSet {
+                        dst_binding: self.binding_offsets.texture_offset,
+                        dst_array_element: 0,
+                        descriptor_count: sampled_image_writes.len() as u32,
+                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                        p_image_info: sampled_image_writes.as_ptr(),
+                        ..vk::WriteDescriptorSet::default()
+                    });
                 }
-                sampled_image_writes.clear();
-                storage_image_writes.clear();
+                if !storage_image_writes.is_empty() {
+                    desc_writes.push(vk::WriteDescriptorSet {
+                        dst_binding: self.binding_offsets.storage_texture_and_buffer_offset,
+                        dst_array_element: 0,
+                        descriptor_count: storage_image_writes.len() as u32,
+                        descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                        p_image_info: storage_image_writes.as_ptr(),
+                        ..vk::WriteDescriptorSet::default()
+                    });
+                }
+                if !dispatch.constant_buffer().is_empty() {
+
+                    desc_writes.push(vk::WriteDescriptorSet {
+                        dst_binding: self.binding_offsets.constant_buffer_offset,
+                        dst_array_element: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        p_buffer_info: &buffer_writes,
+                        ..vk::WriteDescriptorSet::default()
+                    });
+                }
 
                 run(|ctx, command_buffer| unsafe {
                     let device = ctx.device();
@@ -564,13 +533,12 @@ impl NRDPipeline {
                         vk::PipelineBindPoint::COMPUTE,
                         pipeline,
                     );
-                    device.cmd_bind_descriptor_sets(
+                    device.push_descriptor_loader().cmd_push_descriptor_set(
                         command_buffer,
                         vk::PipelineBindPoint::COMPUTE,
                         layout,
                         0,
-                        &[desc_set],
-                        &[]
+                        &desc_writes,
                     );
                     device.cmd_dispatch(
                         command_buffer,
@@ -605,6 +573,9 @@ impl NRDPipeline {
                         }
                     }
                 }).await;
+
+                sampled_image_writes.clear();
+                storage_image_writes.clear();
                 retain!(img_to_access);
             }
             retain!((constant_buffer_staging_data, const_buffer));
