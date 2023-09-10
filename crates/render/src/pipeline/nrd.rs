@@ -10,7 +10,7 @@ use rhyolite::ash::vk;
 use rhyolite::debug::DebugObject;
 use rhyolite::future::{
     run, use_shared_image, use_shared_state, use_state, Disposable, GPUCommandFuture, RenderData,
-    RenderImage, RenderRes, SharedDeviceStateHostContainer, StageContext,
+    RenderImage, RenderRes, SharedDeviceStateHostContainer, StageContext, SharedDeviceState,
 };
 use rhyolite::macros::commands;
 use rhyolite::smallvec::{smallvec, SmallVec};
@@ -296,7 +296,7 @@ impl NRDPipeline {
             )
             .to_cols_array(),
             view_to_clip_matrix_prev: local_state.view_to_clip_matrix,
-            world_to_view_matrix: camera.1.compute_matrix().to_cols_array(),
+            world_to_view_matrix: camera.1.compute_matrix().inverse().to_cols_array(),
             world_to_view_matrix_prev: local_state.world_to_view_matrix,
             world_prev_to_world_matrix: nrd::CommonSettings::default().world_prev_to_world_matrix,
             motion_vector_scale: reblur_settings.common_settings.motion_vector_scale,
@@ -365,17 +365,17 @@ impl NRDPipeline {
             .get_compute_dispatches(&[REBLUR_IDENTIFIER])
             .unwrap();
             let mut constant_buffer_size: u32 = 0;
-            const UNIFORM_ALIGNMENT: u32 = 4 * 4;
+            let uniform_alignment = allocator.device().physical_device().properties().limits.min_uniform_buffer_offset_alignment as u32;
             for dispatch in dispatches.iter() {
                 constant_buffer_size += dispatch.constant_buffer().len() as u32;
-                constant_buffer_size = constant_buffer_size.next_multiple_of(UNIFORM_ALIGNMENT);
+                constant_buffer_size = constant_buffer_size.next_multiple_of(uniform_alignment);
             }
 
             let mut const_buffer = use_shared_state(using!(), |_| {
                 allocator.create_device_buffer_uninit(
                     constant_buffer_size as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-                    UNIFORM_ALIGNMENT
+                    uniform_alignment
                 ).unwrap().with_name("NRD Constant Buffer").unwrap()
             }, |old| (old.size() as u32) < constant_buffer_size);
             let mut current_buffer_offset: usize = 0;
@@ -387,22 +387,24 @@ impl NRDPipeline {
                 }
                 constant_buffer_staging_data[current_buffer_offset .. current_buffer_offset + new_buffer.len()].copy_from_slice(new_buffer);
                 current_buffer_offset += new_buffer.len();
-                current_buffer_offset = current_buffer_offset.next_multiple_of(UNIFORM_ALIGNMENT as usize);
+                current_buffer_offset = current_buffer_offset.next_multiple_of(uniform_alignment as usize);
             }
             let constant_buffer_staging_data = RenderRes::new(constant_buffer_staging_data);
             copy_buffer(&constant_buffer_staging_data, &mut const_buffer).await;
 
 
-            let transient_images: &mut Vec<Option<SharedDeviceStateHostContainer<ImageView<ResidentImage>>>> = use_state(
+            let transient_pool: &mut Vec<Option<SharedDeviceStateHostContainer<ImageView<ResidentImage>>>> = use_state(
                 using!(),
                 || std::iter::repeat_with(|| None).take(self.transient_pool.len()).collect(),
                 |_| {},
             );
-            let permanent_images: &mut Vec<Option<SharedDeviceStateHostContainer<ImageView<ResidentImage>>>> = use_state(
+            let mut transient_images: Vec<Option<RenderImage<SharedDeviceState<ImageView<ResidentImage>>>>> = std::iter::repeat_with(|| None).take(self.transient_pool.len()).collect();
+            let permanent_pool: &mut Vec<Option<SharedDeviceStateHostContainer<ImageView<ResidentImage>>>> = use_state(
                 using!(),
                 || std::iter::repeat_with(|| None).take(self.permanent_pool.len()).collect(),
                 |_| {},
             );
+            let mut permanent_images: Vec<Option<RenderImage<SharedDeviceState<ImageView<ResidentImage>>>>> = std::iter::repeat_with(|| None).take(self.permanent_pool.len()).collect();
             let mut sampled_image_writes: Vec<vk::DescriptorImageInfo> = Vec::new();
             let mut storage_image_writes: Vec<vk::DescriptorImageInfo> = Vec::new();
             current_buffer_offset = 0;
@@ -411,49 +413,53 @@ impl NRDPipeline {
                 let layout  = pipeline.raw_layout();
                 let pipeline = pipeline.raw();
 
+                enum ImgAccess {
+                    Transient(u16),
+                    Permanent(u16),
+                    External(nrd::ResourceType),
+                }
                 let mut img_to_access = Vec::new();
-                let mut img_to_access_readwrite = Vec::new();
-                let mut borrowed_img_to_access = Vec::new();
 
                 for resource in dispatch.resources() {
-                    let has_write = matches!(resource.state_needed, nrd::DescriptorType::StorageTexture);
                     let image_view = match resource.ty {
                         nrd::ResourceType::TRANSIENT_POOL => {
                             let texture_desc = &self.transient_pool[resource.index_in_pool as usize];
-                            let img = use_shared_image(
-                                &mut transient_images[resource.index_in_pool as usize],
-                                |_| {
-                                    (
-                                        create_image(texture_desc, &allocator).unwrap(),
-                                        vk::ImageLayout::UNDEFINED
-                                    )
-                                },
-                                |_old| false // TODO: resize when needed
-                            );
+                            let img = transient_images[resource.index_in_pool as usize].get_or_insert_with(|| {
+                                use_shared_image(
+                                    &mut transient_pool[resource.index_in_pool as usize],
+                                    |_| {
+                                        (
+                                            create_image(texture_desc, &allocator, &format!("Transient Pool Image {}", resource.index_in_pool)).unwrap(),
+                                            vk::ImageLayout::UNDEFINED
+                                        )
+                                    },
+                                    |_old| false // TODO: resize when needed
+                                )
+                            });
                             let view = img.inner().raw_image_view();
-                            img_to_access.push(img);
-                            img_to_access_readwrite.push(has_write);
+                            img_to_access.push((ImgAccess::Transient(resource.index_in_pool), resource.state_needed));
                             view
                         },
                         nrd::ResourceType::PERMANENT_POOL => {
                             let texture_desc = &self.permanent_pool[resource.index_in_pool as usize];
-                            let img = use_shared_image(
-                                &mut permanent_images[resource.index_in_pool as usize],
-                                |_| {
-                                    (
-                                        create_image(texture_desc, &allocator).unwrap(),
-                                        vk::ImageLayout::UNDEFINED
-                                    )
-                                },
-                                |_| false // TODO: resize when needed
-                            );
+                            let img = permanent_images[resource.index_in_pool as usize].get_or_insert_with(|| {
+                                use_shared_image(
+                                    &mut permanent_pool[resource.index_in_pool as usize],
+                                    |_| {
+                                        (
+                                            create_image(texture_desc, &allocator, &format!("Permanent Pool Image {}", resource.index_in_pool)).unwrap(),
+                                            vk::ImageLayout::UNDEFINED
+                                        )
+                                    },
+                                    |_old| false // TODO: resize when needed
+                                )
+                            });
                             let view = img.inner().raw_image_view();
-                            img_to_access.push(img);
-                            img_to_access_readwrite.push(has_write);
+                            img_to_access.push((ImgAccess::Permanent(resource.index_in_pool), resource.state_needed));
                             view
                         },
                         _ => {
-                            borrowed_img_to_access.push((resource.ty, has_write));
+                            img_to_access.push((ImgAccess::External(resource.ty), resource.state_needed));
                             match resource.ty {
                                 nrd::ResourceType::IN_MV => in_motion.inner().raw_image_view(),
                                 nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness.inner().raw_image_view(),
@@ -510,7 +516,6 @@ impl NRDPipeline {
                     });
                 }
                 if !dispatch.constant_buffer().is_empty() {
-
                     desc_writes.push(vk::WriteDescriptorSet {
                         dst_binding: self.binding_offsets.constant_buffer_offset,
                         dst_array_element: 0,
@@ -542,29 +547,48 @@ impl NRDPipeline {
                         1,
                     );
                 }, |ctx| {
-                    for (img, has_write) in img_to_access.iter_mut().zip(img_to_access_readwrite.iter()) {
-                        if *has_write {
-                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
-                            ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
-                        } else {
-                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-                        }
+                    if !dispatch.constant_buffer().is_empty() {
+                        ctx.read(&const_buffer, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::UNIFORM_READ);
                     }
-                    for (img_ty, has_write) in borrowed_img_to_access.iter_mut() {
-                        if *has_write {
-                            matches!(*img_ty, nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST);
-                            ctx.read_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
-                            ctx.write_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
-                        } else {
-                            let img = match img_ty {
-                                nrd::ResourceType::IN_MV => in_motion,
-                                nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness,
-                                nrd::ResourceType::IN_VIEWZ => in_viewz,
-                                nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance,
-                                nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance,
-                                _ => panic!()
-                            };
-                            ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                    for (img_ty, state_needed) in img_to_access.iter_mut() {
+                        match img_ty {
+                            ImgAccess::Transient(index_in_pool) => {
+                                let img = transient_images[*index_in_pool as usize].as_mut().unwrap();
+                                if matches!(state_needed, nrd::DescriptorType::StorageTexture) {
+                                    ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
+                                    ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                                } else {
+                                    ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                                };
+                            },
+                            ImgAccess::Permanent(index_in_pool) => {
+                                let img = permanent_images[*index_in_pool as usize].as_mut().unwrap();
+                                if matches!(state_needed, nrd::DescriptorType::StorageTexture) {
+                                    ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
+                                    ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                                } else {
+                                    ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                                };
+                            },
+                            ImgAccess::External(img_ty) => {
+                                let img = match img_ty {
+                                    nrd::ResourceType::IN_MV => in_motion,
+                                    nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness,
+                                    nrd::ResourceType::IN_VIEWZ => in_viewz,
+                                    nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance,
+                                    nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance,
+                                    _ => panic!()
+                                };
+        
+                                if matches!(state_needed, nrd::DescriptorType::StorageTexture) {
+                                    ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
+                                    if matches!(img_ty, nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST) {
+                                        ctx.write_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                                    }
+                                } else {
+                                    ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                                }
+                            },
                         }
                     }
                 }).await;
@@ -573,11 +597,10 @@ impl NRDPipeline {
                 storage_image_writes.clear();
                 if !dispatch.constant_buffer().is_empty() {
                     current_buffer_offset += dispatch.constant_buffer().len();
-                    current_buffer_offset = current_buffer_offset.next_multiple_of(UNIFORM_ALIGNMENT as usize);
+                    current_buffer_offset = current_buffer_offset.next_multiple_of(uniform_alignment as usize);
                 }
-                retain!(img_to_access);
             }
-            retain!((constant_buffer_staging_data, const_buffer));
+            retain!((constant_buffer_staging_data, const_buffer, transient_images, permanent_images));
         }
     }
 }
@@ -634,6 +657,7 @@ fn nrd_image_format_to_vk(ty: nrd::Format) -> vk::Format {
 fn create_image(
     texture_desc: &nrd::TextureDesc,
     allocator: &Allocator,
+    name: &str,
 ) -> VkResult<ImageView<ResidentImage>> {
     let image = allocator
         .create_device_image_uninit(&ImageRequest {
@@ -648,7 +672,9 @@ fn create_image(
             usage: vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::STORAGE,
             ..Default::default()
         })?
-        .with_2d_view()?;
+        .with_name(name)?
+        .with_2d_view()?
+        .with_name(&format!("{} View", name))?;
     Ok(image)
 }
 
@@ -702,7 +728,7 @@ impl Default for CommonSettings {
             split_screen: default.split_screen,
             debug: default.debug,
             input_subrect_origin: default.input_subrect_origin,
-            is_motion_vector_in_world_space: default.is_motion_vector_in_world_space,
+            is_motion_vector_in_world_space: true,
             is_history_confidence_available: default.is_history_confidence_available,
             is_disocclusion_threshold_mix_available: default
                 .is_disocclusion_threshold_mix_available,

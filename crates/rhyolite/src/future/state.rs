@@ -64,14 +64,12 @@ impl<T> SharedDeviceState<T> {
 }
 impl<T> RenderData for SharedDeviceState<T> {
     fn tracking_feedback(&mut self, feedback: &super::TrackingFeedback) {
-        if self.0.fetched.load(std::sync::atomic::Ordering::Relaxed) {
-            // TOOD: tis probably needs a bit more work
-            self.0
-                .fetched
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            unsafe {
-                *self.0.tracking_feedback.get() = feedback.clone();
-            }
+        assert!(self.0.fetched.load(std::sync::atomic::Ordering::Relaxed));
+        self.0
+            .fetched
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            *self.0.tracking_feedback.get() = feedback.clone();
         }
     }
 }

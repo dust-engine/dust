@@ -59,5 +59,5 @@ void main() {
     vec3 hitPointModel = gl_WorldToObjectEXT * vec4(hitPointWorld, 1.0);
     vec4 hitPointWorldLastFrameH = s_instances.last_frame_transforms[gl_InstanceID] * vec4(hitPointModel, 1.0);
     vec3 hitPointWorldLastFrame = hitPointWorldLastFrameH.xyz / hitPointWorldLastFrameH.w;
-    imageStore(u_motion, ivec2(gl_LaunchIDEXT.xy), vec4(hitPointWorldLastFrame - hitPointWorld, 0.0));
+    imageStore(u_motion, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));
 }
