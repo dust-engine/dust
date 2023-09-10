@@ -411,11 +411,6 @@ impl NRDPipeline {
                 let layout  = pipeline.raw_layout();
                 let pipeline = pipeline.raw();
 
-                if !dispatch.constant_buffer().is_empty() {
-                    current_buffer_offset += dispatch.constant_buffer().len();
-                    current_buffer_offset = current_buffer_offset.next_multiple_of(UNIFORM_ALIGNMENT as usize);
-                }
-
                 let mut img_to_access = Vec::new();
                 let mut img_to_access_readwrite = Vec::new();
                 let mut borrowed_img_to_access = Vec::new();
@@ -576,6 +571,10 @@ impl NRDPipeline {
 
                 sampled_image_writes.clear();
                 storage_image_writes.clear();
+                if !dispatch.constant_buffer().is_empty() {
+                    current_buffer_offset += dispatch.constant_buffer().len();
+                    current_buffer_offset = current_buffer_offset.next_multiple_of(UNIFORM_ALIGNMENT as usize);
+                }
                 retain!(img_to_access);
             }
             retain!((constant_buffer_staging_data, const_buffer));
