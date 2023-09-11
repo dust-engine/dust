@@ -28,7 +28,7 @@ crevice = { git = "https://github.com/LPGhatguy/crevice", features = ["glam"] }
 rand = "0.8"
 arrayvec = "0.7"
 
-nrd = { path = "C:\\Users\\neo\\Developer\\NRD" }
+nrd-sys = "0.1"
 bytemuck = "1.13"
 
 # Processor dependencies

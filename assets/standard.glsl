@@ -14,11 +14,11 @@
 // Illuminance: total luminous flux incident on a surface, per unit area.
 // Unit: lux (lm / m^2)
 // Stores the incoming radiance at primary ray hit points.
-layout(set = 0, binding = 0, rgba32f) uniform image2D u_illuminance;
+layout(set = 0, binding = 0, rgba16f) uniform image2D u_illuminance;
 layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
-layout(set = 0, binding = 2, rgba16_snorm) uniform image2D u_normal;
+layout(set = 0, binding = 2, rgb10_a2) uniform image2D u_normal;
 layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
-layout(set = 0, binding = 4, rg16f) uniform image2D u_motion;
+layout(set = 0, binding = 4, rgba16f) uniform image2D u_motion;
 layout(set = 0, binding = 5, r32ui) uniform uimage2D u_voxel_id;
 
 layout(set = 0, binding = 11) uniform accelerationStructureEXT accelerationStructure;
@@ -298,7 +298,19 @@ vec2 _NRD_EncodeUnitVector( vec3 v, const bool bSigned )
     return bSigned ? v.xy : v.xy * 0.5 + 0.5;
 }
 
+#define NRD_ROUGHNESS_ENCODING_SQ_LINEAR                                                0 // linearRoughness * linearRoughness
+#define NRD_ROUGHNESS_ENCODING_LINEAR                                                   1 // linearRoughness
+#define NRD_ROUGHNESS_ENCODING_SQRT_LINEAR                                              2 // sqrt( linearRoughness )
+
+#define NRD_NORMAL_ENCODING_RGBA8_UNORM                                                 0
+#define NRD_NORMAL_ENCODING_RGBA8_SNORM                                                 1
+#define NRD_NORMAL_ENCODING_R10G10B10A2_UNORM                                           2 // supports material ID bits
+#define NRD_NORMAL_ENCODING_RGBA16_UNORM                                                3
+#define NRD_NORMAL_ENCODING_RGBA16_SNORM                                                4 // also can be used with FP formats
+
+
 #define NRD_NORMAL_ENCODING NRD_NORMAL_ENCODING_R10G10B10A2_UNORM
+#define NRD_ROUGHNESS_ENCODING NRD_ROUGHNESS_ENCODING_LINEAR
 vec4 NRD_FrontEnd_PackNormalAndRoughness(vec3 N, float roughness, float materialID )
 {
     vec4 p;

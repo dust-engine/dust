@@ -951,7 +951,7 @@ pub fn use_gbuffer(
         &mut this.radiance,
         |_| {
             create_image(
-                vk::Format::R32G32B32A32_SFLOAT,
+                vk::Format::R16G16B16A16_SFLOAT,
                 vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
                 cstr!("GBuffer Noisy Radiance Image"),
                 cstr!("GBuffer Noisy Radiance Image View"),

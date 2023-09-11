@@ -4,7 +4,7 @@ use bevy_ecs::system::{Local, Resource, SystemParamItem};
 use bevy_ecs::world::FromWorld;
 use bevy_math::Mat4;
 use bevy_transform::components::GlobalTransform;
-pub use nrd::*;
+pub use nrd_sys::*;
 use rhyolite::ash::prelude::VkResult;
 use rhyolite::ash::vk;
 use rhyolite::debug::DebugObject;
@@ -15,8 +15,8 @@ use rhyolite::future::{
 use rhyolite::macros::commands;
 use rhyolite::smallvec::smallvec;
 use rhyolite::{
-    copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
-    ImageViewLike, ResidentImage,
+    copy_buffer, BufferLike, HasDevice, ImageExt, ImageRequest, ImageView, ImageViewLike,
+    ResidentImage,
 };
 use rhyolite_bevy::{Allocator, Device, StagingRingBuffer};
 use std::borrow::Cow;
@@ -29,14 +29,14 @@ use crate::PinholeProjection;
 
 #[derive(Resource)]
 pub struct NRDPipeline {
-    instance: nrd::Instance,
+    instance: Instance,
     pipelines: Vec<rhyolite::ComputePipeline>,
     transient_pool: Vec<TextureDesc>,
     permanent_pool: Vec<TextureDesc>,
-    binding_offsets: nrd::SPIRVBindingOffsets,
+    binding_offsets: SPIRVBindingOffsets,
     dimensions: (u16, u16),
 }
-const REBLUR_IDENTIFIER: nrd::Identifier = nrd::Identifier(0);
+const REBLUR_IDENTIFIER: Identifier = Identifier(0);
 
 impl FromWorld for NRDPipeline {
     fn from_world(world: &mut bevy_ecs::world::World) -> Self {
@@ -46,14 +46,14 @@ impl FromWorld for NRDPipeline {
 }
 impl NRDPipeline {
     pub fn new(device: &Arc<rhyolite::Device>, width: u16, height: u16) -> Self {
-        let instance = nrd::Instance::new(&[nrd::DenoiserDesc {
+        let instance = Instance::new(&[DenoiserDesc {
             identifier: REBLUR_IDENTIFIER,
-            denoiser: nrd::Denoiser::ReblurDiffuse,
+            denoiser: Denoiser::ReblurDiffuse,
             render_width: width,
             render_height: height,
         }])
         .unwrap();
-        let library_desc = nrd::Instance::library_desc();
+        let library_desc = Instance::library_desc();
         let desc = instance.desc();
         assert_eq!(desc.resources_space_index, 0);
         assert_eq!(desc.constant_buffer_space_index, 0);
@@ -74,7 +74,7 @@ impl NRDPipeline {
             .iter()
             .map(|sampler_desc| {
                 let sampler = match sampler_desc {
-                    nrd::Sampler::NearestClamp => rhyolite::Sampler::new(
+                    Sampler::NearestClamp => rhyolite::Sampler::new(
                         device.clone(),
                         &vk::SamplerCreateInfo {
                             address_mode_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
@@ -86,7 +86,7 @@ impl NRDPipeline {
                             ..sampler_create_info
                         },
                     ),
-                    nrd::Sampler::NearestMirroredRepeat => rhyolite::Sampler::new(
+                    Sampler::NearestMirroredRepeat => rhyolite::Sampler::new(
                         device.clone(),
                         &vk::SamplerCreateInfo {
                             address_mode_u: vk::SamplerAddressMode::MIRRORED_REPEAT,
@@ -98,7 +98,7 @@ impl NRDPipeline {
                             ..sampler_create_info
                         },
                     ),
-                    nrd::Sampler::LinearClamp => rhyolite::Sampler::new(
+                    Sampler::LinearClamp => rhyolite::Sampler::new(
                         device.clone(),
                         &vk::SamplerCreateInfo {
                             address_mode_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
@@ -110,7 +110,7 @@ impl NRDPipeline {
                             ..sampler_create_info
                         },
                     ),
-                    nrd::Sampler::LinearMirroredRepeat => rhyolite::Sampler::new(
+                    Sampler::LinearMirroredRepeat => rhyolite::Sampler::new(
                         device.clone(),
                         &vk::SamplerCreateInfo {
                             address_mode_u: vk::SamplerAddressMode::MIRRORED_REPEAT,
@@ -153,11 +153,11 @@ impl NRDPipeline {
                         .flat_map(|resource_range| {
                             // texture bindings
                             let (offset, ty) = match resource_range.descriptor_type {
-                                nrd::DescriptorType::Texture => (
+                                DescriptorType::Texture => (
                                     library_desc.spirv_binding_offsets.texture_offset,
                                     vk::DescriptorType::SAMPLED_IMAGE,
                                 ),
-                                nrd::DescriptorType::StorageTexture => (
+                                DescriptorType::StorageTexture => (
                                     library_desc
                                         .spirv_binding_offsets
                                         .storage_texture_and_buffer_offset,
@@ -237,9 +237,9 @@ impl NRDPipeline {
         if self.dimensions == (width, height) {
             return;
         }
-        let instance = nrd::Instance::new(&[nrd::DenoiserDesc {
+        let instance = Instance::new(&[DenoiserDesc {
             identifier: REBLUR_IDENTIFIER,
-            denoiser: nrd::Denoiser::ReblurDiffuse,
+            denoiser: Denoiser::ReblurDiffuse,
             render_width: width,
             render_height: height,
         }])
@@ -291,7 +291,7 @@ impl NRDPipeline {
         if self.dimensions != dimensions {
             self.resize(dimensions.0, dimensions.1);
         }
-        let common_settings = nrd::CommonSettings {
+        let common_settings = nrd_sys::CommonSettings {
             view_to_clip_matrix: Mat4::perspective_infinite_reverse_rh(
                 camera.0.fov,
                 dimensions.0 as f32 / dimensions.1 as f32,
@@ -301,7 +301,8 @@ impl NRDPipeline {
             view_to_clip_matrix_prev: local_state.view_to_clip_matrix,
             world_to_view_matrix: camera.1.compute_matrix().inverse().to_cols_array(),
             world_to_view_matrix_prev: local_state.world_to_view_matrix,
-            world_prev_to_world_matrix: nrd::CommonSettings::default().world_prev_to_world_matrix,
+            world_prev_to_world_matrix: nrd_sys::CommonSettings::default()
+                .world_prev_to_world_matrix,
             motion_vector_scale: reblur_settings.common_settings.motion_vector_scale,
             camera_jitter: [0.0, 0.0],
             camera_jitter_prev: [0.0, 0.0], // TODO
@@ -330,9 +331,9 @@ impl NRDPipeline {
                     }
                 }
                 match (should_reset, should_clear) {
-                    (true, false) => nrd::AccumulationMode::Restart,
-                    (true, true) => nrd::AccumulationMode::ClearAndRestart,
-                    _ => nrd::AccumulationMode::Continue,
+                    (true, false) => AccumulationMode::Restart,
+                    (true, true) => AccumulationMode::ClearAndRestart,
+                    _ => AccumulationMode::Continue,
                 }
             },
             is_motion_vector_in_world_space: reblur_settings
@@ -351,7 +352,7 @@ impl NRDPipeline {
         };
         self.instance.set_common_settings(&common_settings).unwrap();
         self.instance
-            .set_denoiser_settings(REBLUR_IDENTIFIER, &reblur_settings)
+            .set_denoiser_settings(REBLUR_IDENTIFIER, &reblur_settings.reblur_settings)
             .unwrap();
         {
             // update local state
@@ -419,13 +420,13 @@ impl NRDPipeline {
                 enum ImgAccess {
                     Transient(u16),
                     Permanent(u16),
-                    External(nrd::ResourceType),
+                    External(ResourceType),
                 }
                 let mut img_to_access = Vec::new();
 
                 for resource in dispatch.resources() {
                     let image_view = match resource.ty {
-                        nrd::ResourceType::TRANSIENT_POOL => {
+                        ResourceType::TRANSIENT_POOL => {
                             let texture_desc = &self.transient_pool[resource.index_in_pool as usize];
                             let img = transient_images[resource.index_in_pool as usize].get_or_insert_with(|| {
                                 use_shared_image(
@@ -443,7 +444,7 @@ impl NRDPipeline {
                             img_to_access.push((ImgAccess::Transient(resource.index_in_pool), resource.state_needed));
                             view
                         },
-                        nrd::ResourceType::PERMANENT_POOL => {
+                        ResourceType::PERMANENT_POOL => {
                             let texture_desc = &self.permanent_pool[resource.index_in_pool as usize];
                             let img = permanent_images[resource.index_in_pool as usize].get_or_insert_with(|| {
                                 use_shared_image(
@@ -464,24 +465,24 @@ impl NRDPipeline {
                         _ => {
                             img_to_access.push((ImgAccess::External(resource.ty), resource.state_needed));
                             match resource.ty {
-                                nrd::ResourceType::IN_MV => in_motion.inner().raw_image_view(),
-                                nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness.inner().raw_image_view(),
-                                nrd::ResourceType::IN_VIEWZ => in_viewz.inner().raw_image_view(),
-                                nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance.inner().raw_image_view(),
-                                nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance.inner().raw_image_view(),
+                                ResourceType::IN_MV => in_motion.inner().raw_image_view(),
+                                ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness.inner().raw_image_view(),
+                                ResourceType::IN_VIEWZ => in_viewz.inner().raw_image_view(),
+                                ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance.inner().raw_image_view(),
+                                ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance.inner().raw_image_view(),
                                 _ => panic!()
                             }
                         }
                     };
                     match resource.state_needed {
-                        nrd::DescriptorType::Texture => {
+                        DescriptorType::Texture => {
                             sampled_image_writes.push(vk::DescriptorImageInfo {
                                 sampler: vk::Sampler::null(),
                                 image_view,
                                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                             });
                         }
-                        nrd::DescriptorType::StorageTexture => {
+                        DescriptorType::StorageTexture => {
                             storage_image_writes.push(vk::DescriptorImageInfo {
                                 sampler: vk::Sampler::null(),
                                 image_view,
@@ -557,7 +558,7 @@ impl NRDPipeline {
                         match img_ty {
                             ImgAccess::Transient(index_in_pool) => {
                                 let img = transient_images[*index_in_pool as usize].as_mut().unwrap();
-                                if matches!(state_needed, nrd::DescriptorType::StorageTexture) {
+                                if matches!(state_needed, DescriptorType::StorageTexture) {
                                     ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
                                     ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
                                 } else {
@@ -566,7 +567,7 @@ impl NRDPipeline {
                             },
                             ImgAccess::Permanent(index_in_pool) => {
                                 let img = permanent_images[*index_in_pool as usize].as_mut().unwrap();
-                                if matches!(state_needed, nrd::DescriptorType::StorageTexture) {
+                                if matches!(state_needed, DescriptorType::StorageTexture) {
                                     ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
                                     ctx.write_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
                                 } else {
@@ -575,17 +576,17 @@ impl NRDPipeline {
                             },
                             ImgAccess::External(img_ty) => {
                                 let img = match img_ty {
-                                    nrd::ResourceType::IN_MV => in_motion,
-                                    nrd::ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness,
-                                    nrd::ResourceType::IN_VIEWZ => in_viewz,
-                                    nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance,
-                                    nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance,
+                                    ResourceType::IN_MV => in_motion,
+                                    ResourceType::IN_NORMAL_ROUGHNESS => in_normal_roughness,
+                                    ResourceType::IN_VIEWZ => in_viewz,
+                                    ResourceType::IN_DIFF_RADIANCE_HITDIST => in_radiance,
+                                    ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance,
                                     _ => panic!()
                                 };
 
-                                if matches!(state_needed, nrd::DescriptorType::StorageTexture) {
+                                if matches!(state_needed, DescriptorType::StorageTexture) {
                                     ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
-                                    if matches!(img_ty, nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST) {
+                                    if matches!(img_ty, ResourceType::OUT_DIFF_RADIANCE_HITDIST) {
                                         ctx.write_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
                                     }
                                 } else {
@@ -608,57 +609,57 @@ impl NRDPipeline {
     }
 }
 
-fn nrd_image_format_to_vk(ty: nrd::Format) -> vk::Format {
+fn nrd_image_format_to_vk(ty: Format) -> vk::Format {
     match ty {
-        nrd::Format::R8_UNORM => vk::Format::R8_UNORM,
-        nrd::Format::R8_SNORM => vk::Format::R8_SNORM,
-        nrd::Format::R8_UINT => vk::Format::R8_UINT,
-        nrd::Format::R8_SINT => vk::Format::R8_SINT,
-        nrd::Format::RG8_UNORM => vk::Format::R8G8_UNORM,
-        nrd::Format::RG8_SNORM => vk::Format::R8G8_SNORM,
-        nrd::Format::RG8_UINT => vk::Format::R8G8_UINT,
-        nrd::Format::RG8_SINT => vk::Format::R8G8_SINT,
-        nrd::Format::RGBA8_UNORM => vk::Format::R8G8B8A8_UNORM,
-        nrd::Format::RGBA8_SNORM => vk::Format::R8G8B8A8_SNORM,
-        nrd::Format::RGBA8_UINT => vk::Format::R8G8B8A8_UINT,
-        nrd::Format::RGBA8_SINT => vk::Format::R8G8B8A8_SINT,
-        nrd::Format::RGBA8_SRGB => vk::Format::R8G8B8A8_SRGB,
-        nrd::Format::R16_UNORM => vk::Format::R16_UNORM,
-        nrd::Format::R16_SNORM => vk::Format::R16_SNORM,
-        nrd::Format::R16_UINT => vk::Format::R16_UINT,
-        nrd::Format::R16_SINT => vk::Format::R16_SINT,
-        nrd::Format::R16_SFLOAT => vk::Format::R16_SFLOAT,
-        nrd::Format::RG16_UNORM => vk::Format::R16G16_UNORM,
-        nrd::Format::RG16_SNORM => vk::Format::R16G16_SNORM,
-        nrd::Format::RG16_UINT => vk::Format::R16G16_UINT,
-        nrd::Format::RG16_SINT => vk::Format::R16G16_SINT,
-        nrd::Format::RG16_SFLOAT => vk::Format::R16G16_SFLOAT,
-        nrd::Format::RGBA16_UNORM => vk::Format::R16G16B16A16_UNORM,
-        nrd::Format::RGBA16_SNORM => vk::Format::R16G16B16A16_SNORM,
-        nrd::Format::RGBA16_UINT => vk::Format::R16G16B16A16_UINT,
-        nrd::Format::RGBA16_SINT => vk::Format::R16G16B16A16_SINT,
-        nrd::Format::RGBA16_SFLOAT => vk::Format::R16G16B16A16_SFLOAT,
-        nrd::Format::R32_UINT => vk::Format::R32_UINT,
-        nrd::Format::R32_SINT => vk::Format::R32_SINT,
-        nrd::Format::R32_SFLOAT => vk::Format::R32_SFLOAT,
-        nrd::Format::RG32_UINT => vk::Format::R32G32_UINT,
-        nrd::Format::RG32_SINT => vk::Format::R32G32_SINT,
-        nrd::Format::RG32_SFLOAT => vk::Format::R32G32_SFLOAT,
-        nrd::Format::RGB32_UINT => vk::Format::R32G32B32_UINT,
-        nrd::Format::RGB32_SINT => vk::Format::R32G32B32_SINT,
-        nrd::Format::RGB32_SFLOAT => vk::Format::R32G32B32_SFLOAT,
-        nrd::Format::RGBA32_UINT => vk::Format::R32G32B32A32_UINT,
-        nrd::Format::RGBA32_SINT => vk::Format::R32G32B32A32_SINT,
-        nrd::Format::RGBA32_SFLOAT => vk::Format::R32G32B32A32_SFLOAT,
-        nrd::Format::R10_G10_B10_A2_UNORM => vk::Format::A2R10G10B10_UNORM_PACK32,
-        nrd::Format::R10_G10_B10_A2_UINT => vk::Format::A2R10G10B10_UINT_PACK32,
-        nrd::Format::R11_G11_B10_UFLOAT => vk::Format::B10G11R11_UFLOAT_PACK32,
-        nrd::Format::R9_G9_B9_E5_UFLOAT => vk::Format::E5B9G9R9_UFLOAT_PACK32,
+        Format::R8_UNORM => vk::Format::R8_UNORM,
+        Format::R8_SNORM => vk::Format::R8_SNORM,
+        Format::R8_UINT => vk::Format::R8_UINT,
+        Format::R8_SINT => vk::Format::R8_SINT,
+        Format::RG8_UNORM => vk::Format::R8G8_UNORM,
+        Format::RG8_SNORM => vk::Format::R8G8_SNORM,
+        Format::RG8_UINT => vk::Format::R8G8_UINT,
+        Format::RG8_SINT => vk::Format::R8G8_SINT,
+        Format::RGBA8_UNORM => vk::Format::R8G8B8A8_UNORM,
+        Format::RGBA8_SNORM => vk::Format::R8G8B8A8_SNORM,
+        Format::RGBA8_UINT => vk::Format::R8G8B8A8_UINT,
+        Format::RGBA8_SINT => vk::Format::R8G8B8A8_SINT,
+        Format::RGBA8_SRGB => vk::Format::R8G8B8A8_UNORM,
+        Format::R16_UNORM => vk::Format::R16_UNORM,
+        Format::R16_SNORM => vk::Format::R16_SNORM,
+        Format::R16_UINT => vk::Format::R16_UINT,
+        Format::R16_SINT => vk::Format::R16_SINT,
+        Format::R16_SFLOAT => vk::Format::R16_SFLOAT,
+        Format::RG16_UNORM => vk::Format::R16G16_UNORM,
+        Format::RG16_SNORM => vk::Format::R16G16_SNORM,
+        Format::RG16_UINT => vk::Format::R16G16_UINT,
+        Format::RG16_SINT => vk::Format::R16G16_SINT,
+        Format::RG16_SFLOAT => vk::Format::R16G16_SFLOAT,
+        Format::RGBA16_UNORM => vk::Format::R16G16B16A16_UNORM,
+        Format::RGBA16_SNORM => vk::Format::R16G16B16A16_SNORM,
+        Format::RGBA16_UINT => vk::Format::R16G16B16A16_UINT,
+        Format::RGBA16_SINT => vk::Format::R16G16B16A16_SINT,
+        Format::RGBA16_SFLOAT => vk::Format::R16G16B16A16_SFLOAT,
+        Format::R32_UINT => vk::Format::R32_UINT,
+        Format::R32_SINT => vk::Format::R32_SINT,
+        Format::R32_SFLOAT => vk::Format::R32_SFLOAT,
+        Format::RG32_UINT => vk::Format::R32G32_UINT,
+        Format::RG32_SINT => vk::Format::R32G32_SINT,
+        Format::RG32_SFLOAT => vk::Format::R32G32_SFLOAT,
+        Format::RGB32_UINT => vk::Format::R32G32B32_UINT,
+        Format::RGB32_SINT => vk::Format::R32G32B32_SINT,
+        Format::RGB32_SFLOAT => vk::Format::R32G32B32_SFLOAT,
+        Format::RGBA32_UINT => vk::Format::R32G32B32A32_UINT,
+        Format::RGBA32_SINT => vk::Format::R32G32B32A32_SINT,
+        Format::RGBA32_SFLOAT => vk::Format::R32G32B32A32_SFLOAT,
+        Format::R10_G10_B10_A2_UNORM => vk::Format::A2B10G10R10_UNORM_PACK32,
+        Format::R10_G10_B10_A2_UINT => vk::Format::A2B10G10R10_UINT_PACK32,
+        Format::R11_G11_B10_UFLOAT => vk::Format::B10G11R11_UFLOAT_PACK32,
+        Format::R9_G9_B9_E5_UFLOAT => vk::Format::E5B9G9R9_UFLOAT_PACK32,
     }
 }
 
 fn create_image(
-    texture_desc: &nrd::TextureDesc,
+    texture_desc: &TextureDesc,
     allocator: &Allocator,
     name: &str,
 ) -> VkResult<ImageView<ResidentImage>> {
@@ -722,7 +723,7 @@ pub struct CommonSettings {
 }
 impl Default for CommonSettings {
     fn default() -> Self {
-        let default = nrd::CommonSettings::default();
+        let default = nrd_sys::CommonSettings::default();
         Self {
             motion_vector_scale: [1.0, 1.0, 1.0],
             denoising_range: default.denoising_range,
@@ -753,17 +754,21 @@ pub enum DenoiserEvent {
 #[derive(Resource, Clone)]
 pub struct ReblurSettings {
     pub common_settings: CommonSettings,
-    pub reblur_settings: nrd::ReblurSettings,
+    pub reblur_settings: nrd_sys::ReblurSettings,
 }
 
 impl Default for ReblurSettings {
     fn default() -> Self {
         Self {
-            common_settings: CommonSettings {
-                split_screen: 0.5,
+            common_settings: Default::default(),
+            reblur_settings: nrd_sys::ReblurSettings {
+                antilag_intensity_settings: AntilagIntensitySettings {
+                    sensitivity_to_darkness: 0.1,
+                    enable: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            reblur_settings: Default::default(),
         }
     }
 }
