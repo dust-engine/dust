@@ -721,7 +721,7 @@ impl Default for CommonSettings {
     fn default() -> Self {
         let default = nrd::CommonSettings::default();
         Self {
-            motion_vector_scale: default.motion_vector_scale,
+            motion_vector_scale: [1.0, 1.0, 1.0],
             denoising_range: default.denoising_range,
             disocclusion_threshold: default.disocclusion_threshold,
             disocclusion_threshold_alternate: default.disocclusion_threshold_alternate,

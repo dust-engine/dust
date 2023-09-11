@@ -47,6 +47,6 @@ void main() {
 
 
     
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance + payload.illuminance, 0.0);
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance + payload.illuminance, gl_HitTEXT);
     imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
 }
