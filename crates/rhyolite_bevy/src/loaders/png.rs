@@ -1,8 +1,9 @@
 use std::fmt::{Debug, Display};
 
 use crate::{AsyncQueues, QueuesRouter, SlicedImageArray};
-use bevy_asset::{AssetLoader, AsyncReadExt, LoadedAsset};
+use bevy_asset::{AssetLoader, AsyncReadExt};
 use bevy_ecs::world::{FromWorld, World};
+use bevy_utils::BoxedFuture;
 use rhyolite::ensure_image_layout;
 use rhyolite::{
     ash::vk,
@@ -51,9 +52,9 @@ impl AssetLoader for PngLoader {
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
-        settings: &'a Self::Settings,
-        load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<SlicedImageArray, bevy_asset::Error>> {
+        _settings: &'a Self::Settings,
+        _load_context: &'a mut bevy_asset::LoadContext,
+    ) -> BoxedFuture<'a, Result<SlicedImageArray, anyhow::Error>> {
         Box::pin(async move {
             let mut img_data = Vec::new();
             reader.read_to_end(&mut img_data).await?;
@@ -78,7 +79,7 @@ impl AssetLoader for PngLoader {
                     png::ColorType::Grayscale => 1,
                     png::ColorType::Rgb => 3,
                     png::ColorType::Rgba => 4,
-                    _ => return Err(bevy_asset::Error::new(UnsupportedPngColorTypeError)),
+                    _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
                 };
                 size / 8
             };
@@ -94,7 +95,7 @@ impl AssetLoader for PngLoader {
                     png::ColorType::Grayscale => 1,
                     png::ColorType::Rgb => 4,
                     png::ColorType::Rgba => 4,
-                    _ => return Err(bevy_asset::Error::new(UnsupportedPngColorTypeError)),
+                    _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
                 };
                 size / 8
             };
@@ -145,7 +146,7 @@ impl AssetLoader for PngLoader {
                     (png::ColorType::Rgba, png::BitDepth::Sixteen) => {
                         vk::Format::R16G16B16A16_UNORM
                     }
-                    _ => return Err(bevy_asset::Error::new(UnsupportedPngColorTypeError)),
+                    _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
                 },
                 extent: vk::Extent3D {
                     width: reader.info().width,

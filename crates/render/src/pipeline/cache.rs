@@ -170,7 +170,7 @@ fn pipeline_cache_shader_updated_system(
     mut pipeline_cache: ResMut<PipelineCache>,
     mut events: EventReader<AssetEvent<ShaderModule>>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         match event {
             AssetEvent::Added { id: _ } => (),
             AssetEvent::Modified { id } => {

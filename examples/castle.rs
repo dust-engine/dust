@@ -43,16 +43,16 @@ fn main() {
     #[cfg(feature = "sentry")]
     app.add_plugin(dust_sentry::SentryPlugin);
     #[cfg(not(feature = "sentry"))]
-    app.add_plugin(bevy_log::LogPlugin::default());
+    app.add_plugins(bevy_log::LogPlugin::default());
 
-    app.add_plugin(bevy_core::TaskPoolPlugin::default())
-        .add_plugin(bevy_core::TypeRegistrationPlugin::default())
-        .add_plugin(bevy_core::FrameCountPlugin::default())
-        .add_plugin(bevy_transform::TransformPlugin::default())
-        .add_plugin(bevy_hierarchy::HierarchyPlugin::default())
-        .add_plugin(bevy_diagnostic::DiagnosticsPlugin::default())
-        .add_plugin(bevy_input::InputPlugin::default())
-        .add_plugin(bevy_window::WindowPlugin {
+    app.add_plugins(bevy_core::TaskPoolPlugin::default())
+        .add_plugins(bevy_core::TypeRegistrationPlugin::default())
+        .add_plugins(bevy_core::FrameCountPlugin::default())
+        .add_plugins(bevy_transform::TransformPlugin::default())
+        .add_plugins(bevy_hierarchy::HierarchyPlugin::default())
+        .add_plugins(bevy_diagnostic::DiagnosticsPlugin::default())
+        .add_plugins(bevy_input::InputPlugin::default())
+        .add_plugins(bevy_window::WindowPlugin {
             primary_window: Some(Window {
                 title: "Dust Renderer: Castle".into(),
                 resolution: WindowResolution::new(1920.0, 1080.0).with_scale_factor_override(1.0),
@@ -60,17 +60,17 @@ fn main() {
             }),
             ..Default::default()
         })
-        .add_plugin(bevy_a11y::AccessibilityPlugin)
-        .add_plugin(bevy_winit::WinitPlugin::default())
-        .add_plugin(bevy_asset::AssetPlugin::processed_dev().watch_for_changes())
-        .add_plugin(dust_render::RenderPlugin::default())
-        .add_plugin(bevy_time::TimePlugin::default())
-        .add_plugin(bevy_scene::ScenePlugin::default())
-        .add_plugin(bevy_diagnostic::FrameTimeDiagnosticsPlugin::default())
-        .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
-        .add_plugin(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
-        .add_plugin(bevy_diagnostic::LogDiagnosticsPlugin::default())
-        .add_plugin(RenderSystem)
+        .add_plugins(bevy_a11y::AccessibilityPlugin)
+        .add_plugins(bevy_winit::WinitPlugin::default())
+        .add_plugins(bevy_asset::AssetPlugin::processed_dev().watch_for_changes())
+        .add_plugins(dust_render::RenderPlugin::default())
+        .add_plugins(bevy_time::TimePlugin::default())
+        .add_plugins(bevy_scene::ScenePlugin::default())
+        .add_plugins(bevy_diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(smooth_bevy_cameras::LookTransformPlugin)
+        .add_plugins(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default())
+        .add_plugins(bevy_diagnostic::LogDiagnosticsPlugin::default())
+        .add_plugins(RenderSystem)
         .add_systems(bevy_app::Update, print_position)
         .add_systems(bevy_app::Update, cursor_grab_system)
         .init_resource::<ToneMappingPipeline>()
@@ -94,7 +94,7 @@ fn main() {
             ..Default::default()
         });
 
-    app.add_plugin(dust_vox::VoxPlugin);
+    app.add_plugins(dust_vox::VoxPlugin);
 
     app.add_systems(Startup, setup);
     app.add_systems(Update, teapot_move_system);
@@ -265,7 +265,7 @@ impl Plugin for RenderSystem {
                 };
                 queues.submit(future, &mut *recycled_state);
             };
-        app.add_system(sys.in_set(RenderSystems::Render));
+        app.add_systems(Update, sys.in_set(RenderSystems::Render));
     }
 }
 
@@ -277,7 +277,7 @@ fn print_position(
     a: Query<&GlobalTransform, With<MainCamera>>,
 ) {
     let (current, target) = &mut state.deref_mut();
-    for event in events.iter() {
+    for event in events.read() {
         let delta = match event.unit {
             bevy_input::mouse::MouseScrollUnit::Line => event.y * 30.0,
             bevy_input::mouse::MouseScrollUnit::Pixel => event.y,

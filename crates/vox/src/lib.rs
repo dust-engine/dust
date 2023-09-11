@@ -29,8 +29,8 @@ impl bevy_app::Plugin for VoxPlugin {
             .init_asset::<VoxGeometry>()
             .init_asset::<PaletteMaterial>()
             .init_asset::<DiffuseMaterial>()
-            .add_plugin(GeometryPlugin::<VoxGeometry>::default())
-            .add_plugin(MaterialPlugin::<DiffuseMaterial>::default());
+            .add_plugins(GeometryPlugin::<VoxGeometry>::default())
+            .add_plugins(MaterialPlugin::<DiffuseMaterial>::default());
     }
 }
 

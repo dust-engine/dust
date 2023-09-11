@@ -87,7 +87,7 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
     //TODO: remove detection
 
     let mut upload_futures = Vec::new();
-    for event in events.iter() {
+    for event in events.read() {
         match event {
             AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                 let Some(entities) = store.entities.get(&id.untyped()) else {

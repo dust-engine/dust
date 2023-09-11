@@ -18,7 +18,6 @@ pub struct PhysicalDevice {
 }
 
 pub struct DeviceCreateInfo<'a, F: Fn(u32) -> Vec<f32>> {
-    pub enabled_layer_names: &'a [*const c_char],
     pub enabled_extension_names: &'a [*const c_char],
     pub enabled_features: Box<PhysicalDeviceFeatures>,
     pub queue_create_callback: F,
@@ -26,7 +25,6 @@ pub struct DeviceCreateInfo<'a, F: Fn(u32) -> Vec<f32>> {
 impl<'a, F: Fn(u32) -> Vec<f32>> DeviceCreateInfo<'a, F> {
     pub fn with_queue_create_callback(callback: F) -> Self {
         Self {
-            enabled_layer_names: &[],
             enabled_extension_names: &[],
             enabled_features: Default::default(),
             queue_create_callback: callback,
@@ -215,7 +213,6 @@ impl PhysicalDevice {
         infos.enabled_features.fix_links();
         let create_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_create_infos)
-            .enabled_layer_names(infos.enabled_layer_names)
             .enabled_extension_names(infos.enabled_extension_names)
             .push_next(&mut infos.enabled_features.inner)
             .build();

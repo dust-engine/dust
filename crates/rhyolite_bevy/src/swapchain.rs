@@ -101,6 +101,7 @@ impl Swapchain {
                 bevy_window::PresentMode::Immediate => vk::PresentModeKHR::IMMEDIATE,
                 bevy_window::PresentMode::Mailbox => vk::PresentModeKHR::MAILBOX,
                 bevy_window::PresentMode::Fifo => vk::PresentModeKHR::FIFO,
+                bevy_window::PresentMode::FifoRelaxed => vk::PresentModeKHR::FIFO_RELAXED,
             },
             clipped: config.clipped,
         }
@@ -153,7 +154,7 @@ pub(super) fn extract_windows(
     )>,
 ) {
     queues.next_frame();
-    for resize_event in window_resized_events.iter() {
+    for resize_event in window_resized_events.read() {
         let (window, _, config, swapchain) = query.get_mut(resize_event.window).unwrap();
         if let Some(mut swapchain) = swapchain {
             let default_config = SwapchainConfigExt::default();
@@ -161,7 +162,7 @@ pub(super) fn extract_windows(
             swapchain.recreate(window, swapchain_config);
         }
     }
-    for create_event in window_created_events.iter() {
+    for create_event in window_created_events.read() {
         let (window, raw_handle, config, swapchain) = query.get(create_event.window).unwrap();
         let raw_handle = unsafe { raw_handle.get_handle() };
         assert!(swapchain.is_none());

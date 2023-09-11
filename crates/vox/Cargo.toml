@@ -8,13 +8,14 @@ edition = "2021"
 [dependencies]
 dot_vox = "5.1"
 dust-render = { path = "../render" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", default-features=false, features=["serialize"] }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d", default-features=false, features=["serialize"] }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_utils = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
 rhyolite = { path = "../rhyolite" }
 rhyolite-bevy = { path = "../rhyolite_bevy" }
 dust_vdb = { path = "../vdb" }

@@ -10,12 +10,12 @@ use rhyolite::ash::vk;
 use rhyolite::debug::DebugObject;
 use rhyolite::future::{
     run, use_shared_image, use_shared_state, use_state, Disposable, GPUCommandFuture, RenderData,
-    RenderImage, RenderRes, SharedDeviceStateHostContainer, StageContext, SharedDeviceState,
+    RenderImage, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer,
 };
 use rhyolite::macros::commands;
-use rhyolite::smallvec::{smallvec, SmallVec};
+use rhyolite::smallvec::smallvec;
 use rhyolite::{
-    copy_buffer, cstr, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
+    copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
     ImageViewLike, ResidentImage,
 };
 use rhyolite_bevy::{Allocator, Device, StagingRingBuffer};
@@ -23,9 +23,9 @@ use std::borrow::Cow;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use rhyolite::descriptor::{DescriptorSetLayoutBindingInfo, DescriptorSetWrite};
+use rhyolite::descriptor::DescriptorSetLayoutBindingInfo;
 
-use crate::{PinholeProjection, StandardPipelineRenderParams};
+use crate::PinholeProjection;
 
 #[derive(Resource)]
 pub struct NRDPipeline {
@@ -62,11 +62,10 @@ impl NRDPipeline {
         // Creating samplers
         let sampler_create_info = vk::SamplerCreateInfo {
             flags: vk::SamplerCreateFlags::empty(),
-            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
             mip_lod_bias: 0.0,
-            max_anisotropy: 1.0,
+            max_anisotropy: 0.0,
             min_lod: 0.0,
-            max_lod: 0.0,
+            max_lod: 16.0,
             border_color: vk::BorderColor::FLOAT_TRANSPARENT_BLACK,
             ..Default::default()
         };
@@ -83,6 +82,7 @@ impl NRDPipeline {
                             address_mode_w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
                             mag_filter: vk::Filter::NEAREST,
                             min_filter: vk::Filter::NEAREST,
+                            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
                             ..sampler_create_info
                         },
                     ),
@@ -94,6 +94,7 @@ impl NRDPipeline {
                             address_mode_w: vk::SamplerAddressMode::MIRRORED_REPEAT,
                             mag_filter: vk::Filter::NEAREST,
                             min_filter: vk::Filter::NEAREST,
+                            mipmap_mode: vk::SamplerMipmapMode::NEAREST,
                             ..sampler_create_info
                         },
                     ),
@@ -105,6 +106,7 @@ impl NRDPipeline {
                             address_mode_w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
                             mag_filter: vk::Filter::LINEAR,
                             min_filter: vk::Filter::LINEAR,
+                            mipmap_mode: vk::SamplerMipmapMode::LINEAR,
                             ..sampler_create_info
                         },
                     ),
@@ -116,6 +118,7 @@ impl NRDPipeline {
                             address_mode_w: vk::SamplerAddressMode::MIRRORED_REPEAT,
                             mag_filter: vk::Filter::LINEAR,
                             min_filter: vk::Filter::LINEAR,
+                            mipmap_mode: vk::SamplerMipmapMode::LINEAR,
                             ..sampler_create_info
                         },
                     ),
@@ -317,7 +320,7 @@ impl NRDPipeline {
             accumulation_mode: {
                 let mut should_reset = false;
                 let mut should_clear = false;
-                for event in denoiser_events.iter() {
+                for event in denoiser_events.read() {
                     match event {
                         DenoiserEvent::Restart => should_reset = true,
                         DenoiserEvent::ClearAndRestart => {
@@ -579,7 +582,7 @@ impl NRDPipeline {
                                     nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST => out_radiance,
                                     _ => panic!()
                                 };
-        
+
                                 if matches!(state_needed, nrd::DescriptorType::StorageTexture) {
                                     ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
                                     if matches!(img_ty, nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST) {
@@ -756,7 +759,10 @@ pub struct ReblurSettings {
 impl Default for ReblurSettings {
     fn default() -> Self {
         Self {
-            common_settings: Default::default(),
+            common_settings: CommonSettings {
+                split_screen: 0.5,
+                ..Default::default()
+            },
             reblur_settings: Default::default(),
         }
     }

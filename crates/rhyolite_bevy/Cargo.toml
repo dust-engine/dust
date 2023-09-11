@@ -7,15 +7,17 @@ edition = "2021"
 
 [dependencies]
 rhyolite = { path = "../rhyolite" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_tasks = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_window = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_a11y = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_winit = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d", features = ["x11", "wayland"] }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_tasks = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d", features = ["multi-threaded"] }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_window = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_a11y = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_utils = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_winit = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d", features = ["x11", "wayland"] }
 thread_local = "^1"
+anyhow = "1"
 event-listener = "2.5.1"
 blocking = "1.2"
 crossbeam-channel = "^0.5"
@@ -28,10 +30,10 @@ raw-window-handle = "0.5.2"
 image = "0.24"
 pin-project = "1.0"
 reqwest = { version = "*", features = ["blocking"] }
-bevy_log = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_input = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_core = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_diagnostic = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_log = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_input = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_core = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_diagnostic = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }

@@ -54,7 +54,7 @@ impl AssetLoader for SpirvLoader {
         reader: &'a mut bevy_asset::io::Reader,
         _settings: &'a Self::Settings,
         _load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<ShaderModule, bevy_asset::Error>> {
+    ) -> bevy_utils::BoxedFuture<'a, Result<ShaderModule, anyhow::Error>> {
         let device = self.device.inner().clone();
         return Box::pin(async move {
             let mut bytes = Vec::new();

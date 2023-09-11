@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use bevy_app::Plugin;
-use bevy_asset::{processor::ProcessContext, saver::AssetSaver, Asset, AssetLoader};
+use bevy_asset::{
+    saver::{AssetSaver, SavedAsset},
+    Asset, AssetLoader, AssetPath, LoadContext,
+};
 use bevy_reflect::TypePath;
 use futures_lite::{AsyncReadExt, AsyncWriteExt};
 use shaderc::ResolvedInclude;
@@ -11,48 +14,59 @@ use super::SpirvLoader;
 #[derive(TypePath, Asset)]
 pub struct GlslShaderSource {
     source: String,
-    kind: ShaderKind,
 }
 
-pub struct GlslLoader;
-
-pub struct GlslCompiler;
-
-#[derive(Clone, Copy)]
-pub enum ShaderKind {
-    Vertex,
-    Fragment,
-    Compute,
-    Geometry,
-    TessControl,
-    TessEvaluation,
-
-    /// Deduce the shader kind from `#pragma` directives in the source code.
-    ///
-    /// Compiler will emit error if `#pragma` annotation is not found.
-    InferFromSource,
-
-    RayGeneration,
-    AnyHit,
-    ClosestHit,
-    Miss,
-    Intersection,
-    Callable,
-
-    Task,
-    Mesh,
+#[derive(TypePath, Asset)]
+pub struct SpirvShaderSource {
+    source: Vec<u8>,
 }
 
-impl AssetLoader for GlslLoader {
+/// Asset loader that loads GLSL source code as is.
+pub struct GlslSourceLoader;
+
+impl AssetLoader for GlslSourceLoader {
     type Asset = GlslShaderSource;
     type Settings = ();
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
         _settings: &'a Self::Settings,
-        load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<Self::Asset, bevy_asset::Error>> {
-        let kind = if let Some(ext) = load_context.asset_path().get_full_extension() {
+        _load_context: &'a mut bevy_asset::LoadContext,
+    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, anyhow::Error>> {
+        Box::pin(async move {
+            let mut source = String::new();
+            reader.read_to_string(&mut source).await?;
+
+            Ok(GlslShaderSource { source })
+        })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["glsl"]
+    }
+}
+
+/// Asset loader that compiles the GLSL source code into SPIR-V using Shaderc.
+pub struct GlslShadercCompiler;
+impl AssetLoader for GlslShadercCompiler {
+    type Asset = SpirvShaderSource;
+
+    type Settings = ();
+
+    fn extensions(&self) -> &[&str] {
+        &[
+            "rgen", "rmiss", "rchit", "rahit", "rint", "frag", "vert", "comp",
+        ]
+    }
+
+    fn load<'a>(
+        &'a self,
+        reader: &'a mut bevy_asset::io::Reader,
+        _settings: &'a Self::Settings,
+        ctx: &'a mut LoadContext,
+    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, anyhow::Error>> {
+        use shaderc::ShaderKind;
+        let kind = if let Some(ext) = ctx.asset_path().get_full_extension() {
             match ext.as_str() {
                 "rgen" => ShaderKind::RayGeneration,
                 "rahit" => ShaderKind::AnyHit,
@@ -67,58 +81,16 @@ impl AssetLoader for GlslLoader {
         } else {
             ShaderKind::InferFromSource
         };
-        Box::pin(async move {
-            let mut source = String::new();
-            reader.read_to_string(&mut source).await?;
-
-            Ok(GlslShaderSource { source, kind })
-        })
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &[
-            "glsl", "rgen", "rmiss", "rchit", "rahit", "rint", "frag", "vert", "comp",
-        ]
-    }
-}
-
-impl AssetSaver for GlslCompiler {
-    type Asset = GlslShaderSource;
-
-    type Settings = ();
-
-    type OutputLoader = SpirvLoader;
-
-    fn save<'a>(
-        &'a self,
-        writer: &'a mut bevy_asset::io::Writer,
-        asset: bevy_asset::saver::SavedAsset<'a, Self::Asset>,
-        _settings: &'a Self::Settings,
-        ctx: &'a mut ProcessContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<Self::Settings, bevy_asset::Error>> {
-        use shaderc::ShaderKind as SK;
-        let kind = match asset.kind {
-            ShaderKind::AnyHit => SK::AnyHit,
-            ShaderKind::Vertex => SK::Vertex,
-            ShaderKind::Fragment => SK::Fragment,
-            ShaderKind::Compute => SK::Compute,
-            ShaderKind::Geometry => SK::Geometry,
-            ShaderKind::TessControl => SK::TessControl,
-            ShaderKind::TessEvaluation => SK::TessEvaluation,
-            ShaderKind::InferFromSource => SK::InferFromSource,
-            ShaderKind::RayGeneration => SK::RayGeneration,
-            ShaderKind::ClosestHit => SK::ClosestHit,
-            ShaderKind::Miss => SK::Miss,
-            ShaderKind::Intersection => SK::Intersection,
-            ShaderKind::Callable => SK::Callable,
-            ShaderKind::Task => SK::Task,
-            ShaderKind::Mesh => SK::Mesh,
-        };
 
         Box::pin(async move {
             let mut includes = HashMap::new();
+            let source = {
+                let mut s = String::new();
+                reader.read_to_string(&mut s).await?;
+                s
+            };
 
-            let mut pending_sources = vec![("".to_string(), asset.source.clone())];
+            let mut pending_sources = vec![("".to_string(), source.clone())];
 
             while !pending_sources.is_empty() {
                 let (filename, source) = pending_sources.pop().unwrap();
@@ -126,7 +98,7 @@ impl AssetSaver for GlslCompiler {
                     if includes.contains_key(included_filename) {
                         continue;
                     }
-                    let Ok(inc) = ctx.load_direct(included_filename).await else {
+                    let Ok(inc) = ctx.load_direct(AssetPath::new(included_filename)).await else {
                         continue;
                     };
                     let Some(source): Option<&GlslShaderSource> = inc.get() else {
@@ -156,10 +128,27 @@ impl AssetSaver for GlslCompiler {
                     })
                 });
                 let binary_result =
-                    compiler.compile_into_spirv(&asset.source, kind, "", "main", Some(&options))?;
+                    compiler.compile_into_spirv(&source, kind, "", "main", Some(&options))?;
                 binary_result.as_binary_u8().to_vec()
             };
-            writer.write_all(&binary).await?;
+            Ok(SpirvShaderSource { source: binary })
+        })
+    }
+}
+
+struct SpirvSaver;
+impl AssetSaver for SpirvSaver {
+    type Asset = SpirvShaderSource;
+    type Settings = ();
+    type OutputLoader = SpirvLoader;
+    fn save<'a>(
+        &'a self,
+        writer: &'a mut bevy_asset::io::Writer,
+        asset: SavedAsset<'a, Self::Asset>,
+        _settings: &'a Self::Settings,
+    ) -> bevy_utils::BoxedFuture<Result<(), anyhow::Error>> {
+        Box::pin(async move {
+            writer.write_all(&asset.source).await?;
             Ok(())
         })
     }
@@ -170,14 +159,16 @@ impl Plugin for GlslPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         use bevy_asset::AssetApp;
         app.init_asset::<GlslShaderSource>()
-            .register_asset_loader(GlslLoader);
+            .init_asset::<SpirvShaderSource>()
+            .register_asset_loader(GlslSourceLoader)
+            .register_asset_loader(GlslShadercCompiler);
         if let Some(processor) = app
             .world
             .get_resource::<bevy_asset::processor::AssetProcessor>()
         {
-            type P = bevy_asset::processor::LoadAndSave<GlslLoader, GlslCompiler>;
-            processor.register_processor::<P>(GlslCompiler.into());
-            for ext in GlslLoader.extensions() {
+            type P = bevy_asset::processor::LoadAndSave<GlslShadercCompiler, SpirvSaver>;
+            processor.register_processor::<P>(SpirvSaver.into());
+            for ext in GlslShadercCompiler.extensions() {
                 if *ext != "glsl" {
                     processor.set_default_processor::<P>(ext);
                 }

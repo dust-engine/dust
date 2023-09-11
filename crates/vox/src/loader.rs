@@ -5,6 +5,7 @@ use crate::{palette::VoxPalette, VoxGeometry};
 /// hierarchy must sum up to 8 where 2^8 = 256.
 use crate::{Tree, VoxBundle};
 use bevy_asset::{AssetLoader, AsyncReadExt, Handle, LoadedAsset};
+use bevy_ecs::world::EntityWorldMut;
 use bevy_ecs::{
     prelude::{Bundle, Entity},
     world::{EntityMut, FromWorld, World},
@@ -313,7 +314,7 @@ impl AssetLoader for VoxLoader {
         reader: &'a mut bevy_asset::io::Reader,
         settings: &'a Self::Settings,
         load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_asset::BoxedFuture<'a, Result<bevy_scene::Scene, anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<'a, Result<bevy_scene::Scene, anyhow::Error>> {
         Box::pin(async {
             let mut buffer = Vec::new();
             reader.read_to_end(&mut buffer).await?;
@@ -443,7 +444,7 @@ enum WorldOrParent<'w, 'q> {
 }
 
 impl<'w, 'q> WorldOrParent<'w, 'q> {
-    fn spawn(self, bundle: impl Bundle + Send + Sync + 'static) -> EntityMut<'w> {
+    fn spawn(self, bundle: impl Bundle + Send + Sync + 'static) -> EntityWorldMut<'w> {
         match self {
             WorldOrParent::World(world) => world.spawn(bundle),
             WorldOrParent::Parent(parent) => parent.spawn(bundle),

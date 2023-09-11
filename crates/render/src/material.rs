@@ -94,7 +94,7 @@ fn material_system<T: Material>(
             commands.entity(entity).insert(*sbt_index);
         }
     }
-    for event in events.iter() {
+    for event in events.read() {
         match event {
             AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                 let material = materials.get(*id).unwrap();

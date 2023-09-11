@@ -31,7 +31,7 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
-use rhyolite::{initialize_buffer, ImageView, ResidentBuffer, ResidentImage};
+use rhyolite::{ImageView, ResidentImage};
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 use rhyolite_bevy::{RenderSystems, StagingRingBuffer};
 
@@ -782,7 +782,7 @@ impl Plugin for StandardPipelinePlugin {
             PostUpdate,
             extract_global_transforms.in_set(RenderSystems::CleanUp),
         );
-        app.add_plugin(
+        app.add_plugins(
             InstanceVecPlugin::<PreviousFrameGlobalTransform, Renderable>::new(
                 vk::BufferUsageFlags::STORAGE_BUFFER,
                 0,

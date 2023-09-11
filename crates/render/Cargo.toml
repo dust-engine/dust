@@ -8,15 +8,17 @@ edition = "2021"
 [dependencies]
 rhyolite-bevy = { path = "../rhyolite_bevy" }
 rhyolite = { path = "../rhyolite" }
-bevy_tasks = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_math = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
-bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "527d3a5885daa4b43df7054f7787dad47f06135d" }
+bevy_tasks = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d", features = ["multi-threaded"] }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d", features = ["multi-threaded"] }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_math = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_time = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_utils = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+anyhow = "1"
 once_cell = "1.17"
 futures-lite = "1.11"
 crossbeam-channel = "^0.5"

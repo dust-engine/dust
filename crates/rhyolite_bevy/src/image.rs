@@ -1,5 +1,5 @@
 use bevy_asset::Asset;
-use bevy_reflect::{TypePath, TypeUuid};
+use bevy_reflect::TypePath;
 use rhyolite::HasDevice;
 use rhyolite::{
     ash::{prelude::VkResult, vk},

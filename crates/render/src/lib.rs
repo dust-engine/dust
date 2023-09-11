@@ -57,7 +57,7 @@ impl Default for RenderPlugin {
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        app.add_plugin(rhyolite_bevy::RenderPlugin {
+        app.add_plugins(rhyolite_bevy::RenderPlugin {
             enabled_instance_extensions: vec![
                 rhyolite::ash::extensions::ext::DebugUtils::name(),
                 rhyolite::ash::extensions::khr::Surface::name(),
@@ -107,7 +107,7 @@ impl Plugin for RenderPlugin {
             }),
             ..rhyolite_bevy::RenderPlugin::default()
         })
-        .add_plugin(PipelineCachePlugin::default())
+        .add_plugins(PipelineCachePlugin::default())
         .register_type::<Renderable>()
         .add_systems(PostUpdate, build_blas_system.in_set(RenderSystems::SetUp))
         .init_resource::<BlasStore>()
@@ -120,11 +120,11 @@ impl Plugin for RenderPlugin {
         app.register_asset_loader(SpirvLoader::new(device.clone()));
 
         if self.tlas_include_all {
-            app.add_plugin(TLASPlugin::<Renderable>::default());
+            app.add_plugins(TLASPlugin::<Renderable>::default());
         }
         if self.use_standard_pipeline {
-            app.add_plugin(StandardPipelinePlugin)
-                .add_plugin(RayTracingPipelinePlugin::<StandardPipeline>::default());
+            app.add_plugins(StandardPipelinePlugin)
+                .add_plugins(RayTracingPipelinePlugin::<StandardPipeline>::default());
         }
 
         #[cfg(feature = "glsl")]
