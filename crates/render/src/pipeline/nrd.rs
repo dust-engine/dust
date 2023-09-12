@@ -270,7 +270,7 @@ impl NRDPipeline {
     pub fn render<'a, T: ImageViewLike + RenderData + 'a>(
         &'a mut self,
         params: SystemParamItem<'a, '_, NDRPipelineRenderParams>,
-        in_motion: &'a RenderImage<T>,
+        in_motion: &'a mut RenderImage<T>,
         in_normal_roughness: &'a RenderImage<T>,
         in_viewz: &'a RenderImage<T>,
         in_radiance: &'a RenderImage<T>,
@@ -586,8 +586,14 @@ impl NRDPipeline {
 
                                 if matches!(state_needed, DescriptorType::StorageTexture) {
                                     ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_READ, vk::ImageLayout::GENERAL);
-                                    if matches!(img_ty, ResourceType::OUT_DIFF_RADIANCE_HITDIST) {
-                                        ctx.write_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                                    match img_ty {
+                                        ResourceType::OUT_DIFF_RADIANCE_HITDIST => {
+                                            ctx.write_image(out_radiance, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                                        },
+                                        ResourceType::IN_MV => {
+                                            ctx.write_image(in_motion, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_STORAGE_WRITE, vk::ImageLayout::GENERAL);
+                                        },
+                                        _ => ()
                                     }
                                 } else {
                                     ctx.read_image(img, vk::PipelineStageFlags2::COMPUTE_SHADER, vk::AccessFlags2::SHADER_SAMPLED_READ, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);

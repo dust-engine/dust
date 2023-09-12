@@ -208,7 +208,7 @@ impl Plugin for RenderSystem {
                             let size = swapchain_image.inner().extent();
                             nrd_pipeline.render(
                                 nrd_pipeline_params,
-                                &gbuffer.motion,
+                                &mut gbuffer.motion,
                                 &gbuffer.normal,
                                 &gbuffer.depth,
                                 &gbuffer.radiance,

@@ -335,7 +335,7 @@ pub enum DescriptorSetWriteType<'a> {
 
 impl Device {
     pub fn write_descriptor_sets(&self, writes: &[DescriptorSetWrite]) {
-        let write_results: Vec<_> = writes
+        let write_results: smallvec::SmallVec<[_; 8]> = writes
             .iter()
             .map(|a| {
                 let mut write = vk::WriteDescriptorSet {
