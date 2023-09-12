@@ -11,7 +11,7 @@ use bevy_ecs::{
     system::{Commands, Local, ParamSet, Query, Res, ResMut, Resource},
 };
 use bevy_hierarchy::Children;
-use bevy_tasks::{IoTaskPool, Task};
+use bevy_tasks::{AsyncComputeTaskPool, IoTaskPool, Task};
 use rhyolite::{
     accel_struct::{
         blas::AabbBlasBuilder,
@@ -213,15 +213,18 @@ pub(crate) fn build_blas_system(
     if builds.len() == 0 {
         return;
     }
-    println!("Scheduled {} BLAS builds", builds.len());
-    let batch_builder =
-        AccelerationStructureBatchBuilder::new(allocator.clone().into_inner(), builds);
+    tracing::info!("Scheduled {} BLAS builds", builds.len());
 
-    let future = queues.submit(
-        batch_builder
-            .build()
-            .schedule_on_queue(queue_router.of_type(QueueType::Compute)),
-        &mut Default::default(),
-    );
-    upload_job.replace(IoTaskPool::get().spawn(future));
+    let queues = queues.clone();
+    let allocator = allocator.clone();
+    let queue_router = queue_router.clone();
+    let cmd_buffer_record_future = AsyncComputeTaskPool::get().spawn(async move {
+        let batch_build_future =
+            AccelerationStructureBatchBuilder::new(allocator.into_inner(), builds).build();
+        let queue_future =
+            batch_build_future.schedule_on_queue(queue_router.of_type(QueueType::Compute));
+        queues.submit(queue_future, &mut Default::default()).await
+    });
+
+    upload_job.replace(cmd_buffer_record_future);
 }

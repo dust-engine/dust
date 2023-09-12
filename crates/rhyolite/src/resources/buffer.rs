@@ -393,7 +393,6 @@ impl<T: BufferLike + RenderData, TRef: DerefMut<Target = RenderRes<SharedDeviceS
         let dst = this.dst.deref_mut().inner_mut();
         let data: u32 = *this.data;
         ctx.record(|ctx, command_buffer| unsafe {
-            println!("Initialized buffer");
             ctx.device()
                 .cmd_fill_buffer(command_buffer, dst.raw_buffer(), offset, size, data);
         });

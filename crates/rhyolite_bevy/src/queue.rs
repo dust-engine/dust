@@ -298,11 +298,11 @@ impl Queues {
     }
 }
 
-#[derive(Resource)]
-pub struct QueuesRouter(rhyolite::QueuesRouter);
+#[derive(Resource, Clone)]
+pub struct QueuesRouter(Arc<rhyolite::QueuesRouter>);
 impl QueuesRouter {
     pub fn new(inner: rhyolite::QueuesRouter) -> Self {
-        Self(inner)
+        Self(Arc::new(inner))
     }
 }
 

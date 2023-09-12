@@ -17,6 +17,8 @@ pub struct AccelerationStructureBuild {
     pub geometries: Box<[(Arc<ResidentBuffer>, usize, vk::GeometryFlagsKHR, u32)]>, // data, stride, flags, num_primitives
     pub primitive_datasize: usize,
 }
+unsafe impl Send for AccelerationStructureBuild {}
+unsafe impl Sync for AccelerationStructureBuild {}
 
 /// Builds many acceleration structures in batch.
 pub struct AccelerationStructureBatchBuilder<T> {
@@ -150,6 +152,8 @@ pub struct BLASBuildFuture<T> {
     build_range_infos: Box<[vk::AccelerationStructureBuildRangeInfoKHR]>,
     build_range_ptrs: Box<[*const vk::AccelerationStructureBuildRangeInfoKHR]>,
 }
+unsafe impl<T: Send> Send for BLASBuildFuture<T> {}
+unsafe impl<T: Sync> Sync for BLASBuildFuture<T> {}
 
 impl<T> GPUCommandFuture for BLASBuildFuture<T> {
     type Output = Vec<(T, AccelerationStructure)>;
