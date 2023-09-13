@@ -4,7 +4,7 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(rgba32f, set = 0, binding = 0) uniform readonly image2D u_src_img;
+layout(rgba16f, set = 0, binding = 0) uniform readonly image2D u_src_img;
 layout(rgb10_a2, set = 0, binding = 1) uniform readonly image2D u_src_img_albedo;
 layout(set = 0, binding = 2) uniform writeonly image2D u_dst_img;
 
@@ -177,7 +177,7 @@ void main() {
     in_value = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(in_value);
     vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
-    float exposure = 0.01; //1.0 / (9.6*u_histogram.avg);
+    float exposure = 0.003; //1.0 / (9.6*u_histogram.avg);
     exposure *= 9.6;
     //exposure = 0.05;
 

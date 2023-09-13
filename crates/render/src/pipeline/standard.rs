@@ -75,6 +75,8 @@ impl RayTracingPipeline for StandardPipeline {
         let set1 = set_layout! {
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
             img_output: vk::DescriptorType::STORAGE_IMAGE,
+            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            img_output_denoised: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
             img_albedo: vk::DescriptorType::STORAGE_IMAGE,
@@ -394,6 +396,7 @@ impl StandardPipeline {
                     0,
                     &[
                         gbuffer.radiance.inner().as_descriptor(vk::ImageLayout::GENERAL),
+                        gbuffer.denoised_radiance.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         gbuffer.albedo.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         gbuffer.normal.inner().as_descriptor(vk::ImageLayout::GENERAL),
                         gbuffer.depth.inner().as_descriptor(vk::ImageLayout::GENERAL),
@@ -403,13 +406,13 @@ impl StandardPipeline {
                 ),
                 DescriptorSetWrite::sampled_images(
                     desc_set[0],
-                    6,
+                    7,
                     0,
                     &[noise_image.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
                 ),
                 DescriptorSetWrite::uniform_buffers(
                     desc_set[0],
-                    7,
+                    8,
                     0,
                     &[
                         sunlight_buffer.inner().as_descriptor(),
@@ -420,7 +423,7 @@ impl StandardPipeline {
                 ),
                 DescriptorSetWrite::storage_buffers(
                     desc_set[0],
-                    10,
+                    11,
                     0,
                     &[
                         instances_buffer.inner().as_descriptor(),
@@ -429,7 +432,7 @@ impl StandardPipeline {
                 ),
                 DescriptorSetWrite::accel_structs(
                     desc_set[0],
-                    11,
+                    12,
                     0,
                     &[tlas.inner().raw()]
                 ),
@@ -834,6 +837,7 @@ pub struct GBuffer<T> {
     pub motion: T,
     pub voxel_id: T,
     pub radiance: T,
+    pub denoised_radiance: T,
 }
 
 impl<T: Disposable> Disposable for GBuffer<T> {
@@ -844,6 +848,7 @@ impl<T: Disposable> Disposable for GBuffer<T> {
         self.motion.dispose();
         self.voxel_id.dispose();
         self.radiance.dispose();
+        self.denoised_radiance.dispose();
     }
     fn retire(&mut self) {
         self.albedo.retire();
@@ -852,6 +857,7 @@ impl<T: Disposable> Disposable for GBuffer<T> {
         self.motion.retire();
         self.voxel_id.retire();
         self.radiance.retire();
+        self.denoised_radiance.retire();
     }
 }
 
@@ -959,6 +965,18 @@ pub fn use_gbuffer(
         },
         should_update,
     );
+    let denoised_radiance = use_shared_image(
+        &mut this.denoised_radiance,
+        |_| {
+            create_image(
+                vk::Format::R16G16B16A16_SFLOAT,
+                vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
+                cstr!("GBuffer Denoised Radiance Image"),
+                cstr!("GBuffer Denoised Radiance Image View"),
+            )
+        },
+        should_update,
+    );
     GBuffer {
         albedo,
         depth,
@@ -966,5 +984,6 @@ pub fn use_gbuffer(
         motion,
         voxel_id,
         radiance,
+        denoised_radiance,
     }
 }

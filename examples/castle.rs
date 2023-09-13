@@ -193,28 +193,6 @@ impl Plugin for RenderSystem {
                             &allocator,
                             UVec2::new(swapchain_image.inner().extent().width, swapchain_image.inner().extent().height),
                         );
-                        let mut denoised_radiance_image = rhyolite::future::use_shared_image(using!(), |_| {
-                            (
-                                {
-                                    let mut img = allocator
-                                    .create_device_image_uninit(
-                                        &ImageRequest {
-                                            format: vk::Format::R32G32B32A32_SFLOAT,
-                                            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-                                            extent: swapchain_image.inner().extent(),
-                                            ..Default::default()
-                                        }
-                                    ).unwrap();
-                                    img.set_name_cstr(cstr!("Denoised Radiance Image")).unwrap();
-
-                                    let mut img_view = img.with_2d_view().unwrap();
-                                    img_view.set_name_cstr(cstr!("Denoised Radiance View")).unwrap();
-                                    img_view
-                                },
-                                vk::ImageLayout::UNDEFINED,
-                            )
-                        }, |image| swapchain_image.inner().extent() != image.extent());
-
 
                         let accel_struct = accel_struct.await;
                         if let Some(render) = ray_tracing_pipeline.render(
@@ -234,17 +212,17 @@ impl Plugin for RenderSystem {
                                 &gbuffer.normal,
                                 &gbuffer.depth,
                                 &gbuffer.radiance,
-                                &mut denoised_radiance_image,
+                                &mut gbuffer.denoised_radiance,
                                 camera,
                                 (size.width as u16, size.height as u16)
                             ).await;
                         }
 
-                        let exposure = auto_exposure_pipeline.render(&denoised_radiance_image, &auto_exposure_pipeline_params).await;
+                        let exposure = auto_exposure_pipeline.render(&gbuffer.denoised_radiance, &auto_exposure_pipeline_params).await;
                         let exposure_avg = exposure.map(|exposure| exposure.slice(4 * 256, 4));
                         let color_space = swapchain_image.inner().color_space().clone();
                         tone_mapping_pipeline.render(
-                            &denoised_radiance_image,
+                            &gbuffer.denoised_radiance,
                             &gbuffer.albedo,
                             &mut swapchain_image,
                             &exposure_avg,
@@ -254,7 +232,7 @@ impl Plugin for RenderSystem {
 
                         retain!(exposure_avg);
                         retain!(accel_struct);
-                        retain!((gbuffer, denoised_radiance_image));
+                        retain!(gbuffer);
                         if !swapchain_image.touched() {
                             clear_image(&mut swapchain_image, vk::ClearColorValue {
                                 float32: [0.0, 1.0, 0.0, 0.0]

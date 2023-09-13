@@ -15,17 +15,15 @@
 // Unit: lux (lm / m^2)
 // Stores the incoming radiance at primary ray hit points.
 layout(set = 0, binding = 0, rgba16f) uniform image2D u_illuminance;
-layout(set = 0, binding = 1, rgb10_a2) uniform image2D u_albedo;
-layout(set = 0, binding = 2, rgb10_a2) uniform image2D u_normal;
-layout(set = 0, binding = 3, r32f) uniform image2D u_depth;
-layout(set = 0, binding = 4, rgba16f) uniform image2D u_motion;
-layout(set = 0, binding = 5, r32ui) uniform uimage2D u_voxel_id;
+layout(set = 0, binding = 1, rgba16f) uniform image2D u_illuminance_denoised;
+layout(set = 0, binding = 2, rgb10_a2) uniform image2D u_albedo;
+layout(set = 0, binding = 3, rgb10_a2) uniform image2D u_normal;
+layout(set = 0, binding = 4, r32f) uniform image2D u_depth;
+layout(set = 0, binding = 5, rgba16f) uniform image2D u_motion;
+layout(set = 0, binding = 6, r32ui) uniform uimage2D u_voxel_id;
+layout(set = 0, binding = 7) uniform texture2D blue_noise;
 
-layout(set = 0, binding = 11) uniform accelerationStructureEXT accelerationStructure;
-layout(set = 0, binding = 6) uniform texture2D blue_noise;
-
-
-layout(set = 0, binding = 8, std430) uniform CameraSettingsLastFrame {
+layout(set = 0, binding = 9, std430) uniform CameraSettingsLastFrame {
     mat4 view_proj;
     mat4 inverse_view_proj;
     vec3 camera_view_col0;
@@ -39,7 +37,7 @@ layout(set = 0, binding = 8, std430) uniform CameraSettingsLastFrame {
     float near;
     float padding;
 } u_camera_last_frame;
-layout(set = 0, binding = 9, std430) uniform CameraSettings {
+layout(set = 0, binding = 10, std430) uniform CameraSettings {
     mat4 view_proj;
     mat4 inverse_view_proj;
     vec3 camera_view_col0;
@@ -53,9 +51,10 @@ layout(set = 0, binding = 9, std430) uniform CameraSettings {
     float near;
     float padding;
 } u_camera;
-layout(set = 0, binding = 10, std430) buffer InstanceData {
+layout(set = 0, binding = 11, std430) buffer InstanceData {
     mat4 last_frame_transforms[];
 } s_instances;
+layout(set = 0, binding = 12) uniform accelerationStructureEXT accelerationStructure;
 vec3 camera_origin() {
     return vec3(u_camera.position_x, u_camera.position_y, u_camera.position_z);
 }
@@ -151,7 +150,7 @@ struct ArHosekSkyModelChannelConfiguration {
     vec4 ldCoefficient2; // 2, 3, 4, 5
 };
 
-layout(set = 0, binding = 7, std430) uniform ArHosekSkyModelConfiguration{
+layout(set = 0, binding = 8, std430) uniform ArHosekSkyModelConfiguration{
     ArHosekSkyModelChannelConfiguration r;
     ArHosekSkyModelChannelConfiguration g;
     ArHosekSkyModelChannelConfiguration b;
