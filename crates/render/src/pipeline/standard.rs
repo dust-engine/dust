@@ -549,6 +549,12 @@ impl StandardPipeline {
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.write_image(
+                    &mut gbuffer.denoised_radiance,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
                     &mut gbuffer.depth,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
@@ -696,12 +702,6 @@ impl StandardPipeline {
                     &mut gbuffer.radiance,
                     vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                     vk::AccessFlags2::SHADER_STORAGE_WRITE,
-                    vk::ImageLayout::GENERAL,
-                );
-                ctx.read_image(
-                    &gbuffer.albedo,
-                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_STORAGE_READ,
                     vk::ImageLayout::GENERAL,
                 );
                 ctx.read_image(

@@ -335,11 +335,23 @@ impl Queues {
                         ..*info
                     };
                     */
-                    self.device
+                    let result = self.device
                         .swapchain_loader()
                         .queue_present(queue, &info)
-                        .map_err(crate::error_handler::handle_device_lost)
-                        .unwrap();
+                        .map_err(crate::error_handler::handle_device_lost);
+                    match result {
+                        Ok(suboptimal) => {
+                            if suboptimal {
+                                tracing::warn!("Suboptimal submission!");
+                            }
+                        },
+                        Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                            tracing::error!("Out of Date submission!");
+                        },
+                        _ => {
+                            result.unwrap();
+                        }
+                    }
                 }
             }
         }

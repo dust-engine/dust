@@ -16,7 +16,7 @@ use rhyolite::macros::commands;
 use rhyolite::smallvec::smallvec;
 use rhyolite::{
     copy_buffer, BufferLike, HasDevice, ImageExt, ImageRequest, ImageView, ImageViewLike,
-    ResidentImage,
+    ResidentImage, ImageLike,
 };
 use rhyolite_bevy::{Allocator, Device, StagingRingBuffer};
 use std::borrow::Cow;
@@ -225,7 +225,6 @@ impl NRDPipeline {
             .collect();
         Self {
             pipelines,
-            //desc_pool,
             transient_pool: desc.transient_pool().iter().cloned().collect(),
             permanent_pool: desc.permanent_pool().iter().cloned().collect(),
             binding_offsets: library_desc.spirv_binding_offsets.clone(),
@@ -234,9 +233,6 @@ impl NRDPipeline {
         }
     }
     pub fn resize(&mut self, width: u16, height: u16) {
-        if self.dimensions == (width, height) {
-            return;
-        }
         let instance = Instance::new(&[DenoiserDesc {
             identifier: REBLUR_IDENTIFIER,
             denoiser: Denoiser::ReblurDiffuse,
@@ -249,6 +245,8 @@ impl NRDPipeline {
 
         self.transient_pool = desc.transient_pool().iter().cloned().collect();
         self.permanent_pool = desc.permanent_pool().iter().cloned().collect();
+        self.dimensions = (width, height);
+        self.instance = instance;
     }
 }
 
@@ -437,7 +435,7 @@ impl NRDPipeline {
                                             vk::ImageLayout::UNDEFINED
                                         )
                                     },
-                                    |_old| false // TODO: resize when needed
+                                    |old| old.extent() != vk::Extent3D { width: texture_desc.width as u32, height: texture_desc.height as u32, depth: 1 },
                                 )
                             });
                             let view = img.inner().raw_image_view();
@@ -455,7 +453,7 @@ impl NRDPipeline {
                                             vk::ImageLayout::UNDEFINED
                                         )
                                     },
-                                    |_old| false // TODO: resize when needed
+                                    |old| old.extent() != vk::Extent3D { width: texture_desc.width as u32, height: texture_desc.height as u32, depth: 1 },
                                 )
                             });
                             let view = img.inner().raw_image_view();

@@ -217,7 +217,6 @@ impl StagingRingBuffer {
             let mut current_guard = self.current.lock().unwrap();
             *current_guard = unsafe { self.add_new_block().map(|a| Some(Arc::new(a)))? };
             let current: Arc<StagingRingBufferBlockTeleporter> = current_guard.clone().unwrap();
-            drop(current_guard);
             let current_block = current.0.as_ref().unwrap();
             let (allocation, offset) = unsafe {
                 let mut virtual_block = current_block.block.lock().unwrap();
@@ -228,6 +227,7 @@ impl StagingRingBuffer {
                 flags: vma::VirtualAllocationCreateFlags::VMA_VIRTUAL_ALLOCATION_CREATE_STRATEGY_MIN_TIME_BIT
             }).unwrap()
             };
+            drop(current_guard);
             return Ok(StagingRingBufferSlice {
                 ptr: unsafe { current_block.ptr.add(offset as usize) },
                 buffer: current_block.buffer,

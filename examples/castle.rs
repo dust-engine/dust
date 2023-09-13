@@ -2,7 +2,7 @@
 #![feature(int_roundings)]
 use std::ops::DerefMut;
 
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Startup, Update, PostUpdate};
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
@@ -243,7 +243,7 @@ impl Plugin for RenderSystem {
                 };
                 queues.submit(future, &mut *recycled_state);
             };
-        app.add_systems(Update, sys.in_set(RenderSystems::Render));
+        app.add_systems(PostUpdate, sys.in_set(RenderSystems::Render));
     }
 }
 
