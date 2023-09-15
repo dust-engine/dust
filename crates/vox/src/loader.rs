@@ -189,12 +189,12 @@ impl<'a> SceneGraphTraverser<'a> {
         let quat = glam::Quat::from_xyzw(quat.x, quat.z, -quat.y, quat.w);
         let scale = glam::Vec3A::from_array(scale).xzy(); // no need to negate scale.y because scale is not a coordinate
 
-        let offset = Vec3A::new(
+        let mut offset = Vec3A::new(
             if size.x % 2 == 0 { 0.0 } else { 0.5 },
             if size.z % 2 == 0 { 0.0 } else { 0.5 },
             if size.y % 2 == 0 { 0.0 } else { -0.5 },
         );
-
+        offset = quat.mul_vec3a(offset); // If another seam shows up in the future, try multiplying this with `scale`
         let center = quat * (size.xzy().as_vec3a() / 2.0);
         Transform {
             translation: (translation - center * scale + offset).into(),
