@@ -384,50 +384,17 @@ impl AssetLoader for VoxLoader {
                     load_context.add_labeled_asset(format!("Material{}", model_id), material);
                 models[model_id as usize] = Some((geometry_handle, material_handle, num_blocks));
             }
-            let diffuse_materials: Vec<_> = traverser
+            traverser
                 .instances
-                .iter()
-                .map(|(model_id, entity_id)| {
+                .into_iter()
+                .for_each(|(model_id, entity_id)| {
                     let (geometry_handle, material_handle, num_blocks) =
-                        models[*model_id as usize].as_ref().unwrap();
+                        models[model_id as usize].as_ref().unwrap();
 
-                    let mut entity = world.entity_mut(*entity_id);
+                    let mut entity = world.entity_mut(entity_id);
                     *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry_handle.clone();
-                    let diffuse_material = DiffuseMaterial::new(
-                        material_handle.clone(),
-                        self.allocator
-                            .create_device_buffer_uninit(
-                                (*num_blocks as usize
-                                    * std::mem::size_of::<DiffuseMaterialIrradianceCacheEntry>())
-                                    as u64,
-                                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
-                                    | vk::BufferUsageFlags::TRANSFER_DST, // TODO: zero-initialize this.0
-                                0,
-                            )
-                            .unwrap(),
-                    );
-                    (diffuse_material, *entity_id)
-                })
-                .collect();
-            let zero_initialize_future = commands! {
-                for (diffuse_material, _) in diffuse_materials.iter() {
-                    // TODO: join here instead
-                    let mut buffer = RenderRes::new(diffuse_material.irradiance_cache.raw_buffer());
-                    fill_buffer(&mut buffer, 0).await;
-                    retain!(buffer);
-                }
-            }
-            .schedule_on_queue(self.transfer_queue);
-            self.queues
-                .submit(zero_initialize_future, &mut Default::default())
-                .await;
-            for (i, (diffuse_material, entity_id)) in diffuse_materials.into_iter().enumerate() {
-                let diffuse_material_handle = load_context
-                    .add_labeled_asset(format!("DiffuseMaterial{}", i), diffuse_material);
-                let mut entity = world.entity_mut(entity_id);
-                *entity.get_mut::<Handle<DiffuseMaterial>>().unwrap() = diffuse_material_handle;
-            }
-
+                    *entity.get_mut::<Handle<PaletteMaterial>>().unwrap() = material_handle.clone();
+                });
             let scene = bevy_scene::Scene::new(world);
             Ok(scene)
         })
