@@ -28,18 +28,6 @@ impl PaletteMaterial {
 }
 
 
-pub struct DiffuseMaterialIrradianceCacheEntryFace {
-    irradiance: [u16; 3],
-    /// Represents 4x4 faces.
-    mask: u16,
-}
-pub struct DiffuseMaterialIrradianceCacheEntry {
-    /// The six faces. 8 bytes per face, 48 bytes in total.
-    faces: [DiffuseMaterialIrradianceCacheEntryFace; 6],
-    lastAccessedFrames: [u16; 6],
-    _reserved: u32,
-}
-
 #[repr(C)]
 pub struct PaletteMaterialShaderParams {
     /// Pointer to a list of u64 indexed by block id
@@ -66,10 +54,6 @@ impl dust_render::Material for PaletteMaterial {
         match ray_type {
             Self::Pipeline::PRIMARY_RAYTYPE => Some(SpecializedShader::for_shader(
                 asset_server.load("hit.rchit"),
-                vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-            )),
-            Self::Pipeline::PHOTON_RAYTYPE => Some(SpecializedShader::for_shader(
-                asset_server.load("photon.rchit"),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )),
             Self::Pipeline::FINAL_GATHER_RAYTYPE => Some(SpecializedShader::for_shader(

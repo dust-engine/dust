@@ -37,8 +37,8 @@ void main() {
         accelerationStructure,
         gl_RayFlagsOpaqueEXT, // RayFlags
         0xFF, // CullMask
-        3, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
-        4, // SBT stride, number of ray types // TODO: Make this a shader constant
+        2, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
+        3, // SBT stride, number of ray types // TODO: Make this a shader constant
         2, // missIndex
         hitLocation,     // ray origin
         u_camera.near,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days

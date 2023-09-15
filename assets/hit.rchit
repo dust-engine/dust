@@ -5,7 +5,6 @@ layout(shaderRecordEXT) buffer Sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
     PaletteInfo paletteInfo;
-    IrradianceCache irradianceCache;
 } sbt;
 
 hitAttributeEXT HitAttribute {

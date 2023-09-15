@@ -48,7 +48,6 @@ use super::{RayTracingPipeline, RayTracingPipelineManager};
 #[derive(Resource)]
 pub struct StandardPipeline {
     primary_ray_pipeline: RayTracingPipelineManager,
-    photon_ray_pipeline: RayTracingPipelineManager,
     shadow_ray_pipeline: RayTracingPipelineManager,
     final_gather_ray_pipeline: RayTracingPipelineManager,
     hitgroup_sbt_manager: SbtManager,
@@ -146,19 +145,6 @@ impl RayTracingPipeline for StandardPipeline {
                 )],
                 Vec::new(),
             ),
-            photon_ray_pipeline: RayTracingPipelineManager::new(
-                pipeline_characteristics.clone(),
-                vec![Self::PHOTON_RAYTYPE],
-                SpecializedShader::for_shader(
-                    asset_server.load("photon.rgen"),
-                    vk::ShaderStageFlags::RAYGEN_KHR,
-                ),
-                vec![SpecializedShader::for_shader(
-                    asset_server.load("photon.rmiss"),
-                    vk::ShaderStageFlags::MISS_KHR,
-                )],
-                Vec::new(),
-            ),
             shadow_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics.clone(),
                 vec![Self::SHADOW_RAYTYPE],
@@ -194,7 +180,6 @@ impl RayTracingPipeline for StandardPipeline {
         params: &mut SystemParamItem<M::ShaderParameterParams>,
     ) -> crate::sbt::SbtIndex {
         self.primary_ray_pipeline.material_instance_added::<M>();
-        self.photon_ray_pipeline.material_instance_added::<M>();
         self.shadow_ray_pipeline.material_instance_added::<M>();
         self.final_gather_ray_pipeline
             .material_instance_added::<M>();
@@ -202,7 +187,7 @@ impl RayTracingPipeline for StandardPipeline {
     }
 
     fn num_raytypes() -> u32 {
-        4
+        3
     }
 
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
@@ -220,17 +205,6 @@ struct StandardPipelineCamera {
     tan_half_fov: f32,
 }
 
-#[derive(AsStd430)]
-struct StandardPipelinePhotonCamera {
-    camera_view_col0: Vec3,
-    near: f32,
-    camera_view_col1: Vec3,
-    far: f32,
-    camera_view_col2: Vec3,
-    strength: f32,
-    camera_position: Vec3,
-    padding: u32,
-}
 #[derive(AsStd430, Default, PushConstants)]
 struct StandardPipelinePushConstant {
     #[stage(
@@ -257,9 +231,8 @@ pub type StandardPipelineRenderParams = (
 );
 impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
-    pub const PHOTON_RAYTYPE: u32 = 1;
-    pub const SHADOW_RAYTYPE: u32 = 2;
-    pub const FINAL_GATHER_RAYTYPE: u32 = 3;
+    pub const SHADOW_RAYTYPE: u32 = 1;
+    pub const FINAL_GATHER_RAYTYPE: u32 = 2;
 
     pub fn render<'a>(
         &'a mut self,
@@ -286,9 +259,6 @@ impl StandardPipeline {
         let primary_pipeline = self
             .primary_ray_pipeline
             .get_pipeline(&pipeline_cache, &shader_store)?;
-        let photon_pipeline = self
-            .photon_ray_pipeline
-            .get_pipeline(&pipeline_cache, &shader_store)?;
         let shadow_pipeline = self
             .shadow_ray_pipeline
             .get_pipeline(&pipeline_cache, &shader_store)?;
@@ -297,7 +267,6 @@ impl StandardPipeline {
             .get_pipeline(&pipeline_cache, &shader_store)?;
         self.hitgroup_sbt_manager.specify_pipelines(&[
             primary_pipeline,
-            photon_pipeline,
             shadow_pipeline,
             final_gather_pipeline,
         ]);
@@ -334,8 +303,6 @@ impl StandardPipeline {
         self.pipeline_sbt_manager
             .push_raygen(primary_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
-            .push_raygen(photon_pipeline, EmptyShaderRecords, 0);
-        self.pipeline_sbt_manager
             .push_raygen(shadow_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_raygen(final_gather_pipeline, EmptyShaderRecords, 0);
@@ -345,8 +312,6 @@ impl StandardPipeline {
             .push_miss(shadow_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_miss(final_gather_pipeline, EmptyShaderRecords, 0);
-        self.pipeline_sbt_manager
-            .push_miss(photon_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_manager = &mut self.pipeline_sbt_manager;
         let desc_pool = &mut self.desc_pool;
         let sunlight = sunlight.bake().as_std430();
@@ -439,7 +404,7 @@ impl StandardPipeline {
             ]);
 
             let extent = gbuffer.radiance.inner().extent();
-            run(|ctx: &rhyolite::future::CommandBufferRecordContext, command_buffer: vk::CommandBuffer| unsafe {
+            run(|ctx, command_buffer| unsafe {
                 let device = ctx.device();
                 let rand: u32 = rand::thread_rng().gen();
                 device.cmd_push_constants(
@@ -467,54 +432,11 @@ impl StandardPipeline {
                 device.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::RAY_TRACING_KHR,
-                    photon_pipeline.pipeline().raw(),
-                );
-                device.rtx_loader().cmd_trace_rays(
-                    command_buffer,
-                    &pipeline_sbt_buffer.inner().rgen(1),
-                    &pipeline_sbt_buffer.inner().miss(),
-                    &vk::StridedDeviceAddressRegionKHR {
-                        device_address: hitgroup_sbt_buffer.inner().device_address(),
-                        stride: hitgroup_stride as u64,
-                        size: hitgroup_sbt_buffer.inner.size(),
-                    },
-                    &vk::StridedDeviceAddressRegionKHR::default(),
-                    512,
-                    512,
-                    1,
-                );
-            }, |ctx: &mut rhyolite::future::StageContext| {
-                ctx.read_others(
-                    tlas.deref(),
-                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
-                );
-                ctx.read(
-                    &hitgroup_sbt_buffer,
-                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
-                );
-                ctx.read(
-                    &pipeline_sbt_buffer,
-                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
-                );
-                ctx.read(
-                    &sunlight_buffer,
-                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                    vk::AccessFlags2::UNIFORM_READ,
-                );
-            }).await;
-            run(|ctx, command_buffer| unsafe {
-                let device = ctx.device();
-                device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::RAY_TRACING_KHR,
                     primary_pipeline.pipeline().raw(),
                 );
                 device.rtx_loader().cmd_trace_rays(
                     command_buffer,
-                    &pipeline_sbt_buffer.inner().rgen(0),
+                    &pipeline_sbt_buffer.inner().rgen(Self::PRIMARY_RAYTYPE as usize),
                     &pipeline_sbt_buffer.inner().miss(),
                     &vk::StridedDeviceAddressRegionKHR {
                         device_address: hitgroup_sbt_buffer.inner().device_address(),
@@ -601,7 +523,7 @@ impl StandardPipeline {
                 );
                 device.rtx_loader().cmd_trace_rays(
                     command_buffer,
-                    &pipeline_sbt_buffer.inner().rgen(2),
+                    &pipeline_sbt_buffer.inner().rgen(Self::SHADOW_RAYTYPE as usize),
                     &pipeline_sbt_buffer.inner().miss(),
                     &vk::StridedDeviceAddressRegionKHR {
                         device_address: hitgroup_sbt_buffer.inner().device_address(),
@@ -664,7 +586,7 @@ impl StandardPipeline {
                 );
                 device.rtx_loader().cmd_trace_rays(
                     command_buffer,
-                    &pipeline_sbt_buffer.inner().rgen(3),
+                    &pipeline_sbt_buffer.inner().rgen(Self::FINAL_GATHER_RAYTYPE as usize),
                     &pipeline_sbt_buffer.inner().miss(),
                     &vk::StridedDeviceAddressRegionKHR {
                         device_address: hitgroup_sbt_buffer.inner().device_address(),
@@ -751,7 +673,6 @@ impl StandardPipeline {
             retain!(
                 DisposeContainer::new((
                     primary_pipeline.pipeline().clone(),
-                    photon_pipeline.pipeline().clone(),
                     shadow_pipeline.pipeline().clone(),
                     final_gather_pipeline.pipeline().clone(),
                     desc_pool.handle(),

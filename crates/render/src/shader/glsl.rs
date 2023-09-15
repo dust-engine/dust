@@ -127,6 +127,8 @@ impl AssetLoader for GlslShadercCompiler {
                         content: includes.get(source_name).ok_or("file not found")?.clone(),
                     })
                 });
+                options.set_optimization_level(shaderc::OptimizationLevel::Performance);
+                options.set_generate_debug_info();
                 let binary_result =
                     compiler.compile_into_spirv(&source, kind, "", "main", Some(&options))?;
                 binary_result.as_binary_u8().to_vec()

@@ -27,7 +27,7 @@ use rhyolite::{
 use rhyolite::{fill_buffer, HasDevice};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter, StagingRingBuffer};
 
-use crate::material::{PaletteMaterial, DiffuseMaterialIrradianceCacheEntry};
+use crate::material::PaletteMaterial;
 
 pub struct VoxLoader {
     allocator: rhyolite_bevy::Allocator,
@@ -222,7 +222,7 @@ impl VoxLoader {
                 .create_static_device_buffer_with_data(
                     std::slice::from_raw_parts(mem.as_ptr() as *const u8, mem.len() * 4),
                     vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                    0,
+                    16,
                     &ring_buffer,
                 )
                 .unwrap();

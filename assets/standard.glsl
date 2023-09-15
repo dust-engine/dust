@@ -106,19 +106,6 @@ layout(buffer_reference) buffer PaletteInfo {
     u8vec4 palette[];
 };
 
-struct IrradianceCacheFace {
-    f16vec3 irradiance;
-    uint16_t mask;
-};
-struct IrradianceCacheEntry {
-    IrradianceCacheFace faces[6];
-    uint16_t lastAccessedFrameIndex[6];
-    uint32_t _reerved;
-};
-layout(buffer_reference, scalar) buffer IrradianceCache {
-    IrradianceCacheEntry entries[];
-};
-
 
 vec3 CubedNormalize(vec3 dir) {
     vec3 dir_abs = abs(dir);
