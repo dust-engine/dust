@@ -107,7 +107,7 @@ struct TeaPot;
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(bevy_scene::SceneBundle {
-        scene: asset_server.load("castle.vox"),
+        scene: asset_server.load("desert ruins.vox"),
         ..Default::default()
     });
     commands

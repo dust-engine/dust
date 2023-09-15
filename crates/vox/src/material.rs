@@ -27,20 +27,6 @@ impl PaletteMaterial {
     }
 }
 
-#[derive(bevy_reflect::TypePath, Asset)]
-pub struct DiffuseMaterial {
-    material: Handle<PaletteMaterial>,
-    pub(crate) irradiance_cache: ResidentBuffer,
-}
-
-impl DiffuseMaterial {
-    pub fn new(material: Handle<PaletteMaterial>, irradiance_cache: ResidentBuffer) -> Self {
-        Self {
-            material,
-            irradiance_cache,
-        }
-    }
-}
 
 pub struct DiffuseMaterialIrradianceCacheEntryFace {
     irradiance: [u16; 3],
@@ -55,7 +41,7 @@ pub struct DiffuseMaterialIrradianceCacheEntry {
 }
 
 #[repr(C)]
-pub struct DiffuseMaterialShaderParams {
+pub struct PaletteMaterialShaderParams {
     /// Pointer to a list of u64 indexed by block id
     geometry_ptr: u64,
 
@@ -65,12 +51,9 @@ pub struct DiffuseMaterialShaderParams {
 
     /// Pointer to a list of 256 u8 colors
     palette_ptr: u64,
-
-    /// number of boxes of entries, each entry has 6 faces.
-    irradiance_cache: u64,
 }
 
-impl dust_render::Material for DiffuseMaterial {
+impl dust_render::Material for PaletteMaterial {
     type Pipeline = StandardPipeline;
 
     const TYPE: MaterialType = MaterialType::Procedural;
@@ -107,7 +90,7 @@ impl dust_render::Material for DiffuseMaterial {
         ))
     }
 
-    type ShaderParameters = DiffuseMaterialShaderParams;
+    type ShaderParameters = PaletteMaterialShaderParams;
     type ShaderParameterParams = (
         SRes<Assets<VoxGeometry>>,
         SRes<Assets<VoxPalette>>,
@@ -119,14 +102,12 @@ impl dust_render::Material for DiffuseMaterial {
         params: &mut SystemParamItem<Self::ShaderParameterParams>,
     ) -> Self::ShaderParameters {
         let (geometry_store, palette_store, material_store) = params;
-        let material = material_store.get(&self.material).unwrap();
-        let geometry = geometry_store.get(&material.geometry).unwrap();
-        let palette = palette_store.get(&material.palette).unwrap();
-        DiffuseMaterialShaderParams {
+        let geometry = geometry_store.get(&self.geometry).unwrap();
+        let palette = palette_store.get(&self.palette).unwrap();
+        PaletteMaterialShaderParams {
             geometry_ptr: geometry.geometry_buffer().device_address(),
-            material_ptr: material.data.device_address(),
+            material_ptr: self.data.device_address(),
             palette_ptr: palette.buffer.device_address(),
-            irradiance_cache: self.irradiance_cache.device_address(),
         }
     }
 }

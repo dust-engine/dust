@@ -27,7 +27,7 @@ use rhyolite::{
 use rhyolite::{fill_buffer, HasDevice};
 use rhyolite_bevy::{AsyncQueues, QueuesRouter, StagingRingBuffer};
 
-use crate::material::{DiffuseMaterial, DiffuseMaterialIrradianceCacheEntry, PaletteMaterial};
+use crate::material::{PaletteMaterial, DiffuseMaterialIrradianceCacheEntry};
 
 pub struct VoxLoader {
     allocator: rhyolite_bevy::Allocator,
