@@ -77,6 +77,7 @@ impl AssetLoader for PngLoader {
                     png::BitDepth::Sixteen => 16,
                 } * match color_type.0 {
                     png::ColorType::Grayscale => 1,
+                    png::ColorType::GrayscaleAlpha => 2,
                     png::ColorType::Rgb => 3,
                     png::ColorType::Rgba => 4,
                     _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
@@ -93,6 +94,7 @@ impl AssetLoader for PngLoader {
                     png::BitDepth::Sixteen => 16,
                 } * match color_type.0 {
                     png::ColorType::Grayscale => 1,
+                    png::ColorType::GrayscaleAlpha => 2,
                     png::ColorType::Rgb => 4,
                     png::ColorType::Rgba => 4,
                     _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
@@ -136,6 +138,8 @@ impl AssetLoader for PngLoader {
                 format: match color_type {
                     (png::ColorType::Grayscale, png::BitDepth::Eight) => vk::Format::R8_UNORM,
                     (png::ColorType::Grayscale, png::BitDepth::Sixteen) => vk::Format::R16_UNORM,
+                    (png::ColorType::GrayscaleAlpha, png::BitDepth::Eight) => vk::Format::R8G8_UNORM,
+                    (png::ColorType::GrayscaleAlpha, png::BitDepth::Sixteen) => vk::Format::R16G16_UNORM,
                     (png::ColorType::Rgb, png::BitDepth::Four) => vk::Format::R4G4B4A4_UNORM_PACK16,
                     (png::ColorType::Rgb, png::BitDepth::Eight) => vk::Format::R8G8B8A8_UNORM,
                     (png::ColorType::Rgb, png::BitDepth::Sixteen) => vk::Format::R16G16B16_UNORM,

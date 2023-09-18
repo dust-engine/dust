@@ -9,7 +9,7 @@ use bevy_ecs::query::{Added, Changed, Or};
 use bevy_ecs::schedule::IntoSystemConfigs;
 use bevy_ecs::system::lifetimeless::SResMut;
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
-use bevy_ecs::system::{Commands, Query};
+use bevy_ecs::system::{Commands, Query, Local};
 use bevy_math::{Mat4, UVec2, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 
@@ -40,7 +40,7 @@ use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
     PinholeProjection, ShaderModule, SpecializedShader,
 };
-use crate::{PipelineCache, Renderable, Sunlight};
+use crate::{PipelineCache, Renderable, Sunlight, BlueNoise};
 
 use super::sky::SkyModelState;
 use super::{RayTracingPipeline, RayTracingPipelineManager};
@@ -89,7 +89,7 @@ impl RayTracingPipeline for StandardPipeline {
             img_voxel_id: vk::DescriptorType::STORAGE_IMAGE,
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
-            noise_unitvec3_cosine: vk::DescriptorType::SAMPLED_IMAGE,
+            noise: [vk::DescriptorType::SAMPLED_IMAGE; 6],
 
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
             sunlight_settings: vk::DescriptorType::UNIFORM_BUFFER,
@@ -228,6 +228,9 @@ pub type StandardPipelineRenderParams = (
     SRes<Sunlight>,
     SResMut<InstanceVecStore<PreviousFrameGlobalTransform>>,
     SRes<StagingRingBuffer>,
+    SRes<BlueNoise>,
+    SRes<Assets<SlicedImageArray>>,
+    Local<'static, u32>
 );
 impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
@@ -237,7 +240,6 @@ impl StandardPipeline {
     pub fn render<'a>(
         &'a mut self,
         gbuffer: &'a mut GBuffer<RenderImage<impl ImageViewLike + RenderData>>,
-        noise_image: &'a SlicedImageArray,
         tlas: &'a RenderRes<Arc<AccelerationStructure>>,
         params: SystemParamItem<'a, '_, StandardPipelineRenderParams>,
         camera: (&PinholeProjection, &GlobalTransform),
@@ -255,7 +257,13 @@ impl StandardPipeline {
             sunlight,
             mut instances_buffer,
             staging_ring_buffer,
+            blue_noise,
+            image_arrays,
+            mut frame_index
         ) = params;
+        *frame_index += 1;
+        let frame_index = *frame_index;
+        let noise_image_descriptors = blue_noise.as_descriptors(&image_arrays, frame_index)?;
         let primary_pipeline = self
             .primary_ray_pipeline
             .get_pipeline(&pipeline_cache, &shader_store)?;
@@ -340,14 +348,6 @@ impl StandardPipeline {
                             staging_ring_buffer.update_buffer(&mut sunlight_buffer, sunlight.as_bytes())
             ).await;
 
-            let frame_index = use_state(
-                using!(),
-                || 0,
-                |a| *a += 1
-            );
-            let noise_texture_index = *frame_index % noise_image.subresource_range().layer_count;
-
-
             let desc_set = use_per_frame_state(using!(), || {
                 desc_pool
                     .allocate_for_pipeline_layout(primary_pipeline.layout())
@@ -373,7 +373,7 @@ impl StandardPipeline {
                     desc_set[0],
                     7,
                     0,
-                    &[noise_image.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
+                    &noise_image_descriptors
                 ),
                 DescriptorSetWrite::uniform_buffers(
                     desc_set[0],
@@ -419,7 +419,7 @@ impl StandardPipeline {
                     primary_pipeline.layout().raw(),
                     vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR,
                     4,
-                    std::slice::from_raw_parts(frame_index as *const _ as *const u8, 4),
+                    std::slice::from_raw_parts(&frame_index as *const _ as *const u8, 4),
                 );
                 device.cmd_bind_descriptor_sets(
                     command_buffer,

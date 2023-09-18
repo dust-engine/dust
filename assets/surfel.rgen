@@ -1,0 +1,56 @@
+#version 460
+#include "standard.glsl"
+
+layout(location = 0) rayPayloadEXT struct RayPayload {
+    uint32_t surfel_index;
+} payload;
+
+
+struct SurfelEntry { 
+    uvec3 position;
+    uint32_t direction; // [0, 6) indicating one of the six faces of the cube
+};
+
+layout(set = 2, binding = 0) buffer SurfelPool {
+    SurfelEntry entries[];
+} s_surfel_pool;
+
+
+void main() {
+    SurfelEntry entry = s_surfel_pool.entries[gl_LaunchIDEXT.x];
+    if (entry.direction >= 6) { // invalid entry
+        return;
+    }
+
+    vec3 origin = vec3(entry.position) + vec3(0.5); // world space
+
+    vec3 normal = faceId2Normal(uint8_t(entry.direction)); // world space
+
+    
+    vec3 offset = texelFetch(blue_noise[1], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[1], 0)), 0).xyz;
+    offset.z = 0.5;
+    offset.xy -= 0.5;
+    offset = rotateVectorByNormal(normal, offset);
+    origin += offset;
+
+    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
+    // noiseSample is weighted on the z axis
+    noiseSample = rotateVectorByNormal(normal, noiseSample);
+    
+
+    // Shoot shadow ray
+    traceRayEXT(
+        accelerationStructure,
+        gl_RayFlagsOpaqueEXT, // RayFlags
+        0xFF, // CullMask
+        3, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
+        4, // SBT stride, number of ray types // TODO: Make this a shader constant
+        3, // missIndex
+        origin * 4.0,     // ray origin
+        0.1,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
+        noiseSample, // outgoing direction: cosine weighted on the normal direction
+        10000.0, // tmax
+        0 // payload
+    );
+    // TODO: stocastically caste rays directly to light sources also
+}

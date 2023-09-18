@@ -21,7 +21,7 @@ layout(set = 0, binding = 3, rgb10_a2) uniform image2D u_normal;
 layout(set = 0, binding = 4, r32f) uniform image2D u_depth;
 layout(set = 0, binding = 5, rgba16f) uniform image2D u_motion;
 layout(set = 0, binding = 6, r32ui) uniform uimage2D u_voxel_id;
-layout(set = 0, binding = 7) uniform texture2D blue_noise;
+layout(set = 0, binding = 7) uniform texture2D blue_noise[6]; // [1d, 2d, unit2d, 3d, unit3d, unit3d_cosine]
 
 layout(set = 0, binding = 9, std430) uniform CameraSettingsLastFrame {
     mat4 view_proj;
@@ -54,7 +54,7 @@ layout(set = 0, binding = 10, std430) uniform CameraSettings {
 layout(set = 0, binding = 11, std430) buffer InstanceData {
     mat4 last_frame_transforms[];
 } s_instances;
-layout(set = 0, binding = 12) uniform accelerationStructureEXT accelerationStructure;
+layout(set = 0, binding = 14) uniform accelerationStructureEXT accelerationStructure;
 vec3 camera_origin() {
     return vec3(u_camera.position_x, u_camera.position_y, u_camera.position_z);
 }
@@ -400,3 +400,169 @@ vec4 REBLUR_FrontEnd_PackRadianceAndNormHitDist( vec3 radiance, float normHitDis
     return vec4( radiance, normHitDist );
 }
 
+struct SpatialHashEntry {
+    uint32_t fingerprint;
+    uint16_t last_accessed_frame;
+    uint16_t sample_count;
+    f16vec3 radiance;
+    float16_t visual_importance;
+};
+
+struct SpatialHashKey {
+    uvec3 position;
+    uint8_t direction; // [0, 6) indicating one of the six faces of the cube
+};
+
+
+// https://www.pcg-random.org/
+uint pcg(in uint v)
+{
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+
+    return (word >> 22u) ^ word;
+}
+
+// xxhash (https://github.com/Cyan4973/xxHash)
+//   From: https://www.shadertoy.com/view/Xt3cDn
+uint xxhash32(in uint p)
+{
+    const uint PRIME32_2 = 2246822519U, PRIME32_3 = 3266489917U;
+    const uint PRIME32_4 = 668265263U, PRIME32_5 = 374761393U;
+
+    uint h32 = p + PRIME32_5;
+    h32 = PRIME32_4 * ((h32 << 17) | (h32 >> (32 - 17)));
+    h32 = PRIME32_2 * (h32 ^ (h32 >> 15));
+    h32 = PRIME32_3 * (h32 ^ (h32 >> 13));
+
+    return h32 ^ (h32 >> 16);
+}
+
+uint32_t SpatialHashKeyGetFingerprint(SpatialHashKey key) {
+    uint hash = xxhash32(key.position.x);
+    hash = xxhash32(key.position.y + hash);
+    hash = xxhash32(key.position.z + hash);
+    hash = xxhash32(key.direction + hash);
+    hash = max(1, hash);
+    return hash;
+}
+layout(constant_id = 0) const uint32_t SpatialHashCapacity = 32 * 1024 * 1024; // 512 MB
+uint32_t SpatialHashKeyGetLocation(SpatialHashKey key) {
+    uint hash = pcg(key.position.x);
+    hash = pcg(key.position.y + hash);
+    hash = pcg(key.position.z + hash);
+    hash = pcg(key.direction + hash);
+    return hash % SpatialHashCapacity;
+}
+
+
+layout(set = 0, binding = 12) buffer SpatialHash {
+    SpatialHashEntry entries[];
+} s_spatial_hash;
+
+// input param: a vector with only one component being 1 or -1, the rest being 0
+// +1 0 0 | 0b101
+// -1 0 0 | 0b100
+// 0 +1 0 | 0b011
+// 0 -1 0 | 0b010
+// 0 0 +1 | 0b001
+// 0 0 -1 | 0b000
+uint8_t normal2FaceID(vec3 normalObject) {
+    float s = clamp(normalObject.x + normalObject.y + normalObject.z, 0.0, 1.0); // Sign of the nonzero component
+    uint8_t faceId = uint8_t(s); // The lowest digit is 1 if the sign is positive, 0 otherwise
+
+    // 4 (0b100) if z is the nonzero component, 2 (0b010) if y is the nonzero component, 0 if x is the nonzero component
+    uint8_t index = uint8_t(abs(normalObject.z)) * uint8_t(4) + uint8_t(abs(normalObject.y)) * uint8_t(2);
+
+    faceId += index;
+    return faceId;
+}
+
+vec3 faceId2Normal(uint8_t faceId) {
+    float s = float(faceId & 1) * 2.0 - 1.0; // Extract the lowest component and restore as the sign.
+
+    vec3 normal = vec3(0);
+    normal[faceId >> 1] = s;
+    return normal;
+}
+
+// This function rotates `target` from the z axis by the same amount as `normal`.
+// param: normal: a unit vector.
+//        sample: the vector to be rotated
+vec3 rotateVectorByNormal(vec3 normal, vec3 target) {
+    vec4 quat = normalize(vec4(-normal.y, normal.x, 0.0, 1.0 + normal.z));
+    if (normal.z < -0.99999) {
+        quat = vec4(-1.0, 0.0, 0.0, 0.0);
+    }
+    return 2.0 * dot(quat.xyz, target) * quat.xyz + (quat.w * quat.w - dot(quat.xyz, quat.xyz)) * target + 2.0 * quat.w * cross(quat.xyz, target);
+}
+
+void SpatialHashInsert(SpatialHashKey key, vec3 value) {
+    uint fingerprint = SpatialHashKeyGetFingerprint(key);
+    uint location = SpatialHashKeyGetLocation(key);
+
+
+    uint i_minFrameIndex;
+    uint minFrameIndex;
+    for (uint i = 0; i < 3; i++) {
+        uint current_fingerprint = s_spatial_hash.entries[location + i].fingerprint;
+        uint current_frame_index = s_spatial_hash.entries[location + i].last_accessed_frame;
+        if (i == 0 || current_frame_index < minFrameIndex) {
+            i_minFrameIndex = i;
+            minFrameIndex = current_frame_index;
+        }
+
+
+        if (current_fingerprint == fingerprint || current_fingerprint == 0) {
+            // Found.
+            if (current_fingerprint == 0) {
+                s_spatial_hash.entries[location + i].fingerprint = fingerprint;
+            }
+
+            vec3 current_radiance = vec3(0.0);
+            uint current_sample_count = 0;
+            if (current_fingerprint == fingerprint) {
+                current_sample_count = s_spatial_hash.entries[location + i].sample_count;
+                current_radiance = s_spatial_hash.entries[location + i].radiance;
+            }
+            uint next_sample_count = current_sample_count + 1;
+            current_radiance = current_radiance * (float(current_sample_count) / float(next_sample_count)) + value * (1.0 / float(next_sample_count));
+            
+            s_spatial_hash.entries[location + i].radiance = f16vec3(current_radiance);
+            s_spatial_hash.entries[location + i].last_accessed_frame = uint16_t(pushConstants.frameIndex);
+            s_spatial_hash.entries[location + i].sample_count = uint16_t(next_sample_count);
+            return;
+        }
+    }
+    // Not found after 3 iterations. Evict the LRU entry.
+    s_spatial_hash.entries[location + i_minFrameIndex].fingerprint = fingerprint;
+    uint current_sample_count = s_spatial_hash.entries[location + i_minFrameIndex].sample_count;
+    vec3 current_radiance = s_spatial_hash.entries[location + i_minFrameIndex].radiance;
+    uint next_sample_count = current_sample_count + 1;
+    current_radiance = current_radiance * (float(current_sample_count) / float(next_sample_count)) + value * (1.0 / float(next_sample_count));
+    s_spatial_hash.entries[location + i_minFrameIndex].radiance = f16vec3(current_radiance);
+    s_spatial_hash.entries[location + i_minFrameIndex].last_accessed_frame = uint16_t(pushConstants.frameIndex);
+    s_spatial_hash.entries[location + i_minFrameIndex].sample_count = uint16_t(next_sample_count);
+}
+
+
+// Returns: found
+bool SpatialHashGet(SpatialHashKey key, out vec3 value) {
+    uint fingerprint = SpatialHashKeyGetFingerprint(key);
+    uint location = SpatialHashKeyGetLocation(key);
+
+    for (uint i = 0; i < 3; i++) {
+        uint current_fingerprint = s_spatial_hash.entries[location + i].fingerprint;
+        if (current_fingerprint == 0) {
+            return false; // Found an empty entry, so we terminate the search early.
+        }
+
+        if (current_fingerprint == fingerprint) {
+            // Found.
+            s_spatial_hash.entries[location + i].last_accessed_frame = uint16_t(pushConstants.frameIndex);
+            value = s_spatial_hash.entries[location + i].radiance;
+            return true;
+        }
+    }
+    return false;
+}

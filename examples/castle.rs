@@ -157,8 +157,6 @@ impl Plugin for RenderSystem {
                 SystemParamItem<dust_render::pipeline::nrd::NDRPipelineRenderParams>,
             ),
              cameras: Query<(&PinholeProjection, &GlobalTransform), With<MainCamera>>,
-             blue_noise: Res<BlueNoise>,
-             img_slices: Res<Assets<SlicedImageArray>>,
              mut windows: Query<(&Window, &mut Swapchain), With<PrimaryWindow>>| {
                 let (
                     mut ray_tracing_pipeline,
@@ -178,9 +176,6 @@ impl Plugin for RenderSystem {
                 let Some(camera) = cameras.iter().next() else {
                     return;
                 };
-                let Some(blue_noise) = img_slices.get(&blue_noise.unitvec3_cosine) else {
-                    return;
-                };
                 let accel_struct = tlas_store.accel_struct();
                 let graphics_queue = queue_router.of_type(QueueType::Graphics);
                 let swapchain_image = swapchain.acquire_next_image(queues.current_frame());
@@ -197,7 +192,6 @@ impl Plugin for RenderSystem {
                         let accel_struct = accel_struct.await;
                         if let Some(render) = ray_tracing_pipeline.render(
                             &mut gbuffer,
-                            &blue_noise,
                             &accel_struct,
                             ray_tracing_pipeline_params,
                             camera,

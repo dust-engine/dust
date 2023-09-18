@@ -18,19 +18,9 @@ void main() {
     vec3 normalWorld = NRD_FrontEnd_UnpackNormalAndRoughness(imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)), unused).xyz;
     vec3 hitLocation = hitT * camera_ray_dir() + camera_origin() + normalWorld * 0.01;
 
-    vec3 noiseSample = texelFetch(blue_noise, ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise, 0)), 0).xyz;
+    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
     // noiseSample is weighted on the z axis
-    noiseSample = noiseSample * 2.0 - 1.0;
-
-    const vec3 k = cross(vec3(0, 0, 1), normalWorld);
-    const float cosTheta = dot(vec3(0, 0, 1), normalWorld);
-    const float sinTheta = length(k);
-    const vec3 crossed = cross(k, noiseSample);
-    vec3 rotatedNoiseSample = noiseSample * cosTheta + crossed * sinTheta + k * dot(k, noiseSample) * (1.0 - cosTheta);
-
-    if (dot(rotatedNoiseSample, vec3(normalWorld)) < 0.0) {
-        rotatedNoiseSample = -rotatedNoiseSample;
-    }
+    noiseSample = rotateVectorByNormal(normalWorld, noiseSample);
 
     // Shoot shadow ray
     traceRayEXT(
@@ -42,7 +32,7 @@ void main() {
         2, // missIndex
         hitLocation,     // ray origin
         u_camera.near,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
-        rotatedNoiseSample, // direction
+        noiseSample, // direction
         u_camera.far, // tmax
         0 // payload
     );

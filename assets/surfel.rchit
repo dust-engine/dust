@@ -1,19 +1,20 @@
 #version 460
 #include "standard.glsl"
 
+struct SurfelEntry { 
+    uvec3 position;
+    uint32_t direction; // [0, 6) indicating one of the six faces of the cube
+};
+
+layout(set = 0, binding = 13) buffer SurfelPool {
+    SurfelEntry entries[];
+} s_surfel_pool;
+
 layout(shaderRecordEXT) buffer Sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
     PaletteInfo paletteInfo;
 } sbt;
-
-hitAttributeEXT HitAttribute {
-    uint8_t voxelId;
-} hitAttributes;
-layout(location = 0) rayPayloadInEXT struct RayPayload {
-    vec3 illuminance;
-} payload;
-
 
 void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
@@ -30,19 +31,20 @@ void main() {
     key.position = uvec3(round(aabbCenterWorld / 4.0));
     key.direction = normal2FaceID(normalWorld);
 
-
-
-    vec3 radiance = vec3(0.0);
+    vec3 radiance;
     bool found = SpatialHashGet(key, radiance);
 
-    if (!found) {
-        // TODO: Enqueue the patch stocastically
+    if (found) {
+        // Add to surfel value
+        SurfelEntry surfel = s_surfel_pool.entries[gl_LaunchIDEXT.x];
+
+        SpatialHashKey key;
+        key.position = surfel.position;
+        key.direction = uint8_t(surfel.direction);
+        SpatialHashInsert(key, radiance);
+
+        // TODO: Maybe add more samples to the patch: need heuristic.
     } else {
-        // Maybe add more samples to the patch? need heuristic.
+        // TODO: enqueue the patch stocastically
     }
-
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(payload.illuminance + radiance, gl_HitTEXT);
-    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
 }
-
-// TODO: final gather and surfel should both use the corser grid.
