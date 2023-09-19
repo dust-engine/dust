@@ -547,7 +547,7 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
 
 
 // Returns: found
-bool SpatialHashGet(SpatialHashKey key, out vec3 value) {
+bool SpatialHashGet(SpatialHashKey key, out vec3 value, out uint sample_count) {
     uint fingerprint = SpatialHashKeyGetFingerprint(key);
     uint location = SpatialHashKeyGetLocation(key);
 
@@ -561,8 +561,21 @@ bool SpatialHashGet(SpatialHashKey key, out vec3 value) {
             // Found.
             s_spatial_hash.entries[location + i].last_accessed_frame = uint16_t(pushConstants.frameIndex);
             value = s_spatial_hash.entries[location + i].radiance;
+            sample_count = s_spatial_hash.entries[location + i].sample_count;
             return true;
         }
     }
     return false;
 }
+
+
+
+struct SurfelEntry { 
+    uvec3 position;
+    uint32_t direction; // [0, 6) indicating one of the six faces of the cube
+};
+layout(constant_id = 1) const uint32_t SurfelPoolSize = 720*480;
+
+layout(set = 0, binding = 13) buffer SurfelPool {
+    SurfelEntry entries[];
+} s_surfel_pool;

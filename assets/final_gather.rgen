@@ -8,10 +8,11 @@ layout(location = 0) rayPayloadEXT struct RayPayload {
 
 void main() {
     float hitT = imageLoad(u_depth, ivec2(gl_LaunchIDEXT.xy)).x;
-    if (hitT == 0.0) {
+    if (hitT == 1.0 / 0.0) {
         // Did not hit.
         return;
     }
+    // TODO: fix the rgen shader.
     payload.illuminance = imageLoad(u_illuminance, ivec2(gl_LaunchIDEXT.xy)).xyz;
 
     float unused;
@@ -20,7 +21,10 @@ void main() {
 
     vec3 noiseSample = texelFetch(blue_noise[5], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
     // noiseSample is weighted on the z axis
-    noiseSample = rotateVectorByNormal(normalWorld, noiseSample);
+    noiseSample = rotateVectorByNormal(normalWorld, noiseSample * 2.0 - 1.0);
+    if (dot(noiseSample, normalWorld) < 0.0) {
+        noiseSample = -noiseSample;
+    }
 
     // Shoot shadow ray
     traceRayEXT(
@@ -31,7 +35,7 @@ void main() {
         3, // SBT stride, number of ray types // TODO: Make this a shader constant
         2, // missIndex
         hitLocation,     // ray origin
-        u_camera.near,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
+        5.0,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
         noiseSample, // direction
         u_camera.far, // tmax
         0 // payload

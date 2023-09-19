@@ -100,6 +100,10 @@ impl RayTracingPipeline for StandardPipeline {
             camera_settings: vk::DescriptorType::UNIFORM_BUFFER,
             #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR)]
             instances: vk::DescriptorType::STORAGE_BUFFER,
+            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            spatial_hashmap: vk::DescriptorType::STORAGE_BUFFER,
+            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
+            surfel_pool: vk::DescriptorType::STORAGE_BUFFER,
             #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
             accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
         };
@@ -236,6 +240,7 @@ impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
     pub const SHADOW_RAYTYPE: u32 = 1;
     pub const FINAL_GATHER_RAYTYPE: u32 = 2;
+    pub const SURFEL_RAYTYPE: u32 = 3;
 
     pub fn render<'a>(
         &'a mut self,
@@ -328,6 +333,30 @@ impl StandardPipeline {
             let instances_buffer = instances_buffer.await;
             let (pipeline_sbt_buffer, hitgroup_sbt_buffer) = pipeline_sbt_manager.build(&staging_ring_buffer).join(hitgroup_sbt_buffer).await;
 
+            
+            let mut surfel_pool_buffer = use_shared_state(
+                using!(),
+                |_| {
+                    allocator.create_device_buffer_uninit(
+                        720*480 * 16,
+                        vk::BufferUsageFlags::STORAGE_BUFFER,
+                        0
+                    ).unwrap()
+                },
+                |_| false
+            );
+            let mut spatial_hash_buffer = use_shared_state(
+                using!(),
+                |_| {
+                    allocator.create_device_buffer_uninit(
+                        32 * 1024 * 1024 * 16,
+                        vk::BufferUsageFlags::STORAGE_BUFFER,
+                        0
+                    ).unwrap()
+                },
+                |_| false
+            );
+
             // TODO: Direct writes on integrated GPUs.
             let mut sunlight_buffer = use_shared_state(
                 using!(),
@@ -395,9 +424,20 @@ impl StandardPipeline {
                     ],
                     false
                 ),
-                DescriptorSetWrite::accel_structs(
+                // cannot merge with the above because different stages
+                DescriptorSetWrite::storage_buffers(
                     desc_set[0],
                     12,
+                    0,
+                    &[
+                        spatial_hash_buffer.inner().as_descriptor(),
+                        surfel_pool_buffer.inner().as_descriptor()
+                    ],
+                    false
+                ),
+                DescriptorSetWrite::accel_structs(
+                    desc_set[0],
+                    14,
                     0,
                     &[tlas.inner().raw()]
                 ),
@@ -669,6 +709,8 @@ impl StandardPipeline {
                 pipeline_sbt_buffer,
                 hitgroup_sbt_buffer,
                 instances_buffer,
+                spatial_hash_buffer,
+                surfel_pool_buffer
             ));
             retain!(
                 DisposeContainer::new((

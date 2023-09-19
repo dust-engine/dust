@@ -2,16 +2,6 @@
 #include "standard.glsl"
 
 
-struct SurfelEntry { 
-    uvec3 position;
-    uint32_t direction; // [0, 6) indicating one of the six faces of the cube
-};
-
-layout(set = 2, binding = 0) buffer SurfelPool {
-    SurfelEntry entries[];
-} s_surfel_pool;
-
-
 void main() {
     vec3 sky_illuminance = arhosek_sky_radiance(normalize(gl_WorldRayDirectionEXT));
 

@@ -1,15 +1,6 @@
 #version 460
 #include "standard.glsl"
 
-struct SurfelEntry { 
-    uvec3 position;
-    uint32_t direction; // [0, 6) indicating one of the six faces of the cube
-};
-
-layout(set = 0, binding = 13) buffer SurfelPool {
-    SurfelEntry entries[];
-} s_surfel_pool;
-
 layout(shaderRecordEXT) buffer Sbt {
     GeometryInfo geometryInfo;
     MaterialInfo materialInfo;
@@ -32,7 +23,8 @@ void main() {
     key.direction = normal2FaceID(normalWorld);
 
     vec3 radiance;
-    bool found = SpatialHashGet(key, radiance);
+    uint sample_count = 0;
+    bool found = SpatialHashGet(key, radiance, sample_count);
 
     if (found) {
         // Add to surfel value
