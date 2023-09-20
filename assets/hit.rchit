@@ -45,7 +45,6 @@ void main() {
     // Store the contribution from photon maps
     imageStore(u_depth, ivec2(gl_LaunchIDEXT.xy), vec4(gl_HitTEXT));
 
-    // TODO: Is it actually normalWorld?
     imageStore(u_normal, ivec2(gl_LaunchIDEXT.xy), NRD_FrontEnd_PackNormalAndRoughness(normalWorld, 1.0, float(palette_index)));
 
     imageStore(u_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(albedo), 1.0));

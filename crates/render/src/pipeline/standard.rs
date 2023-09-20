@@ -197,18 +197,6 @@ impl RayTracingPipeline for StandardPipeline {
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
 }
 
-#[derive(AsStd430, Clone)]
-struct StandardPipelineCamera {
-    camera_view_col0: Vec3,
-    near: f32,
-    camera_view_col1: Vec3,
-    far: f32,
-    camera_view_col2: Vec3,
-    padding: f32,
-    camera_position: Vec3,
-    tan_half_fov: f32,
-}
-
 #[derive(AsStd430, Default, PushConstants)]
 struct StandardPipelinePushConstant {
     #[stage(
