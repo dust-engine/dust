@@ -8,14 +8,14 @@ edition = "2021"
 [dependencies]
 dot_vox = "5.1"
 dust-render = { path = "../render" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
-bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d", default-features=false, features=["serialize"] }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
-bevy_utils = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
+bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a", default-features=false, features=["serialize"] }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
+bevy_utils = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
 rhyolite = { path = "../rhyolite" }
 rhyolite-bevy = { path = "../rhyolite_bevy" }
 dust_vdb = { path = "../vdb" }

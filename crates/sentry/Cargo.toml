@@ -10,7 +10,7 @@ tracing = "0.1"
 sentry = "^0.31"
 sentry-tracing = "^0.31"
 tracing-subscriber = "^0.3"
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0c44de76264de79423c0d603d41fd19729b1c27d" }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
 rhyolite-bevy = { path = "../rhyolite_bevy" }
 rhyolite = { path = "../rhyolite" }
 
