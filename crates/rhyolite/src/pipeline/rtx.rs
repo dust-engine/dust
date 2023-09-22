@@ -163,14 +163,12 @@ impl RayTracingPipelineLibrary {
     }
     pub fn create_for_hitgroups<'a, S: Deref<Target = ShaderModule>>(
         layout: Arc<PipelineLayout>,
-        hitgroups: impl ExactSizeIterator<
-            Item = (
-                Option<SpecializedShader<'a, S>>, // rchit
-                Option<SpecializedShader<'a, S>>, // rint
-                Option<SpecializedShader<'a, S>>, // rahit
-                RayTracingHitGroupType,
-            ),
-        >,
+        hitgroups: &[(
+            Option<SpecializedShader<'a, S>>, // rchit
+            Option<SpecializedShader<'a, S>>, // rint
+            Option<SpecializedShader<'a, S>>, // rahit
+            RayTracingHitGroupType,
+        )],
         info: &'a RayTracingPipelineLibraryCreateInfo,
         pipeline_cache: Option<&'a PipelineCache>,
         pool: Arc<DeferredOperationTaskPool>,
@@ -258,22 +256,20 @@ impl RayTracingPipelineLibrary {
 }
 
 impl RayTracingPipeline {
-    pub fn create_for_shaders<'a, S: Deref<Target = ShaderModule>>(
+    pub fn create_for_shaders<'a, S: Deref<Target = ShaderModule> + Send + 'a>(
         layout: Arc<PipelineLayout>,
-        shaders: &'a [SpecializedShader<'a, S>],
-        hitgroups: impl ExactSizeIterator<
-            Item = (
-                Option<SpecializedShader<'a, S>>, // rchit
-                Option<SpecializedShader<'a, S>>, // rint
-                Option<SpecializedShader<'a, S>>, // rahit
-                RayTracingHitGroupType,
-            ),
-        >,
+        shaders: Vec<SpecializedShader<'a, S>>,
+        hitgroups: Vec<(
+            Option<SpecializedShader<'a, S>>, // rchit
+            Option<SpecializedShader<'a, S>>, // rint
+            Option<SpecializedShader<'a, S>>, // rahit
+            RayTracingHitGroupType,
+        )>,
         info: &'a RayTracingPipelineLibraryCreateInfo,
         pipeline_cache: Option<&'a PipelineCache>,
         pool: Arc<DeferredOperationTaskPool>,
     ) -> impl Future<Output = VkResult<Self>> + Send + 'a {
-        let (num_raygen, num_miss, num_callable) = verify_general_shader_orders(shaders);
+        let (num_raygen, num_miss, num_callable) = verify_general_shader_orders(&shaders);
         let num_hitgroups = hitgroups.len() as u32;
         unsafe {
             let mut stages: Vec<vk::PipelineShaderStageCreateInfo> =
@@ -282,12 +278,17 @@ impl RayTracingPipeline {
                 Vec::with_capacity(hitgroups.len() * 3 + shaders.len());
             let mut groups: Vec<vk::RayTracingShaderGroupCreateInfoKHR> =
                 Vec::with_capacity(hitgroups.len() + shaders.len());
-            build_general_shaders(&mut specialization_infos, &mut stages, &mut groups, shaders);
+            build_general_shaders(
+                &mut specialization_infos,
+                &mut stages,
+                &mut groups,
+                &shaders,
+            );
             build_hitgroup_shaders(
                 &mut specialization_infos,
                 &mut stages,
                 &mut groups,
-                hitgroups,
+                &hitgroups,
             );
             let stages = SendMarker::new(stages);
             let groups = SendMarker::new(groups);
@@ -330,6 +331,8 @@ impl RayTracingPipeline {
                 drop(groups);
                 drop(info);
                 drop(library_interface);
+                drop(shaders);
+                drop(hitgroups);
 
                 let sbt_handles = SbtHandles::new(
                     &device,
@@ -617,14 +620,12 @@ fn build_hitgroup_shaders<'a, S: Deref<Target = ShaderModule>>(
     specialization_info: &mut Vec<vk::SpecializationInfo>,
     stages: &mut Vec<vk::PipelineShaderStageCreateInfo>,
     groups: &mut Vec<vk::RayTracingShaderGroupCreateInfoKHR>,
-    hitgroups: impl ExactSizeIterator<
-        Item = (
-            Option<SpecializedShader<'a, S>>, // rchit
-            Option<SpecializedShader<'a, S>>, // rint
-            Option<SpecializedShader<'a, S>>, // rahit
-            RayTracingHitGroupType,
-        ),
-    >,
+    hitgroups: &[(
+        Option<SpecializedShader<'a, S>>, // rchit
+        Option<SpecializedShader<'a, S>>, // rint
+        Option<SpecializedShader<'a, S>>, // rahit
+        RayTracingHitGroupType,
+    )],
 ) {
     let initial_capacity = (
         stages.capacity(),
@@ -683,7 +684,7 @@ fn build_hitgroup_shaders<'a, S: Deref<Target = ShaderModule>>(
             });
         }
         groups.push(vk::RayTracingShaderGroupCreateInfoKHR {
-            ty: ty.into(),
+            ty: (*ty).into(),
             closest_hit_shader: rchit_stage,
             any_hit_shader: rahit_stage,
             intersection_shader: rint_stage,

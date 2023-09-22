@@ -220,6 +220,7 @@ impl SpecializationInfo {
             unsafe {
                 let value: bool = std::mem::transmute_copy(&item);
                 self.push_bool(constant_id, value);
+                return;
             }
         }
         let size = std::mem::size_of::<T>();

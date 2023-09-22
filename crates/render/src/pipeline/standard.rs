@@ -782,12 +782,40 @@ pub fn extract_global_transforms(
 
 #[derive(Default)]
 pub struct GBuffer<T> {
+    /// A2R10G10B10_UNORM_PACK32
+    /// TODO: This probably can be reduced to a R8G8B8A8, if we need that extra A8 for something else.
+    /// We're A2R10G10B10 for now, because the A8 would've been unused anyways.
     pub albedo: T,
+
+    /// The depth buffer for the fine hit results.
+    /// R32_SFLOAT
     pub depth: T,
+
+    /// The packed normal/roughness/material buffer for the fine hit results.
+    /// Packed with NRD_FrontEnd_PackNormalAndRoughness
+    /// A2R10G10B10_UNORM_PACK32
+    /// - R10G10: Normal
+    /// - B10: Roughness
+    /// - A2: Material ID
     pub normal: T,
+
+    /// World space motion buffer.
+    /// R16G16B16A16_SFLOAT
+    /// - R16G16B16: Motion
+    /// - A16: Unused
     pub motion: T,
+
+    /// Voxel IDs.
+    /// R32_UINT
     pub voxel_id: T,
+
+    /// Illuminance and secondary ray hit distances
+    /// Packed with REBLUR_FrontEnd_PackRadianceAndNormHitDist
+    /// R16G16B16A16_SFLOAT
+    /// - R16G16B16: Illuminance, in YCoCg. TODO: Make the Primary ray pass store YCoCg as well.
+    /// - A16: Secondary ray hit distance
     pub radiance: T,
+    /// R16G16B16A16_SFLOAT
     pub denoised_radiance: T,
 }
 

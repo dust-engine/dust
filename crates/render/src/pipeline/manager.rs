@@ -214,8 +214,8 @@ impl PipelineBuildInfo for RayTracingPipelineBuildInfo {
             AsyncComputeTaskPool::get().spawn(async move {
                 let pipeline = rhyolite::RayTracingPipeline::create_for_shaders(
                     layout,
-                    base_shaders.as_slice(),
-                    hitgroups.into_iter(),
+                    base_shaders,
+                    hitgroups,
                     &create_info,
                     pipeline_cache.as_ref().map(|a| a.as_ref()),
                     DeferredTaskPool::get().inner().clone(),
