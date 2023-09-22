@@ -5,12 +5,12 @@ use bevy_asset::{AssetLoader, AsyncReadExt};
 use bevy_ecs::world::{FromWorld, World};
 use bevy_utils::BoxedFuture;
 use rhyolite::ensure_image_layout;
+use rhyolite::utils::format::{FormatType, Permutation, Format};
 use rhyolite::{
     ash::vk,
     copy_buffer_to_image,
     future::{GPUCommandFutureExt, RenderImage, RenderRes},
-    macros::commands,
-    ImageLike, ImageRequest, QueueRef,
+    macros::commands, ImageRequest, QueueRef,
 };
 
 pub struct PngLoader {
@@ -33,26 +33,45 @@ impl FromWorld for PngLoader {
     }
 }
 
-#[derive()]
-pub struct Image<T: ImageLike>(T);
+use serde::{Deserialize, Serialize};
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PngSettings {
+    pub format_type: FormatType,
+    pub format_permutation: Option<Permutation>
+}
+impl Default for PngSettings {
+    fn default() -> Self {
+        Self {
+            format_type: FormatType::UNorm,
+            format_permutation: None
+        }
+    }
+}
 
 #[derive(Debug)]
-struct UnsupportedPngColorTypeError;
-impl Display for UnsupportedPngColorTypeError {
+enum PngLoadingError {
+    /// Possible reasons:
+    /// - The png file operates in index mode.
+    /// - The png file has a bit depth of 1 or 2.
+    /// - Grayscale or Grayscale alpha image with a bit depth of 4.
+    UnsupportedPngColorTypeError,
+    UnsupportedFormatError(Format)
+}
+impl Display for PngLoadingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self, f)
     }
 }
-impl std::error::Error for UnsupportedPngColorTypeError {}
+impl std::error::Error for PngLoadingError {}
 
 impl AssetLoader for PngLoader {
     // TODO: make different loaders for png img arrays and single images
     type Asset = SlicedImageArray;
-    type Settings = ();
+    type Settings = PngSettings;
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
-        _settings: &'a Self::Settings,
+        settings: &'a Self::Settings,
         _load_context: &'a mut bevy_asset::LoadContext,
     ) -> BoxedFuture<'a, Result<SlicedImageArray, anyhow::Error>> {
         Box::pin(async move {
@@ -80,7 +99,7 @@ impl AssetLoader for PngLoader {
                     png::ColorType::GrayscaleAlpha => 2,
                     png::ColorType::Rgb => 3,
                     png::ColorType::Rgba => 4,
-                    _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
+                    png::ColorType::Indexed => return Err(anyhow::Error::new(PngLoadingError::UnsupportedPngColorTypeError)),
                 };
                 size / 8
             };
@@ -97,7 +116,7 @@ impl AssetLoader for PngLoader {
                     png::ColorType::GrayscaleAlpha => 2,
                     png::ColorType::Rgb => 4,
                     png::ColorType::Rgba => 4,
-                    _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
+                    png::ColorType::Indexed => return Err(anyhow::Error::new(PngLoadingError::UnsupportedPngColorTypeError)),
                 };
                 size / 8
             };
@@ -133,25 +152,30 @@ impl AssetLoader for PngLoader {
                 }
             }
 
+            let (r, g, b, a, permutation) = match color_type {
+                (png::ColorType::Grayscale, png::BitDepth::Eight) => (8, 0, 0, 0, Permutation::R),
+                (png::ColorType::Grayscale, png::BitDepth::Sixteen) => (16, 0, 0, 0, Permutation::R),
+                (png::ColorType::GrayscaleAlpha, png::BitDepth::Eight) => (8, 8, 0, 0, Permutation::RG),
+                (png::ColorType::GrayscaleAlpha, png::BitDepth::Sixteen) => (16, 16, 0, 0, Permutation::RG),
+                (png::ColorType::Rgb | png::ColorType::Rgba, png::BitDepth::Four) => (4, 4, 4, 4, Permutation::RGBA),
+                (png::ColorType::Rgb | png::ColorType::Rgba, png::BitDepth::Eight) => (8, 8, 8, 8, Permutation::RGBA),
+                (png::ColorType::Rgb | png::ColorType::Rgba, png::BitDepth::Sixteen) => (16, 16, 16, 16, Permutation::RGBA),
+                (_, png::BitDepth::One | png::BitDepth::Two) |
+                (png::ColorType::Indexed, _) | (png::ColorType::Grayscale | png::ColorType::GrayscaleAlpha, png::BitDepth::Four) => return Err(anyhow::Error::new(PngLoadingError::UnsupportedPngColorTypeError)),
+            };
+
+            let format = Format {
+                r,
+                g,
+                b,
+                a,
+                ty: settings.format_type,
+                permutation: settings.format_permutation.unwrap_or(permutation),
+            };
+
             let image = self.allocator.create_device_image_uninit(&ImageRequest {
                 image_type: vk::ImageType::TYPE_2D,
-                format: match color_type {
-                    (png::ColorType::Grayscale, png::BitDepth::Eight) => vk::Format::R8_UNORM,
-                    (png::ColorType::Grayscale, png::BitDepth::Sixteen) => vk::Format::R16_UNORM,
-                    (png::ColorType::GrayscaleAlpha, png::BitDepth::Eight) => vk::Format::R8G8_UNORM,
-                    (png::ColorType::GrayscaleAlpha, png::BitDepth::Sixteen) => vk::Format::R16G16_UNORM,
-                    (png::ColorType::Rgb, png::BitDepth::Four) => vk::Format::R4G4B4A4_UNORM_PACK16,
-                    (png::ColorType::Rgb, png::BitDepth::Eight) => vk::Format::R8G8B8A8_UNORM,
-                    (png::ColorType::Rgb, png::BitDepth::Sixteen) => vk::Format::R16G16B16_UNORM,
-                    (png::ColorType::Rgba, png::BitDepth::Four) => {
-                        vk::Format::R4G4B4A4_UNORM_PACK16
-                    }
-                    (png::ColorType::Rgba, png::BitDepth::Eight) => vk::Format::R8G8B8A8_UNORM,
-                    (png::ColorType::Rgba, png::BitDepth::Sixteen) => {
-                        vk::Format::R16G16B16A16_UNORM
-                    }
-                    _ => return Err(anyhow::Error::new(UnsupportedPngColorTypeError)),
-                },
+                format: format.try_into().map_err(|format| PngLoadingError::UnsupportedFormatError(format))?,
                 extent: vk::Extent3D {
                     width: reader.info().width,
                     height: reader.info().height,
