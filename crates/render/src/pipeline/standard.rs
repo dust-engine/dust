@@ -9,7 +9,7 @@ use bevy_ecs::query::{Added, Changed, Or};
 use bevy_ecs::schedule::IntoSystemConfigs;
 use bevy_ecs::system::lifetimeless::SResMut;
 use bevy_ecs::system::{lifetimeless::SRes, Resource, SystemParamItem};
-use bevy_ecs::system::{Commands, Query, Local};
+use bevy_ecs::system::{Commands, Local, Query};
 use bevy_math::{Mat4, UVec2, Vec3};
 use bevy_transform::prelude::GlobalTransform;
 
@@ -40,7 +40,7 @@ use crate::{
     sbt::{EmptyShaderRecords, PipelineSbtManager, SbtManager},
     PinholeProjection, ShaderModule, SpecializedShader,
 };
-use crate::{PipelineCache, Renderable, Sunlight, BlueNoise};
+use crate::{BlueNoise, PipelineCache, Renderable, Sunlight};
 
 use super::sky::SkyModelState;
 use super::{RayTracingPipeline, RayTracingPipelineManager};
@@ -222,7 +222,7 @@ pub type StandardPipelineRenderParams = (
     SRes<StagingRingBuffer>,
     SRes<BlueNoise>,
     SRes<Assets<SlicedImageArray>>,
-    Local<'static, u32>
+    Local<'static, u32>,
 );
 impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
@@ -252,7 +252,7 @@ impl StandardPipeline {
             staging_ring_buffer,
             blue_noise,
             image_arrays,
-            mut frame_index
+            mut frame_index,
         ) = params;
         *frame_index += 1;
         let frame_index = *frame_index;
@@ -321,7 +321,7 @@ impl StandardPipeline {
             let instances_buffer = instances_buffer.await;
             let (pipeline_sbt_buffer, hitgroup_sbt_buffer) = pipeline_sbt_manager.build(&staging_ring_buffer).join(hitgroup_sbt_buffer).await;
 
-            
+
             let mut surfel_pool_buffer = use_shared_state(
                 using!(),
                 |_| {

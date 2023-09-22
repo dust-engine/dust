@@ -5,12 +5,13 @@ use bevy_asset::{AssetLoader, AsyncReadExt};
 use bevy_ecs::world::{FromWorld, World};
 use bevy_utils::BoxedFuture;
 use rhyolite::ensure_image_layout;
-use rhyolite::utils::format::{FormatType, Permutation, Format};
+use rhyolite::utils::format::{Format, FormatType, Permutation};
 use rhyolite::{
     ash::vk,
     copy_buffer_to_image,
     future::{GPUCommandFutureExt, RenderImage, RenderRes},
-    macros::commands, ImageRequest, QueueRef,
+    macros::commands,
+    ImageRequest, QueueRef,
 };
 
 pub struct PngLoader {
@@ -37,13 +38,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PngSettings {
     pub format_type: FormatType,
-    pub format_permutation: Option<Permutation>
+    pub format_permutation: Option<Permutation>,
 }
 impl Default for PngSettings {
     fn default() -> Self {
         Self {
             format_type: FormatType::UNorm,
-            format_permutation: None
+            format_permutation: None,
         }
     }
 }
@@ -55,7 +56,7 @@ enum PngLoadingError {
     /// - The png file has a bit depth of 1 or 2.
     /// - Grayscale or Grayscale alpha image with a bit depth of 4.
     UnsupportedPngColorTypeError,
-    UnsupportedFormatError(Format)
+    UnsupportedFormatError(Format),
 }
 impl Display for PngLoadingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -99,7 +100,11 @@ impl AssetLoader for PngLoader {
                     png::ColorType::GrayscaleAlpha => 2,
                     png::ColorType::Rgb => 3,
                     png::ColorType::Rgba => 4,
-                    png::ColorType::Indexed => return Err(anyhow::Error::new(PngLoadingError::UnsupportedPngColorTypeError)),
+                    png::ColorType::Indexed => {
+                        return Err(anyhow::Error::new(
+                            PngLoadingError::UnsupportedPngColorTypeError,
+                        ))
+                    }
                 };
                 size / 8
             };
@@ -116,7 +121,11 @@ impl AssetLoader for PngLoader {
                     png::ColorType::GrayscaleAlpha => 2,
                     png::ColorType::Rgb => 4,
                     png::ColorType::Rgba => 4,
-                    png::ColorType::Indexed => return Err(anyhow::Error::new(PngLoadingError::UnsupportedPngColorTypeError)),
+                    png::ColorType::Indexed => {
+                        return Err(anyhow::Error::new(
+                            PngLoadingError::UnsupportedPngColorTypeError,
+                        ))
+                    }
                 };
                 size / 8
             };
@@ -138,6 +147,7 @@ impl AssetLoader for PngLoader {
                 let dst_slice = &mut dst_buf_slice
                     [(dst_frame_size * i) as usize..(dst_frame_size * i + dst_frame_size) as usize];
                 if dst_slice.len() != bytes.len() {
+                    // For Rgb => Rgba copy.
                     let num_samples = reader.info().width * reader.info().height;
                     for j in 0..num_samples {
                         let dst_sample = &mut dst_slice
@@ -152,6 +162,7 @@ impl AssetLoader for PngLoader {
                 }
             }
 
+            #[rustfmt::skip]
             let (r, g, b, a, permutation) = match color_type {
                 (png::ColorType::Grayscale, png::BitDepth::Eight) => (8, 0, 0, 0, Permutation::R),
                 (png::ColorType::Grayscale, png::BitDepth::Sixteen) => (16, 0, 0, 0, Permutation::R),
@@ -160,8 +171,16 @@ impl AssetLoader for PngLoader {
                 (png::ColorType::Rgb | png::ColorType::Rgba, png::BitDepth::Four) => (4, 4, 4, 4, Permutation::RGBA),
                 (png::ColorType::Rgb | png::ColorType::Rgba, png::BitDepth::Eight) => (8, 8, 8, 8, Permutation::RGBA),
                 (png::ColorType::Rgb | png::ColorType::Rgba, png::BitDepth::Sixteen) => (16, 16, 16, 16, Permutation::RGBA),
-                (_, png::BitDepth::One | png::BitDepth::Two) |
-                (png::ColorType::Indexed, _) | (png::ColorType::Grayscale | png::ColorType::GrayscaleAlpha, png::BitDepth::Four) => return Err(anyhow::Error::new(PngLoadingError::UnsupportedPngColorTypeError)),
+                (_, png::BitDepth::One | png::BitDepth::Two)
+                | (png::ColorType::Indexed, _)
+                | (
+                    png::ColorType::Grayscale | png::ColorType::GrayscaleAlpha,
+                    png::BitDepth::Four,
+                ) => {
+                    return Err(anyhow::Error::new(
+                        PngLoadingError::UnsupportedPngColorTypeError,
+                    ))
+                }
             };
 
             let format = Format {
@@ -175,7 +194,9 @@ impl AssetLoader for PngLoader {
 
             let image = self.allocator.create_device_image_uninit(&ImageRequest {
                 image_type: vk::ImageType::TYPE_2D,
-                format: format.try_into().map_err(|format| PngLoadingError::UnsupportedFormatError(format))?,
+                format: format
+                    .try_into()
+                    .map_err(|format| PngLoadingError::UnsupportedFormatError(format))?,
                 extent: vk::Extent3D {
                     width: reader.info().width,
                     height: reader.info().height,

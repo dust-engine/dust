@@ -27,7 +27,6 @@ impl PaletteMaterial {
     }
 }
 
-
 #[repr(C)]
 pub struct PaletteMaterialShaderParams {
     /// Pointer to a list of u64 indexed by block id
@@ -64,19 +63,18 @@ impl dust_render::Material for PaletteMaterial {
         }
     }
 
-    fn intersection_shader(
-        ray_type: u32,
-        asset_server: &AssetServer,
-    ) -> Option<SpecializedShader> {
+    fn intersection_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
         match ray_type {
-            Self::Pipeline::FINAL_GATHER_RAYTYPE | Self::Pipeline::SURFEL_RAYTYPE => Some(SpecializedShader::for_shader(
-                asset_server.load("rough.rint"),
-                vk::ShaderStageFlags::INTERSECTION_KHR,
-            )),
+            Self::Pipeline::FINAL_GATHER_RAYTYPE | Self::Pipeline::SURFEL_RAYTYPE => {
+                Some(SpecializedShader::for_shader(
+                    asset_server.load("rough.rint"),
+                    vk::ShaderStageFlags::INTERSECTION_KHR,
+                ))
+            }
             _ => Some(SpecializedShader::for_shader(
                 asset_server.load("hit.rint"),
                 vk::ShaderStageFlags::INTERSECTION_KHR,
-            ))
+            )),
         }
     }
 

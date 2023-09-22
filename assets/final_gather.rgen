@@ -19,12 +19,9 @@ void main() {
     vec3 normalWorld = NRD_FrontEnd_UnpackNormalAndRoughness(imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)), unused).xyz;
     vec3 hitLocation = hitT * camera_ray_dir() + camera_origin() + normalWorld * 0.01;
 
-    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
+    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz * 2.0 - 1.0;
     // noiseSample is weighted on the z axis
-    noiseSample = rotateVectorByNormal(normalWorld, noiseSample * 2.0 - 1.0);
-    if (dot(noiseSample, normalWorld) < 0.0) {
-        noiseSample = -noiseSample;
-    }
+    noiseSample = rotateVectorByNormal(normalWorld, noiseSample);
 
     // Shoot shadow ray
     traceRayEXT(

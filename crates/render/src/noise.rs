@@ -1,7 +1,7 @@
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::world::FromWorld;
-use rhyolite_bevy::SlicedImageArray;
 use rhyolite::ash::vk;
+use rhyolite_bevy::SlicedImageArray;
 
 #[derive(bevy_ecs::system::Resource)]
 pub struct BlueNoise {
@@ -28,7 +28,11 @@ impl FromWorld for BlueNoise {
 }
 
 impl BlueNoise {
-    pub fn as_descriptors(&self, image_arrays: &Assets<SlicedImageArray>, index: u32) -> Option<[vk::DescriptorImageInfo; 6]> {
+    pub fn as_descriptors(
+        &self,
+        image_arrays: &Assets<SlicedImageArray>,
+        index: u32,
+    ) -> Option<[vk::DescriptorImageInfo; 6]> {
         use rhyolite::{ImageLike, ImageViewExt};
         let mut descriptors: [vk::DescriptorImageInfo; 6] = [Default::default(); 6];
         let handles = [
@@ -44,7 +48,9 @@ impl BlueNoise {
                 return None;
             };
             let noise_texture_index = index % img.subresource_range().layer_count;
-            *desc = img.slice(noise_texture_index as usize).as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+            *desc = img
+                .slice(noise_texture_index as usize)
+                .as_descriptor(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         }
         Some(descriptors)
     }

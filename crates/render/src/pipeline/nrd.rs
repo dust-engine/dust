@@ -15,8 +15,8 @@ use rhyolite::future::{
 use rhyolite::macros::commands;
 use rhyolite::smallvec::smallvec;
 use rhyolite::{
-    copy_buffer, BufferLike, HasDevice, ImageExt, ImageRequest, ImageView, ImageViewLike,
-    ResidentImage, ImageLike,
+    copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
+    ImageViewLike, ResidentImage,
 };
 use rhyolite_bevy::{Allocator, Device, StagingRingBuffer};
 use std::borrow::Cow;
