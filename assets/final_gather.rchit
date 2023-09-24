@@ -32,8 +32,8 @@ void main() {
 
 
 
-    vec3 radiance = vec3(0.0);
-    uint sample_count = 0;
+    vec3 radiance;
+    uint sample_count;
     bool found = SpatialHashGet(key, radiance, sample_count);
     float probability_to_schedule = 1.0 / float(sample_count + 2);
     float noise_sample = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(34, 21) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;

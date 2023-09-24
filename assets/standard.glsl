@@ -550,7 +550,8 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
 bool SpatialHashGet(SpatialHashKey key, out vec3 value, out uint sample_count) {
     uint fingerprint = SpatialHashKeyGetFingerprint(key);
     uint location = SpatialHashKeyGetLocation(key);
-
+    value = vec3(0.0);
+    sample_count = 0;
     for (uint i = 0; i < 3; i++) {
         uint current_fingerprint = s_spatial_hash.entries[location + i].fingerprint;
         if (current_fingerprint == 0) {

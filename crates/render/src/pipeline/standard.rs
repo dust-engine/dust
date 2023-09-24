@@ -15,6 +15,7 @@ use bevy_transform::prelude::GlobalTransform;
 
 use crevice::std430::{AsStd430, Std430};
 use rand::Rng;
+use rhyolite::debug::DebugObject;
 use rhyolite::future::{
     run, use_shared_image, use_shared_resource_flipflop, use_shared_state, use_state,
     GPUCommandFutureExt, SharedDeviceState, SharedDeviceStateHostContainer,
@@ -329,7 +330,7 @@ impl StandardPipeline {
                         720*480 * 16,
                         vk::BufferUsageFlags::STORAGE_BUFFER,
                         0
-                    ).unwrap()
+                    ).unwrap().with_name("Surfel Pool Buffer").unwrap()
                 },
                 |_| false
             );
@@ -340,7 +341,7 @@ impl StandardPipeline {
                         32 * 1024 * 1024 * 16,
                         vk::BufferUsageFlags::STORAGE_BUFFER,
                         0
-                    ).unwrap()
+                    ).unwrap().with_name("Spatial Hash Buffer").unwrap()
                 },
                 |_| false
             );
