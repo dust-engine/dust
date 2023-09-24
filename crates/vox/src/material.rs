@@ -59,6 +59,10 @@ impl dust_render::Material for PaletteMaterial {
                 asset_server.load("final_gather.rchit"),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )),
+            Self::Pipeline::SURFEL_RAYTYPE => Some(SpecializedShader::for_shader(
+                asset_server.load("surfel.rchit"),
+                vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+            )),
             _ => None,
         }
     }

@@ -26,7 +26,7 @@ void main() {
         gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT, // RayFlags
         0xFF, // CullMask
         1, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
-        3, // SBT stride, number of ray types // TODO: Make this a shader constant
+        4, // SBT stride, number of ray types // TODO: Make this a shader constant
         1, // missIndex
         hitLocation,     // ray origin
         0.1,           // ray min range

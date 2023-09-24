@@ -32,7 +32,7 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
-use rhyolite::{ImageView, ResidentImage};
+use rhyolite::{ImageView, ResidentImage, fill_buffer};
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 use rhyolite_bevy::{RenderSystems, StagingRingBuffer};
 
@@ -51,6 +51,7 @@ pub struct StandardPipeline {
     primary_ray_pipeline: RayTracingPipelineManager,
     shadow_ray_pipeline: RayTracingPipelineManager,
     final_gather_ray_pipeline: RayTracingPipelineManager,
+    surfel_ray_pipeline: RayTracingPipelineManager,
     hitgroup_sbt_manager: SbtManager,
     pipeline_sbt_manager: PipelineSbtManager,
 
@@ -164,7 +165,7 @@ impl RayTracingPipeline for StandardPipeline {
                 Vec::new(),
             ),
             final_gather_ray_pipeline: RayTracingPipelineManager::new(
-                pipeline_characteristics,
+                pipeline_characteristics.clone(),
                 vec![Self::FINAL_GATHER_RAYTYPE],
                 SpecializedShader::for_shader(
                     asset_server.load("final_gather.rgen"),
@@ -172,6 +173,19 @@ impl RayTracingPipeline for StandardPipeline {
                 ),
                 vec![SpecializedShader::for_shader(
                     asset_server.load("final_gather.rmiss"),
+                    vk::ShaderStageFlags::MISS_KHR,
+                )],
+                Vec::new(),
+            ),
+            surfel_ray_pipeline: RayTracingPipelineManager::new(
+                pipeline_characteristics,
+                vec![Self::SURFEL_RAYTYPE],
+                SpecializedShader::for_shader(
+                    asset_server.load("surfel.rgen"),
+                    vk::ShaderStageFlags::RAYGEN_KHR,
+                ),
+                vec![SpecializedShader::for_shader(
+                    asset_server.load("surfel.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
@@ -188,11 +202,13 @@ impl RayTracingPipeline for StandardPipeline {
         self.shadow_ray_pipeline.material_instance_added::<M>();
         self.final_gather_ray_pipeline
             .material_instance_added::<M>();
+        self.surfel_ray_pipeline
+            .material_instance_added::<M>();
         self.hitgroup_sbt_manager.add_instance(material, params)
     }
 
     fn num_raytypes() -> u32 {
-        3
+        4
     }
 
     fn material_instance_removed<M: crate::Material<Pipeline = Self>>(&mut self) {}
@@ -267,10 +283,14 @@ impl StandardPipeline {
         let final_gather_pipeline = self
             .final_gather_ray_pipeline
             .get_pipeline(&pipeline_cache, &shader_store)?;
+        let surfel_pipeline = self
+            .surfel_ray_pipeline
+            .get_pipeline(&pipeline_cache, &shader_store)?;
         self.hitgroup_sbt_manager.specify_pipelines(&[
             primary_pipeline,
             shadow_pipeline,
             final_gather_pipeline,
+            surfel_pipeline,
         ]);
         let hitgroup_sbt_buffer = self.hitgroup_sbt_manager.hitgroup_sbt_buffer();
         let hitgroup_stride = self.hitgroup_sbt_manager.hitgroup_stride();
@@ -309,18 +329,24 @@ impl StandardPipeline {
         self.pipeline_sbt_manager
             .push_raygen(final_gather_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
+            .push_raygen(surfel_pipeline, EmptyShaderRecords, 0);
+        self.pipeline_sbt_manager
             .push_miss(primary_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_miss(shadow_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_miss(final_gather_pipeline, EmptyShaderRecords, 0);
+        self.pipeline_sbt_manager
+            .push_miss(surfel_pipeline, EmptyShaderRecords, 0);
         let pipeline_sbt_manager = &mut self.pipeline_sbt_manager;
         let desc_pool = &mut self.desc_pool;
         let sunlight = sunlight.bake().as_std430();
 
         let fut = commands! { move
-            let instances_buffer = instances_buffer.await;
-            let (pipeline_sbt_buffer, hitgroup_sbt_buffer) = pipeline_sbt_manager.build(&staging_ring_buffer).join(hitgroup_sbt_buffer).await;
+            let ((pipeline_sbt_buffer, hitgroup_sbt_buffer), instances_buffer) = pipeline_sbt_manager
+                .build(&staging_ring_buffer)
+                .join(hitgroup_sbt_buffer)
+                .join(instances_buffer).await;
 
 
             let mut surfel_pool_buffer = use_shared_state(
@@ -328,12 +354,15 @@ impl StandardPipeline {
                 |_| {
                     allocator.create_device_buffer_uninit(
                         720*480 * 16,
-                        vk::BufferUsageFlags::STORAGE_BUFFER,
+                        vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                         0
                     ).unwrap().with_name("Surfel Pool Buffer").unwrap()
                 },
                 |_| false
             );
+            if !surfel_pool_buffer.inner().reused() {
+                fill_buffer(&mut surfel_pool_buffer, u32::MAX).await;
+            }
             let mut spatial_hash_buffer = use_shared_state(
                 using!(),
                 |_| {
@@ -616,6 +645,91 @@ impl StandardPipeline {
                 device.rtx_loader().cmd_trace_rays(
                     command_buffer,
                     &pipeline_sbt_buffer.inner().rgen(Self::FINAL_GATHER_RAYTYPE as usize),
+                    &pipeline_sbt_buffer.inner().miss(),
+                    &vk::StridedDeviceAddressRegionKHR {
+                        device_address: hitgroup_sbt_buffer.inner().device_address(),
+                        stride: hitgroup_stride as u64,
+                        size: hitgroup_sbt_buffer.inner.size(),
+                    },
+                    &vk::StridedDeviceAddressRegionKHR::default(),
+                    extent.width,
+                    extent.height,
+                    extent.depth,
+                ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
+            }, |ctx| {
+                ctx.read_others(
+                    tlas.deref(),
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
+                );
+                ctx.read(
+                    &hitgroup_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.read(
+                    &pipeline_sbt_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+                );
+                ctx.read_image(
+                    &gbuffer.radiance,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.write_image(
+                    &mut gbuffer.radiance,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    &gbuffer.depth,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    &gbuffer.normal,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    &gbuffer.motion,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read(
+                    &sunlight_buffer,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::UNIFORM_READ,
+                );
+                ctx.write_image(
+                    &mut gbuffer.voxel_id,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                    vk::ImageLayout::GENERAL,
+                );
+                ctx.read_image(
+                    &gbuffer.voxel_id,
+                    vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    vk::AccessFlags2::SHADER_STORAGE_READ,
+                    vk::ImageLayout::GENERAL,
+                );
+            }).await;
+            run(|ctx, command_buffer| unsafe {
+                let device = ctx.device();
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_KHR,
+                    surfel_pipeline.pipeline().raw(),
+                );
+                device.rtx_loader().cmd_trace_rays(
+                    command_buffer,
+                    &pipeline_sbt_buffer.inner().rgen(Self::SURFEL_RAYTYPE as usize),
                     &pipeline_sbt_buffer.inner().miss(),
                     &vk::StridedDeviceAddressRegionKHR {
                         device_address: hitgroup_sbt_buffer.inner().device_address(),
