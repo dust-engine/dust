@@ -32,9 +32,9 @@ void main() {
 
 
 
-    vec3 radiance;
+    vec3 indirect_radiance;
     uint sample_count;
-    bool found = SpatialHashGet(key, radiance, sample_count);
+    bool found = SpatialHashGet(key, indirect_radiance, sample_count);
     float probability_to_schedule = 1.0 / float(sample_count + 2);
     float noise_sample = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(34, 21) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;
 
@@ -48,7 +48,7 @@ void main() {
         s_surfel_pool.entries[index] = entry;
     }
 
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(payload.illuminance, gl_HitTEXT);
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance, gl_HitTEXT);
     imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
 }
 

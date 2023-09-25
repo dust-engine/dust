@@ -24,6 +24,7 @@ void main() {
 
     vec3 radiance;
     uint sample_count = 0;
+    // Sample the hit location in the spatial hash
     bool found = SpatialHashGet(key, radiance, sample_count);
 
     if (found) {
@@ -33,6 +34,7 @@ void main() {
         SpatialHashKey key;
         key.position = surfel.position;
         key.direction = uint8_t(surfel.direction);
+        // Insert into the spatial hash where the ray was spanwed
         SpatialHashInsert(key, radiance);
 
         // TODO: Maybe add more samples to the patch: need heuristic.
