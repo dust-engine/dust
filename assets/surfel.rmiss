@@ -11,7 +11,7 @@ void main() {
     key.position = surfel.position;
     key.direction = uint8_t(surfel.direction);
 
-    SpatialHashInsert(key, sky_illuminance);
+    SpatialHashInsert(key, sky_illuminance * 0.9); // TODO: times the actual albedo
 
     // TODO: stocastically sample the lights as well.
 }

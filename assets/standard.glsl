@@ -409,7 +409,7 @@ struct SpatialHashEntry {
 };
 
 struct SpatialHashKey {
-    uvec3 position;
+    ivec3 position;
     uint8_t direction; // [0, 6) indicating one of the six faces of the cube
 };
 
@@ -547,6 +547,7 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
 
 
 // Returns: found
+// out vec3: value. The outgoing radiance at the voxel.
 bool SpatialHashGet(SpatialHashKey key, out vec3 value, out uint sample_count) {
     uint fingerprint = SpatialHashKeyGetFingerprint(key);
     uint location = SpatialHashKeyGetLocation(key);
@@ -572,7 +573,7 @@ bool SpatialHashGet(SpatialHashKey key, out vec3 value, out uint sample_count) {
 
 
 struct SurfelEntry { 
-    uvec3 position;
+    ivec3 position;
     uint32_t direction; // [0, 6) indicating one of the six faces of the cube
 };
 layout(constant_id = 1) const uint32_t SurfelPoolSize = 720*480;

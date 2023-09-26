@@ -19,7 +19,7 @@ void main() {
     
 
     SpatialHashKey key;
-    key.position = uvec3(round(aabbCenterWorld / 4.0));
+    key.position = ivec3(round(aabbCenterWorld / 4.0));
     key.direction = normal2FaceID(normalWorld);
 
     vec3 radiance;
@@ -35,10 +35,14 @@ void main() {
         key.position = surfel.position;
         key.direction = uint8_t(surfel.direction);
         // Insert into the spatial hash where the ray was spanwed
-        SpatialHashInsert(key, radiance);
+        // Outgoing radiace at the current voxel is the incoming radiance from the other voxel times the albedo
+        SpatialHashInsert(key, radiance * 0.9); // TODO: times the actual albedo
+        // TODO: Optimize the Insert / Get flow so they only do the loop once.
 
         // TODO: Maybe add more samples to the patch: need heuristic.
     } else {
         // TODO: enqueue the patch stocastically
+        // TODO: Also need to enqueue a sample of strength = 0
+        // TODO: weight expotential fallout over time
     }
 }

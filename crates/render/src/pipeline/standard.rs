@@ -32,7 +32,7 @@ use rhyolite::{
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
-use rhyolite::{ImageView, ResidentImage, fill_buffer};
+use rhyolite::{fill_buffer, ImageView, ResidentImage};
 use rhyolite_bevy::{Allocator, SlicedImageArray};
 use rhyolite_bevy::{RenderSystems, StagingRingBuffer};
 
@@ -202,8 +202,7 @@ impl RayTracingPipeline for StandardPipeline {
         self.shadow_ray_pipeline.material_instance_added::<M>();
         self.final_gather_ray_pipeline
             .material_instance_added::<M>();
-        self.surfel_ray_pipeline
-            .material_instance_added::<M>();
+        self.surfel_ray_pipeline.material_instance_added::<M>();
         self.hitgroup_sbt_manager.add_instance(material, params)
     }
 

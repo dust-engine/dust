@@ -17,13 +17,20 @@ void main() {
     vec3 normal = faceId2Normal(uint8_t(entry.direction)); // world space
 
     
-    vec3 offset = texelFetch(blue_noise[1], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[1], 0)), 0).xyz;
+    uvec2 noiseSampleLocation;
+    uint width = textureSize(blue_noise[1], 0).x;
+    noiseSampleLocation.y = gl_LaunchIDEXT.x / width;
+    noiseSampleLocation.x = gl_LaunchIDEXT.x - noiseSampleLocation.y * width;
+
+    // Location on the patch
+    vec3 offset = texelFetch(blue_noise[1], ivec2((noiseSampleLocation + uvec2(71, 83) + pushConstants.rand) % textureSize(blue_noise[1], 0)), 0).xyz;
     offset.z = 0.5;
     offset.xy -= 0.5;
     offset = rotateVectorByNormal(normal, offset);
     origin += offset;
 
-    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((gl_LaunchIDEXT.xy + uvec2(7, 183) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
+    // Outgoing direction
+    vec3 noiseSample = texelFetch(blue_noise[5], (ivec2(noiseSampleLocation + uvec2(16, 47) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
     // noiseSample is weighted on the z axis
     noiseSample = rotateVectorByNormal(normal, noiseSample);
     

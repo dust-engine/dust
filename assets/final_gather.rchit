@@ -27,7 +27,7 @@ void main() {
     
 
     SpatialHashKey key;
-    key.position = uvec3(round(aabbCenterWorld / 4.0));
+    key.position = ivec3(round(aabbCenterWorld / 4.0));
     key.direction = normal2FaceID(normalWorld);
 
 
@@ -43,7 +43,7 @@ void main() {
         index = index % SurfelPoolSize;
 
         SurfelEntry entry;
-        entry.position = uvec3(round(aabbCenterWorld / 4.0));
+        entry.position = ivec3(round(aabbCenterWorld / 4.0));
         entry.direction = normal2FaceID(normalWorld);
         s_surfel_pool.entries[index] = entry;
     }
