@@ -13,9 +13,11 @@ hitAttributeEXT HitAttribute {
 #ifdef SHADER_INT_64
 #define GridType uint64_t
 #define GridCheck(grid, hit) ((grid & (uint64_t(1) << hit)) == 0)
+#define GridIsEmpty(grid) (grid == 0)
 #else
 #define GridType u32vec2
 #define GridCheck(grid, hit) (((hit < 32) ?(grid.x & (1 << hit)):(grid.y & (1 << (hit - 32)))) == 0)
+#define GridIsEmpty(grid) (grid.x == 0 && grid.y == 0)
 #endif
 
 
@@ -42,7 +44,7 @@ void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
         return;
     }
     if (RoughIntersectionTestThreshold > 0.0 && initialIntersectionT.x > RoughIntersectionTestThreshold) {
-        if (initialIntersectionT.x <= gl_RayTmaxEXT) {
+        if ((initialIntersectionT.x <= gl_RayTmaxEXT) && !GridIsEmpty(grid)) {
             hitAttributes.voxelId = uint8_t(0xFF);
             reportIntersectionEXT(initialIntersectionT.x, 1);
         }

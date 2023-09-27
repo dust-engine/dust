@@ -404,7 +404,7 @@ struct SpatialHashEntry {
     uint32_t fingerprint;
     uint16_t last_accessed_frame;
     uint16_t sample_count;
-    f16vec3 radiance;
+    f16vec3 radiance; // The amount of incoming radiance
     float16_t visual_importance;
 };
 
@@ -525,6 +525,8 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
                 current_sample_count = s_spatial_hash.entries[location + i].sample_count;
                 current_radiance = s_spatial_hash.entries[location + i].radiance;
             }
+            #define MAX_SAMPLE_COUNT 256
+            current_sample_count = min(current_sample_count, MAX_SAMPLE_COUNT - 1);
             uint next_sample_count = current_sample_count + 1;
             current_radiance = current_radiance * (float(current_sample_count) / float(next_sample_count)) + value * (1.0 / float(next_sample_count));
             

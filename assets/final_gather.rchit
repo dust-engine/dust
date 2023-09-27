@@ -14,7 +14,22 @@ layout(location = 0) rayPayloadInEXT struct RayPayload {
     vec3 illuminance;
 } payload;
 
+#ifdef SHADER_INT_64
+#define GridType uint64_t
+uint GridNumVoxels(GridType grid) {
+    u32vec2 unpacked = unpack32(grid);
+    return bitCount(masked.x) + bitCount(masked.y);
+}
+#else
+#define GridType u32vec2
+uint GridNumVoxels(GridType grid) {
+    return bitCount(grid.x) + bitCount(grid.y);
+}
+#endif
 
+// The ray goes from the primary hit point to the secondary hit point.
+// We sample the spatial hash at the secondary hit point, find out
+// the outgoing radiance, and store into the radiance texture.
 void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
     vec3 aabbCenterObject = block.position.xyz + 2.0;
@@ -48,7 +63,29 @@ void main() {
         s_surfel_pool.entries[index] = entry;
     }
 
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance, gl_HitTEXT);
+    // indirect radiance is the incoming radiance at the secondary hit location.
+    // Multiply with albedo to convert into outgoing radiance at secondary hit location.
+
+    #ifdef SHADER_INT_64
+    uint numVoxelInAabb = GridNumVoxels(block.mask);
+    #else
+    uint numVoxelInAabb = GridNumVoxels(u32vec2(block.mask1, block.mask2));
+    #endif
+    float rand = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(18, 74) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;
+    float randomVoxelIndexFloat = mix(0.0, float(numVoxelInAabb), rand);
+    uint randomVoxelIndex = max(uint(randomVoxelIndexFloat), numVoxelInAabb - 1);
+
+    // Convert into albedo
+    uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + randomVoxelIndex];
+    u8vec4 color = sbt.paletteInfo.palette[palette_index];
+    vec3 albedo = color.xyz / 255.0;
+    albedo.x = SRGBToLinear(albedo.x);
+    albedo.y = SRGBToLinear(albedo.y);
+    albedo.z = SRGBToLinear(albedo.z);
+    albedo = SRGBToXYZ(albedo);
+
+    
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance * albedo, gl_HitTEXT);
     imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
 }
 
