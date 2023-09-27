@@ -30,7 +30,7 @@ void main() {
     origin += offset;
 
     // Outgoing direction
-    vec3 noiseSample = texelFetch(blue_noise[5], (ivec2(noiseSampleLocation + uvec2(16, 47) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
+    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((noiseSampleLocation + uvec2(16, 47) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
     // noiseSample is weighted on the z axis
     noiseSample = rotateVectorByNormal(normal, noiseSample);
     
@@ -45,7 +45,7 @@ void main() {
         3, // missIndex
         origin * 4.0,     // ray origin
         0.1,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
-        noiseSample, // outgoing direction: cosine weighted on the normal direction
+        normalize(noiseSample), // outgoing direction: cosine weighted on the normal direction
         10000.0, // tmax
         0 // payload
     );

@@ -33,7 +33,7 @@ void main() {
         2, // missIndex
         hitLocation,     // ray origin
         0.1,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
-        noiseSample, // direction
+        normalize(noiseSample), // direction
         u_camera.far, // tmax
         0 // payload
     );

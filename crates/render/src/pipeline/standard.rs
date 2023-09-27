@@ -736,9 +736,9 @@ impl StandardPipeline {
                         size: hitgroup_sbt_buffer.inner.size(),
                     },
                     &vk::StridedDeviceAddressRegionKHR::default(),
-                    extent.width,
-                    extent.height,
-                    extent.depth,
+                    720 * 480,
+                    1,
+                    1,
                 ); // TODO: Perf: Only trace rays for locations where primary ray was hit.
             }, |ctx| {
                 ctx.read_others(
