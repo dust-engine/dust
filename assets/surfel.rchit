@@ -43,6 +43,11 @@ void main() {
     // Sample the hit location in the spatial hash
     bool found = SpatialHashGet(key, radiance, sample_count);
 
+    uvec2 noiseSampleLocation;
+    uint width = textureSize(blue_noise[0], 0).x;
+    noiseSampleLocation.y = gl_LaunchIDEXT.x / width;
+    noiseSampleLocation.x = gl_LaunchIDEXT.x - noiseSampleLocation.y * width;
+    float rand = texelFetch(blue_noise[0], ivec2((noiseSampleLocation + uvec2(114, 40) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;
     if (found) {
         // Stocasticlly select one voxel from the block
         #ifdef SHADER_INT_64
@@ -50,11 +55,6 @@ void main() {
         #else
         uint numVoxelInAabb = GridNumVoxels(u32vec2(block.mask1, block.mask2));
         #endif
-        uvec2 noiseSampleLocation;
-        uint width = textureSize(blue_noise[0], 0).x;
-        noiseSampleLocation.y = gl_LaunchIDEXT.x / width;
-        noiseSampleLocation.x = gl_LaunchIDEXT.x - noiseSampleLocation.y * width;
-        float rand = texelFetch(blue_noise[0], ivec2((noiseSampleLocation + uvec2(114, 40) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;
         float randomVoxelIndexFloat = mix(0.0, float(numVoxelInAabb), rand);
         uint randomVoxelIndex = max(uint(randomVoxelIndexFloat), numVoxelInAabb - 1);
 
@@ -85,5 +85,15 @@ void main() {
         // TODO: enqueue the patch stocastically
         // TODO: Also need to enqueue a sample of strength = 0
         // TODO: weight expotential fallout over time
+        float probability_to_schedule = 1.0 / float(sample_count + 2);
+        if (rand > probability_to_schedule) {
+            uint index = gl_LaunchIDEXT.x % SurfelPoolSize;
+
+
+            SurfelEntry entry;
+            entry.position = ivec3(round(aabbCenterWorld / 4.0));
+            entry.direction = normal2FaceID(normalWorld);
+            s_surfel_pool.entries[index] = entry;
+        }
     }
 }
