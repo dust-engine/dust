@@ -177,7 +177,7 @@ void main() {
     in_value = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(in_value);
     vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
 
-    float exposure = 0.003; //1.0 / (9.6*u_histogram.avg);
+    float exposure = 0.03; //1.0 / (9.6*u_histogram.avg);
     exposure *= 9.6;
     //exposure = 0.05;
 
