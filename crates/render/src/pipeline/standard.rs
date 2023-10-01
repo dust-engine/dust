@@ -142,11 +142,11 @@ impl RayTracingPipeline for StandardPipeline {
                 pipeline_characteristics.clone(),
                 vec![Self::PRIMARY_RAYTYPE],
                 SpecializedShader::for_shader(
-                    asset_server.load("primary.rgen"),
+                    asset_server.load("shaders/primary/primary.rgen"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
                 vec![SpecializedShader::for_shader(
-                    asset_server.load("miss.rmiss"),
+                    asset_server.load("shaders/primary/miss.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
@@ -155,11 +155,11 @@ impl RayTracingPipeline for StandardPipeline {
                 pipeline_characteristics.clone(),
                 vec![Self::SHADOW_RAYTYPE],
                 SpecializedShader::for_shader(
-                    asset_server.load("shadow.rgen"),
+                    asset_server.load("shaders/shadow/shadow.rgen"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
                 vec![SpecializedShader::for_shader(
-                    asset_server.load("shadow.rmiss"),
+                    asset_server.load("shaders/shadow/shadow.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
@@ -168,11 +168,11 @@ impl RayTracingPipeline for StandardPipeline {
                 pipeline_characteristics.clone(),
                 vec![Self::FINAL_GATHER_RAYTYPE],
                 SpecializedShader::for_shader(
-                    asset_server.load("final_gather.rgen"),
+                    asset_server.load("shaders/final_gather/final_gather.rgen"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
                 vec![SpecializedShader::for_shader(
-                    asset_server.load("final_gather.rmiss"),
+                    asset_server.load("shaders/final_gather/final_gather.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
@@ -181,11 +181,11 @@ impl RayTracingPipeline for StandardPipeline {
                 pipeline_characteristics,
                 vec![Self::SURFEL_RAYTYPE],
                 SpecializedShader::for_shader(
-                    asset_server.load("surfel.rgen"),
+                    asset_server.load("shaders/surfel/surfel.rgen"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
                 vec![SpecializedShader::for_shader(
-                    asset_server.load("surfel.rmiss"),
+                    asset_server.load("shaders/surfel/surfel.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),

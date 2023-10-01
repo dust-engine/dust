@@ -7,7 +7,6 @@ use syn::parse::{Parse, ParseStream};
 extern crate proc_macro;
 mod commands;
 mod commands_join;
-mod glsl;
 mod gpu;
 mod push_constant;
 mod set_layout;
@@ -39,12 +38,6 @@ pub fn gpu(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 #[proc_macro]
 pub fn join(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     commands_join::proc_macro_join(input.into()).into()
-}
-
-#[cfg(feature = "glsl")]
-#[proc_macro]
-pub fn glsl_reflected(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    glsl::glsl_reflected(input.into()).into()
 }
 
 #[proc_macro]

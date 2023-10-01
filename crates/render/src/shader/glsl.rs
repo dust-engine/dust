@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::{Path, PathBuf}};
 
 use bevy_app::Plugin;
 use bevy_asset::{
@@ -98,12 +98,10 @@ impl AssetLoader for GlslShadercCompiler {
                     if includes.contains_key(included_filename) {
                         continue;
                     }
-                    let Ok(inc) = ctx.load_direct(AssetPath::new(included_filename)).await else {
-                        continue;
-                    };
-                    let Some(source): Option<&GlslShaderSource> = inc.get() else {
-                        continue;
-                    };
+                    let path: std::path::PathBuf = ctx.path().parent().unwrap().join(&filename).join(included_filename);
+                    let normalized_path = normalize_path(&path);
+                    let inc = ctx.load_direct(AssetPath::from_path(normalized_path)).await?;
+                    let source: &GlslShaderSource = inc.get().unwrap();
                     pending_sources.push((included_filename.to_string(), source.source.clone()));
                 }
                 if !filename.is_empty() {
@@ -127,6 +125,8 @@ impl AssetLoader for GlslShadercCompiler {
                         content: includes.get(source_name).ok_or("file not found")?.clone(),
                     })
                 });
+                options.set_source_language(shaderc::SourceLanguage::GLSL);
+                options.set_forced_version_profile(460, shaderc::GlslProfile::Core);
                 options.set_optimization_level(shaderc::OptimizationLevel::Performance);
                 options.set_generate_debug_info();
                 let binary_result =
@@ -216,4 +216,32 @@ fn match_include_line(line: &str) -> Option<(&str, shaderc::IncludeType)> {
         return None;
     };
     Some((file_name, ty))
+}
+
+pub fn normalize_path(path: &PathBuf) -> PathBuf {
+    use std::path::Component;
+    let mut components = path.components().peekable();
+    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
+        components.next();
+        PathBuf::from(c.as_os_str())
+    } else {
+        PathBuf::new()
+    };
+
+    for component in components {
+        match component {
+            Component::Prefix(..) => unreachable!(),
+            Component::RootDir => {
+                ret.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                ret.pop();
+            }
+            Component::Normal(c) => {
+                ret.push(c);
+            }
+        }
+    }
+    ret
 }

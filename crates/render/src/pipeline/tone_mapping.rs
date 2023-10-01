@@ -109,7 +109,7 @@ impl ToneMappingPipeline {
                     .to_color_space(&output_color_space.primaries());
                 let transfer_function = output_color_space.transfer_function() as u32;
 
-                let shader = asset_server.load("tone_map.comp");
+                let shader = asset_server.load("shaders/tone_map.comp");
                 pipeline_cache.add_compute_pipeline(
                     self.layout.clone(),
                     SpecializedShader::for_shader(shader, vk::ShaderStageFlags::COMPUTE)

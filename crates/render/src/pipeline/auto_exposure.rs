@@ -74,8 +74,8 @@ impl FromWorld for AutoExposurePipeline {
         .unwrap();
 
         let asset_server: &AssetServer = world.resource();
-        let auto_exposure_shader = asset_server.load("auto_exposure.comp");
-        let auto_exposure_avg_shader = asset_server.load("auto_exposure_avg.comp");
+        let auto_exposure_shader = asset_server.load("shaders/auto_exposure.comp");
+        let auto_exposure_avg_shader = asset_server.load("shaders/auto_exposure_avg.comp");
 
         let pipeline_cache: Mut<PipelineCache> = world.resource_mut();
         let pipeline = pipeline_cache.add_compute_pipeline(

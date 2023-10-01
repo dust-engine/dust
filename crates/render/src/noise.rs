@@ -17,12 +17,12 @@ impl FromWorld for BlueNoise {
     fn from_world(world: &mut bevy_ecs::world::World) -> Self {
         let asset_server = world.resource::<AssetServer>();
         BlueNoise {
-            scalar: asset_server.load("stbn_scalar_2Dx1Dx1D_128x128x64x1.png"),
-            vec2: asset_server.load("stbn_vec2_2Dx1D_128x128x64.png"),
-            unitvec2: asset_server.load("stbn_unitvec2_2Dx1D_128x128x64.png"),
-            vec3: asset_server.load("stbn_vec3_2Dx1D_128x128x64.png"),
-            unitvec3: asset_server.load("stbn_unitvec3_2Dx1D_128x128x64.png"),
-            unitvec3_cosine: asset_server.load("stbn_unitvec3_cosine_2Dx1D_128x128x64.png"),
+            scalar: asset_server.load("stbn/scalar_2Dx1Dx1D_128x128x64x1.png"),
+            vec2: asset_server.load("stbn/vec2_2Dx1D_128x128x64.png"),
+            unitvec2: asset_server.load("stbn/unitvec2_2Dx1D_128x128x64.png"),
+            vec3: asset_server.load("stbn/vec3_2Dx1D_128x128x64.png"),
+            unitvec3: asset_server.load("stbn/unitvec3_2Dx1D_128x128x64.png"),
+            unitvec3_cosine: asset_server.load("stbn/unitvec3_cosine_2Dx1D_128x128x64.png"),
         }
     }
 }

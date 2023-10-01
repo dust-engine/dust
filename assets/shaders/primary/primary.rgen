@@ -1,5 +1,6 @@
-#version 460
-#include "standard.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/layout.glsl"
+#include "../headers/camera.glsl"
 
 layout(location = 0) rayPayloadEXT uint8_t _rayPayloadNotUsed;
 

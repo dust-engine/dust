@@ -1,11 +1,11 @@
-#version 460
-#include "standard.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/sbt.glsl"
+#include "../headers/normal.glsl"
+#include "../headers/layout.glsl"
+#include "../headers/spatial_hash.glsl"
+#include "../headers/color.glsl"
+#include "../headers/surfel.glsl"
 
-layout(shaderRecordEXT) buffer Sbt {
-    GeometryInfo geometryInfo;
-    MaterialInfo materialInfo;
-    PaletteInfo paletteInfo;
-} sbt;
 
 #ifdef SHADER_INT_64
 #define GridType uint64_t

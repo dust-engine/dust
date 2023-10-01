@@ -1,5 +1,8 @@
-#version 460
-#include "standard.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/layout.glsl"
+#include "../headers/sky.glsl"
+#include "../headers/camera.glsl"
+#include "../headers/nrd.glsl"
 
 layout(location = 0) rayPayloadEXT struct Payload {
     vec3 normal;

@@ -1,5 +1,9 @@
-#version 460
-#include "standard.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/sky.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/surfel.glsl"
+#include "../headers/layout.glsl"
+#include "../headers/spatial_hash.glsl"
 
 
 void main() {

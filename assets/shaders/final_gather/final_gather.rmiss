@@ -1,6 +1,7 @@
-
-#version 460
-#include "standard.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/sky.glsl"
+#include "../headers/layout.glsl"
+#include "../headers/nrd.glsl"
 
 layout(location = 0) rayPayloadInEXT struct RayPayload {
     vec3 illuminance;

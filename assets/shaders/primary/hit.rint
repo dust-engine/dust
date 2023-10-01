@@ -1,11 +1,6 @@
-#version 460
-#include "standard.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/sbt.glsl"
 
-layout(shaderRecordEXT) buffer sbt {
-    GeometryInfo geometryInfo;
-    MaterialInfo materialInfo;
-    PaletteInfo paletteInfo;
-};
 hitAttributeEXT HitAttribute {
     uint8_t voxelId;
 } hitAttributes;
@@ -22,6 +17,21 @@ hitAttributeEXT HitAttribute {
 
 
 layout(constant_id = 2) const float RoughIntersectionTestThreshold = 0.0;
+
+vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
+    vec3 tMin = (box_min - origin) / dir;
+    vec3 tMax = (box_max - origin) / dir;
+    vec3 t1 = min(tMin, tMax);
+    vec3 t2 = max(tMin, tMax);
+    float t_min = max(max(t1.x, t1.y), t1.z);
+    float t_max = min(min(t2.x, t2.y), t2.z);
+    return vec2(t_min, t_max);
+}
+
+uint8_t encode_index(u8vec3 position){
+    return (position.x<<4) | (position.y << 2) | position.z;
+}
+
 
 /**
   Intersects ray with a unix box with 4x4x4 voxels. A branchless implementation of
@@ -115,7 +125,7 @@ void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
 
 void main()
 {
-    Block block = geometryInfo.blocks[gl_PrimitiveID];
+    Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
     vec3 min = block.position.xyz;
 
     dda(

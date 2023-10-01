@@ -1,11 +1,9 @@
-#version 460
-#include "standard.glsl"
-
-layout(shaderRecordEXT) buffer Sbt {
-    GeometryInfo geometryInfo;
-    MaterialInfo materialInfo;
-    PaletteInfo paletteInfo;
-} sbt;
+#include "../headers/standard.glsl"
+#include "../headers/sbt.glsl"
+#include "../headers/normal.glsl"
+#include "../headers/nrd.glsl"
+#include "../headers/layout.glsl"
+#include "../headers/color.glsl"
 
 hitAttributeEXT HitAttribute {
     uint8_t voxelId;

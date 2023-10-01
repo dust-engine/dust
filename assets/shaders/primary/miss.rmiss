@@ -1,6 +1,7 @@
-
-#version 460
-#include "standard.glsl"
+#include "../headers/standard.glsl"
+#include "../headers/layout.glsl"
+#include "../headers/sky.glsl"
+#include "../headers/nrd.glsl"
 
 void main() {
     vec3 dir = normalize(gl_WorldRayDirectionEXT);
