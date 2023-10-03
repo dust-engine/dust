@@ -10,6 +10,9 @@ layout(location = 0) rayPayloadEXT struct Payload {
 
 
 void main() {
+    #ifndef CONTRIBUTION_DIRECT
+    return;
+    #endif
     float hitT = imageLoad(img_depth, ivec2(gl_LaunchIDEXT.xy)).x;
     if (hitT == 1.0 / 0.0) {
         // Did not hit.

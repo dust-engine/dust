@@ -53,6 +53,10 @@ void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
     if (initialIntersectionT.x >= initialIntersectionT.y) {
         return;
     }
+    #ifdef DEBUG_VISUALIZE_SPATIAL_HASH
+    reportIntersectionEXT(initialIntersectionT.x, 0);
+    return;
+    #endif
     if (RoughIntersectionTestThreshold > 0.0 && initialIntersectionT.x > RoughIntersectionTestThreshold) {
         if ((initialIntersectionT.x <= gl_RayTmaxEXT) && !GridIsEmpty(grid)) {
             hitAttributes.voxelId = uint8_t(0xFF);

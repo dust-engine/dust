@@ -87,8 +87,18 @@ void main() {
     albedo = SRGBToXYZ(albedo);
 
     
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance * albedo, gl_HitTEXT);
+    vec3 value = vec3(0.0);
+    #ifdef CONTRIBUTION_SECONDARY_SPATIAL_HASH
+    value += indirect_radiance * albedo;
+    #endif
+    #ifdef CONTRIBUTION_DIRECT
+    value += payload.illuminance;
+    #endif
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(value, gl_HitTEXT);
+
+    #ifndef DEBUG_VISUALIZE_SPATIAL_HASH
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
+    #endif
 }
 
 // TODO: final gather and surfel should both use the corser grid.
