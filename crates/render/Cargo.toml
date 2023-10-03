@@ -33,7 +33,8 @@ bytemuck = "1.13"
 
 # Processor dependencies
 shaderc = { version = "0.8", optional = true }
+playout = { path = "../../../playout", optional = true }
 
 [features]
 default = ["glsl"]
-glsl = ["shaderc"]
+glsl = ["shaderc", "playout"]

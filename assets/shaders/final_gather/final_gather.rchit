@@ -2,7 +2,7 @@
 #include "../headers/standard.glsl"
 #include "../headers/sbt.glsl"
 #include "../headers/normal.glsl"
-#include "../headers/layout.glsl"
+#include "../headers/layout.playout"
 #include "../headers/spatial_hash.glsl"
 #include "../headers/surfel.glsl"
 #include "../headers/color.glsl"
@@ -53,7 +53,7 @@ void main() {
     uint sample_count;
     bool found = SpatialHashGet(key, indirect_radiance, sample_count);
     float probability_to_schedule = 1.0 / float(sample_count + 2);
-    float noise_sample = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(34, 21) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;
+    float noise_sample = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(34, 21) + push_constants.rand) % textureSize(blue_noise[0], 0)), 0).x;
 
     if (noise_sample > probability_to_schedule) {
         uint index = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x;
@@ -62,7 +62,7 @@ void main() {
         SurfelEntry entry;
         entry.position = ivec3(round(aabbCenterWorld / 4.0));
         entry.direction = normal2FaceID(normalWorld);
-        s_surfel_pool.entries[index] = entry;
+        surfel_pool[index] = entry;
     }
 
     // indirect radiance is the incoming radiance at the secondary hit location.
@@ -73,7 +73,7 @@ void main() {
     #else
     uint numVoxelInAabb = GridNumVoxels(u32vec2(block.mask1, block.mask2));
     #endif
-    float rand = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(18, 74) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;
+    float rand = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(18, 74) + push_constants.rand) % textureSize(blue_noise[0], 0)), 0).x;
     float randomVoxelIndexFloat = mix(0.0, float(numVoxelInAabb), rand);
     uint randomVoxelIndex = max(uint(randomVoxelIndexFloat), numVoxelInAabb - 1);
 
@@ -88,7 +88,7 @@ void main() {
 
     
     vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance * albedo, gl_HitTEXT);
-    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
+    imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
 }
 
 // TODO: final gather and surfel should both use the corser grid.

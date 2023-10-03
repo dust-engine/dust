@@ -1,5 +1,5 @@
 #include "../headers/standard.glsl"
-#include "../headers/layout.glsl"
+#include "../headers/layout.playout"
 #include "../headers/sky.glsl"
 #include "../headers/camera.glsl"
 #include "../headers/nrd.glsl"
@@ -10,7 +10,7 @@ layout(location = 0) rayPayloadEXT struct Payload {
 
 
 void main() {
-    float hitT = imageLoad(u_depth, ivec2(gl_LaunchIDEXT.xy)).x;
+    float hitT = imageLoad(img_depth, ivec2(gl_LaunchIDEXT.xy)).x;
     if (hitT == 1.0 / 0.0) {
         // Did not hit.
         return;
@@ -18,14 +18,14 @@ void main() {
     const vec3 sunDir = sunlight_config.direction.xyz;
     
     float unused;
-    payload.normal = NRD_FrontEnd_UnpackNormalAndRoughness(imageLoad(u_normal, ivec2(gl_LaunchIDEXT.xy)), unused).xyz;
+    payload.normal = NRD_FrontEnd_UnpackNormalAndRoughness(imageLoad(img_normal, ivec2(gl_LaunchIDEXT.xy)), unused).xyz;
     if (dot(sunDir, payload.normal) < 0) {
         return;
     }
     vec3 hitLocation = hitT * camera_ray_dir() + camera_origin() + payload.normal * 0.01;
     // Shoot shadow ray
     traceRayEXT(
-        accelerationStructure,
+        acceleration_structure,
         gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT, // RayFlags
         0xFF, // CullMask
         1, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
@@ -34,7 +34,7 @@ void main() {
         hitLocation,     // ray origin
         0.1,           // ray min range
         normalize(sunDir), // direction
-        u_camera.far, // tmax
+        camera.far, // tmax
         0 // payload
     );
 }

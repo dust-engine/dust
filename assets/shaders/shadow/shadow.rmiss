@@ -1,6 +1,6 @@
 #include "../headers/standard.glsl"
+#include "../headers/layout.playout"
 #include "../headers/sky.glsl"
-#include "../headers/layout.glsl"
 
 layout(location = 0) rayPayloadInEXT struct Payload {
     vec3 normal;
@@ -17,5 +17,5 @@ void main() {
     (1.0 - cos(sunlight_config.solar_intensity.w));
 
     vec3 illuminance = vec3(strength) * dot(payload.normal, gl_WorldRayDirectionEXT);
-    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(illuminance, 1.0));
+    imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(illuminance, 1.0));
 }

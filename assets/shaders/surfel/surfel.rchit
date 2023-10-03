@@ -1,7 +1,7 @@
 #include "../headers/standard.glsl"
+#include "../headers/layout.playout"
 #include "../headers/sbt.glsl"
 #include "../headers/normal.glsl"
-#include "../headers/layout.glsl"
 #include "../headers/spatial_hash.glsl"
 #include "../headers/color.glsl"
 #include "../headers/surfel.glsl"
@@ -47,7 +47,7 @@ void main() {
     uint width = textureSize(blue_noise[0], 0).x;
     noiseSampleLocation.y = gl_LaunchIDEXT.x / width;
     noiseSampleLocation.x = gl_LaunchIDEXT.x - noiseSampleLocation.y * width;
-    float rand = texelFetch(blue_noise[0], ivec2((noiseSampleLocation + uvec2(114, 40) + pushConstants.rand) % textureSize(blue_noise[0], 0)), 0).x;
+    float rand = texelFetch(blue_noise[0], ivec2((noiseSampleLocation + uvec2(114, 40) + push_constants.rand) % textureSize(blue_noise[0], 0)), 0).x;
     if (found) {
         // Stocasticlly select one voxel from the block
         #ifdef SHADER_INT_64
@@ -69,7 +69,7 @@ void main() {
 
 
         // Add to surfel value
-        SurfelEntry surfel = s_surfel_pool.entries[gl_LaunchIDEXT.x];
+        SurfelEntry surfel = surfel_pool[gl_LaunchIDEXT.x];
 
         SpatialHashKey key;
         key.position = surfel.position;
@@ -93,7 +93,7 @@ void main() {
             SurfelEntry entry;
             entry.position = ivec3(round(aabbCenterWorld / 4.0));
             entry.direction = normal2FaceID(normalWorld);
-            s_surfel_pool.entries[index] = entry;
+            surfel_pool[index] = entry;
         }
     }
 }

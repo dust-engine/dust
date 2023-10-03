@@ -13,7 +13,7 @@ use super::SpirvLoader;
 
 #[derive(TypePath, Asset)]
 pub struct GlslShaderSource {
-    source: String,
+    pub source: String,
 }
 
 #[derive(TypePath, Asset)]
@@ -94,11 +94,14 @@ impl AssetLoader for GlslShadercCompiler {
 
             while !pending_sources.is_empty() {
                 let (filename, source) = pending_sources.pop().unwrap();
-                for (included_filename, _ty) in source.lines().filter_map(match_include_line) {
+                for (included_filename, ty) in source.lines().filter_map(match_include_line) {
                     if includes.contains_key(included_filename) {
                         continue;
                     }
-                    let path: std::path::PathBuf = ctx.path().parent().unwrap().join(&filename).join(included_filename);
+                    let path = match ty {
+                        shaderc::IncludeType::Relative => ctx.path().parent().unwrap().join(&filename).join(included_filename),
+                        shaderc::IncludeType::Standard => included_filename.into(),
+                    };
                     let normalized_path = normalize_path(&path);
                     let inc = ctx.load_direct(AssetPath::from_path(normalized_path)).await?;
                     let source: &GlslShaderSource = inc.get().unwrap();
@@ -156,6 +159,24 @@ impl AssetSaver for SpirvSaver {
     }
 }
 
+struct GlslSaver;
+impl AssetSaver for GlslSaver {
+    type Asset = GlslShaderSource;
+    type Settings = ();
+    type OutputLoader = GlslSourceLoader;
+    fn save<'a>(
+        &'a self,
+        writer: &'a mut bevy_asset::io::Writer,
+        asset: SavedAsset<'a, Self::Asset>,
+        _settings: &'a Self::Settings,
+    ) -> bevy_utils::BoxedFuture<Result<(), anyhow::Error>> {
+        Box::pin(async move {
+            writer.write_all(asset.source.as_bytes()).await?;
+            Ok(())
+        })
+    }
+}
+
 pub struct GlslPlugin;
 impl Plugin for GlslPlugin {
     fn build(&self, app: &mut bevy_app::App) {
@@ -163,18 +184,27 @@ impl Plugin for GlslPlugin {
         app.init_asset::<GlslShaderSource>()
             .init_asset::<SpirvShaderSource>()
             .register_asset_loader(GlslSourceLoader)
+            .register_asset_loader(PlayoutGlslLoader)
             .register_asset_loader(GlslShadercCompiler);
         if let Some(processor) = app
             .world
             .get_resource::<bevy_asset::processor::AssetProcessor>()
         {
-            type P = bevy_asset::processor::LoadAndSave<GlslShadercCompiler, SpirvSaver>;
-            processor.register_processor::<P>(SpirvSaver.into());
+            use bevy_asset::processor::LoadAndSave;
+
+            // Load GLSL source, compile with shaderc, and save as SPIR-V
+            type GlslToSpirv = LoadAndSave<GlslShadercCompiler, SpirvSaver>;
+            processor.register_processor::<GlslToSpirv>(SpirvSaver.into());
             for ext in GlslShadercCompiler.extensions() {
                 if *ext != "glsl" {
-                    processor.set_default_processor::<P>(ext);
+                    processor.set_default_processor::<GlslToSpirv>(ext);
                 }
             }
+
+            // Load Playout source, compile, and save as GLSL
+            type PlayoutToGlsl = LoadAndSave<PlayoutGlslLoader, GlslSaver>;
+            processor.register_processor::<PlayoutToGlsl>(GlslSaver.into());
+            processor.set_default_processor::<PlayoutToGlsl>("playout");
         }
     }
 }
@@ -245,3 +275,32 @@ pub fn normalize_path(path: &PathBuf) -> PathBuf {
     }
     ret
 }
+
+#[derive(Default)]
+pub struct PlayoutGlslLoader;
+
+impl AssetLoader for PlayoutGlslLoader {
+    type Asset = GlslShaderSource;
+    type Settings = ();
+    fn load<'a>(
+        &'a self,
+        reader: &'a mut bevy_asset::io::Reader,
+        _settings: &'a Self::Settings,
+        _load_context: &'a mut bevy_asset::LoadContext,
+    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, anyhow::Error>> {
+        Box::pin(async move {
+            let mut source = String::new();
+            reader.read_to_string(&mut source).await?;
+            let module = playout::PlayoutModule::try_from(source.as_str())?;
+
+            let mut source = String::new();
+            module.show(&mut source);
+            Ok(GlslShaderSource { source })
+        })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["playout"]
+    }
+}
+

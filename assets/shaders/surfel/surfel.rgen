@@ -1,7 +1,7 @@
 #include "../headers/standard.glsl"
+#include "../headers/layout.playout"
 #include "../headers/surfel.glsl"
 #include "../headers/normal.glsl"
-#include "../headers/layout.glsl"
 
 layout(location = 0) rayPayloadEXT struct RayPayload {
     uint32_t surfel_index;
@@ -9,7 +9,7 @@ layout(location = 0) rayPayloadEXT struct RayPayload {
 
 
 void main() {
-    SurfelEntry entry = s_surfel_pool.entries[gl_LaunchIDEXT.x];
+    SurfelEntry entry = surfel_pool[gl_LaunchIDEXT.x];
     if (entry.direction >= 6) { // invalid entry
         return;
     }
@@ -25,21 +25,21 @@ void main() {
     noiseSampleLocation.x = gl_LaunchIDEXT.x - noiseSampleLocation.y * width;
 
     // Location on the patch
-    vec3 offset = texelFetch(blue_noise[1], ivec2((noiseSampleLocation + uvec2(71, 83) + pushConstants.rand) % textureSize(blue_noise[1], 0)), 0).xyz;
+    vec3 offset = texelFetch(blue_noise[1], ivec2((noiseSampleLocation + uvec2(71, 83) + push_constants.rand) % textureSize(blue_noise[1], 0)), 0).xyz;
     offset.z = 0.5;
     offset.xy -= 0.5;
     offset = rotateVectorByNormal(normal, offset);
     origin += offset;
 
     // Outgoing direction
-    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((noiseSampleLocation + uvec2(16, 47) + pushConstants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
+    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((noiseSampleLocation + uvec2(16, 47) + push_constants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
     // noiseSample is weighted on the z axis
     noiseSample = rotateVectorByNormal(normal, noiseSample);
     
 
     // Shoot shadow ray
     traceRayEXT(
-        accelerationStructure,
+        acceleration_structure,
         gl_RayFlagsOpaqueEXT, // RayFlags
         0xFF, // CullMask
         3, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.

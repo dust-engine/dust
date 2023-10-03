@@ -1,23 +1,3 @@
-
-struct ArHosekSkyModelChannelConfiguration {
-    vec4 configs0;
-    vec4 configs1;
-    float configs2;
-    float radiance;
-    float ldCoefficient0;
-    float ldCoefficient1;
-    vec4 ldCoefficient2; // 2, 3, 4, 5
-};
-
-layout(set = 0, binding = 8, std430) uniform ArHosekSkyModelConfiguration{
-    ArHosekSkyModelChannelConfiguration r;
-    ArHosekSkyModelChannelConfiguration g;
-    ArHosekSkyModelChannelConfiguration b;
-    vec4 direction; // normalized.
-    vec4 solar_intensity; // w is solar radius
-} sunlight_config;
-
-
 float ArHosekSkyModel_GetRadianceInternal(
         float[9]  configuration, 
         float                        cos_theta, 
@@ -114,19 +94,19 @@ vec3 arhosek_sun_radiance(
     }
     float sampleCosine = sqrt(sc2);
 
-    vec3 darkeningFactor = vec3(sunlight_config.r.ldCoefficient0, sunlight_config.g.ldCoefficient0, sunlight_config.b.ldCoefficient2);
+    vec3 darkeningFactor = vec3(sunlight_config.r.ld_coefficient0, sunlight_config.g.ld_coefficient0, sunlight_config.b.ld_coefficient2);
 
 
-    darkeningFactor += vec3(sunlight_config.r.ldCoefficient1, sunlight_config.g.ldCoefficient1, sunlight_config.b.ldCoefficient1) * sampleCosine;
+    darkeningFactor += vec3(sunlight_config.r.ld_coefficient1, sunlight_config.g.ld_coefficient1, sunlight_config.b.ld_coefficient1) * sampleCosine;
 
     float currentSampleCosine = sampleCosine;
     [[unroll]]
     for (uint i = 0; i < 4; i++) {
         currentSampleCosine *= sampleCosine;
         darkeningFactor += vec3(
-            sunlight_config.r.ldCoefficient2[i],
-            sunlight_config.g.ldCoefficient2[i],
-            sunlight_config.b.ldCoefficient2[i]
+            sunlight_config.r.ld_coefficient2[i],
+            sunlight_config.g.ld_coefficient2[i],
+            sunlight_config.b.ld_coefficient2[i]
         ) * currentSampleCosine;
     }
     return sunlight_config.solar_intensity.xyz * darkeningFactor;

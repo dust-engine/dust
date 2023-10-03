@@ -1,23 +1,23 @@
 #include "../headers/standard.glsl"
-#include "../headers/layout.glsl"
+#include "../headers/layout.playout"
 #include "../headers/camera.glsl"
 
 layout(location = 0) rayPayloadEXT uint8_t _rayPayloadNotUsed;
 
 
 void main() {
-    imageStore(u_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));
+    imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));
     traceRayEXT(
-        accelerationStructure,
+        acceleration_structure,
         gl_RayFlagsOpaqueEXT , // RayFlags
         0xFF, // CullMask
         0, // SBT offset, ray type index
         4, // SBT stride, number of ray types
         0, // missIndex
         camera_origin(),     // ray origin
-        u_camera.near,           // ray min range
+        camera.near,           // ray min range
         camera_ray_dir(), // direction
-        u_camera.far, // tmax
+        camera.far, // tmax
         0 // payload
     );
 }
