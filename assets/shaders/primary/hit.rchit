@@ -32,9 +32,9 @@ void main() {
 
     uint8_t palette_index = uint8_t(0);
     #ifdef DEBUG_VISUALIZE_SPATIAL_HASH
-    vec3 boxCenterWorld = gl_ObjectToWorldEXT * vec4(hitPointObject, 1.0);
+    vec3 boxCenterWorld = gl_ObjectToWorldEXT * vec4(boxCenterObject, 1.0);
     SpatialHashKey key;
-    key.position = ivec3(round(boxCenterWorld / 4.0));
+    key.position = ivec3((boxCenterWorld / 4.0));
     key.direction = normal2FaceID(normalWorld);
 
     vec3 indirect_radiance; // The amount of incoming radiance at the voxel

@@ -12,7 +12,7 @@ void main() {
     SurfelEntry surfel = surfel_pool[gl_LaunchIDEXT.x];
 
     SpatialHashKey key;
-    key.position = surfel.position;
+    key.position = ivec3((surfel.position / 4.0));
     key.direction = uint8_t(surfel.direction);
 
     SpatialHashInsert(key, sky_illuminance);

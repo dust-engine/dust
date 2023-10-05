@@ -14,7 +14,7 @@ void main() {
         return;
     }
 
-    vec3 origin = vec3(entry.position) + vec3(0.5); // world space
+    vec3 origin = vec3(entry.position); // world space
 
     vec3 normal = faceId2Normal(uint8_t(entry.direction)); // world space
 
@@ -29,10 +29,10 @@ void main() {
     offset.z = 0.5;
     offset.xy -= 0.5;
     offset = rotateVectorByNormal(normal, offset);
-    origin += offset;
+    origin += offset * 4.0;
 
     // Outgoing direction
-    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((noiseSampleLocation + uvec2(16, 47) + push_constants.rand) % textureSize(blue_noise[5], 0)), 0).xyz;
+    vec3 noiseSample = texelFetch(blue_noise[5], ivec2((noiseSampleLocation + uvec2(16, 47) + push_constants.rand) % textureSize(blue_noise[5], 0)), 0).xyz * 2.0 - 1.0;
     // noiseSample is weighted on the z axis
     noiseSample = rotateVectorByNormal(normal, noiseSample);
     
@@ -45,7 +45,7 @@ void main() {
         3, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
         4, // SBT stride, number of ray types // TODO: Make this a shader constant
         3, // missIndex
-        origin * 4.0,     // ray origin
+        origin,     // ray origin
         0.1,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
         normalize(noiseSample), // outgoing direction: cosine weighted on the normal direction
         10000.0, // tmax

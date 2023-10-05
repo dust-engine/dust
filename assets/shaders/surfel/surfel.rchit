@@ -35,7 +35,7 @@ void main() {
     
 
     SpatialHashKey key;
-    key.position = ivec3(round(aabbCenterWorld / 4.0));
+    key.position = ivec3((aabbCenterWorld / 4.0));
     key.direction = normal2FaceID(normalWorld);
 
     vec3 radiance;
@@ -72,7 +72,7 @@ void main() {
         SurfelEntry surfel = surfel_pool[gl_LaunchIDEXT.x];
 
         SpatialHashKey key;
-        key.position = surfel.position;
+        key.position = ivec3((surfel.position / 4.0));
         key.direction = uint8_t(surfel.direction);
         // `radiance` is the incoming radiance at the hit location.
         // Spatial hash stores the incoming radiance. The incoming radiance at the
@@ -91,9 +91,34 @@ void main() {
 
 
             SurfelEntry entry;
-            entry.position = ivec3(round(aabbCenterWorld / 4.0));
+            entry.position = aabbCenterWorld;
             entry.direction = normal2FaceID(normalWorld);
             surfel_pool[index] = entry;
         }
     }
 }
+
+
+
+// Surfel sampling strategy:
+// - Surfel should be sampled porportional to their visual importance.
+// - Visual importance is the amount of light that eventually reaches the eye.
+
+// We may change the surfel being sampled when
+// - The final gather ray hits the surfel
+// - The surfel ray hits the surfel
+
+
+// How to estimate the visual importance of a surfel?
+// if we turn the eye into a light source, the visual importance is the amount of radiance received
+// Russian roulette. When we trace from the eye, we +1 on each bounce.
+// Then we terminate the ray with probability porportional to the albedo.
+
+// At the end of this, we collect all the +1s . We then select 2000 of those
+// with importance sampling based on the number of +1s.
+
+//  However, more importantly, the sample rate should be porportional to
+// the variance.
+
+
+

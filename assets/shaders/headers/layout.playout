@@ -1,5 +1,5 @@
 struct SurfelEntry {
-    position: IVec3,
+    position: Vec3, // The coordinates of the center of the box.
     direction: u32, // [0, 6) indicating one of the six faces of the cube
 }
 

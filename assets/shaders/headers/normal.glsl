@@ -8,10 +8,10 @@
 // 0 0 -1 | 0b000
 uint8_t normal2FaceID(vec3 normalObject) {
     float s = clamp(normalObject.x + normalObject.y + normalObject.z, 0.0, 1.0); // Sign of the nonzero component
-    uint8_t faceId = uint8_t(s); // The lowest digit is 1 if the sign is positive, 0 otherwise
+    uint8_t faceId = uint8_t(round(s)); // The lowest digit is 1 if the sign is positive, 0 otherwise
 
     // 4 (0b100) if z is the nonzero component, 2 (0b010) if y is the nonzero component, 0 if x is the nonzero component
-    uint8_t index = uint8_t(abs(normalObject.z)) * uint8_t(4) + uint8_t(abs(normalObject.y)) * uint8_t(2);
+    uint8_t index = uint8_t(round(abs(normalObject.z))) * uint8_t(4) + uint8_t(round(abs(normalObject.y))) * uint8_t(2);
 
     faceId += index;
     return faceId;
