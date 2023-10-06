@@ -69,7 +69,7 @@ void main() {
         uint numVoxelInAabb = GridNumVoxels(u32vec2(block.mask1, block.mask2));
         #endif
         float randomVoxelIndexFloat = mix(0.0, float(numVoxelInAabb), rand);
-        uint randomVoxelIndex = max(uint(randomVoxelIndexFloat), numVoxelInAabb - 1);
+        uint randomVoxelIndex = min(uint(randomVoxelIndexFloat), numVoxelInAabb - 1);
 
         // Use the albedo of the randomly selected voxel as the albedo
         uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + randomVoxelIndex];
@@ -111,27 +111,6 @@ void main() {
     }
 }
 
-
-
-// Surfel sampling strategy:
-// - Surfel should be sampled porportional to their visual importance.
-// - Visual importance is the amount of light that eventually reaches the eye.
-
-// We may change the surfel being sampled when
-// - The final gather ray hits the surfel
-// - The surfel ray hits the surfel
-
-
-// How to estimate the visual importance of a surfel?
-// if we turn the eye into a light source, the visual importance is the amount of radiance received
-// Russian roulette. When we trace from the eye, we +1 on each bounce.
-// Then we terminate the ray with probability porportional to the albedo.
-
-// At the end of this, we collect all the +1s . We then select 2000 of those
-// with importance sampling based on the number of +1s.
-
-//  However, more importantly, the sample rate should be porportional to
-// the variance.
 
 
 
