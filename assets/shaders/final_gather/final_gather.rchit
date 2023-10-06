@@ -34,12 +34,24 @@ uint GridNumVoxels(GridType grid) {
 // the outgoing radiance, and store into the radiance texture.
 void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
-    vec3 aabbCenterObject = block.position.xyz + 2.0;
+
+    vec3 aabbCenterObject = block.position.xyz;
+    if (hitAttributes.voxelId == uint8_t(0xFF)) {
+        // Ray hits the rough model.
+        aabbCenterObject += 2.0;
+    } else {
+        // Ray hits the fine model.
+        vec3 offsetInBox = vec3(hitAttributes.voxelId >> 4, (hitAttributes.voxelId >> 2) & 3, hitAttributes.voxelId & 3);
+        aabbCenterObject += offsetInBox + vec3(0.5);
+    }
     
     vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
     vec3 normalObject = hitPointObject - aabbCenterObject;
     vec3 normalWorld = CubedNormalize(gl_ObjectToWorldEXT * vec4(normalObject, 0.0));
 
+
+    // Use the center of the rough model.
+    aabbCenterObject = block.position.xyz + 2.0;
     vec3 aabbCenterWorld = gl_ObjectToWorldEXT * vec4(aabbCenterObject, 1.0);
     
 
