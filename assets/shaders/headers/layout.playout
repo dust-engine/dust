@@ -5,10 +5,9 @@ struct SurfelEntry {
 
 struct SpatialHashEntry {
     fingerprint: u32,
+    radiance: Vec3,
     last_accessed_frame: u16,
     sample_count: u16,
-    radiance: Vec3<f16>,
-    visual_importance: f16,
 }
 
 struct CameraSettings {
@@ -64,6 +63,8 @@ struct StandardLayout {
     camera: UniformBuffer<CameraSettings>,
 
     instances: StorageBuffer<[Mat4]>,
+
+    #[layout = scalar]
     spatial_hash: StorageBuffer<[SpatialHashEntry]>,
     surfel_pool: StorageBuffer<[SurfelEntry]>,
 

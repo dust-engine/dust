@@ -81,12 +81,12 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
                 current_sample_count = spatial_hash[location + i].sample_count;
                 current_radiance = spatial_hash[location + i].radiance;
             }
-            #define MAX_SAMPLE_COUNT 300
+            #define MAX_SAMPLE_COUNT 2048
             current_sample_count = min(current_sample_count, MAX_SAMPLE_COUNT - 1);
             uint next_sample_count = current_sample_count + 1;
             current_radiance = mix(current_radiance, value, 1.0 / float(next_sample_count));
             
-            spatial_hash[location + i].radiance = f16vec3(current_radiance);
+            spatial_hash[location + i].radiance = current_radiance;
             spatial_hash[location + i].last_accessed_frame = uint16_t(push_constants.frame_index);
             spatial_hash[location + i].sample_count = uint16_t(next_sample_count);
             return;
@@ -94,7 +94,7 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
     }
     // Not found after 3 iterations. Evict the LRU entry.
     spatial_hash[location + i_minFrameIndex].fingerprint = fingerprint;
-    spatial_hash[location + i_minFrameIndex].radiance = f16vec3(value);
+    spatial_hash[location + i_minFrameIndex].radiance = value;
     spatial_hash[location + i_minFrameIndex].last_accessed_frame = uint16_t(push_constants.frame_index);
     spatial_hash[location + i_minFrameIndex].sample_count = uint16_t(1);
 }

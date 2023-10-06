@@ -366,7 +366,7 @@ impl StandardPipeline {
                 using!(),
                 |_| {
                     allocator.create_device_buffer_uninit(
-                        32 * 1024 * 1024 * 16,
+                        32 * 1024 * 1024 * 20,
                         vk::BufferUsageFlags::STORAGE_BUFFER,
                         0
                     ).unwrap().with_name("Spatial Hash Buffer").unwrap()
