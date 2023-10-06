@@ -57,9 +57,16 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
     uint i_minFrameIndex;
     uint minFrameIndex;
     for (uint i = 0; i < 3; i++) {
-        uint current_fingerprint = spatial_hash[location + i].fingerprint;
+        // Compare the stored fingerprint with 0.
+        // If it's 0, populate with the new fingerprint.
+        uint current_fingerprint = atomicCompSwap(
+            spatial_hash[location + i].fingerprint, // 1
+            0,
+            fingerprint
+        );
         uint current_frame_index = spatial_hash[location + i].last_accessed_frame;
         if (i == 0 || current_frame_index < minFrameIndex) {
+            // Maintain the least recently accessed frame index.
             i_minFrameIndex = i;
             minFrameIndex = current_frame_index;
         }
@@ -67,9 +74,6 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
 
         if (current_fingerprint == fingerprint || current_fingerprint == 0) {
             // Found.
-            if (current_fingerprint == 0) {
-                spatial_hash[location + i].fingerprint = fingerprint;
-            }
 
             vec3 current_radiance = vec3(0.0);
             uint current_sample_count = 0;
@@ -77,7 +81,7 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
                 current_sample_count = spatial_hash[location + i].sample_count;
                 current_radiance = spatial_hash[location + i].radiance;
             }
-            #define MAX_SAMPLE_COUNT 4096
+            #define MAX_SAMPLE_COUNT 2048
             current_sample_count = min(current_sample_count, MAX_SAMPLE_COUNT - 1);
             uint next_sample_count = current_sample_count + 1;
             current_radiance = mix(current_radiance, value, 1.0 / float(next_sample_count));
@@ -90,13 +94,9 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
     }
     // Not found after 3 iterations. Evict the LRU entry.
     spatial_hash[location + i_minFrameIndex].fingerprint = fingerprint;
-    uint current_sample_count = spatial_hash[location + i_minFrameIndex].sample_count;
-    vec3 current_radiance = spatial_hash[location + i_minFrameIndex].radiance;
-    uint next_sample_count = current_sample_count + 1;
-    current_radiance = current_radiance * (float(current_sample_count) / float(next_sample_count)) + value * (1.0 / float(next_sample_count));
-    spatial_hash[location + i_minFrameIndex].radiance = f16vec3(current_radiance);
+    spatial_hash[location + i_minFrameIndex].radiance = f16vec3(value);
     spatial_hash[location + i_minFrameIndex].last_accessed_frame = uint16_t(push_constants.frame_index);
-    spatial_hash[location + i_minFrameIndex].sample_count = uint16_t(next_sample_count);
+    spatial_hash[location + i_minFrameIndex].sample_count = uint16_t(1);
 }
 
 
@@ -123,5 +123,3 @@ bool SpatialHashGet(SpatialHashKey key, out vec3 value, out uint sample_count) {
     }
     return false;
 }
-
-

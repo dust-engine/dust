@@ -14,8 +14,6 @@ void main() {
         return;
     }
 
-    vec3 origin = vec3(entry.position); // world space
-
     vec3 normal = faceId2Normal(uint8_t(entry.direction)); // world space
 
     
@@ -29,7 +27,7 @@ void main() {
     offset.z = 0.5;
     offset.xy -= 0.5;
     offset = rotateVectorByNormal(normal, offset);
-    origin += offset * 4.0;
+    vec3 origin = entry.position + offset * 4.0;
 
     // Outgoing direction
     vec3 noiseSample = texelFetch(blue_noise[5], ivec2((noiseSampleLocation + uvec2(16, 47) + push_constants.rand) % textureSize(blue_noise[5], 0)), 0).xyz * 2.0 - 1.0;

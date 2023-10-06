@@ -42,7 +42,7 @@ void main() {
     bool found = SpatialHashGet(key, indirect_radiance, sample_count);
     vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance, 0.0);
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
-    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(vec3(0.1)), 1.0));
+    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(vec3(0.3)), 1.0));
     #else
     // Sample the albedo from the voxel
     #ifdef SHADER_INT_64
