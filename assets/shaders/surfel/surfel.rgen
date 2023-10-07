@@ -23,11 +23,7 @@ void main() {
     noiseSampleLocation.x = gl_LaunchIDEXT.x - noiseSampleLocation.y * width;
 
     // Location on the patch
-    vec3 offset = texelFetch(blue_noise[1], ivec2((noiseSampleLocation + uvec2(71, 83) + push_constants.rand) % textureSize(blue_noise[1], 0)), 0).xyz;
-    offset.z = 0.5;
-    offset.xy -= 0.5;
-    offset = rotateVectorByNormal(normal, offset);
-    vec3 origin = entry.position + offset * 4.0;
+    vec3 origin = entry.position + 2.01 * normal;
 
     // Outgoing direction
     vec3 noiseSample = texelFetch(blue_noise[5], ivec2((noiseSampleLocation + uvec2(16, 47) + push_constants.rand) % textureSize(blue_noise[5], 0)), 0).xyz * 2.0 - 1.0;

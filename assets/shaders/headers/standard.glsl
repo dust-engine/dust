@@ -12,10 +12,10 @@
 #extension GL_EXT_debug_printf : enable
 
 // Eye -> Object -> Skylight
-//#define CONTRIBUTION_SECONDARY_SKYLIGHT
+#define CONTRIBUTION_SECONDARY_SKYLIGHT
 // Eye -> Object -> Object (sample spatial hash)
 #define CONTRIBUTION_SECONDARY_SPATIAL_HASH
 // Eye -> Object -> Sun
-//#define CONTRIBUTION_DIRECT
+#define CONTRIBUTION_DIRECT
 
-#define DEBUG_VISUALIZE_SPATIAL_HASH
+//#define DEBUG_VISUALIZE_SPATIAL_HASH
