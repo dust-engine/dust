@@ -7,8 +7,7 @@
 #include "../headers/surfel.glsl"
 
 hitAttributeEXT HitAttribute {
-    float hitT;
-    uint8_t voxelId;
+    uint voxelId;
 } hitAttributes;
 
 #ifdef SHADER_INT_64

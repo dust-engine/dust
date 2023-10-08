@@ -7,7 +7,7 @@
 
 
 layout(location = 0) rayPayloadEXT struct RayPayload {
-    vec3 illuminance;
+    uint _unused;
 } payload;
 
 
@@ -15,13 +15,6 @@ void main() {
     float hitT = imageLoad(img_depth, ivec2(gl_LaunchIDEXT.xy)).x;
     if (hitT == 1.0 / 0.0) {
         // Did not hit.
-        return;
-    }
-    
-    vec4 in_value = imageLoad(img_illuminance, ivec2(gl_LaunchIDEXT.xy));
-    in_value = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(in_value);
-    if (in_value.w > 0.0) {
-        // Ambient occlusion pass resolved.
         return;
     }
 
@@ -34,18 +27,17 @@ void main() {
     noiseSample = rotateVectorByNormal(normalWorld, noiseSample);
 
     // Shoot shadow ray
-    payload.illuminance = vec3(0.0);
     traceRayEXT(
         acceleration_structure,
         gl_RayFlagsOpaqueEXT, // RayFlags
         0xFF, // CullMask
-        2, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
+        1, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
         4, // SBT stride, number of ray types // TODO: Make this a shader constant
-        2, // missIndex
+        1, // missIndex
         hitLocation,     // ray origin
-        AMBIENT_OCCLUSION_THRESHOLD,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
+        0.1,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
         normalize(noiseSample), // direction
-        camera.far, // tmax
+        AMBIENT_OCCLUSION_THRESHOLD, // tmax
         0 // payload
     );
 }

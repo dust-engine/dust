@@ -16,6 +16,7 @@ hitAttributeEXT HitAttribute {
 #endif
 
 
+layout(constant_id = 2) const bool RoughIntersectionTest = false;
 
 vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
     vec3 tMin = (box_min - origin) / dir;
@@ -30,6 +31,8 @@ vec2 intersectAABB(vec3 origin, vec3 dir, vec3 box_min, vec3 box_max) {
 uint8_t encode_index(u8vec3 position){
     return (position.x<<4) | (position.y << 2) | position.z;
 }
+
+// TODO: consolidate intersection shaders
 
 
 /**
@@ -53,15 +56,18 @@ void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
         // No intersection
         return;
     }
-    #ifdef DEBUG_VISUALIZE_SPATIAL_HASH
-    if (!GridIsEmpty(grid)) {
-        if ((initialIntersectionT.x <= gl_RayTmaxEXT)) {
-            hitAttributes.voxelId = 0xF;
+    if (initialIntersectionT.x <= AMBIENT_OCCLUSION_THRESHOLD && AMBIENT_OCCLUSION_THRESHOLD <= initialIntersectionT.y) {
+        // The threshold is somewhere within the voxel.
+        // If the voxel was empty, we proceed.
+        // Otherwise, we terminate the travesal early and report a hit.
+        if (!GridIsEmpty(grid)) {
+            if ((initialIntersectionT.x <= gl_RayTmaxEXT)) {
+                hitAttributes.voxelId = 0xFF;
+            }
+            reportIntersectionEXT(initialIntersectionT.x, 1);
         }
-        reportIntersectionEXT(initialIntersectionT.x, 1);
+        return;
     }
-    return;
-    #endif
 
     vec3 initialIntersectionPoint = origin + dir * initialIntersectionT.x;
     i8vec3 position = i8vec3(clamp(ivec3(floor(initialIntersectionPoint)), 0, 3));

@@ -10,8 +10,7 @@
 #endif
 
 hitAttributeEXT HitAttribute {
-    float hitT;
-    uint8_t voxelId;
+    uint voxelId;
 } hitAttributes;
 
 void main() {

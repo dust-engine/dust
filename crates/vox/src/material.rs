@@ -63,36 +63,39 @@ impl dust_render::Material for PaletteMaterial {
                 asset_server.load("shaders/surfel/surfel.rchit"),
                 vk::ShaderStageFlags::CLOSEST_HIT_KHR,
             )),
+            Self::Pipeline::AMBIENT_OCCLUSION_RAYTYPE => Some(SpecializedShader::for_shader(
+                asset_server.load("shaders/final_gather/ambient_occlusion.rchit"),
+                vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+            )),
             _ => None,
         }
     }
 
     fn intersection_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
         match ray_type {
-            Self::Pipeline::FINAL_GATHER_RAYTYPE => {
-                let rough_intersection_test_threshold: f32 = 16.0;
+            Self::Pipeline::FINAL_GATHER_RAYTYPE | Self::Pipeline::SURFEL_RAYTYPE => {
                 Some(
                     SpecializedShader::for_shader(
-                        asset_server.load("shaders/primary/hit.rint"),
+                        asset_server.load("shaders/final_gather/rough.rint"),
                         vk::ShaderStageFlags::INTERSECTION_KHR,
-                    )
-                    .with_const(2, rough_intersection_test_threshold),
+                    ),
                 )
             }
-            Self::Pipeline::SURFEL_RAYTYPE => {
+            Self::Pipeline::AMBIENT_OCCLUSION_RAYTYPE => {
                 let rough_intersection_test_threshold: f32 = 0.0;
                 Some(
                     SpecializedShader::for_shader(
-                        asset_server.load("shaders/primary/hit.rint"),
+                        asset_server.load("shaders/final_gather/ambient_occlusion.rint"),
                         vk::ShaderStageFlags::INTERSECTION_KHR,
                     )
                     .with_const(2, rough_intersection_test_threshold),
                 )
             }
-            _ => Some(SpecializedShader::for_shader(
+            Self::Pipeline::PRIMARY_RAYTYPE => Some(SpecializedShader::for_shader(
                 asset_server.load("shaders/primary/hit.rint"),
                 vk::ShaderStageFlags::INTERSECTION_KHR,
             )),
+            _ => unreachable!()
         }
     }
 

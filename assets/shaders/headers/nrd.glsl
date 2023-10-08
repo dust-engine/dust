@@ -106,6 +106,27 @@ vec3 _NRD_LinearToYCoCg( vec3 color )
 }
 
 
+
+vec3 _NRD_YCoCgToLinear( vec3 color )
+{
+    float t = color.x - color.z;
+
+    vec3 r;
+    r.y = color.x + color.z;
+    r.x = t + color.y;
+    r.z = t - color.y;
+
+    return max( r, 0.0 );
+}
+vec4 REBLUR_BackEnd_UnpackRadianceAndNormHitDist( vec4 data )
+{
+    data.xyz = _NRD_YCoCgToLinear( data.xyz );
+
+    return data;
+}
+
+
+
 vec4 REBLUR_FrontEnd_PackRadianceAndNormHitDist( vec3 radiance, float normHitDist)
 {
     /*

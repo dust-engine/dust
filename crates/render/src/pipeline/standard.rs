@@ -49,7 +49,7 @@ use super::{RayTracingPipeline, RayTracingPipelineManager};
 #[derive(Resource)]
 pub struct StandardPipeline {
     primary_ray_pipeline: RayTracingPipelineManager,
-    shadow_ray_pipeline: RayTracingPipelineManager,
+    ambient_occlusion_ray_pipeline: RayTracingPipelineManager,
     final_gather_ray_pipeline: RayTracingPipelineManager,
     surfel_ray_pipeline: RayTracingPipelineManager,
     hitgroup_sbt_manager: SbtManager,
@@ -151,15 +151,15 @@ impl RayTracingPipeline for StandardPipeline {
                 )],
                 Vec::new(),
             ),
-            shadow_ray_pipeline: RayTracingPipelineManager::new(
+            ambient_occlusion_ray_pipeline: RayTracingPipelineManager::new(
                 pipeline_characteristics.clone(),
-                vec![Self::SHADOW_RAYTYPE],
+                vec![Self::AMBIENT_OCCLUSION_RAYTYPE],
                 SpecializedShader::for_shader(
-                    asset_server.load("shaders/shadow/shadow.rgen"),
+                    asset_server.load("shaders/final_gather/ambient_occlusion.rgen"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
                 vec![SpecializedShader::for_shader(
-                    asset_server.load("shaders/shadow/shadow.rmiss"),
+                    asset_server.load("shaders/final_gather/ambient_occlusion.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
@@ -199,7 +199,7 @@ impl RayTracingPipeline for StandardPipeline {
         params: &mut SystemParamItem<M::ShaderParameterParams>,
     ) -> crate::sbt::SbtIndex {
         self.primary_ray_pipeline.material_instance_added::<M>();
-        self.shadow_ray_pipeline.material_instance_added::<M>();
+        self.ambient_occlusion_ray_pipeline.material_instance_added::<M>();
         self.final_gather_ray_pipeline
             .material_instance_added::<M>();
         self.surfel_ray_pipeline.material_instance_added::<M>();
@@ -242,7 +242,7 @@ pub type StandardPipelineRenderParams = (
 );
 impl StandardPipeline {
     pub const PRIMARY_RAYTYPE: u32 = 0;
-    pub const SHADOW_RAYTYPE: u32 = 1;
+    pub const AMBIENT_OCCLUSION_RAYTYPE: u32 = 1;
     pub const FINAL_GATHER_RAYTYPE: u32 = 2;
     pub const SURFEL_RAYTYPE: u32 = 3;
 
@@ -276,8 +276,8 @@ impl StandardPipeline {
         let primary_pipeline = self
             .primary_ray_pipeline
             .get_pipeline(&pipeline_cache, &shader_store)?;
-        let shadow_pipeline = self
-            .shadow_ray_pipeline
+        let ambient_occlusion_pipeline = self
+            .ambient_occlusion_ray_pipeline
             .get_pipeline(&pipeline_cache, &shader_store)?;
         let final_gather_pipeline = self
             .final_gather_ray_pipeline
@@ -287,7 +287,7 @@ impl StandardPipeline {
             .get_pipeline(&pipeline_cache, &shader_store)?;
         self.hitgroup_sbt_manager.specify_pipelines(&[
             primary_pipeline,
-            shadow_pipeline,
+            ambient_occlusion_pipeline,
             final_gather_pipeline,
             surfel_pipeline,
         ]);
@@ -324,7 +324,7 @@ impl StandardPipeline {
         self.pipeline_sbt_manager
             .push_raygen(primary_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
-            .push_raygen(shadow_pipeline, EmptyShaderRecords, 0);
+            .push_raygen(ambient_occlusion_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_raygen(final_gather_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
@@ -332,7 +332,7 @@ impl StandardPipeline {
         self.pipeline_sbt_manager
             .push_miss(primary_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
-            .push_miss(shadow_pipeline, EmptyShaderRecords, 0);
+            .push_miss(ambient_occlusion_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
             .push_miss(final_gather_pipeline, EmptyShaderRecords, 0);
         self.pipeline_sbt_manager
@@ -576,11 +576,11 @@ impl StandardPipeline {
                 device.cmd_bind_pipeline(
                     command_buffer,
                     vk::PipelineBindPoint::RAY_TRACING_KHR,
-                    shadow_pipeline.pipeline().raw(),
+                    ambient_occlusion_pipeline.pipeline().raw(),
                 );
                 device.rtx_loader().cmd_trace_rays(
                     command_buffer,
-                    &pipeline_sbt_buffer.inner().rgen(Self::SHADOW_RAYTYPE as usize),
+                    &pipeline_sbt_buffer.inner().rgen(Self::AMBIENT_OCCLUSION_RAYTYPE as usize),
                     &pipeline_sbt_buffer.inner().miss(),
                     &vk::StridedDeviceAddressRegionKHR {
                         device_address: hitgroup_sbt_buffer.inner().device_address(),
@@ -817,7 +817,7 @@ impl StandardPipeline {
             retain!(
                 DisposeContainer::new((
                     primary_pipeline.pipeline().clone(),
-                    shadow_pipeline.pipeline().clone(),
+                    ambient_occlusion_pipeline.pipeline().clone(),
                     final_gather_pipeline.pipeline().clone(),
                     desc_pool.handle(),
                     desc_set,

@@ -10,8 +10,7 @@
 
 
 hitAttributeEXT HitAttribute {
-    float hitT;
-    uint8_t voxelId;
+    uint _unused;
 } hitAttributes;
 layout(location = 0) rayPayloadInEXT struct RayPayload {
     vec3 illuminance;
@@ -37,27 +36,15 @@ void main() {
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
 
     vec3 aabbCenterObject = block.position.xyz + 2.0;
-    vec3 boxCenterObject = aabbCenterObject;
-    if (hitAttributes.voxelId != uint8_t(0xFF)) {
-        // Ray hits the fine model.
-        vec3 offsetInBox = vec3(hitAttributes.voxelId >> 4, (hitAttributes.voxelId >> 2) & 3, hitAttributes.voxelId & 3);
-        boxCenterObject = block.position.xyz + offsetInBox + vec3(0.5);
-    }
-    
-    vec3 hitPointBoxObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
-    vec3 hitPointAabbObject = hitAttributes.hitT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
-    vec3 boxNormalObject = hitPointBoxObject - boxCenterObject; // normal of the smaller voxels
-    vec3 boxNormalWorld = CubedNormalize(gl_ObjectToWorldEXT * vec4(boxNormalObject, 0.0));
-    vec3 aabbNormalObject = hitPointAabbObject - aabbCenterObject; // normal of the larger voxels
+    vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
+    vec3 aabbNormalObject = hitPointObject - aabbCenterObject; // normal of the larger voxels
     vec3 aabbNormalWorld = CubedNormalize(gl_ObjectToWorldEXT * vec4(aabbNormalObject, 0.0));
     vec3 aabbCenterWorld = gl_ObjectToWorldEXT * vec4(aabbCenterObject, 1.0); // Center of the larger voxels
     
 
     SpatialHashKey key;
     key.position = ivec3((aabbCenterWorld / 4.0));
-    key.direction = normal2FaceID(boxNormalWorld);
-
-
+    key.direction = normal2FaceID(aabbNormalWorld);
 
     vec3 indirect_radiance;
     uint sample_count;
@@ -97,12 +84,9 @@ void main() {
     albedo = SRGBToXYZ(albedo);
 
     
-    vec3 value = vec3(0.0);
+    vec3 value = payload.illuminance;
     #ifdef CONTRIBUTION_SECONDARY_SPATIAL_HASH
     value += indirect_radiance * albedo;
-    #endif
-    #ifdef CONTRIBUTION_DIRECT
-    value += payload.illuminance;
     #endif
     vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(value, gl_HitTEXT);
 

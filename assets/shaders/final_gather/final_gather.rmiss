@@ -9,17 +9,15 @@ layout(location = 0) rayPayloadInEXT struct RayPayload {
 
 
 void main() {
-    vec3 sky_illuminance = vec3(0.0);
+    vec3 sky_illuminance = payload.illuminance;
 
     #ifdef CONTRIBUTION_SECONDARY_SKYLIGHT
     sky_illuminance += arhosek_sky_radiance(normalize(gl_WorldRayDirectionEXT));
-    #endif
-    #ifdef CONTRIBUTION_DIRECT
-    sky_illuminance += payload.illuminance;
     #endif
     vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(sky_illuminance , 0.0);
 
     #ifndef DEBUG_VISUALIZE_SPATIAL_HASH
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
     #endif
+    
 }
