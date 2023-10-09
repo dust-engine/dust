@@ -34,7 +34,6 @@ void main() {
     vec3 normalObject = hitPointObject - aabbCenterObject;
     vec3 normalWorld = CubedNormalize(gl_ObjectToWorldEXT * vec4(normalObject, 0.0));
 
-    aabbCenterObject = block.position.xyz + 2.0;
     vec3 aabbCenterWorld = gl_ObjectToWorldEXT * vec4(aabbCenterObject, 1.0);
     
     SpatialHashKey key;

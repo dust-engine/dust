@@ -34,7 +34,7 @@ void main() {
     noiseSample = rotateVectorByNormal(normalWorld, noiseSample);
 
     // Shoot shadow ray
-    payload.illuminance = vec3(0.0);
+    payload.illuminance = in_value.xyz;
     traceRayEXT(
         acceleration_structure,
         gl_RayFlagsOpaqueEXT, // RayFlags

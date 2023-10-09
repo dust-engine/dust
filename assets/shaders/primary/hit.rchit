@@ -44,6 +44,8 @@ void main() {
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
     imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(vec3(0.3)), 1.0));
     #else
+    
+    imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));
     // Sample the albedo from the voxel
     #ifdef SHADER_INT_64
     u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << hitAttributes.voxelId) - 1));

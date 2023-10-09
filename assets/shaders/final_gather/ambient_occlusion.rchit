@@ -8,6 +8,6 @@ layout(location = 0) rayPayloadInEXT struct RayPayload {
 
 
 void main() {
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(vec3(0.0), gl_HitTEXT);
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(payload.illuminance, gl_HitTEXT);
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
 }
