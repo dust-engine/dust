@@ -56,6 +56,9 @@ void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
         // No intersection
         return;
     }
+    if (initialIntersectionT.y <= 0.0) {
+        return;
+    }
     if (initialIntersectionT.x <= AMBIENT_OCCLUSION_THRESHOLD && AMBIENT_OCCLUSION_THRESHOLD <= initialIntersectionT.y) {
         // The threshold is somewhere within the voxel.
         // If the voxel was empty, we proceed.
@@ -68,8 +71,8 @@ void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
         }
         return;
     }
-
-    vec3 initialIntersectionPoint = origin + dir * initialIntersectionT.x;
+    float hitDistance = max(initialIntersectionT.x, gl_RayTminEXT);
+    vec3 initialIntersectionPoint = origin + dir * hitDistance;
     i8vec3 position = i8vec3(clamp(ivec3(floor(initialIntersectionPoint)), 0, 3));
 
     // In  addition, the variables stepX and stepY are initialized to either 1 or -1 indicating whether X and Y
@@ -97,7 +100,6 @@ void dda(vec3 origin, vec3 dir, GridType grid, float scale) {
 
     // Intersection phase
     uint8_t hit = encode_index(position);
-    float hitDistance = initialIntersectionT.x;
 
     while(GridCheck(grid, hit)) {
         vec3 compResult = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
