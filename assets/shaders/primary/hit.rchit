@@ -42,7 +42,7 @@ void main() {
     bool found = SpatialHashGet(key, indirect_radiance, sample_count);
     vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance, 0.0);
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
-    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(vec3(0.3)), 1.0));
+    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(0.3), 1.0));
     #else
     
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));
@@ -63,10 +63,8 @@ void main() {
     u8vec4 color = sbt.paletteInfo.palette[palette_index];
 
     vec3 albedo = color.xyz / 255.0;
-    albedo.x = SRGBToLinear(albedo.x);
-    albedo.y = SRGBToLinear(albedo.y);
-    albedo.z = SRGBToLinear(albedo.z);
-    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(SRGBToXYZ(albedo), 1.0));
+
+    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(albedo, 1.0));
     #endif
 
 

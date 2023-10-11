@@ -75,7 +75,7 @@ vec3 arhosek_sky_radiance(vec3 dir)
         gamma, cos_gamma
     ) * sunlight_config.b.radiance;
     vec3 sky_color =  vec3(x, y, z) * 683.0;
-    return sky_color;
+    return XYZ2ACEScg(sky_color);
 }
 
 vec3 arhosek_sun_radiance(
@@ -109,6 +109,6 @@ vec3 arhosek_sun_radiance(
             sunlight_config.b.ld_coefficient2[i]
         ) * currentSampleCosine;
     }
-    return sunlight_config.solar_intensity.xyz * darkeningFactor;
+    return XYZ2ACEScg(sunlight_config.solar_intensity.xyz * darkeningFactor);
 }
 

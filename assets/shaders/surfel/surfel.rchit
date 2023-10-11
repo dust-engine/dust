@@ -67,7 +67,8 @@ void main() {
         albedo.x = SRGBToLinear(albedo.x);
         albedo.y = SRGBToLinear(albedo.y);
         albedo.z = SRGBToLinear(albedo.z);
-        albedo = SRGBToXYZ(albedo);
+
+        radiance = sRGB2AECScg(AECScg2sRGB(radiance) * albedo);
 
 
         // Add to surfel value
@@ -79,7 +80,7 @@ void main() {
         // `radiance` is the incoming radiance at the hit location.
         // Spatial hash stores the incoming radiance. The incoming radiance at the
         // surfel location is the outgoing radiance at the hit location.
-        SpatialHashInsert(key, radiance * albedo);
+        SpatialHashInsert(key, radiance);
         // TODO: Optimize the Insert / Get flow so they only do the loop once.
 
         // TODO: Maybe add more samples to the patch: need heuristic.

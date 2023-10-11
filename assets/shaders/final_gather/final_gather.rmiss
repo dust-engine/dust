@@ -1,5 +1,6 @@
 #include "../headers/standard.glsl"
 #include "../headers/layout.playout"
+#include "../headers/color.glsl"
 #include "../headers/sky.glsl"
 #include "../headers/nrd.glsl"
 

@@ -81,12 +81,12 @@ void main() {
     albedo.x = SRGBToLinear(albedo.x);
     albedo.y = SRGBToLinear(albedo.y);
     albedo.z = SRGBToLinear(albedo.z);
-    albedo = SRGBToXYZ(albedo);
 
+    indirect_radiance = sRGB2AECScg(AECScg2sRGB(indirect_radiance) * albedo);
     
     vec3 value = payload.illuminance;
     #ifdef CONTRIBUTION_SECONDARY_SPATIAL_HASH
-    value += indirect_radiance * albedo;
+    value += indirect_radiance;
     #endif
     vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(value, gl_HitTEXT);
 

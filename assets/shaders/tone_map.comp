@@ -1,5 +1,5 @@
 #version 460
-
+#include "./headers/color.glsl"
 #extension GL_EXT_debug_printf : enable
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -191,14 +191,17 @@ void main() {
 
     vec4 in_value = imageLoad(u_src_img, ivec2(gl_GlobalInvocationID.xy));
     in_value = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(in_value);
-    vec4 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy));
+    vec3 albedo = imageLoad(u_src_img_albedo, ivec2(gl_GlobalInvocationID.xy)).xyz; // in nonlinear SRGB space
+    albedo.x = SRGBToLinear(albedo.x);
+    albedo.y = SRGBToLinear(albedo.y);
+    albedo.z = SRGBToLinear(albedo.z);
 
     float exposure = 0.03; //1.0 / (9.6*u_histogram.avg);
     exposure *= 9.6;
     //exposure = 0.05;
 
     // Tone mapping
-    vec3 mapped = in_value.xyz * albedo.xyz * exposure;
+    vec3 mapped = sRGB2AECScg(AECScg2sRGB(in_value.xyz) * albedo.xyz) * exposure;
 
     const mat3 COLOR_SPACE_CONVERSION = mat3(
       COLOR_SPACE_CONVERSION_0, COLOR_SPACE_CONVERSION_1, COLOR_SPACE_CONVERSION_2,
