@@ -1,4 +1,5 @@
 use ash::vk;
+use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 #[allow(non_camel_case_types)]
@@ -499,156 +500,76 @@ impl TryFrom<Format> for vk::Format {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct ColorSpace {
-    pub ty: ColorSpaceType,
-    pub linear: bool,
+    pub primaries: ColorSpacePrimaries,
+    pub transfer_function: ColorSpaceTransferFunction,
 }
 
-#[allow(non_camel_case_types)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ColorSpaceType {
-    sRGB,
-    Display_P3,
-    DCI_P3,
-    ExtendedSrgb,
-    BT709,
-    BT2020,
-    HDR10_ST2084,
-    DolbyVision,
-    HDR10_HLG,
-    AdobeRGB,
-}
 
 impl From<vk::ColorSpaceKHR> for ColorSpace {
     fn from(value: vk::ColorSpaceKHR) -> Self {
         match value {
             vk::ColorSpaceKHR::SRGB_NONLINEAR => ColorSpace {
-                ty: ColorSpaceType::sRGB,
-                linear: false,
+                primaries: ColorSpacePrimaries::BT709,
+                transfer_function: ColorSpaceTransferFunction::LINEAR
             },
             vk::ColorSpaceKHR::DISPLAY_P3_NONLINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::Display_P3,
-                linear: false,
-            },
-            vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::ExtendedSrgb,
-                linear: true,
+                primaries: ColorSpacePrimaries::DCI_P3,
+                transfer_function: ColorSpaceTransferFunction::DisplayP3,
             },
             vk::ColorSpaceKHR::DISPLAY_P3_LINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::Display_P3,
-                linear: true,
+                primaries: ColorSpacePrimaries::DCI_P3,
+                transfer_function: ColorSpaceTransferFunction::LINEAR
             },
-            vk::ColorSpaceKHR::DCI_P3_NONLINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::DCI_P3,
-                linear: false,
-            },
-            vk::ColorSpaceKHR::BT709_LINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::BT709,
-                linear: true,
-            },
-            vk::ColorSpaceKHR::BT709_NONLINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::BT709,
-                linear: false,
-            },
-            vk::ColorSpaceKHR::BT2020_LINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::BT2020,
-                linear: true,
-            },
-            vk::ColorSpaceKHR::HDR10_ST2084_EXT => ColorSpace {
-                ty: ColorSpaceType::HDR10_ST2084,
-                linear: false,
-            },
-            vk::ColorSpaceKHR::DOLBYVISION_EXT => ColorSpace {
-                ty: ColorSpaceType::DolbyVision,
-                linear: false,
-            },
-            vk::ColorSpaceKHR::HDR10_HLG_EXT => ColorSpace {
-                ty: ColorSpaceType::HDR10_HLG,
-                linear: false,
-            },
-            vk::ColorSpaceKHR::ADOBERGB_LINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::AdobeRGB,
-                linear: true,
-            },
-            vk::ColorSpaceKHR::ADOBERGB_NONLINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::AdobeRGB,
-                linear: false,
+            vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::BT709,
+                transfer_function: ColorSpaceTransferFunction::LINEAR
             },
             vk::ColorSpaceKHR::EXTENDED_SRGB_NONLINEAR_EXT => ColorSpace {
-                ty: ColorSpaceType::ExtendedSrgb,
-                linear: false,
+                primaries: ColorSpacePrimaries::BT709,
+                transfer_function: ColorSpaceTransferFunction::scRGB
+            },
+            vk::ColorSpaceKHR::DCI_P3_NONLINEAR_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::XYZ,
+                transfer_function: ColorSpaceTransferFunction::DCI_P3
+            },
+            vk::ColorSpaceKHR::BT709_LINEAR_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::BT709,
+                transfer_function: ColorSpaceTransferFunction::LINEAR
+            },
+            vk::ColorSpaceKHR::BT709_NONLINEAR_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::BT709,
+                transfer_function: ColorSpaceTransferFunction::ITU
+            },
+            vk::ColorSpaceKHR::BT2020_LINEAR_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::BT2020,
+                transfer_function: ColorSpaceTransferFunction::LINEAR
+            },
+            vk::ColorSpaceKHR::HDR10_ST2084_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::BT2020,
+                transfer_function: ColorSpaceTransferFunction::ST2084_PQ
+            },
+            vk::ColorSpaceKHR::DOLBYVISION_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::BT2020,
+                transfer_function: ColorSpaceTransferFunction::ST2084_PQ
+            },
+            vk::ColorSpaceKHR::HDR10_HLG_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::BT2020,
+                transfer_function: ColorSpaceTransferFunction::HLG
+            },
+            vk::ColorSpaceKHR::ADOBERGB_LINEAR_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::ADOBE_RGB,
+                transfer_function: ColorSpaceTransferFunction::LINEAR
+            },
+            vk::ColorSpaceKHR::ADOBERGB_NONLINEAR_EXT => ColorSpace {
+                primaries: ColorSpacePrimaries::ADOBE_RGB,
+                transfer_function: ColorSpaceTransferFunction::AdobeRGB
             },
             _ => panic!(),
         }
     }
 }
-impl ColorSpace {
-    pub const fn transfer_function(&self) -> ColorSpaceTransferFunction {
-        if self.linear {
-            return ColorSpaceTransferFunction::LINEAR;
-        }
-        match self.ty {
-            ColorSpaceType::sRGB => ColorSpaceTransferFunction::sRGB,
-            ColorSpaceType::Display_P3 => ColorSpaceTransferFunction::Display_P3,
-            ColorSpaceType::DCI_P3 => ColorSpaceTransferFunction::DCI_P3,
-            ColorSpaceType::ExtendedSrgb => ColorSpaceTransferFunction::sRGB,
-            ColorSpaceType::BT709 => ColorSpaceTransferFunction::ITU,
-            ColorSpaceType::HDR10_ST2084 => ColorSpaceTransferFunction::ST2084_PQ,
-            ColorSpaceType::DolbyVision => ColorSpaceTransferFunction::ST2084_PQ,
-            ColorSpaceType::HDR10_HLG => ColorSpaceTransferFunction::HLG,
-            ColorSpaceType::AdobeRGB => ColorSpaceTransferFunction::AdobeRGB,
-            ColorSpaceType::BT2020 => ColorSpaceTransferFunction::LINEAR,
-        }
-    }
-    pub const fn primaries(&self) -> ColorSpacePrimaries {
-        self.ty.primaries()
-    }
-}
-impl ColorSpaceType {
-    pub const fn primaries(&self) -> ColorSpacePrimaries {
-        use glam::Vec2;
-        const D65: Vec2 = Vec2::new(0.3127, 0.3290);
-        match self {
-            ColorSpaceType::sRGB | ColorSpaceType::ExtendedSrgb | ColorSpaceType::BT709 => {
-                ColorSpacePrimaries {
-                    r: Vec2::new(0.64, 0.33),
-                    g: Vec2::new(0.3, 0.6),
-                    b: Vec2::new(0.15, 0.06),
-                    white_point: D65,
-                }
-            }
-            ColorSpaceType::Display_P3 => ColorSpacePrimaries {
-                r: Vec2::new(0.68, 0.32),
-                g: Vec2::new(0.265, 0.69),
-                b: Vec2::new(0.15, 0.06),
-                white_point: D65,
-            },
-            ColorSpaceType::DCI_P3 => ColorSpacePrimaries {
-                r: Vec2::new(1.0, 0.0),
-                g: Vec2::new(0.0, 1.0),
-                b: Vec2::new(0.0, 0.0),
-                white_point: Vec2::new(0.3333, 0.3333),
-            },
-            ColorSpaceType::HDR10_ST2084
-            | ColorSpaceType::DolbyVision
-            | ColorSpaceType::HDR10_HLG
-            | ColorSpaceType::BT2020 => ColorSpacePrimaries {
-                r: Vec2::new(0.708, 0.292),
-                g: Vec2::new(0.170, 0.797),
-                b: Vec2::new(0.131, 0.046),
-                white_point: D65,
-            },
-            ColorSpaceType::AdobeRGB => ColorSpacePrimaries {
-                r: Vec2::new(0.64, 0.33),
-                g: Vec2::new(0.21, 0.71),
-                b: Vec2::new(0.15, 0.06),
-                white_point: D65,
-            },
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct ColorSpacePrimaries {
     pub r: glam::Vec2,
@@ -656,7 +577,71 @@ pub struct ColorSpacePrimaries {
     pub b: glam::Vec2,
     pub white_point: glam::Vec2,
 }
+
+pub mod white_points {
+    use glam::Vec2;
+    pub const D65: Vec2 = Vec2::new(0.3127, 0.3290);
+    pub const D60: Vec2 = Vec2::new(0.32168, 0.33767);
+    pub const E: Vec2 = Vec2::new(0.3333, 0.3333);
+}
 impl ColorSpacePrimaries {
+    /// Primaries for CIE 1931 XYZ colorspace.
+    /// It is the most common color space for LDR content.
+    /// https://en.wikipedia.org/wiki/Rec._709
+    pub const BT709: Self = ColorSpacePrimaries {
+        r: Vec2::new(0.64, 0.33),
+        g: Vec2::new(0.3, 0.6),
+        b: Vec2::new(0.15, 0.06),
+        white_point: white_points::D65,
+    };
+
+    /// Primaries for CIE 1931 XYZ colorspace.
+    /// Commonly used as a bridge color space between other color spaces.
+    /// https://en.wikipedia.org/wiki/CIE_1931_color_space
+    pub const XYZ: Self = ColorSpacePrimaries {
+        r: Vec2::new(1.0, 0.0),
+        g: Vec2::new(0.0, 1.0),
+        b: Vec2::new(0.0, 0.0),
+        white_point: white_points::E,
+    };
+    pub const DCI_P3: Self = ColorSpacePrimaries {
+        r: Vec2::new(0.68, 0.32),
+        g: Vec2::new(0.265, 0.69),
+        b: Vec2::new(0.15, 0.06),
+        white_point: white_points::D65,
+    };
+    pub const BT2020: Self = ColorSpacePrimaries {
+        r: Vec2::new(0.708, 0.292),
+        g: Vec2::new(0.170, 0.797),
+        b: Vec2::new(0.131, 0.046),
+        white_point: white_points::D65,
+    };
+    pub const ADOBE_RGB: Self = ColorSpacePrimaries {
+        r: Vec2::new(0.64, 0.33),
+        g: Vec2::new(0.21, 0.71),
+        b: Vec2::new(0.15, 0.06),
+        white_point: white_points::D65,
+    };
+
+    /// Primaries used in ACES2065-1.
+    /// Typically, this is the colorspace you would use to transfer images/animations between production studios.
+    pub const ACES_AP0: Self = ColorSpacePrimaries {
+        r: Vec2::new(0.7347, 0.2653),
+        g: Vec2::new(0.0, 1.0),
+        b: Vec2::new(0.0001, -0.0770),
+        white_point: white_points::D60,
+    };
+
+    /// Primaries used in ACEScg.
+    /// ACEScg is the recommended rendering color space for HDR games.
+    pub const ACES_AP1: Self = ColorSpacePrimaries {
+        r: Vec2::new(0.713, 0.293),
+        g: Vec2::new(0.165, 0.830),
+        b: Vec2::new(0.128, 0.044),
+        white_point: white_points::D60,
+    };
+
+
     pub fn area_size(&self) -> f32 {
         let a = (self.r - self.g).length();
         let b = (self.g - self.b).length();
@@ -684,10 +669,10 @@ impl ColorSpacePrimaries {
         if self == other_color_space {
             return glam::Mat3::IDENTITY;
         }
-        if self == &ColorSpaceType::DCI_P3.primaries() {
+        if self == &ColorSpacePrimaries::XYZ {
             return other_color_space.to_xyz().inverse();
         }
-        if other_color_space == &ColorSpaceType::DCI_P3.primaries() {
+        if other_color_space == &ColorSpacePrimaries::XYZ {
             return self.to_xyz();
         }
         other_color_space.to_xyz().inverse() * self.to_xyz()
@@ -695,13 +680,21 @@ impl ColorSpacePrimaries {
 }
 
 #[allow(non_camel_case_types)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorSpaceTransferFunction {
     LINEAR = 0,
     sRGB = 1,
-    DCI_P3 = 2,
-    Display_P3 = 3,
-    ITU = 4,
-    ST2084_PQ = 5,
-    HLG = 6,
-    AdobeRGB = 7,
+    scRGB = 2,
+    DCI_P3 = 3,
+    DisplayP3 = 4,
+    ITU = 5,
+    ST2084_PQ = 6,
+    HLG = 7,
+    AdobeRGB = 8,
+}
+
+impl ColorSpaceTransferFunction {
+    pub fn is_linear(&self) -> bool {
+        matches!(self, Self::LINEAR)
+    }
 }

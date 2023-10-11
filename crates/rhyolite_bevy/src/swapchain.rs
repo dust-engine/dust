@@ -4,7 +4,7 @@ use bevy_ecs::prelude::*;
 use bevy_window::{RawHandleWrapper, Window};
 use rhyolite::{
     ash::vk,
-    utils::format::{ColorSpace, ColorSpaceType, FormatType},
+    utils::format::{ColorSpace, FormatType, ColorSpaceTransferFunction, ColorSpacePrimaries},
     AcquireFuture, HasDevice, PhysicalDevice, Surface,
 };
 
@@ -265,23 +265,23 @@ pub fn get_surface_preferred_format(
             let format_priority = format.r + format.g + format.b;
 
             let color_space: ColorSpace = surface_format.color_space.into();
-            let color_space_priority = match color_space.ty {
-                ColorSpaceType::ExtendedSrgb => {
-                    ColorSpaceType::HDR10_ST2084.primaries().area_size()
-                }
-                _ => color_space.primaries().area_size(),
-            } * 4096.0;
-            let color_space_priority = color_space_priority as u32;
-            let linearity_priority: u8 = if format_priority < 30 {
-                // < 8 bit color. Prefer non-linear color space
-                if color_space.linear {
+
+            let color_space_priority = if matches!(color_space.transfer_function, ColorSpaceTransferFunction::scRGB) {
+                // Special case for extended srgb
+                (ColorSpacePrimaries::BT2020.area_size() * 4096.0) as u32 - 1
+            } else {
+                (color_space.primaries.area_size() * 4096.0) as u32
+            };
+            let linearity_priority: u8 = if format_priority <= 30 {
+                // <= 10 bit color. Prefer non-linear color space
+                if color_space.transfer_function.is_linear() {
                     0
                 } else {
                     1
                 }
             } else {
-                // >= 8 bit color, for example 10 bit color and above. Prefer linear color space
-                if color_space.linear {
+                // > 10 bit color, for example 10 bit color and above. Prefer linear color space
+                if color_space.transfer_function.is_linear() {
                     1
                 } else {
                     0

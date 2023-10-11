@@ -71,7 +71,10 @@ vec3 ACESFitted(vec3 color) {
 
 float LinearToSRGB(float color) {
     // Approximately pow(color, 1.0 / 2.2)
-    return color < 0.0031308 ? 12.92 * color : 1.055 * pow(color, 1.0 / 2.4) - 0.055;
+    return color <= 0.0031308 ? 12.92 * color : 1.055 * pow(color, 1.0 / 2.4) - 0.055;
+}
+float LinearToSCRGB(float color) {
+  return color <= -0.0031308 ? -1.055 * pow(-color, 1.0 / 2.4) + 0.055 : LinearToSRGB(color);
 }
 float LinearToDisplayP3(float color)
 {
@@ -90,12 +93,12 @@ float LinearToHLG(float color) {
   return color < (1.0 / 12.0) ? sqrt(3 * color) : a * log(12.0 * color - b) + c;
 }
 vec3 SwapchainOETF(vec3 normalizedLinearValue) {
-  // Looking for EOTF-1 here.
+  // Looking for EOTF-1 or OETF here.
   if(OUTPUT_TRANSFER_FUNCTION == 0) {
     // linear
     return normalizedLinearValue;
   } else if (OUTPUT_TRANSFER_FUNCTION == 1) {
-    // sRGB
+    // sRGB EOTF-1
     // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_SRGB
     return vec3(
       LinearToSRGB(normalizedLinearValue.x),
@@ -103,27 +106,34 @@ vec3 SwapchainOETF(vec3 normalizedLinearValue) {
       LinearToSRGB(normalizedLinearValue.z)
     );
   } else if (OUTPUT_TRANSFER_FUNCTION == 2) {
+    // scRGB EOTF-1
+    return vec3(
+      LinearToSCRGB(normalizedLinearValue.x),
+      LinearToSCRGB(normalizedLinearValue.y),
+      LinearToSCRGB(normalizedLinearValue.z)
+    );
+  }else if (OUTPUT_TRANSFER_FUNCTION == 3) {
     // DCI_P3
     // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_DCIP3
     return pow((normalizedLinearValue / 52.37), vec3(1 / 2.6));
-  } else if (OUTPUT_TRANSFER_FUNCTION == 3) {
-    // Display P3
+  } else if (OUTPUT_TRANSFER_FUNCTION == 4) {
+    // Display P3 OETF
     // https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkColorSpaceKHR.html
     return vec3(
-      LinearToSRGB(normalizedLinearValue.x),
-      LinearToSRGB(normalizedLinearValue.y),
-      LinearToSRGB(normalizedLinearValue.z)
-    );
-  } else if (OUTPUT_TRANSFER_FUNCTION == 4) {
-    // ITU
-    // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_ITU
-    return vec3(
-      LinearToSRGB(normalizedLinearValue.x),
-      LinearToSRGB(normalizedLinearValue.y),
-      LinearToSRGB(normalizedLinearValue.z)
+      LinearToDisplayP3(normalizedLinearValue.x),
+      LinearToDisplayP3(normalizedLinearValue.y),
+      LinearToDisplayP3(normalizedLinearValue.z)
     );
   } else if (OUTPUT_TRANSFER_FUNCTION == 5) {
-    // ST2084_PQ
+    // ITU OETF
+    // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_ITU
+    return vec3(
+      LinearToITU(normalizedLinearValue.x),
+      LinearToITU(normalizedLinearValue.y),
+      LinearToITU(normalizedLinearValue.z)
+    );
+  } else if (OUTPUT_TRANSFER_FUNCTION == 6) {
+    // ST2084_PQ EOTF-1
     // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_PQ
     // TODO: This seems incorrect. The produced image looks too bright.
     const float m1 = 2610.0 / 16384.0;
@@ -133,9 +143,15 @@ vec3 SwapchainOETF(vec3 normalizedLinearValue) {
     const float c1 = c3 - c2 + 1.0;
     const vec3 Lm = pow(normalizedLinearValue, vec3(m1));
     return pow((c1 + c2 * Lm) / (1.0 + c3 * Lm), vec3(m2));
-  } else if (OUTPUT_TRANSFER_FUNCTION == 6) {
-    // HLG
   } else if (OUTPUT_TRANSFER_FUNCTION == 7) {
+    // HLG OETF
+    // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_HLG
+    return vec3(
+      LinearToHLG(normalizedLinearValue.x),
+      LinearToHLG(normalizedLinearValue.y),
+      LinearToHLG(normalizedLinearValue.z)
+    );
+  } else if (OUTPUT_TRANSFER_FUNCTION == 8) {
     // AdobeRGB
     // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_ADOBERGB
     return pow(normalizedLinearValue, vec3(256.0 / 563.0));

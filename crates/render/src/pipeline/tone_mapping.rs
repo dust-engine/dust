@@ -13,13 +13,13 @@ use rhyolite::{
         RenderRes,
     },
     macros::set_layout,
-    utils::retainer::Retainer,
+    utils::{retainer::Retainer, format::{ColorSpacePrimaries, ColorSpaceTransferFunction}},
     BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
 };
 use rhyolite::{
     future::Disposable,
     macros::commands,
-    utils::format::{ColorSpace, ColorSpaceType},
+    utils::format::ColorSpace,
 };
 use rhyolite_bevy::Queues;
 
@@ -28,9 +28,10 @@ use crate::{CachedPipeline, PipelineCache, ShaderModule, SpecializedShader};
 #[derive(Resource)]
 pub struct ToneMappingPipeline {
     layout: Arc<PipelineLayout>,
-    pipeline: HashMap<ColorSpace, CachedPipeline<ComputePipeline>>,
+    pipeline: Option<CachedPipeline<ComputePipeline>>,
+    display_color_space_transfer_fn: ColorSpaceTransferFunction,
     desc_pool: Retainer<DescriptorPool>,
-    scene_color_space: ColorSpaceType,
+    scene_color_space: ColorSpacePrimaries,
 }
 
 impl FromWorld for ToneMappingPipeline {
@@ -72,9 +73,10 @@ impl FromWorld for ToneMappingPipeline {
         .unwrap();
         ToneMappingPipeline {
             layout,
-            pipeline: HashMap::new(),
+            pipeline: None,
+            display_color_space_transfer_fn: ColorSpaceTransferFunction::LINEAR,
             desc_pool: Retainer::new(desc_pool),
-            scene_color_space: ColorSpaceType::DCI_P3, // The default scene color space.
+            scene_color_space: ColorSpacePrimaries::ACES_AP1
         }
     }
 }
@@ -99,15 +101,19 @@ impl ToneMappingPipeline {
         RecycledState: 'static + Default,
     > + 'a {
         let (asset_server, pipeline_cache, shader_assets) = params;
+        if output_color_space.transfer_function != self.display_color_space_transfer_fn {
+            // Will need to recreate the pipeline if the transfer function changes,
+            // since the transfer function was baked into the shader with a specialization constant.
+            self.pipeline = None;
+            self.display_color_space_transfer_fn = output_color_space.transfer_function;
+        }
         let pipeline = self
             .pipeline
-            .entry(output_color_space.clone())
-            .or_insert_with(|| {
+            .get_or_insert_with(|| {
                 let mat = self
                     .scene_color_space
-                    .primaries()
-                    .to_color_space(&output_color_space.primaries());
-                let transfer_function = output_color_space.transfer_function() as u32;
+                    .to_color_space(&output_color_space.primaries);
+                let transfer_function = output_color_space.transfer_function as u32;
 
                 let shader = asset_server.load("shaders/tone_map.comp");
                 pipeline_cache.add_compute_pipeline(
