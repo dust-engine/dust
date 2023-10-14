@@ -196,7 +196,7 @@ void main() {
     albedo.y = SRGBToLinear(albedo.y);
     albedo.z = SRGBToLinear(albedo.z);
 
-    float exposure = 0.03; //1.0 / (9.6*u_histogram.avg);
+    float exposure = 0.6; //1.0 / (9.6*u_histogram.avg);
     exposure *= 9.6;
     //exposure = 0.05;
 

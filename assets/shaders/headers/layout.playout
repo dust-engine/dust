@@ -3,6 +3,13 @@ struct SurfelEntry {
     direction: u32, // [0, 6) indicating one of the six faces of the cube
 }
 
+struct PackedReservoir {
+    sample_count: u16,
+    direction: u32,
+    radiance: u32,
+    weight: f32,
+}
+
 struct SpatialHashEntry {
     fingerprint: u32,
     radiance: Vec3,

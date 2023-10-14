@@ -2,6 +2,8 @@
 #include "../headers/layout.playout"
 #include "../headers/surfel.glsl"
 #include "../headers/normal.glsl"
+#include "../headers/color.glsl"
+#include "../headers/reservoir.glsl"
 
 layout(location = 0) rayPayloadEXT struct RayPayload {
     uint32_t surfel_index;

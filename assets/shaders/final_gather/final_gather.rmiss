@@ -15,7 +15,7 @@ void main() {
     #ifdef CONTRIBUTION_SECONDARY_SKYLIGHT
     sky_illuminance += arhosek_sky_radiance(normalize(gl_WorldRayDirectionEXT));
     #endif
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(sky_illuminance , 0.0);
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(sky_illuminance, 0.0);
 
     #ifndef DEBUG_VISUALIZE_SPATIAL_HASH
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);

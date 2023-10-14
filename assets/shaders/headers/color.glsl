@@ -29,3 +29,11 @@ vec3 XYZ2ACEScg(vec3 srgb) {
     );
     return transform * srgb;
 }
+vec3 ACEScg2XYZ(vec3 srgb) {
+    mat3 transform = mat3(
+        0.66245437, 0.2722288, -0.0055746622,
+        0.13400422, 0.6740818, 0.00406073,
+        0.15618773, 0.05368953, 1.0103393
+    );
+    return transform * srgb;
+}

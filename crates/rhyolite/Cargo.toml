@@ -25,4 +25,4 @@ event-listener = "2.5.1"
 bytemuck = "1.13"
 glam = "0.24"
 smallvec = "1"
-serde = "1"
+serde = { version = "1", features = ["derive"] }
