@@ -1,0 +1,17 @@
+struct Params {
+    minLogLum: f32,
+    logLumRange: f32,
+    timeCoeff: f32,
+}
+struct Histogram {
+    histogram: [u32; 256],
+    avg: f32,
+}
+#[set]
+struct AutoExposureLayout {
+    #![stage(COMPUTE)]
+    illuminance: StorageImage<RGBA16_Float>,
+    params: InlineUniformBlock<Params>,
+    histogram: StorageBuffer<Histogram>,
+}
+

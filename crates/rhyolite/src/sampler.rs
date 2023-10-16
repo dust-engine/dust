@@ -17,8 +17,8 @@ impl Sampler {
         let inner = unsafe { device.create_sampler(info, None) }?;
         Ok(Self { device, inner })
     }
-    pub unsafe fn raw(&self) -> vk::Sampler {
-        self.inner
+    pub fn raw(&self) -> &vk::Sampler {
+        &self.inner
     }
 }
 

@@ -22,7 +22,7 @@ pub trait ImageViewExt: ImageViewLike {
         vk::DescriptorImageInfo {
             image_layout,
             image_view: self.raw_image_view(),
-            sampler: unsafe { sampler.raw() },
+            sampler: *sampler.raw(),
         }
     }
 }

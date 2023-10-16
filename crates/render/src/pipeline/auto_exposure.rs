@@ -5,7 +5,7 @@ use bevy_ecs::{
     system::{lifetimeless::SRes, Resource, SystemParamItem},
     world::{FromWorld, Mut, World},
 };
-use rhyolite::future::run;
+use rhyolite::{future::run, descriptor::DescriptorSetLayout};
 
 use rhyolite::BufferExt;
 use rhyolite::{
@@ -16,7 +16,7 @@ use rhyolite::{
         use_per_frame_state, use_shared_state, Disposable, DisposeContainer, GPUCommandFuture,
         RenderData, RenderImage, RenderRes, SharedDeviceState,
     },
-    macros::{commands, set_layout},
+    macros::commands,
     utils::retainer::Retainer,
     ComputePipeline, HasDevice, ImageLike, ImageViewExt, ImageViewLike, PipelineLayout,
     ResidentBuffer,
@@ -45,22 +45,12 @@ impl FromWorld for AutoExposurePipeline {
         let num_frame_in_flight = queues.num_frame_in_flight();
         let device = queues.device().clone();
 
-        let set = set_layout! {
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            illuminance_image: vk::DescriptorType::STORAGE_IMAGE,
-
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            params: [vk::DescriptorType::INLINE_UNIFORM_BLOCK; 12],
-
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            histogram: vk::DescriptorType::STORAGE_BUFFER,
-        }
-        .build(device.clone())
-        .unwrap();
+        let set0 = playout_macro::layout!("../../../../../assets/shaders/auto_exposure.playout", 0);
+        let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
         let layout = Arc::new(
             rhyolite::PipelineLayout::new(
                 device.clone(),
-                vec![Arc::new(set)],
+                vec![Arc::new(set0)],
                 Default::default(),
                 vk::PipelineLayoutCreateFlags::empty(),
             )

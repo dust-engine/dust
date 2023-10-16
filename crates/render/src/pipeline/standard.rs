@@ -16,6 +16,7 @@ use bevy_transform::prelude::GlobalTransform;
 use crevice::std430::{AsStd430, Std430};
 use rand::Rng;
 use rhyolite::debug::DebugObject;
+use rhyolite::descriptor::DescriptorSetLayout;
 use rhyolite::future::{
     run, use_shared_image, use_shared_resource_flipflop, use_shared_state, use_state,
     GPUCommandFutureExt, SharedDeviceState, SharedDeviceStateHostContainer,
@@ -28,7 +29,7 @@ use rhyolite::{
         use_per_frame_state, Disposable, DisposeContainer, GPUCommandFuture, RenderData,
         RenderImage, RenderRes,
     },
-    macros::{commands, set_layout},
+    macros::commands,
     utils::retainer::Retainer,
     BufferExt, BufferLike, HasDevice, ImageLike, ImageViewExt, ImageViewLike,
 };
@@ -73,48 +74,12 @@ impl RayTracingPipeline for StandardPipeline {
         }
     }
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
-        let set1 = set_layout! {
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            img_output: vk::DescriptorType::STORAGE_IMAGE,
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            img_output_denoised: vk::DescriptorType::STORAGE_IMAGE,
-
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            img_albedo: vk::DescriptorType::STORAGE_IMAGE,
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            img_normal: vk::DescriptorType::STORAGE_IMAGE,
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            img_depth: vk::DescriptorType::STORAGE_IMAGE,
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            img_motion: vk::DescriptorType::STORAGE_IMAGE,
-            #[shader(vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            img_voxel_id: vk::DescriptorType::STORAGE_IMAGE,
-
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR)]
-            noise: [vk::DescriptorType::SAMPLED_IMAGE; 6],
-
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
-            sunlight_settings: vk::DescriptorType::UNIFORM_BUFFER,
-
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
-            camera_settings_prev_frame: vk::DescriptorType::UNIFORM_BUFFER,
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR | vk::ShaderStageFlags::CLOSEST_HIT_KHR | vk::ShaderStageFlags::MISS_KHR)]
-            camera_settings: vk::DescriptorType::UNIFORM_BUFFER,
-            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR)]
-            instances: vk::DescriptorType::STORAGE_BUFFER,
-            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            spatial_hashmap: vk::DescriptorType::STORAGE_BUFFER,
-            #[shader(vk::ShaderStageFlags::CLOSEST_HIT_KHR| vk::ShaderStageFlags::MISS_KHR | vk::ShaderStageFlags::RAYGEN_KHR)]
-            surfel_pool: vk::DescriptorType::STORAGE_BUFFER,
-            #[shader(vk::ShaderStageFlags::RAYGEN_KHR)]
-            accel_struct: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-        };
-
-        let set1 = set1.build(device.clone()).unwrap();
+        let set0 = playout_macro::layout!("../../../../../assets/shaders/headers/layout.playout", 0);
+        let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
         Arc::new(
             rhyolite::PipelineLayout::new(
                 device.clone(),
-                vec![Arc::new(set1)],
+                vec![Arc::new(set0)],
                 StandardPipelinePushConstant::ranges().as_slice(),
                 vk::PipelineLayoutCreateFlags::empty(),
             )

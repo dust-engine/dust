@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
 
 use bevy_asset::{AssetServer, Assets};
 use bevy_ecs::{
@@ -7,12 +7,11 @@ use bevy_ecs::{
 };
 use rhyolite::{
     ash::vk,
-    descriptor::{DescriptorPool, DescriptorSetWrite},
+    descriptor::{DescriptorPool, DescriptorSetWrite, DescriptorSetLayout},
     future::{
         run, use_per_frame_state, DisposeContainer, GPUCommandFuture, RenderData, RenderImage,
         RenderRes,
     },
-    macros::set_layout,
     utils::{retainer::Retainer, format::{ColorSpacePrimaries, ColorSpaceTransferFunction}},
     BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
 };
@@ -42,24 +41,13 @@ impl FromWorld for ToneMappingPipeline {
         let num_frame_in_flight = queues.num_frame_in_flight();
         let device = queues.device().clone();
 
-        let set = set_layout! {
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            src_img: vk::DescriptorType::STORAGE_IMAGE,
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            src_img_albedo: vk::DescriptorType::STORAGE_IMAGE,
 
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            dst_img: vk::DescriptorType::STORAGE_IMAGE,
-
-            #[shader(vk::ShaderStageFlags::COMPUTE)]
-            histogram_avg: vk::DescriptorType::UNIFORM_BUFFER,
-        }
-        .build(device.clone())
-        .unwrap();
+        let set0 = playout_macro::layout!("../../../../../assets/shaders/tone_map.playout", 0);
+        let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
         let layout = Arc::new(
             rhyolite::PipelineLayout::new(
                 device.clone(),
-                vec![Arc::new(set)],
+                vec![Arc::new(set0)],
                 Default::default(),
                 vk::PipelineLayoutCreateFlags::empty(),
             )

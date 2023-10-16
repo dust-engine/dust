@@ -1,0 +1,12 @@
+struct Histogram {
+    avg: f32,
+}
+
+#[set]
+struct StandardLayout {
+    #![stage(COMPUTE)]
+    u_src_img: StorageImage<RGBA16_Float>,
+    u_src_img_albedo: StorageImage<RGB10A2_UNorm>,
+    u_dst_img: StorageImage<RGBA16_Float>,
+    u_histogram: UniformBuffer<Histogram>,
+}

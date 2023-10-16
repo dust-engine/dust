@@ -2,7 +2,7 @@ use ash::{prelude::VkResult, vk};
 
 use super::PipelineCache;
 use crate::{
-    shader::{ShaderModule, SpecializedReflectedShader, SpecializedShader},
+    shader::{ShaderModule, SpecializedShader},
     HasDevice,
 };
 
@@ -51,22 +51,6 @@ impl<'a> Default for ComputePipelineCreateInfo<'a> {
 }
 
 impl ComputePipeline {
-    pub fn create_with_reflected_shader<'a>(
-        shader: SpecializedReflectedShader<'a>,
-        info: ComputePipelineCreateInfo<'a>,
-    ) -> VkResult<Self> {
-        let layout = PipelineLayout::for_layout(
-            shader.device().clone(),
-            shader.entry_point().clone(),
-            info.pipeline_layout_create_flags,
-        )?;
-        Self::create_with_shader_and_layout(
-            shader.into(),
-            Arc::new(layout),
-            info.pipeline_create_flags,
-            info.pipeline_cache,
-        )
-    }
     pub fn create_with_shader_and_layout<'a, S: Deref<Target = ShaderModule>>(
         shader: SpecializedShader<'a, S>,
         layout: Arc<PipelineLayout>,

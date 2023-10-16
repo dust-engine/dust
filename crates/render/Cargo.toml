@@ -34,6 +34,7 @@ bytemuck = "1.13"
 # Processor dependencies
 shaderc = { version = "0.8", optional = true }
 playout = { path = "../../../playout", optional = true }
+playout_macro = { path = "../../../playout/macro" }
 
 [features]
 default = ["glsl"]

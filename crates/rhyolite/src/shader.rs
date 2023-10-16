@@ -20,88 +20,6 @@ impl<T: Deref<Target = [u32]>> SpirvShader<T> {
     }
 }
 
-pub struct ReflectedSpirvShader<T: Deref<Target = [u32]>> {
-    pub shader: SpirvShader<T>,
-    pub entry_points: HashMap<String, SpirvEntryPoint>,
-}
-
-pub use crate::descriptor::DescriptorSetLayoutBindingInfo as SpirvDescriptorSetBinding;
-pub use crate::descriptor::DescriptorSetLayoutCacheKey as SpirvDescriptorSet;
-#[derive(Debug)]
-pub struct SpirvEntryPoint {
-    pub stage: vk::ShaderStageFlags,
-    pub descriptor_sets: Vec<SpirvDescriptorSet>,
-    pub push_constant_range: Option<vk::PushConstantRange>,
-}
-
-impl<T: Deref<Target = [u32]>> ReflectedSpirvShader<T> {
-    pub fn set_flags(
-        &mut self,
-        entry_point: &str,
-        set_id: u32,
-        flags: vk::DescriptorSetLayoutCreateFlags,
-    ) {
-        self.entry_points
-            .get_mut(entry_point)
-            .unwrap()
-            .descriptor_sets[set_id as usize]
-            .flags = flags;
-    }
-    pub fn add_immutable_samplers(
-        &mut self,
-        entry_point: &str,
-        set_id: u32,
-        binding_id: u32,
-        samplers: SmallVec<[Arc<Sampler>; 1]>,
-    ) {
-        let binding = self
-            .entry_points
-            .get_mut(entry_point)
-            .expect("Entry point not found")
-            .descriptor_sets
-            .get_mut(set_id as usize)
-            .expect("Set not found")
-            .bindings
-            .iter_mut()
-            .find(|binding| binding.binding == binding_id)
-            .expect("Binding not found");
-        assert!(
-            binding.immutable_samplers.is_empty(),
-            "Immutable samplers already added"
-        );
-        assert!(binding.descriptor_count == samplers.len() as u32);
-        assert!(
-            binding.descriptor_type == vk::DescriptorType::SAMPLER
-                || binding.descriptor_type == vk::DescriptorType::COMBINED_IMAGE_SAMPLER
-        );
-        binding.immutable_samplers = samplers;
-    }
-    pub fn build(self, device: Arc<Device>) -> VkResult<ReflectedShaderModule> {
-        let entry_points = self
-            .entry_points
-            .into_iter()
-            .map(|(name, entry_point)| {
-                (
-                    name.clone(),
-                    ShaderModuleEntryPoint {
-                        stage: entry_point.stage,
-                        desc_sets: entry_point
-                            .descriptor_sets
-                            .into_iter()
-                            .map(|desc_set| Arc::new(desc_set.build(device.clone()).unwrap()))
-                            .collect(),
-                        push_constant_range: entry_point.push_constant_range.clone(),
-                    },
-                )
-            })
-            .collect();
-        Ok(ReflectedShaderModule {
-            module: self.shader.build(device)?,
-            entry_points,
-        })
-    }
-}
-
 pub struct ShaderModule {
     device: Arc<Device>,
     module: vk::ShaderModule,
@@ -156,29 +74,6 @@ impl Drop for ShaderModule {
     }
 }
 
-pub struct ReflectedShaderModule {
-    pub module: ShaderModule,
-    pub entry_points: HashMap<String, ShaderModuleEntryPoint>,
-}
-impl ReflectedShaderModule {
-    pub unsafe fn raw(&self) -> vk::ShaderModule {
-        self.module.module
-    }
-    pub fn specialized<'a>(&'a self, entry_point: &'a CStr) -> SpecializedReflectedShader {
-        SpecializedReflectedShader {
-            flags: vk::PipelineShaderStageCreateFlags::empty(),
-            shader: self,
-            specialization_info: Default::default(),
-            entry_point,
-        }
-    }
-}
-
-impl HasDevice for ReflectedShaderModule {
-    fn device(&self) -> &Arc<Device> {
-        &self.module.device
-    }
-}
 
 #[derive(Clone)]
 pub struct ShaderModuleEntryPoint {
@@ -268,47 +163,5 @@ pub struct SpecializedShader<'a, S: Deref<Target = ShaderModule>> {
 impl<'a, S: Deref<Target = ShaderModule>> HasDevice for SpecializedShader<'a, S> {
     fn device(&self) -> &Arc<Device> {
         &self.shader.device
-    }
-}
-
-impl<'b, 'a: 'b> From<SpecializedReflectedShader<'a>> for SpecializedShader<'b, &'a ShaderModule> {
-    fn from(shader: SpecializedReflectedShader<'a>) -> Self {
-        let entrypoint = shader
-            .shader
-            .entry_points
-            .get(shader.entry_point.to_str().unwrap())
-            .expect("Entrypoint not found");
-        SpecializedShader {
-            stage: entrypoint.stage,
-            flags: shader.flags,
-            shader: &shader.shader.module,
-            specialization_info: shader.specialization_info,
-            entry_point: shader.entry_point,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct SpecializedReflectedShader<'a> {
-    pub flags: vk::PipelineShaderStageCreateFlags,
-    pub shader: &'a ReflectedShaderModule,
-    pub specialization_info: SpecializationInfo,
-    pub entry_point: &'a CStr,
-}
-impl<'a> SpecializedReflectedShader<'a> {
-    pub fn entry_point(&self) -> &ShaderModuleEntryPoint {
-        self.shader
-            .entry_points
-            .get(self.entry_point.to_str().unwrap())
-            .unwrap()
-    }
-    pub fn with_const<T: Copy + 'static>(mut self, constant_id: u32, item: T) -> Self {
-        self.specialization_info.push(constant_id, item);
-        self
-    }
-}
-impl<'a> HasDevice for SpecializedReflectedShader<'a> {
-    fn device(&self) -> &Arc<Device> {
-        self.shader.device()
     }
 }

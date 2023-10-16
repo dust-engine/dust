@@ -13,7 +13,6 @@ use rhyolite::future::{
     RenderImage, RenderRes, SharedDeviceState, SharedDeviceStateHostContainer,
 };
 use rhyolite::macros::commands;
-use rhyolite::smallvec::smallvec;
 use rhyolite::{
     copy_buffer, BufferLike, HasDevice, ImageExt, ImageLike, ImageRequest, ImageView,
     ImageViewLike, ResidentImage,
@@ -23,8 +22,6 @@ use std::borrow::Cow;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use rhyolite::descriptor::DescriptorSetLayoutBindingInfo;
-
 use crate::PinholeProjection;
 
 #[derive(Resource)]
@@ -33,6 +30,7 @@ pub struct NRDPipeline {
     pipelines: Vec<rhyolite::ComputePipeline>,
     transient_pool: Vec<TextureDesc>,
     permanent_pool: Vec<TextureDesc>,
+    samplers: Vec<rhyolite::Sampler>,
     binding_offsets: SPIRVBindingOffsets,
     dimensions: (u16, u16),
 }
@@ -124,18 +122,18 @@ impl NRDPipeline {
                     ),
                 }
                 .unwrap();
-                Arc::new(sampler)
+                sampler
             })
             .collect::<Vec<_>>();
         let sampler_bindings: Vec<_> = samplers
             .iter()
             .enumerate()
-            .map(|(i, sampler)| DescriptorSetLayoutBindingInfo {
+            .map(|(i, sampler)| vk::DescriptorSetLayoutBinding {
                 binding: i as u32 + library_desc.spirv_binding_offsets.sampler_offset,
                 descriptor_type: vk::DescriptorType::SAMPLER,
                 descriptor_count: 1,
                 stage_flags: vk::ShaderStageFlags::COMPUTE,
-                immutable_samplers: smallvec![sampler.clone()],
+                p_immutable_samplers: sampler.raw()
             })
             .collect();
 
@@ -147,7 +145,7 @@ impl NRDPipeline {
                 // TODO: Cache desc layout and pipeline layouts
                 let desc_layout = rhyolite::descriptor::DescriptorSetLayout::new(
                     device.clone(),
-                    pipeline_desc
+                    &pipeline_desc
                         .resource_ranges()
                         .iter()
                         .flat_map(|resource_range| {
@@ -165,24 +163,24 @@ impl NRDPipeline {
                                 ),
                             };
                             (0..resource_range.descriptors_num).map(move |i| {
-                                DescriptorSetLayoutBindingInfo {
+                                vk::DescriptorSetLayoutBinding {
                                     binding: resource_range.base_register_index + offset + i,
                                     descriptor_type: ty,
                                     descriptor_count: 1,
                                     stage_flags: vk::ShaderStageFlags::COMPUTE,
-                                    immutable_samplers: Default::default(),
+                                    ..Default::default()
                                 }
                             })
                         })
                         .chain(sampler_bindings.iter().cloned())
                         .chain(
                             // constant buffer (uniform buffer) binding
-                            std::iter::once_with(|| DescriptorSetLayoutBindingInfo {
+                            std::iter::once_with(|| vk::DescriptorSetLayoutBinding {
                                 binding: library_desc.spirv_binding_offsets.constant_buffer_offset,
                                 descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                                 descriptor_count: 1,
                                 stage_flags: vk::ShaderStageFlags::COMPUTE,
-                                immutable_samplers: Default::default(),
+                                ..Default::default()
                             })
                             .take(
                                 if pipeline_desc.has_constant_data {
@@ -192,7 +190,7 @@ impl NRDPipeline {
                                 },
                             ),
                         )
-                        .collect(),
+                        .collect::<Vec<_>>(),
                     vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR,
                 )
                 .unwrap();
@@ -228,6 +226,11 @@ impl NRDPipeline {
             transient_pool: desc.transient_pool().iter().cloned().collect(),
             permanent_pool: desc.permanent_pool().iter().cloned().collect(),
             binding_offsets: library_desc.spirv_binding_offsets.clone(),
+
+            // Retain a copy of the samplers.
+            // Vulkan Docs: Only the sampler handles are copied; the sampler objects must not be destroyed before
+            // the final use of the set layout and any descriptor pools and sets created using it.
+            samplers,
             instance,
             dimensions: (width, height),
         }
