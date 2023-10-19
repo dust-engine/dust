@@ -10,6 +10,12 @@ hitAttributeEXT HitAttribute {
     uint voxelId;
 } hitAttributes;
 
+
+layout(location = 0) rayPayloadInEXT struct RayPayload {
+    vec3 radiance;
+} payload;
+
+
 #ifdef SHADER_INT_64
 #define GridType uint64_t
 uint GridNumVoxels(GridType grid) {
@@ -80,7 +86,7 @@ void main() {
         // `radiance` is the incoming radiance at the hit location.
         // Spatial hash stores the incoming radiance. The incoming radiance at the
         // surfel location is the outgoing radiance at the hit location.
-        SpatialHashInsert(key, radiance);
+        SpatialHashInsert(key, radiance + payload.radiance);
         // TODO: Optimize the Insert / Get flow so they only do the loop once.
 
         // TODO: Maybe add more samples to the patch: need heuristic.

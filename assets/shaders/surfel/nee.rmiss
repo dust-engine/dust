@@ -5,6 +5,7 @@
 #include "../headers/standard.glsl"
 #include "../headers/surfel.glsl"
 #include "../headers/spatial_hash.glsl"
+#include "../headers/normal.glsl"
 
 layout(location = 0) rayPayloadInEXT struct RayPayload {
     vec3 radiance;
@@ -12,15 +13,15 @@ layout(location = 0) rayPayloadInEXT struct RayPayload {
 
 
 void main() {
-    vec3 sky_illuminance = arhosek_sky_radiance(normalize(gl_WorldRayDirectionEXT));
-
     SurfelEntry surfel = surfel_pool[gl_LaunchIDEXT.x];
 
     SpatialHashKey key;
     key.position = ivec3((surfel.position / 4.0));
     key.direction = uint8_t(surfel.direction);
 
-    SpatialHashInsert(key, sky_illuminance + payload.radiance);
+    vec3 normal = faceId2Normal(uint8_t(surfel.direction)); // world space
+    vec3 strength = arhosek_sun_radiance(normalize(gl_WorldRayDirectionEXT)) * (1.0 - cos(sunlight_config.solar_intensity.w));
+    vec3 illuminance = vec3(strength) * dot(normal, gl_WorldRayDirectionEXT);
 
-    // TODO: stocastically sample the lights as well.
+    payload.radiance += illuminance;
 }

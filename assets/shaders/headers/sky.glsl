@@ -94,7 +94,7 @@ vec3 arhosek_sun_radiance(
     }
     float sampleCosine = sqrt(sc2);
 
-    vec3 darkeningFactor = vec3(sunlight_config.r.ld_coefficient0, sunlight_config.g.ld_coefficient0, sunlight_config.b.ld_coefficient2);
+    vec3 darkeningFactor = vec3(sunlight_config.r.ld_coefficient0, sunlight_config.g.ld_coefficient0, sunlight_config.b.ld_coefficient0);
 
 
     darkeningFactor += vec3(sunlight_config.r.ld_coefficient1, sunlight_config.g.ld_coefficient1, sunlight_config.b.ld_coefficient1) * sampleCosine;
@@ -111,4 +111,3 @@ vec3 arhosek_sun_radiance(
     }
     return XYZ2ACEScg(sunlight_config.solar_intensity.xyz * darkeningFactor);
 }
-

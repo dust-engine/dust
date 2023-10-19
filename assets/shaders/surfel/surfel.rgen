@@ -3,10 +3,9 @@
 #include "../headers/surfel.glsl"
 #include "../headers/normal.glsl"
 #include "../headers/color.glsl"
-#include "../headers/reservoir.glsl"
 
 layout(location = 0) rayPayloadEXT struct RayPayload {
-    uint32_t surfel_index;
+    vec3 radiance;
 } payload;
 
 
@@ -33,7 +32,25 @@ void main() {
     noiseSample = rotateVectorByNormal(normal, noiseSample);
     
 
-    // Shoot shadow ray
+    vec3 sunDir = sunlight_config.direction.xyz;
+    payload.radiance = vec3(0.0);
+    #ifdef CONTRIBUTION_SECONDARY_SUNLIGHT
+    if (dot(sunDir, normal) > 0.0) {
+        traceRayEXT(
+            acceleration_structure,
+            gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsTerminateOnFirstHitEXT, // RayFlags
+            0xFF, // CullMask
+            3, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
+            4, // SBT stride, number of ray types // TODO: Make this a shader constant
+            4, // missIndex
+            origin,     // ray origin
+            0.1,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
+            normalize(sunDir), // outgoing direction: cosine weighted on the normal direction
+            10000.0, // tmax
+            0 // payload
+        );
+    }
+    #endif
     traceRayEXT(
         acceleration_structure,
         gl_RayFlagsOpaqueEXT, // RayFlags
@@ -47,5 +64,4 @@ void main() {
         10000.0, // tmax
         0 // payload
     );
-    // TODO: stocastically caste rays directly to light sources also
 }
