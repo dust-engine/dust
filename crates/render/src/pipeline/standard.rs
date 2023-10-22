@@ -126,6 +126,9 @@ impl RayTracingPipeline for StandardPipeline {
                 vec![SpecializedShader::for_shader(
                     asset_server.load("shaders/final_gather/ambient_occlusion.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
+                ),SpecializedShader::for_shader(
+                    asset_server.load("shaders/final_gather/nee.rmiss"),
+                    vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
             ),
@@ -138,9 +141,6 @@ impl RayTracingPipeline for StandardPipeline {
                 ),
                 vec![SpecializedShader::for_shader(
                     asset_server.load("shaders/final_gather/final_gather.rmiss"),
-                    vk::ShaderStageFlags::MISS_KHR,
-                ),SpecializedShader::for_shader(
-                    asset_server.load("shaders/final_gather/nee.rmiss"),
                     vk::ShaderStageFlags::MISS_KHR,
                 )],
                 Vec::new(),
@@ -311,7 +311,7 @@ impl StandardPipeline {
         self.pipeline_sbt_manager
             .push_miss(surfel_pipeline, EmptyShaderRecords, 1);
         self.pipeline_sbt_manager
-            .push_miss(final_gather_pipeline, EmptyShaderRecords, 1);
+            .push_miss(ambient_occlusion_pipeline, EmptyShaderRecords, 1);
         let pipeline_sbt_manager = &mut self.pipeline_sbt_manager;
         let desc_pool = &mut self.desc_pool;
         let sunlight = sunlight.bake().as_std430();

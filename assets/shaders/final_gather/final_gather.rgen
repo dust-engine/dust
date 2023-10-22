@@ -36,27 +36,6 @@ void main() {
     // Shoot shadow ray
     payload.illuminance = in_value.xyz;
 
-    vec3 sunDir = sunlight_config.direction.xyz;
-
-    #ifdef CONTRIBUTION_DIRECT
-    if (dot(sunDir, normalWorld) > 0.0) {
-        traceRayEXT(
-            acceleration_structure,
-            gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsTerminateOnFirstHitEXT, // RayFlags
-            0xFF, // CullMask
-            2, // SBT offset, ray type index // Use the same intersection shader. We need higher-quality intersection for shadow rays as well.
-            4, // SBT stride, number of ray types // TODO: Make this a shader constant
-            5, // missIndex
-            hitLocation,     // ray origin
-            0.1,           // ray min range. If we set this to 0.0, VK_DEVICE_LOST. Time stuck: 2 days
-            normalize(sunDir), // outgoing direction: cosine weighted on the normal direction
-            10000.0, // tmax
-            0 // payload
-        );
-    }
-    #endif
-
-
     traceRayEXT(
         acceleration_structure,
         gl_RayFlagsOpaqueEXT, // RayFlags
