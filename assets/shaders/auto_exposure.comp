@@ -1,4 +1,5 @@
 #version 460
+#extension GL_EXT_debug_printf : enable
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba16f) uniform image2D u_illuminance;
@@ -18,7 +19,7 @@ shared uint histogramShared[256];
 // For a given color and luminance range, return the histogram bin index
 uint colorToBin(vec3 hdrColor) {
   // Convert our RGB value to Luminance, see note for RGB_TO_LUM macro above
-  float lum = hdrColor.y;
+  float lum = dot(hdrColor, vec3(0.299, 0.587, 0.114));
 
   // Avoid taking the log of zero
   if (lum < 0.005) {
@@ -33,6 +34,25 @@ uint colorToBin(vec3 hdrColor) {
   return uint(logLum * 254.0 + 1.0);
 }
 
+vec3 _NRD_YCoCgToLinear( vec3 color )
+{
+    float t = color.x - color.z;
+
+    vec3 r;
+    r.y = color.x + color.z;
+    r.x = t + color.y;
+    r.z = t - color.y;
+
+    return max( r, 0.0 );
+}
+vec4 REBLUR_BackEnd_UnpackRadianceAndNormHitDist( vec4 data )
+{
+    data.xyz = _NRD_YCoCgToLinear( data.xyz );
+
+    return data;
+}
+
+
 void main() {
     // clear shared memory bins
     histogramShared[gl_LocalInvocationIndex] = 0;
@@ -41,8 +61,9 @@ void main() {
     uvec2 dim = imageSize(u_illuminance).xy;
     // Ignore threads that map to areas beyond the bounds of our HDR image
     if (gl_GlobalInvocationID.x < dim.x && gl_GlobalInvocationID.y < dim.y) {
-        vec3 hdrColor = imageLoad(u_illuminance, ivec2(gl_GlobalInvocationID.xy)).xyz;
-        uint binIndex = colorToBin(hdrColor);
+        vec4 hdrColor = imageLoad(u_illuminance, ivec2(gl_GlobalInvocationID.xy));
+        hdrColor = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(hdrColor);
+        uint binIndex = colorToBin(hdrColor.xyz);
         // We use an atomic add to ensure we don't write to the same bin in our
         // histogram from two different threads at the same time.
         atomicAdd(histogramShared[binIndex], 1);

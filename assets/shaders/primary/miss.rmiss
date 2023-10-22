@@ -8,7 +8,8 @@ void main() {
     vec3 dir = normalize(gl_WorldRayDirectionEXT);
     vec3 sky_color_xyz = arhosek_sky_radiance(dir) + arhosek_sun_radiance(dir);
 
-    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(sky_color_xyz, 100000.0);
+    vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(sky_color_xyz / 3.14, 100000.0);
+    // TODO: figure out why we need to divide by PI here.
     imageStore(img_illuminance_denoised, ivec2(gl_LaunchIDEXT.xy), packed);
     imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(1.0));
     imageStore(img_depth, ivec2(gl_LaunchIDEXT.xy), vec4(1.0 / 0.0));
