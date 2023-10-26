@@ -8,7 +8,7 @@ use rhyolite::{ash::vk, BufferLike, ResidentBuffer};
 
 #[derive(bevy_reflect::TypePath, Asset)]
 pub struct PaletteMaterial {
-    palette: Handle<VoxPalette>,
+    pub(crate) palette: Handle<VoxPalette>,
     pub(crate) geometry: Handle<VoxGeometry>,
     /// Compacted list of indexes into the palette array.
     data: ResidentBuffer,

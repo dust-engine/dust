@@ -238,7 +238,7 @@ impl VoxLoader {
     fn load_model(
         &self,
         model: &Model,
-        palette: Handle<VoxPalette>,
+        palette: &VoxPalette,
         ring_buffer: &StagingRingBuffer,
     ) -> impl GPUCommandFuture<Output = (VoxGeometry, PaletteMaterial)> + Send {
         let mut palette_index_collector = crate::collector::ModelIndexCollector::new();
@@ -293,6 +293,8 @@ impl VoxLoader {
             1.0,
             &self.allocator,
             ring_buffer,
+            &palette_indexes,
+            palette,
         );
 
         let future_to_wait = material_buffer.join(geometry);
@@ -300,7 +302,7 @@ impl VoxLoader {
             let buffer = buffer.into_inner();
             (
                 geometry,
-                PaletteMaterial::new(Handle::default(), palette, buffer),
+                PaletteMaterial::new(Handle::default(), Handle::default(), buffer),
             )
         })
     }
@@ -326,10 +328,7 @@ impl AssetLoader for VoxLoader {
                 .load_palette(&file.palette, &staging_ring_buffer)
                 .schedule_on_queue(self.transfer_queue);
 
-            let palette = self.queues.submit(palette, &mut Default::default()).await;
-
-            let palette_handle =
-                load_context.add_labeled_asset("palette".into(), palette.into_inner());
+            let palette = self.queues.submit(palette, &mut Default::default()).await.into_inner();
 
             let mut world = World::default();
             let mut traverser = SceneGraphTraverser {
@@ -355,7 +354,7 @@ impl AssetLoader for VoxLoader {
 
                     (
                         *model_id,
-                        self.load_model(model, palette_handle.clone(), &staging_ring_buffer),
+                        self.load_model(model, &palette, &staging_ring_buffer),
                     )
                 })
                 .collect();
@@ -375,11 +374,15 @@ impl AssetLoader for VoxLoader {
 
             let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>, u32)>> =
                 vec![None; file.models.len()];
+                
+            let palette_handle =
+            load_context.add_labeled_asset("palette".into(), palette);
             for (model_id, geometry, mut material) in geometry_materials.into_iter() {
                 let num_blocks = geometry.num_blocks;
                 let geometry_handle =
                     load_context.add_labeled_asset(format!("Geometry{}", model_id), geometry);
                 material.geometry = geometry_handle.clone();
+                material.palette = palette_handle.clone();
                 let material_handle =
                     load_context.add_labeled_asset(format!("Material{}", model_id), material);
                 models[model_id as usize] = Some((geometry_handle, material_handle, num_blocks));

@@ -42,7 +42,16 @@ void main() {
     bool found = SpatialHashGet(key, indirect_radiance, sample_count);
     vec4 packed = REBLUR_FrontEnd_PackRadianceAndNormHitDist(indirect_radiance, 0.0);
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), packed);
-    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), vec4(vec3(0.3), 1.0));
+
+    uint32_t packed_albedo = block.avg_albedo;
+    vec4 albedo = vec4(
+        float((packed_albedo >> 22) & 1023) / 1023.0,
+        float((packed_albedo >> 12) & 1023) / 1023.0,
+        float((packed_albedo >> 2) & 1023) / 1023.0,
+        float(packed_albedo & 3) / 3.0
+    );
+
+    imageStore(img_albedo, ivec2(gl_LaunchIDEXT.xy), albedo);
     #else
     
     imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(0.0));

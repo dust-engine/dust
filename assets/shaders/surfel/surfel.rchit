@@ -57,24 +57,18 @@ void main() {
     noiseSampleLocation.x = gl_LaunchIDEXT.x - noiseSampleLocation.y * width;
     float rand = texelFetch(blue_noise[0], ivec2((noiseSampleLocation + uvec2(114, 40) + push_constants.rand) % textureSize(blue_noise[0], 0)), 0).x;
     if (found) {
-        // Stocasticlly select one voxel from the block
-        #ifdef SHADER_INT_64
-        uint numVoxelInAabb = GridNumVoxels(block.mask);
-        #else
-        uint numVoxelInAabb = GridNumVoxels(u32vec2(block.mask1, block.mask2));
-        #endif
-        float randomVoxelIndexFloat = mix(0.0, float(numVoxelInAabb), rand);
-        uint randomVoxelIndex = min(uint(randomVoxelIndexFloat), numVoxelInAabb - 1);
-
-        // Use the albedo of the randomly selected voxel as the albedo
-        uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + randomVoxelIndex];
-        u8vec4 color = sbt.paletteInfo.palette[palette_index];
-        vec3 albedo = color.xyz / 255.0;
+        uint32_t packed_albedo = block.avg_albedo;
+        vec4 albedo = vec4(
+            float((packed_albedo >> 22) & 1023) / 1023.0,
+            float((packed_albedo >> 12) & 1023) / 1023.0,
+            float((packed_albedo >> 2) & 1023) / 1023.0,
+            float(packed_albedo & 3) / 3.0
+        );
         albedo.x = SRGBToLinear(albedo.x);
         albedo.y = SRGBToLinear(albedo.y);
         albedo.z = SRGBToLinear(albedo.z);
 
-        radiance = sRGB2AECScg(AECScg2sRGB(radiance) * albedo);
+        radiance = sRGB2AECScg(AECScg2sRGB(radiance) * albedo.xyz);
 
 
         // Add to surfel value

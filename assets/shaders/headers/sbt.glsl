@@ -8,7 +8,9 @@ struct Block
     uint32_t mask2;
     #endif
     uint32_t material_ptr;
-    uint32_t reserved;
+
+    // avg albedo, R10G10B10A2
+    uint32_t avg_albedo;
 };
 
 

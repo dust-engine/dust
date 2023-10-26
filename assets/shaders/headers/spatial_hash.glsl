@@ -81,7 +81,7 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
                 current_sample_count = spatial_hash[location + i].sample_count;
                 current_radiance = spatial_hash[location + i].radiance;
             }
-            #define MAX_SAMPLE_COUNT 204
+            #define MAX_SAMPLE_COUNT 4040
             current_sample_count = min(current_sample_count, MAX_SAMPLE_COUNT - 1);
             uint next_sample_count = current_sample_count + 1;
             current_radiance = mix(current_radiance, value, 1.0 / float(next_sample_count));

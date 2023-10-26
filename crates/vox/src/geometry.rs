@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::{Tree, TreeRoot};
+use crate::{Tree, TreeRoot, VoxPalette};
 
 use bevy_asset::Asset;
 use dust_render::Geometry;
 use dust_vdb::{IsLeaf, Node};
-use glam::{UVec3, Vec3A};
+use glam::{UVec3, Vec3A, Vec4};
 use rhyolite::ash::vk;
 use rhyolite::debug::DebugObject;
 use rhyolite::future::{GPUCommandFuture, GPUCommandFutureExt, UnitCommandFuture};
@@ -45,7 +45,7 @@ struct GPUVoxNode {
     w: u16,
     mask: u64,
     material_ptr: u32,
-    reserved: u32,
+    avg_albedo: u32,
 }
 
 impl VoxGeometry {
@@ -58,6 +58,8 @@ impl VoxGeometry {
         unit_size: f32,
         allocator: &Allocator,
         ring_buffer: &StagingRingBuffer,
+        palette_indexes: &[u8],
+        palette: &VoxPalette
     ) -> impl GPUCommandFuture<Output = Self> {
         let leaf_extent_int = <<TreeRoot as Node>::LeafType as Node>::EXTENT;
         let leaf_extent: Vec3A = leaf_extent_int.as_vec3a();
@@ -80,16 +82,41 @@ impl VoxGeometry {
                 };
                 let mut mask = [0_u64; 1];
                 d.get_occupancy(&mut mask);
-                let mask = mask[0];
+
+                let mut color = glam::UVec4::ZERO;
+                let num_voxels = mask[0].count_ones();
+                for i in 0..num_voxels {
+                    let palette_index = palette_indexes[d.material_ptr as usize + i as usize];
+                    let albedo = palette.colors[palette_index as usize];
+                    color += glam::UVec4::new(
+                        albedo.r as u32,
+                        albedo.g as u32,
+                        albedo.b as u32,
+                        albedo.a as u32,
+                    );
+                }
+                let mut color = color.as_vec4() / (num_voxels as f32 * 255.0);
+                fn linear2srgb(color: f32) -> f32{
+                    if color <= 0.0031308 { 12.92 * color } else { 1.055 * color.powf(1.0 / 2.4) - 0.055 }
+                }
+                color.x = linear2srgb(color.x);
+                color.y = linear2srgb(color.y);
+                color.z = linear2srgb(color.z);
+                let r = (color.x * 1023.0) as u32;
+                let g = (color.y * 1023.0) as u32;
+                let b = (color.z * 1023.0) as u32;
+                let a = (color.w * 3.0) as u32;
+                let packed = (r << 22) | (g << 12) | (b << 2) | a;
+
                 let node = {
                     GPUVoxNode {
                         x: position.x as u16,
                         y: position.y as u16,
                         z: position.z as u16,
                         w: 0,
-                        mask,
+                        mask: mask[0],
                         material_ptr: d.material_ptr,
-                        reserved: 0,
+                        avg_albedo: packed,
                     }
                 };
                 (aabb, node)

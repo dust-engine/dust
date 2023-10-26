@@ -64,25 +64,20 @@ void main() {
 
     // indirect radiance is the incoming radiance at the secondary hit location.
     // Multiply with albedo to convert into outgoing radiance at secondary hit location.
-
-    #ifdef SHADER_INT_64
-    uint numVoxelInAabb = GridNumVoxels(block.mask);
-    #else
-    uint numVoxelInAabb = GridNumVoxels(u32vec2(block.mask1, block.mask2));
-    #endif
-    float rand = texelFetch(blue_noise[0], ivec2((gl_LaunchIDEXT.xy + uvec2(18, 74) + push_constants.rand) % textureSize(blue_noise[0], 0)), 0).x;
-    float randomVoxelIndexFloat = mix(0.0, float(numVoxelInAabb), rand);
-    uint randomVoxelIndex = max(uint(randomVoxelIndexFloat), numVoxelInAabb - 1);
-
     // Convert into albedo
-    uint8_t palette_index = sbt.materialInfo.materials[block.material_ptr + randomVoxelIndex];
-    u8vec4 color = sbt.paletteInfo.palette[palette_index];
-    vec3 albedo = color.xyz / 255.0;
+    uint32_t packed_albedo = block.avg_albedo;
+    vec4 albedo = vec4(
+        float((packed_albedo >> 22) & 1023) / 1023.0,
+        float((packed_albedo >> 12) & 1023) / 1023.0,
+        float((packed_albedo >> 2) & 1023) / 1023.0,
+        float(packed_albedo & 3) / 3.0
+    );
+
     albedo.x = SRGBToLinear(albedo.x);
     albedo.y = SRGBToLinear(albedo.y);
     albedo.z = SRGBToLinear(albedo.z);
 
-    indirect_radiance = sRGB2AECScg(AECScg2sRGB(indirect_radiance) * albedo);
+    indirect_radiance = sRGB2AECScg(AECScg2sRGB(indirect_radiance) * albedo.xyz);
     
     vec3 value = payload.illuminance;
     #ifdef CONTRIBUTION_SECONDARY_SPATIAL_HASH
