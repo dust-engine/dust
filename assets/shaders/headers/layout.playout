@@ -12,7 +12,7 @@ struct PackedReservoir {
 
 struct SpatialHashEntry {
     fingerprint: u32,
-    radiance: Vec3,
+    radiance: u32,
     last_accessed_frame: u16,
     sample_count: u16,
 }

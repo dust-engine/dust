@@ -1,5 +1,100 @@
 layout(constant_id = 0) const uint32_t SpatialHashCapacity = 32 * 1024 * 1024; // 512 MB
 
+
+vec3 XYZ2ACEScg2(vec3 srgb) {
+    mat3 transform = mat3(
+        1.6410228, -0.66366285, 0.011721907,
+        -0.32480323, 1.6153315, -0.0082844375,
+        -0.23642465, 0.016756356, 0.9883947
+    );
+    return transform * srgb;
+}
+vec3 ACEScg2XYZ2(vec3 srgb) {
+    mat3 transform = mat3(
+        0.66245437, 0.2722288, -0.0055746622,
+        0.13400422, 0.6740818, 0.00406073,
+        0.15618773, 0.05368953, 1.0103393
+    );
+    return transform * srgb;
+}
+
+
+// Encode an RGB color into a 32-bit LogLuv HDR format.
+//
+// The supported luminance range is roughly 10^-6..10^6 in 0.17% steps.
+// The log-luminance is encoded with 14 bits and chroma with 9 bits each.
+// This was empirically more accurate than using 8 bit chroma.
+// Black (all zeros) is handled exactly.
+uint EncodeRGBToLogLuv(vec3 color)
+{
+    // Convert ACEScg to XYZ.
+    vec3 XYZ = ACEScg2XYZ2(color);
+
+    // Encode log2(Y) over the range [-20,20) in 14 bits (no sign bit).
+    // TODO: Fast path that uses the bits from the fp32 representation directly.
+    float logY = 409.6 * (log2(XYZ.y) + 20.0); // -inf if Y==0
+    uint Le = uint(clamp(logY, 0.0, 16383.0));
+
+    // Early out if zero luminance to avoid NaN in chroma computation.
+    // Note Le==0 if Y < 9.55e-7. We'll decode that as exactly zero.
+    if (Le == 0) return 0;
+
+    // Compute chroma (u,v) values by:
+    //  x = X / (X + Y + Z)
+    //  y = Y / (X + Y + Z)
+    //  u = 4x / (-2x + 12y + 3)
+    //  v = 9y / (-2x + 12y + 3)
+    //
+    // These expressions can be refactored to avoid a division by:
+    //  u = 4X / (-2X + 12Y + 3(X + Y + Z))
+    //  v = 9Y / (-2X + 12Y + 3(X + Y + Z))
+    //
+    float invDenom = 1.0 / (-2.0 * XYZ.x + 12.0 * XYZ.y + 3.0 * (XYZ.x + XYZ.y + XYZ.z));
+    vec2 uv = vec2(4.0, 9.0) * XYZ.xy * invDenom;
+
+    // Encode chroma (u,v) in 9 bits each.
+    // The gamut of perceivable uv values is roughly [0,0.62], so scale by 820 to get 9-bit values.
+    uvec2 uve = uvec2(clamp(820.0 * uv, 0.0, 511.0));
+
+    return (Le << 18) | (uve.x << 9) | uve.y;
+}
+
+// Decode an RGB color stored in a 32-bit LogLuv HDR format.
+//    See RTXDI_EncodeRGBToLogLuv() for details.
+vec3 DecodeLogLuvToRGB(uint packedColor)
+{
+    // Decode luminance Y from encoded log-luminance.
+    uint Le = packedColor >> 18;
+    if (Le == 0) return vec3(0, 0, 0);
+
+    float logY = (float(Le) + 0.5) / 409.6 - 20.0;
+    float Y = pow(2.0, logY);
+
+    // Decode normalized chromaticity xy from encoded chroma (u,v).
+    //
+    //  x = 9u / (6u - 16v + 12)
+    //  y = 4v / (6u - 16v + 12)
+    //
+    uvec2 uve = uvec2(packedColor >> 9, packedColor) & 0x1ff;
+    vec2 uv = (vec2(uve)+0.5) / 820.0;
+
+    float invDenom = 1.0 / (6.0 * uv.x - 16.0 * uv.y + 12.0);
+    vec2 xy = vec2(9.0, 4.0) * uv * invDenom;
+
+    // Convert chromaticity to XYZ and back to RGB.
+    //  X = Y / y * x
+    //  Z = Y / y * (1 - x - y)
+    //
+    float s = Y / xy.y;
+    vec3 XYZ = vec3(s * xy.x, Y, s * (1.f - xy.x - xy.y));
+
+    // Convert back to RGB and clamp to avoid out-of-gamut colors.
+    return max(XYZ2ACEScg2(XYZ), 0.0);
+}
+
+
+
+
 struct SpatialHashKey {
     ivec3 position;
     uint8_t direction; // [0, 6) indicating one of the six faces of the cube
@@ -79,14 +174,14 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
             uint current_sample_count = 0;
             if (current_fingerprint == fingerprint) {
                 current_sample_count = spatial_hash[location + i].sample_count;
-                current_radiance = spatial_hash[location + i].radiance;
+                current_radiance = DecodeLogLuvToRGB(spatial_hash[location + i].radiance);
             }
-            #define MAX_SAMPLE_COUNT 4040
+            #define MAX_SAMPLE_COUNT 404
             current_sample_count = min(current_sample_count, MAX_SAMPLE_COUNT - 1);
             uint next_sample_count = current_sample_count + 1;
             current_radiance = mix(current_radiance, value, 1.0 / float(next_sample_count));
             
-            spatial_hash[location + i].radiance = current_radiance;
+            spatial_hash[location + i].radiance = EncodeRGBToLogLuv(current_radiance);
             spatial_hash[location + i].last_accessed_frame = uint16_t(push_constants.frame_index);
             spatial_hash[location + i].sample_count = uint16_t(next_sample_count);
             return;
@@ -94,7 +189,7 @@ void SpatialHashInsert(SpatialHashKey key, vec3 value) {
     }
     // Not found after 3 iterations. Evict the LRU entry.
     spatial_hash[location + i_minFrameIndex].fingerprint = fingerprint;
-    spatial_hash[location + i_minFrameIndex].radiance = value;
+    spatial_hash[location + i_minFrameIndex].radiance = EncodeRGBToLogLuv(value);
     spatial_hash[location + i_minFrameIndex].last_accessed_frame = uint16_t(push_constants.frame_index);
     spatial_hash[location + i_minFrameIndex].sample_count = uint16_t(1);
 }
@@ -116,7 +211,7 @@ bool SpatialHashGet(SpatialHashKey key, out vec3 value, out uint sample_count) {
         if (current_fingerprint == fingerprint) {
             // Found.
             spatial_hash[location + i].last_accessed_frame = uint16_t(push_constants.frame_index);
-            value = spatial_hash[location + i].radiance;
+            value = DecodeLogLuvToRGB(spatial_hash[location + i].radiance);
             sample_count = spatial_hash[location + i].sample_count;
             return true;
         }
