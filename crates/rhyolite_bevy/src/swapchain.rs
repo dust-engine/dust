@@ -4,7 +4,7 @@ use bevy_ecs::prelude::*;
 use bevy_window::{RawHandleWrapper, Window};
 use rhyolite::{
     ash::vk,
-    utils::format::{ColorSpace, FormatType, ColorSpaceTransferFunction, ColorSpacePrimaries},
+    utils::format::{ColorSpace, ColorSpacePrimaries, ColorSpaceTransferFunction, FormatType},
     AcquireFuture, HasDevice, PhysicalDevice, Surface,
 };
 
@@ -266,7 +266,10 @@ pub fn get_surface_preferred_format(
 
             let color_space: ColorSpace = surface_format.color_space.into();
 
-            let color_space_priority = if matches!(color_space.transfer_function, ColorSpaceTransferFunction::scRGB) {
+            let color_space_priority = if matches!(
+                color_space.transfer_function,
+                ColorSpaceTransferFunction::scRGB
+            ) {
                 // Special case for extended srgb
                 (ColorSpacePrimaries::BT2020.area_size() * 4096.0) as u32 - 1
             } else {

@@ -506,13 +506,12 @@ pub struct ColorSpace {
     pub transfer_function: ColorSpaceTransferFunction,
 }
 
-
 impl From<vk::ColorSpaceKHR> for ColorSpace {
     fn from(value: vk::ColorSpaceKHR) -> Self {
         match value {
             vk::ColorSpaceKHR::SRGB_NONLINEAR => ColorSpace {
                 primaries: ColorSpacePrimaries::BT709,
-                transfer_function: ColorSpaceTransferFunction::LINEAR
+                transfer_function: ColorSpaceTransferFunction::LINEAR,
             },
             vk::ColorSpaceKHR::DISPLAY_P3_NONLINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::DCI_P3,
@@ -520,51 +519,51 @@ impl From<vk::ColorSpaceKHR> for ColorSpace {
             },
             vk::ColorSpaceKHR::DISPLAY_P3_LINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::DCI_P3,
-                transfer_function: ColorSpaceTransferFunction::LINEAR
+                transfer_function: ColorSpaceTransferFunction::LINEAR,
             },
             vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT709,
-                transfer_function: ColorSpaceTransferFunction::LINEAR
+                transfer_function: ColorSpaceTransferFunction::LINEAR,
             },
             vk::ColorSpaceKHR::EXTENDED_SRGB_NONLINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT709,
-                transfer_function: ColorSpaceTransferFunction::scRGB
+                transfer_function: ColorSpaceTransferFunction::scRGB,
             },
             vk::ColorSpaceKHR::DCI_P3_NONLINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::XYZ,
-                transfer_function: ColorSpaceTransferFunction::DCI_P3
+                transfer_function: ColorSpaceTransferFunction::DCI_P3,
             },
             vk::ColorSpaceKHR::BT709_LINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT709,
-                transfer_function: ColorSpaceTransferFunction::LINEAR
+                transfer_function: ColorSpaceTransferFunction::LINEAR,
             },
             vk::ColorSpaceKHR::BT709_NONLINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT709,
-                transfer_function: ColorSpaceTransferFunction::ITU
+                transfer_function: ColorSpaceTransferFunction::ITU,
             },
             vk::ColorSpaceKHR::BT2020_LINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT2020,
-                transfer_function: ColorSpaceTransferFunction::LINEAR
+                transfer_function: ColorSpaceTransferFunction::LINEAR,
             },
             vk::ColorSpaceKHR::HDR10_ST2084_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT2020,
-                transfer_function: ColorSpaceTransferFunction::ST2084_PQ
+                transfer_function: ColorSpaceTransferFunction::ST2084_PQ,
             },
             vk::ColorSpaceKHR::DOLBYVISION_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT2020,
-                transfer_function: ColorSpaceTransferFunction::ST2084_PQ
+                transfer_function: ColorSpaceTransferFunction::ST2084_PQ,
             },
             vk::ColorSpaceKHR::HDR10_HLG_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::BT2020,
-                transfer_function: ColorSpaceTransferFunction::HLG
+                transfer_function: ColorSpaceTransferFunction::HLG,
             },
             vk::ColorSpaceKHR::ADOBERGB_LINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::ADOBE_RGB,
-                transfer_function: ColorSpaceTransferFunction::LINEAR
+                transfer_function: ColorSpaceTransferFunction::LINEAR,
             },
             vk::ColorSpaceKHR::ADOBERGB_NONLINEAR_EXT => ColorSpace {
                 primaries: ColorSpacePrimaries::ADOBE_RGB,
-                transfer_function: ColorSpaceTransferFunction::AdobeRGB
+                transfer_function: ColorSpaceTransferFunction::AdobeRGB,
             },
             _ => panic!(),
         }
@@ -640,7 +639,6 @@ impl ColorSpacePrimaries {
         b: Vec2::new(0.128, 0.044),
         white_point: white_points::D60,
     };
-
 
     pub fn area_size(&self) -> f32 {
         let a = (self.r - self.g).length();

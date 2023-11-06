@@ -5,7 +5,7 @@ use bevy_ecs::{
     system::{lifetimeless::SRes, Resource, SystemParamItem},
     world::{FromWorld, Mut, World},
 };
-use rhyolite::{future::run, descriptor::DescriptorSetLayout};
+use rhyolite::{descriptor::DescriptorSetLayout, future::run};
 
 use rhyolite::BufferExt;
 use rhyolite::{

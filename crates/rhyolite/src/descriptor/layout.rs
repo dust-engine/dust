@@ -1,6 +1,6 @@
 use crate::Device;
 use ash::{prelude::VkResult, vk};
-use std::{sync::Arc, collections::BTreeMap};
+use std::{collections::BTreeMap, sync::Arc};
 
 pub struct DescriptorSetLayout {
     device: Arc<Device>,
@@ -58,11 +58,10 @@ impl DescriptorSetLayout {
             }
         }
 
-
         Ok(Self {
             device,
             raw,
-            desc_types: desc_types.into_iter().collect()
+            desc_types: desc_types.into_iter().collect(),
         })
     }
     pub unsafe fn raw(&self) -> vk::DescriptorSetLayout {

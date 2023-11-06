@@ -43,7 +43,7 @@ impl BlueNoise {
             &self.unitvec3,
             &self.unitvec3_cosine,
         ];
-        for (i, (desc, handle)) in descriptors.iter_mut().zip(handles.iter()).enumerate() {
+        for (_i, (desc, handle)) in descriptors.iter_mut().zip(handles.iter()).enumerate() {
             let Some(img) = image_arrays.get(*handle) else {
                 return None;
             };

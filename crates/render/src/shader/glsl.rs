@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::{Path, PathBuf}};
+use std::{collections::HashMap, path::PathBuf};
 
 use bevy_app::Plugin;
 use bevy_asset::{
@@ -99,11 +99,18 @@ impl AssetLoader for GlslShadercCompiler {
                         continue;
                     }
                     let path = match ty {
-                        shaderc::IncludeType::Relative => ctx.path().parent().unwrap().join(&filename).join(included_filename),
+                        shaderc::IncludeType::Relative => ctx
+                            .path()
+                            .parent()
+                            .unwrap()
+                            .join(&filename)
+                            .join(included_filename),
                         shaderc::IncludeType::Standard => included_filename.into(),
                     };
                     let normalized_path = normalize_path(&path);
-                    let inc = ctx.load_direct(AssetPath::from_path(normalized_path)).await?;
+                    let inc = ctx
+                        .load_direct(AssetPath::from_path(normalized_path))
+                        .await?;
                     let source: &GlslShaderSource = inc.get().unwrap();
                     pending_sources.push((included_filename.to_string(), source.source.clone()));
                 }
@@ -303,4 +310,3 @@ impl AssetLoader for PlayoutGlslLoader {
         &["playout"]
     }
 }
-

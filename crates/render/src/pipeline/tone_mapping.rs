@@ -7,19 +7,18 @@ use bevy_ecs::{
 };
 use rhyolite::{
     ash::vk,
-    descriptor::{DescriptorPool, DescriptorSetWrite, DescriptorSetLayout},
+    descriptor::{DescriptorPool, DescriptorSetLayout, DescriptorSetWrite},
     future::{
         run, use_per_frame_state, DisposeContainer, GPUCommandFuture, RenderData, RenderImage,
         RenderRes,
     },
-    utils::{retainer::Retainer, format::{ColorSpacePrimaries, ColorSpaceTransferFunction}},
+    utils::{
+        format::{ColorSpacePrimaries, ColorSpaceTransferFunction},
+        retainer::Retainer,
+    },
     BufferExt, BufferLike, ComputePipeline, HasDevice, ImageViewExt, ImageViewLike, PipelineLayout,
 };
-use rhyolite::{
-    future::Disposable,
-    macros::commands,
-    utils::format::ColorSpace,
-};
+use rhyolite::{future::Disposable, macros::commands, utils::format::ColorSpace};
 use rhyolite_bevy::Queues;
 
 use crate::{CachedPipeline, PipelineCache, ShaderModule, SpecializedShader};
@@ -40,7 +39,6 @@ impl FromWorld for ToneMappingPipeline {
         let queues: &Queues = world.resource();
         let num_frame_in_flight = queues.num_frame_in_flight();
         let device = queues.device().clone();
-
 
         let set0 = playout_macro::layout!("../../../../../assets/shaders/tone_map.playout", 0);
         let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
@@ -64,7 +62,7 @@ impl FromWorld for ToneMappingPipeline {
             pipeline: None,
             display_color_space_transfer_fn: ColorSpaceTransferFunction::LINEAR,
             desc_pool: Retainer::new(desc_pool),
-            scene_color_space: ColorSpacePrimaries::ACES_AP1
+            scene_color_space: ColorSpacePrimaries::ACES_AP1,
         }
     }
 }
@@ -95,31 +93,29 @@ impl ToneMappingPipeline {
             self.pipeline = None;
             self.display_color_space_transfer_fn = output_color_space.transfer_function;
         }
-        let pipeline = self
-            .pipeline
-            .get_or_insert_with(|| {
-                let mat = self
-                    .scene_color_space
-                    .to_color_space(&output_color_space.primaries);
-                let transfer_function = output_color_space.transfer_function as u32;
+        let pipeline = self.pipeline.get_or_insert_with(|| {
+            let mat = self
+                .scene_color_space
+                .to_color_space(&output_color_space.primaries);
+            let transfer_function = output_color_space.transfer_function as u32;
 
-                let shader = asset_server.load("shaders/tone_map.comp");
-                pipeline_cache.add_compute_pipeline(
-                    self.layout.clone(),
-                    SpecializedShader::for_shader(shader, vk::ShaderStageFlags::COMPUTE)
-                        .with_const(0, transfer_function)
-                        .with_const(1, mat.x_axis.x)
-                        .with_const(2, mat.x_axis.y)
-                        .with_const(3, mat.x_axis.z)
-                        .with_const(4, mat.y_axis.x)
-                        .with_const(5, mat.y_axis.y)
-                        .with_const(6, mat.y_axis.z)
-                        .with_const(7, mat.z_axis.x)
-                        .with_const(8, mat.z_axis.y)
-                        .with_const(9, mat.z_axis.z)
-                        .into(),
-                )
-            });
+            let shader = asset_server.load("shaders/tone_map.comp");
+            pipeline_cache.add_compute_pipeline(
+                self.layout.clone(),
+                SpecializedShader::for_shader(shader, vk::ShaderStageFlags::COMPUTE)
+                    .with_const(0, transfer_function)
+                    .with_const(1, mat.x_axis.x)
+                    .with_const(2, mat.x_axis.y)
+                    .with_const(3, mat.x_axis.z)
+                    .with_const(4, mat.y_axis.x)
+                    .with_const(5, mat.y_axis.y)
+                    .with_const(6, mat.y_axis.z)
+                    .with_const(7, mat.z_axis.x)
+                    .with_const(8, mat.z_axis.y)
+                    .with_const(9, mat.z_axis.z)
+                    .into(),
+            )
+        });
         let desc_pool = &mut self.desc_pool;
         commands! { move
             let Some(pipeline) = pipeline_cache.retrieve(pipeline, shader_assets) else {

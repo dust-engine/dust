@@ -133,7 +133,7 @@ impl NRDPipeline {
                 descriptor_type: vk::DescriptorType::SAMPLER,
                 descriptor_count: 1,
                 stage_flags: vk::ShaderStageFlags::COMPUTE,
-                p_immutable_samplers: sampler.raw()
+                p_immutable_samplers: sampler.raw(),
             })
             .collect();
 
@@ -769,9 +769,13 @@ impl Default for ReblurSettings {
         Self {
             common_settings: Default::default(),
             reblur_settings: nrd_sys::ReblurSettings {
+                antilag_hit_distance_settings: AntilagHitDistanceSettings {
+                    enable: false,
+                    ..Default::default()
+                },
                 antilag_intensity_settings: AntilagIntensitySettings {
                     sensitivity_to_darkness: 0.1,
-                    enable: true,
+                    enable: false,
                     ..Default::default()
                 },
                 ..Default::default()

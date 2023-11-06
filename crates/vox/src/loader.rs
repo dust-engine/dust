@@ -328,7 +328,11 @@ impl AssetLoader for VoxLoader {
                 .load_palette(&file.palette, &staging_ring_buffer)
                 .schedule_on_queue(self.transfer_queue);
 
-            let palette = self.queues.submit(palette, &mut Default::default()).await.into_inner();
+            let palette = self
+                .queues
+                .submit(palette, &mut Default::default())
+                .await
+                .into_inner();
 
             let mut world = World::default();
             let mut traverser = SceneGraphTraverser {
@@ -374,9 +378,8 @@ impl AssetLoader for VoxLoader {
 
             let mut models: Vec<Option<(Handle<VoxGeometry>, Handle<PaletteMaterial>, u32)>> =
                 vec![None; file.models.len()];
-                
-            let palette_handle =
-            load_context.add_labeled_asset("palette".into(), palette);
+
+            let palette_handle = load_context.add_labeled_asset("palette".into(), palette);
             for (model_id, geometry, mut material) in geometry_materials.into_iter() {
                 let num_blocks = geometry.num_blocks;
                 let geometry_handle =

@@ -74,12 +74,10 @@ impl dust_render::Material for PaletteMaterial {
     fn intersection_shader(ray_type: u32, asset_server: &AssetServer) -> Option<SpecializedShader> {
         match ray_type {
             Self::Pipeline::FINAL_GATHER_RAYTYPE | Self::Pipeline::SURFEL_RAYTYPE => {
-                Some(
-                    SpecializedShader::for_shader(
-                        asset_server.load("shaders/final_gather/rough.rint"),
-                        vk::ShaderStageFlags::INTERSECTION_KHR,
-                    ),
-                )
+                Some(SpecializedShader::for_shader(
+                    asset_server.load("shaders/final_gather/rough.rint"),
+                    vk::ShaderStageFlags::INTERSECTION_KHR,
+                ))
             }
             Self::Pipeline::AMBIENT_OCCLUSION_RAYTYPE => {
                 let rough_intersection_test_threshold: f32 = 0.0;
@@ -95,7 +93,7 @@ impl dust_render::Material for PaletteMaterial {
                 asset_server.load("shaders/primary/hit.rint"),
                 vk::ShaderStageFlags::INTERSECTION_KHR,
             )),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 

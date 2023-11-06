@@ -59,7 +59,7 @@ impl VoxGeometry {
         allocator: &Allocator,
         ring_buffer: &StagingRingBuffer,
         palette_indexes: &[u8],
-        palette: &VoxPalette
+        palette: &VoxPalette,
     ) -> impl GPUCommandFuture<Output = Self> {
         let leaf_extent_int = <<TreeRoot as Node>::LeafType as Node>::EXTENT;
         let leaf_extent: Vec3A = leaf_extent_int.as_vec3a();
@@ -96,8 +96,12 @@ impl VoxGeometry {
                     );
                 }
                 let mut color = color.as_vec4() / (num_voxels as f32 * 255.0);
-                fn linear2srgb(color: f32) -> f32{
-                    if color <= 0.0031308 { 12.92 * color } else { 1.055 * color.powf(1.0 / 2.4) - 0.055 }
+                fn linear2srgb(color: f32) -> f32 {
+                    if color <= 0.0031308 {
+                        12.92 * color
+                    } else {
+                        1.055 * color.powf(1.0 / 2.4) - 0.055
+                    }
                 }
                 color.x = linear2srgb(color.x);
                 color.y = linear2srgb(color.y);

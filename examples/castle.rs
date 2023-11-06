@@ -3,7 +3,7 @@
 use std::ops::DerefMut;
 
 use bevy_app::{App, Plugin, PostUpdate, Startup, Update};
-use bevy_asset::{AssetServer, Assets};
+use bevy_asset::AssetServer;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParamItem;
 use bevy_input::mouse::MouseWheel;
@@ -14,28 +14,22 @@ use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dust_render::nrd::{DenoiserEvent, NRDPipeline};
 use dust_render::use_gbuffer;
 use dust_render::{
-    pipeline::CachablePipeline, AutoExposurePipeline, AutoExposurePipelineRenderParams, BlueNoise,
-    ExposureSettings, PinholeProjection, StandardPipeline, StandardPipelineRenderParams, Sunlight,
-    TLASStore, ToneMappingPipeline, ToneMappingPipelineRenderParams,
+    AutoExposurePipeline, AutoExposurePipelineRenderParams, ExposureSettings, PinholeProjection,
+    StandardPipeline, StandardPipelineRenderParams, Sunlight, TLASStore, ToneMappingPipeline,
+    ToneMappingPipelineRenderParams,
 };
 
 use glam::{UVec2, Vec3, Vec3A};
 use rhyolite::ash::vk;
 use rhyolite::future::GPUCommandFutureExt;
-use rhyolite::{
-    clear_image, cstr, BufferExt, ImageArraySliceView, ImageArraySlicedViews, ImageExt, ImageLike,
-    ImageRequest,
-};
+use rhyolite::{clear_image, BufferExt, ImageLike};
 
-use rhyolite::debug::DebugObject;
 use rhyolite::{
     macros::{commands, gpu},
     QueueType,
 };
 
-use rhyolite_bevy::{
-    Image, Queues, QueuesRouter, RenderSystems, SlicedImageArray, Swapchain, SwapchainConfigExt,
-};
+use rhyolite_bevy::{Queues, QueuesRouter, RenderSystems, Swapchain, SwapchainConfigExt};
 
 fn main() {
     let mut app = App::new();

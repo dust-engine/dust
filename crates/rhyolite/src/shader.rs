@@ -1,13 +1,13 @@
 use ash::prelude::VkResult;
 use ash::vk;
-use smallvec::SmallVec;
+
 use std::ffi::CStr;
 use std::fmt::Debug;
 use std::ops::Deref;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::descriptor::DescriptorSetLayout;
-use crate::sampler::Sampler;
+
 use crate::{Device, HasDevice};
 
 pub struct SpirvShader<T: Deref<Target = [u32]>> {
@@ -73,7 +73,6 @@ impl Drop for ShaderModule {
         }
     }
 }
-
 
 #[derive(Clone)]
 pub struct ShaderModuleEntryPoint {

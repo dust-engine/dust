@@ -18,8 +18,8 @@ use rand::Rng;
 use rhyolite::debug::DebugObject;
 use rhyolite::descriptor::DescriptorSetLayout;
 use rhyolite::future::{
-    run, use_shared_image, use_shared_resource_flipflop, use_shared_state, use_state,
-    GPUCommandFutureExt, SharedDeviceState, SharedDeviceStateHostContainer,
+    run, use_shared_image, use_shared_resource_flipflop, use_shared_state, GPUCommandFutureExt,
+    SharedDeviceState, SharedDeviceStateHostContainer,
 };
 use rhyolite::{
     accel_struct::AccelerationStructure,
@@ -74,7 +74,8 @@ impl RayTracingPipeline for StandardPipeline {
         }
     }
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
-        let set0 = playout_macro::layout!("../../../../../assets/shaders/headers/layout.playout", 0);
+        let set0 =
+            playout_macro::layout!("../../../../../assets/shaders/headers/layout.playout", 0);
         let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
         Arc::new(
             rhyolite::PipelineLayout::new(
@@ -123,13 +124,16 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("shaders/final_gather/ambient_occlusion.rgen"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                vec![SpecializedShader::for_shader(
-                    asset_server.load("shaders/final_gather/ambient_occlusion.rmiss"),
-                    vk::ShaderStageFlags::MISS_KHR,
-                ),SpecializedShader::for_shader(
-                    asset_server.load("shaders/final_gather/nee.rmiss"),
-                    vk::ShaderStageFlags::MISS_KHR,
-                )],
+                vec![
+                    SpecializedShader::for_shader(
+                        asset_server.load("shaders/final_gather/ambient_occlusion.rmiss"),
+                        vk::ShaderStageFlags::MISS_KHR,
+                    ),
+                    SpecializedShader::for_shader(
+                        asset_server.load("shaders/final_gather/nee.rmiss"),
+                        vk::ShaderStageFlags::MISS_KHR,
+                    ),
+                ],
                 Vec::new(),
             ),
             final_gather_ray_pipeline: RayTracingPipelineManager::new(
@@ -152,13 +156,16 @@ impl RayTracingPipeline for StandardPipeline {
                     asset_server.load("shaders/surfel/surfel.rgen"),
                     vk::ShaderStageFlags::RAYGEN_KHR,
                 ),
-                vec![SpecializedShader::for_shader(
-                    asset_server.load("shaders/surfel/surfel.rmiss"),
-                    vk::ShaderStageFlags::MISS_KHR,
-                ),SpecializedShader::for_shader(
-                    asset_server.load("shaders/surfel/nee.rmiss"),
-                    vk::ShaderStageFlags::MISS_KHR,
-                )],
+                vec![
+                    SpecializedShader::for_shader(
+                        asset_server.load("shaders/surfel/surfel.rmiss"),
+                        vk::ShaderStageFlags::MISS_KHR,
+                    ),
+                    SpecializedShader::for_shader(
+                        asset_server.load("shaders/surfel/nee.rmiss"),
+                        vk::ShaderStageFlags::MISS_KHR,
+                    ),
+                ],
                 Vec::new(),
             ),
             pipeline_sbt_manager,
@@ -170,7 +177,8 @@ impl RayTracingPipeline for StandardPipeline {
         params: &mut SystemParamItem<M::ShaderParameterParams>,
     ) -> crate::sbt::SbtIndex {
         self.primary_ray_pipeline.material_instance_added::<M>();
-        self.ambient_occlusion_ray_pipeline.material_instance_added::<M>();
+        self.ambient_occlusion_ray_pipeline
+            .material_instance_added::<M>();
         self.final_gather_ray_pipeline
             .material_instance_added::<M>();
         self.surfel_ray_pipeline.material_instance_added::<M>();
@@ -337,7 +345,7 @@ impl StandardPipeline {
             if !surfel_pool_buffer.inner().reused() {
                 fill_buffer(&mut surfel_pool_buffer, u32::MAX).await;
             }
-            let mut spatial_hash_buffer = use_shared_state(
+            let spatial_hash_buffer = use_shared_state(
                 using!(),
                 |_| {
                     allocator.create_device_buffer_uninit(
