@@ -28,7 +28,7 @@ crevice = { git = "https://github.com/LPGhatguy/crevice", features = ["glam"] }
 rand = "0.8"
 arrayvec = "0.7"
 
-nrd-sys = "0.1"
+nrd-sys = { git = "https://github.com/dust-engine/nrd-sys", rev = "bcf2d846b21848b60b528b5eae2e0ed770709054" }
 bytemuck = "1.13"
 
 # Processor dependencies
