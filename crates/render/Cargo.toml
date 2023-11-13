@@ -34,7 +34,7 @@ bytemuck = "1.13"
 # Processor dependencies
 shaderc = { version = "0.8", optional = true }
 playout = { git = "https://github.com/dust-engine/playout", optional = true }
-playout_macro = { path = "../../../playout/macro" }
+playout_macro = { git = "https://github.com/dust-engine/playout" }
 
 [features]
 default = ["glsl"]
