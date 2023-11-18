@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::{Debug, Write},
     marker::PhantomData,
-    ops::Generator,
+    ops::Coroutine,
     pin::Pin,
     sync::Arc,
     task::Poll,
@@ -1243,7 +1243,7 @@ pub trait QueueFuture {
 }
 
 /// On yield: true for a hard sync point (semaphore)
-pub trait QueueFutureBlockGenerator<Return, RecycledState, RetainedState> = Generator<
+pub trait QueueFutureBlockGenerator<Return, RecycledState, RetainedState> = Coroutine<
     (QueueMask, *mut (), *mut RecycledState),
     Return = (QueueMask, RetainedState, Return),
     Yield = Option<Vec<(vk::Semaphore, u64)>>,
@@ -1307,14 +1307,14 @@ where
             ctx as *mut _ as *mut (),
             recycled_state,
         )) {
-            std::ops::GeneratorState::Yielded(is_semaphore) => {
+            std::ops::CoroutineState::Yielded(is_semaphore) => {
                 if let Some(additional_semaphores) = is_semaphore {
                     QueueFuturePoll::Semaphore(additional_semaphores)
                 } else {
                     QueueFuturePoll::Barrier
                 }
             }
-            std::ops::GeneratorState::Complete((next_queue, dispose, output)) => {
+            std::ops::CoroutineState::Complete((next_queue, dispose, output)) => {
                 *this.retained_state = Some(dispose);
                 QueueFuturePoll::Ready { next_queue, output }
             }

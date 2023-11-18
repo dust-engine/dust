@@ -1,5 +1,5 @@
 #![feature(let_chains)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(associated_type_defaults)]
 #![feature(alloc_layout_extra)]
 #![feature(int_roundings)]

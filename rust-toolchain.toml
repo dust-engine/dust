@@ -1,4 +1,4 @@
 [toolchain]
 # Using an older version of nightly until keyword generics land in rustc.
 # https://github.com/rust-lang/rust/issues/110395
-channel = "nightly-2023-07-08"
+channel = "nightly-2023-11-18"

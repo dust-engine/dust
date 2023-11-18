@@ -1,5 +1,5 @@
 #![feature(get_mut_unchecked)]
-#![feature(generators)]
+#![feature(coroutines)]
 
 mod image;
 mod loaders;

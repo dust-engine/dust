@@ -1,7 +1,7 @@
 use super::{CommandBufferRecordContext, Disposable, GPUCommandFuture, StageContext};
 use pin_project::pin_project;
 use std::marker::PhantomData;
-use std::ops::{Generator, GeneratorState};
+use std::ops::{Coroutine, CoroutineState};
 use std::pin::Pin;
 use std::task::Poll;
 
@@ -30,7 +30,7 @@ impl GPUCommandGeneratorContextFetchPtr {
 // Yield = GPUCommandGeneratorContextFetchPtr,
 // Return = (R, State, PhantomData<&'retain ()>),
 // >;
-pub trait GPUCommandGenerator<R, State, Recycle: Default> = Generator<
+pub trait GPUCommandGenerator<R, State, Recycle: Default> = Coroutine<
     (*mut (), *mut Recycle),
     Yield = GPUCommandGeneratorContextFetchPtr,
     Return = (R, State),
@@ -102,12 +102,12 @@ impl<
             .inner
             .resume((ctx as *mut _ as *mut (), recycled_state))
         {
-            GeneratorState::Yielded(ctx) => {
+            CoroutineState::Yielded(ctx) => {
                 *this.state = GPUCommandBlockState::Continue { next_ctx: ctx };
                 // continue here.
                 Poll::Pending
             }
-            GeneratorState::Complete((ret, state)) => {
+            CoroutineState::Complete((ret, state)) => {
                 *this.state = GPUCommandBlockState::Terminated;
                 Poll::Ready((ret, state))
             }
@@ -139,10 +139,10 @@ impl<
             .inner
             .resume((ctx as *mut _ as *mut (), recycled_state))
         {
-            GeneratorState::Yielded(ctx) => {
+            CoroutineState::Yielded(ctx) => {
                 *this.state = GPUCommandBlockState::Continue { next_ctx: ctx };
             }
-            GeneratorState::Complete((output, retain)) => {
+            CoroutineState::Complete((output, retain)) => {
                 // We're pretty sure that this should be the first time we pull the generator.
                 // However, it's already completed. This indicates that nothing was awaited ever
                 // in the future.

@@ -1,5 +1,5 @@
 #![feature(generic_const_exprs)]
-#![feature(generators)]
+#![feature(coroutines)]
 
 mod collector;
 mod loader;

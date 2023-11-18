@@ -1,4 +1,4 @@
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(int_roundings)]
 use std::ops::DerefMut;
 
