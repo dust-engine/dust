@@ -75,7 +75,7 @@ impl RayTracingPipeline for StandardPipeline {
     }
     fn pipeline_layout(device: &Arc<rhyolite::Device>) -> Arc<rhyolite::PipelineLayout> {
         let set0 =
-            playout_macro::layout!("../../../../../assets/shaders/headers/layout.playout", 0);
+            playout_macro::layout!("../../../../assets/shaders/headers/layout.playout", 0);
         let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
         Arc::new(
             rhyolite::PipelineLayout::new(

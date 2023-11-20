@@ -40,7 +40,7 @@ impl FromWorld for ToneMappingPipeline {
         let num_frame_in_flight = queues.num_frame_in_flight();
         let device = queues.device().clone();
 
-        let set0 = playout_macro::layout!("../../../../../assets/shaders/tone_map.playout", 0);
+        let set0 = playout_macro::layout!("../../../../assets/shaders/tone_map.playout", 0);
         let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
         let layout = Arc::new(
             rhyolite::PipelineLayout::new(

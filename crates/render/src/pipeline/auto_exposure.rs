@@ -45,7 +45,7 @@ impl FromWorld for AutoExposurePipeline {
         let num_frame_in_flight = queues.num_frame_in_flight();
         let device = queues.device().clone();
 
-        let set0 = playout_macro::layout!("../../../../../assets/shaders/auto_exposure.playout", 0);
+        let set0 = playout_macro::layout!("../../../../assets/shaders/auto_exposure.playout", 0);
         let set0 = DescriptorSetLayout::new(device.clone(), &set0, Default::default()).unwrap();
         let layout = Arc::new(
             rhyolite::PipelineLayout::new(
