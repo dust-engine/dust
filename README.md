@@ -29,10 +29,12 @@ That includes the following devices:
 - Intel Arc A380 and above
 - AMD RDNA2+ integrated graphics. That includes all Ryzen 6000 series laptop CPUs, all Ryzen 7000 series laptop CPUs except 7030 series, and potentially Steam Deck, PS5 and Xbox.
 
-### Compatible operating system.
-The engine is tested on Windows only.
+### Compatible operating system
+The engine is only substantially tested on Windows
 
 Should also work on Linux, but it's tested to a lesser degree. If you run into any problems, please let us know on our [Discord Server](https://discord.com/invite/7R26SXn8CT).
+
+Windows Subsystem for Linux is unsupported.
 
 macOS support is possible in the future through MoltenVK.
 
