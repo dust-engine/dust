@@ -6,7 +6,7 @@
 #![feature(alloc_layout_extra)]
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(const_maybe_uninit_write)]
-#![feature(const_trait_impl)]
+#![feature(const_trait_impl, effects)]
 #![feature(const_mut_refs)]
 #![feature(const_for)]
 #![feature(const_intoiterator_identity)]

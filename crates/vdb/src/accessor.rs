@@ -36,7 +36,7 @@ where
     #[inline]
     pub fn get(&mut self, coords: UVec3) -> Option<ROOT::Voxel>
     where
-        ROOT: ~const NodeConst,
+        ROOT: NodeConst,
     {
         let lca_level = lowest_common_ancestor_level(
             self.last_coords,
@@ -73,7 +73,7 @@ where
     #[inline]
     pub fn get(&mut self, coords: UVec3) -> Option<ROOT::Voxel>
     where
-        ROOT: ~const NodeConst,
+        ROOT: NodeConst,
     {
         let lca_level = lowest_common_ancestor_level(
             self.last_coords,
@@ -96,7 +96,7 @@ where
     #[inline]
     pub fn set(&mut self, coords: UVec3, value: Option<ROOT::Voxel>)
     where
-        ROOT: ~const NodeConst,
+        ROOT: NodeConst,
     {
         let lca_level = lowest_common_ancestor_level(
             self.last_coords,

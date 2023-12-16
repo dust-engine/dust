@@ -29,7 +29,7 @@ where
 {
     pub fn new() -> Self
     where
-        ROOT: ~const NodeConst,
+        ROOT: NodeConst,
     {
         let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
         for (i, meta) in Self::METAS.iter().take(ROOT::LEVEL).enumerate() {
