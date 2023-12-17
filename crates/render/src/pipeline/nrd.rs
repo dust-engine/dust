@@ -34,7 +34,7 @@ pub struct NRDPipeline {
     binding_offsets: SPIRVBindingOffsets,
     dimensions: (u16, u16),
 }
-const REBLUR_IDENTIFIER: Identifier = Identifier(0);
+const DENOISER_IDENTIFIER: Identifier = Identifier(0);
 
 impl FromWorld for NRDPipeline {
     fn from_world(world: &mut bevy_ecs::world::World) -> Self {
@@ -45,7 +45,7 @@ impl FromWorld for NRDPipeline {
 impl NRDPipeline {
     pub fn new(device: &Arc<rhyolite::Device>, width: u16, height: u16) -> Self {
         let instance = Instance::new(&[DenoiserDesc {
-            identifier: REBLUR_IDENTIFIER,
+            identifier: DENOISER_IDENTIFIER,
             denoiser: Denoiser::ReblurDiffuse,
             render_width: width,
             render_height: height,
@@ -56,6 +56,7 @@ impl NRDPipeline {
         assert_eq!(desc.resources_space_index, 0);
         assert_eq!(desc.constant_buffer_space_index, 0);
         assert_eq!(desc.constant_buffer_register_index, 0);
+        println!("{:?}", desc.samplers());
 
         // Creating samplers
         let sampler_create_info = vk::SamplerCreateInfo {
@@ -237,7 +238,7 @@ impl NRDPipeline {
     }
     pub fn resize(&mut self, width: u16, height: u16) {
         let instance = Instance::new(&[DenoiserDesc {
-            identifier: REBLUR_IDENTIFIER,
+            identifier: DENOISER_IDENTIFIER,
             denoiser: Denoiser::ReblurDiffuse,
             render_width: width,
             render_height: height,
@@ -353,7 +354,7 @@ impl NRDPipeline {
         };
         self.instance.set_common_settings(&common_settings).unwrap();
         self.instance
-            .set_denoiser_settings(REBLUR_IDENTIFIER, &reblur_settings.reblur_settings)
+            .set_denoiser_settings(DENOISER_IDENTIFIER, &reblur_settings.reblur_settings)
             .unwrap();
         {
             // update local state
@@ -367,7 +368,7 @@ impl NRDPipeline {
         commands! { move
             let dispatches = self
             .instance
-            .get_compute_dispatches(&[REBLUR_IDENTIFIER])
+            .get_compute_dispatches(&[DENOISER_IDENTIFIER])
             .unwrap();
             let mut constant_buffer_size: u32 = 0;
             let uniform_alignment = allocator.device().physical_device().properties().limits.min_uniform_buffer_offset_alignment as u32;
@@ -767,15 +768,14 @@ pub struct ReblurSettings {
 impl Default for ReblurSettings {
     fn default() -> Self {
         Self {
-            common_settings: Default::default(),
+            common_settings: CommonSettings {
+                ..Default::default()
+            },
             reblur_settings: nrd_sys::ReblurSettings {
-                antilag_hit_distance_settings: AntilagHitDistanceSettings {
-                    enable: false,
-                    ..Default::default()
-                },
-                antilag_intensity_settings: AntilagIntensitySettings {
-                    sensitivity_to_darkness: 0.1,
-                    enable: false,
+                antilag_settings: nrd_sys::ReblurAntilagSettings {
+                    luminance_sigma_scale: 2.0,
+                    luminance_antilag_power: 0.8,
+                    hit_distance_antilag_power: 0.1,
                     ..Default::default()
                 },
                 ..Default::default()
