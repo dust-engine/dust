@@ -4,6 +4,7 @@ use bevy_asset::{Asset, AssetLoader, Handle};
 use bevy_reflect::TypePath;
 use futures_lite::AsyncReadExt;
 use rhyolite::{ash::vk, cstr, shader::SpecializationInfo};
+use thiserror::Error;
 
 #[derive(TypePath, Asset)]
 pub struct ShaderModule(Arc<rhyolite::shader::ShaderModule>);
@@ -38,6 +39,14 @@ impl SpecializedShader {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum SpirvLoaderError {
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("vulkan error: {0:?}")]
+    VkError(#[from] vk::Result),
+}
 pub struct SpirvLoader {
     device: rhyolite_bevy::Device,
 }
@@ -49,12 +58,13 @@ impl SpirvLoader {
 impl AssetLoader for SpirvLoader {
     type Asset = ShaderModule;
     type Settings = ();
+    type Error = SpirvLoaderError;
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
         _settings: &'a Self::Settings,
         _load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_utils::BoxedFuture<'a, Result<ShaderModule, anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<'a, Result<ShaderModule, Self::Error>> {
         let device = self.device.inner().clone();
         return Box::pin(async move {
             let mut bytes = Vec::new();

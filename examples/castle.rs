@@ -51,12 +51,15 @@ fn main() {
                 title: "Dust Renderer: Castle".into(),
                 resolution: WindowResolution::new(1920.0, 1080.0).with_scale_factor_override(1.0),
                 ..Default::default()
-            }),
+            }), 
             ..Default::default()
         })
         .add_plugins(bevy_a11y::AccessibilityPlugin)
         .add_plugins(bevy_winit::WinitPlugin::default())
-        .add_plugins(bevy_asset::AssetPlugin::processed_dev().watch_for_changes())
+        .add_plugins(bevy_asset::AssetPlugin {
+            mode: bevy_asset::AssetMode::Processed,
+            ..Default::default()
+        })
         .add_plugins(dust_render::RenderPlugin::default())
         .add_plugins(bevy_time::TimePlugin::default())
         .add_plugins(bevy_scene::ScenePlugin::default())
@@ -264,8 +267,8 @@ fn print_position(
 }
 
 fn cursor_grab_system(
-    btn: Res<bevy_input::Input<MouseButton>>,
-    key: Res<bevy_input::Input<KeyCode>>,
+    btn: Res<bevy_input::ButtonInput<MouseButton>>,
+    key: Res<bevy_input::ButtonInput<KeyCode>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let mut window = windows.iter_mut().next().unwrap();

@@ -3,9 +3,10 @@ use std::{collections::HashMap, path::PathBuf};
 use bevy_app::Plugin;
 use bevy_asset::{
     saver::{AssetSaver, SavedAsset},
-    Asset, AssetLoader, AssetPath, LoadContext,
+    Asset, AssetLoader, AssetPath, LoadContext, LoadDirectError,
 };
 use bevy_reflect::TypePath;
+use bevy_utils::thiserror::Error;
 use futures_lite::{AsyncReadExt, AsyncWriteExt};
 use shaderc::ResolvedInclude;
 
@@ -27,12 +28,13 @@ pub struct GlslSourceLoader;
 impl AssetLoader for GlslSourceLoader {
     type Asset = GlslShaderSource;
     type Settings = ();
+    type Error = std::io::Error;
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
         _settings: &'a Self::Settings,
         _load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, Self::Error>> {
         Box::pin(async move {
             let mut source = String::new();
             reader.read_to_string(&mut source).await?;
@@ -46,12 +48,23 @@ impl AssetLoader for GlslSourceLoader {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum ShadercLoadingError {
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("shaderc error: {0}")]
+    ShadercError(#[from] shaderc::Error),
+    #[error("shaderc error: {0}")]
+    LoadingError(#[from] LoadDirectError),
+}
+
 /// Asset loader that compiles the GLSL source code into SPIR-V using Shaderc.
 pub struct GlslShadercCompiler;
 impl AssetLoader for GlslShadercCompiler {
     type Asset = SpirvShaderSource;
 
     type Settings = ();
+    type Error = ShadercLoadingError;
 
     fn extensions(&self) -> &[&str] {
         &[
@@ -64,7 +77,7 @@ impl AssetLoader for GlslShadercCompiler {
         reader: &'a mut bevy_asset::io::Reader,
         _settings: &'a Self::Settings,
         ctx: &'a mut LoadContext,
-    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, Self::Error>> {
         use shaderc::ShaderKind;
         let kind = if let Some(ext) = ctx.asset_path().get_full_extension() {
             match ext.as_str() {
@@ -109,7 +122,7 @@ impl AssetLoader for GlslShadercCompiler {
                     };
                     let normalized_path = normalize_path(&path);
                     let inc = ctx
-                        .load_direct(AssetPath::from_path(normalized_path))
+                        .load_direct(AssetPath::from_path(&normalized_path))
                         .await?;
                     let source: &GlslShaderSource = inc.get().unwrap();
                     pending_sources.push((included_filename.to_string(), source.source.clone()));
@@ -153,12 +166,13 @@ impl AssetSaver for SpirvSaver {
     type Asset = SpirvShaderSource;
     type Settings = ();
     type OutputLoader = SpirvLoader;
+    type Error = std::io::Error;
     fn save<'a>(
         &'a self,
         writer: &'a mut bevy_asset::io::Writer,
         asset: SavedAsset<'a, Self::Asset>,
         _settings: &'a Self::Settings,
-    ) -> bevy_utils::BoxedFuture<Result<(), anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<Result<(), std::io::Error>> {
         Box::pin(async move {
             writer.write_all(&asset.source).await?;
             Ok(())
@@ -171,12 +185,13 @@ impl AssetSaver for GlslSaver {
     type Asset = GlslShaderSource;
     type Settings = ();
     type OutputLoader = GlslSourceLoader;
+    type Error = std::io::Error;
     fn save<'a>(
         &'a self,
         writer: &'a mut bevy_asset::io::Writer,
         asset: SavedAsset<'a, Self::Asset>,
         _settings: &'a Self::Settings,
-    ) -> bevy_utils::BoxedFuture<Result<(), anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<Result<(), std::io::Error>> {
         Box::pin(async move {
             writer.write_all(asset.source.as_bytes()).await?;
             Ok(())
@@ -283,18 +298,27 @@ pub fn normalize_path(path: &PathBuf) -> PathBuf {
     ret
 }
 
+#[derive(Error, Debug)]
+pub enum PlayoutLoadingError {
+    #[error("playout error: {0}")]
+    PlayoutError(#[from] playout::Error),
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
+}
+
 #[derive(Default)]
 pub struct PlayoutGlslLoader;
 
 impl AssetLoader for PlayoutGlslLoader {
     type Asset = GlslShaderSource;
     type Settings = ();
+    type Error = PlayoutLoadingError;
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
         _settings: &'a Self::Settings,
         _load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<'a, Result<Self::Asset, Self::Error>> {
         Box::pin(async move {
             let mut source = String::new();
             reader.read_to_string(&mut source).await?;

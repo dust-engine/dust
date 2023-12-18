@@ -308,20 +308,28 @@ impl VoxLoader {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum VoxLoadingError {
+    #[error("parse error: {0}")]
+    ParseError(&'static str),
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error)
+}
 impl AssetLoader for VoxLoader {
     type Asset = bevy_scene::Scene;
     type Settings = ();
+    type Error = VoxLoadingError;
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
-        settings: &'a Self::Settings,
+        _settings: &'a Self::Settings,
         load_context: &'a mut bevy_asset::LoadContext,
-    ) -> bevy_utils::BoxedFuture<'a, Result<bevy_scene::Scene, anyhow::Error>> {
+    ) -> bevy_utils::BoxedFuture<'a, Result<bevy_scene::Scene, VoxLoadingError>> {
         Box::pin(async {
             let mut buffer = Vec::new();
             reader.read_to_end(&mut buffer).await?;
             let file =
-                dot_vox::load_bytes(buffer.as_slice()).map_err(|str| anyhow::Error::msg(str))?;
+                dot_vox::load_bytes(buffer.as_slice()).map_err(|reason| VoxLoadingError::ParseError(reason))?;
 
             let staging_ring_buffer = StagingRingBuffer::new(self.allocator.device()).unwrap();
             let palette = self

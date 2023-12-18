@@ -8,17 +8,17 @@ edition = "2021"
 [dependencies]
 dot_vox = "5.1"
 dust-render = { path = "../render" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
-bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a", default-features=false, features=["serialize"] }
-bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
-bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
-bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
-bevy_utils = { git = "https://github.com/bevyengine/bevy.git", rev = "0181d40d83c7e12a3e54846c60b7bff3142cbe0a" }
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f" }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f" }
+bevy_scene = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f", default-features=false, features=["serialize"] }
+bevy_asset = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f" }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f" }
+bevy_hierarchy = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f" }
+bevy_transform = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f" }
+bevy_utils = { git = "https://github.com/bevyengine/bevy.git", rev = "2c7eab1b4c4ec6c533b6b609d5ddf8a7282f2c4f" }
 rhyolite = { path = "../rhyolite" }
 rhyolite-bevy = { path = "../rhyolite_bevy" }
 dust_vdb = { path = "../vdb" }
 glam = "^0.24"
-anyhow = "*"
+thiserror = "1"
 rayon = "1.7"

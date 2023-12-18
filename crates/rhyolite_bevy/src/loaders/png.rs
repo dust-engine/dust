@@ -35,6 +35,7 @@ impl FromWorld for PngLoader {
 }
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PngSettings {
     pub format_type: FormatType,
@@ -49,32 +50,34 @@ impl Default for PngSettings {
     }
 }
 
-#[derive(Debug)]
-enum PngLoadingError {
+#[derive(Debug, Error)]
+pub enum PngLoadingError {
     /// Possible reasons:
     /// - The png file operates in index mode.
     /// - The png file has a bit depth of 1 or 2.
     /// - Grayscale or Grayscale alpha image with a bit depth of 4.
+    #[error("Png color type wrong")]
     UnsupportedPngColorTypeError,
+    #[error("unsupported format: {0:?}")]
     UnsupportedFormatError(Format),
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("vulkan error: {0}")]
+    VkError(#[from] vk::Result),
 }
-impl Display for PngLoadingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self, f)
-    }
-}
-impl std::error::Error for PngLoadingError {}
+
 
 impl AssetLoader for PngLoader {
     // TODO: make different loaders for png img arrays and single images
     type Asset = SlicedImageArray;
     type Settings = PngSettings;
+    type Error = PngLoadingError;
     fn load<'a>(
         &'a self,
         reader: &'a mut bevy_asset::io::Reader,
         settings: &'a Self::Settings,
         _load_context: &'a mut bevy_asset::LoadContext,
-    ) -> BoxedFuture<'a, Result<SlicedImageArray, anyhow::Error>> {
+    ) -> BoxedFuture<'a, Result<SlicedImageArray, PngLoadingError>> {
         Box::pin(async move {
             let mut img_data = Vec::new();
             reader.read_to_end(&mut img_data).await?;
@@ -101,9 +104,7 @@ impl AssetLoader for PngLoader {
                     png::ColorType::Rgb => 3,
                     png::ColorType::Rgba => 4,
                     png::ColorType::Indexed => {
-                        return Err(anyhow::Error::new(
-                            PngLoadingError::UnsupportedPngColorTypeError,
-                        ))
+                        return Err(PngLoadingError::UnsupportedPngColorTypeError)
                     }
                 };
                 size / 8
@@ -122,9 +123,7 @@ impl AssetLoader for PngLoader {
                     png::ColorType::Rgb => 4,
                     png::ColorType::Rgba => 4,
                     png::ColorType::Indexed => {
-                        return Err(anyhow::Error::new(
-                            PngLoadingError::UnsupportedPngColorTypeError,
-                        ))
+                        return Err(PngLoadingError::UnsupportedPngColorTypeError)
                     }
                 };
                 size / 8
@@ -177,9 +176,7 @@ impl AssetLoader for PngLoader {
                     png::ColorType::Grayscale | png::ColorType::GrayscaleAlpha,
                     png::BitDepth::Four,
                 ) => {
-                    return Err(anyhow::Error::new(
-                        PngLoadingError::UnsupportedPngColorTypeError,
-                    ))
+                    return Err(PngLoadingError::UnsupportedPngColorTypeError)
                 }
             };
 

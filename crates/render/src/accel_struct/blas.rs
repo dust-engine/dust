@@ -96,7 +96,7 @@ pub(crate) fn geometry_normalize_system<G: Geometry>(
                 };
                 for entity in entities.iter() {
                     let entity = *entity;
-                    let asset = assets.get(id.untyped()).unwrap();
+                    let asset = assets.get(*id).unwrap();
                     let flags = asset.geometry_flags();
                     let layout = asset.layout();
                     upload_futures.push(
