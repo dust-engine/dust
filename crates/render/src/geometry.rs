@@ -48,7 +48,7 @@ impl<G: Geometry> Plugin for GeometryPlugin<G> {
             PostUpdate,
             (crate::accel_struct::blas::geometry_normalize_system::<G>
                 .in_set(RenderSystems::SetUp)
-                .before(build_blas_system),),
+                .before_ignore_deferred(build_blas_system),),
         );
     }
 }
