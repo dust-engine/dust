@@ -1,0 +1,10 @@
+#[set]
+struct EguiLayout {
+    #![stage(FRAGMENT)]
+    u_img: CombinedImageSampler,
+}
+#[push_constants]
+struct PushConstants {
+    #![stage(VERTEX)]
+    u_transform: Vec2,
+}

@@ -1,0 +1,10 @@
+(
+    meta_format_version: "1.0",
+    asset: Process(
+        processor: "bevy_asset::processor::process::LoadAndSave<rhyolite::shader::glsl::GlslShadercCompiler, rhyolite::shader::spirv::SpirvSaver>",
+        settings: (
+            loader_settings: (),
+            saver_settings: (),
+        ),
+    ),
+)

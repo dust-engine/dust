@@ -3,4 +3,14 @@ name = "dust"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = [
+  "crates/*",
+]
+
+
 [dependencies]
+
+
+[patch.crates-io]
+bevy = { path = "../bevy" }

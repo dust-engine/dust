@@ -1,0 +1,10 @@
+[package]
+name = "dust_editor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rhyolite = { path = "../../../rhyolite" }
+rhyolite_egui = { path = "../../../rhyolite/crates/egui" }
+bevy = { version = "0.13", default-features = false }
+rfd = "0.14"
