@@ -658,7 +658,7 @@ dependencies = [
 name = "bevy_math"
 version = "0.13.0"
 dependencies = [
- "glam",
+ "glam 0.25.0",
  "serde",
 ]
 
@@ -666,7 +666,7 @@ dependencies = [
 name = "bevy_mikktspace"
 version = "0.13.0"
 dependencies = [
- "glam",
+ "glam 0.25.0",
 ]
 
 [[package]]
@@ -683,7 +683,7 @@ dependencies = [
  "bevy_utils",
  "downcast-rs",
  "erased-serde",
- "glam",
+ "glam 0.25.0",
  "serde",
  "smol_str",
  "thiserror",
@@ -1385,13 +1385,23 @@ name = "dust"
 version = "0.1.0"
 
 [[package]]
-name = "dust_voxelizer"
+name = "dust_editor"
 version = "0.1.0"
 dependencies = [
  "bevy",
  "rfd",
  "rhyolite",
  "rhyolite_egui",
+]
+
+[[package]]
+name = "dust_vdb"
+version = "0.1.0"
+dependencies = [
+ "fxhash",
+ "glam 0.24.2",
+ "nohash",
+ "rand",
 ]
 
 [[package]]
@@ -1437,7 +1447,7 @@ checksum = "95ed933078d2e659745df651f4c180511cd582e5b9414ff896e7d50d207e3103"
 dependencies = [
  "const_panic",
  "encase_derive",
- "glam",
+ "glam 0.25.0",
  "thiserror",
 ]
 
@@ -1754,6 +1764,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fxhash"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1796,6 +1815,12 @@ dependencies = [
  "log",
  "xml-rs",
 ]
+
+[[package]]
+name = "glam"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
 
 [[package]]
 name = "glam"
@@ -1934,7 +1959,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f33ddb7f7143d9e703c072e88b98cd8b9719f174137a671429351bd2ee43c02a"
 dependencies = [
  "constgebra",
- "glam",
+ "glam 0.25.0",
 ]
 
 [[package]]
@@ -2351,6 +2376,12 @@ dependencies = [
  "libc",
  "memoffset",
 ]
+
+[[package]]
+name = "nohash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0f889fb66f7acdf83442c35775764b51fed3c606ab9cee51500dbde2cf528ca"
 
 [[package]]
 name = "nohash-hasher"
