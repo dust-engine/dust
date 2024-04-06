@@ -1,17 +1,8 @@
-#![feature(int_roundings)]
-#![feature(stdsimd)]
 #![feature(generic_const_exprs)]
 #![feature(adt_const_params)]
 #![feature(maybe_uninit_uninit_array)]
+#![feature(maybe_uninit_array_assume_init)]
 #![feature(alloc_layout_extra)]
-#![feature(const_maybe_uninit_uninit_array)]
-#![feature(const_maybe_uninit_write)]
-#![feature(const_maybe_uninit_assume_init_read)]
-#![feature(const_trait_impl)]
-#![feature(const_mut_refs)]
-#![feature(const_for)]
-#![feature(const_intoiterator_identity)]
-#![feature(portable_simd)]
 
 mod accessor;
 mod bitmask;

@@ -32,6 +32,7 @@ pub trait Node: 'static + Default + Debug {
     const EXTENT_LOG2: UVec3;
     const EXTENT: UVec3;
     const EXTENT_MASK: UVec3; // = (1 << extent_log2) - 1
+    const META_MASK: UVec3;
     /// Max number of child nodes.
     const SIZE: usize;
 
@@ -87,14 +88,8 @@ pub trait Node: 'static + Default + Debug {
     fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a>;
     /// This is called when the node was located in a node pool.
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a>;
-}
 
-/// Trait that contains const methods for the node.
-#[const_trait]
-pub trait NodeConst: Node {
-    /// Method that congregates metadata of each level of the tree into an array.
-    /// Implementation shoud write NodeMeta into `metas[Self::LEVEL]`.
-    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]);
+    fn write_meta(metas: &mut Vec<NodeMeta<Self::Voxel>>);
 }
 
 /// Macro that simplifies tree type construction.

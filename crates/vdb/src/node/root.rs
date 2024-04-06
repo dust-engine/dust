@@ -2,7 +2,7 @@ use std::{cell::UnsafeCell, marker::PhantomData, mem::MaybeUninit};
 
 use glam::UVec3;
 
-use crate::{Node, NodeConst, Pool};
+use crate::{Node, Pool};
 
 use super::NodeMeta;
 
@@ -44,6 +44,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         z: u32::MAX,
     };
     const EXTENT_MASK: UVec3 = Self::EXTENT;
+    const META_MASK: UVec3 = CHILD::META_MASK;
 
     const SIZE: usize = usize::MAX;
 
@@ -160,11 +161,9 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     ) -> Self::LeafIterator<'a> {
         unreachable!("Root Node is never kept in a pool!")
     }
-}
-
-impl<CHILD: ~const NodeConst> const NodeConst for RootNode<CHILD> {
-    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]) {
-        metas[Self::LEVEL as usize].write(NodeMeta {
+    fn write_meta(metas: &mut Vec<NodeMeta<Self::Voxel>>) {
+        CHILD::write_meta(metas);
+        metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
             setter: Self::set_in_pools,
@@ -172,9 +171,9 @@ impl<CHILD: ~const NodeConst> const NodeConst for RootNode<CHILD> {
             fanout_log2: Self::EXTENT_LOG2,
             extent_mask: Self::EXTENT_MASK,
         });
-        CHILD::write_meta(metas);
     }
 }
+
 
 impl<CHILD: Node> std::fmt::Debug for RootNode<CHILD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 
 use glam::UVec3;
 
-use crate::{Node, NodeConst, NodeMeta, Pool};
+use crate::{Node, NodeMeta, Pool};
 
 pub struct Tree<ROOT: Node>
 where
@@ -29,10 +29,10 @@ where
 {
     pub fn new() -> Self
     where
-        ROOT: ~const NodeConst,
+        ROOT: Node,
     {
         let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
-        for (i, meta) in Self::METAS.iter().take(ROOT::LEVEL).enumerate() {
+        for (i, meta) in Self::metas().iter().take(ROOT::LEVEL).enumerate() {
             let pool = Pool::new(meta.layout, 10);
             pools[i].write(pool);
         }
@@ -122,59 +122,11 @@ where
                 (position, leaf)
             })
     }
+    
+    pub fn metas() -> Vec<NodeMeta<ROOT::Voxel>> {
+        let mut vec = Vec::with_capacity(ROOT::LEVEL + 1);
+        ROOT::write_meta(&mut vec);
+        vec
+    }
 }
 
-/// Workaround for https://github.com/rust-lang/rust/issues/88424#issuecomment-911158795
-#[const_trait]
-pub(crate) trait TreeMeta<ROOT: Node>
-where
-    [(); ROOT::LEVEL as usize + 1]: Sized,
-{
-    const METAS: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1];
-    const META_MASK: UVec3;
-    const ID: u64;
-}
-
-impl<ROOT: ~const NodeConst> const TreeMeta<ROOT> for Tree<ROOT>
-where
-    [(); ROOT::LEVEL as usize + 1]: Sized,
-{
-    const METAS: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1] = {
-        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL as usize + 1] =
-            MaybeUninit::uninit_array();
-
-        ROOT::write_meta(&mut metas);
-        let metas: [crate::node::NodeMeta<ROOT::Voxel>; ROOT::LEVEL as usize + 1] = unsafe {
-            // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504
-            (&*(&MaybeUninit::new(metas) as *const _ as *const MaybeUninit<_>)).assume_init_read()
-        };
-
-        metas
-    };
-    const META_MASK: UVec3 = {
-        let mut mask: UVec3 = UVec3::ZERO;
-        let mut i = 0;
-        while i < Self::METAS.len() {
-            let meta = &Self::METAS[i];
-            mask = UVec3 {
-                x: mask.x | (1 << (meta.extent_log2.x - 1)),
-                y: mask.y | (1 << (meta.extent_log2.y - 1)),
-                z: mask.z | (1 << (meta.extent_log2.z - 1)),
-            };
-            i += 1;
-        }
-        mask
-    };
-    const ID: u64 = {
-        let mut id: u64 = 0;
-        let mut i = 0;
-        while i < Self::METAS.len() {
-            let meta = &Self::METAS[i];
-            id = id * 32 + meta.extent_log2.x as u64;
-            id = id * 32 + meta.extent_log2.y as u64;
-            id = id * 32 + meta.extent_log2.z as u64;
-            i += 1;
-        }
-        id
-    };
-}

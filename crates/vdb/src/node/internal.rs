@@ -1,5 +1,5 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, NodeConst, Pool};
+use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
@@ -62,6 +62,11 @@ where
         x: Self::EXTENT.x - 1,
         y: Self::EXTENT.y - 1,
         z: Self::EXTENT.z - 1,
+    };
+    const META_MASK: UVec3 = UVec3 {
+        x: CHILD::META_MASK.x | (1 << (Self::EXTENT_LOG2.x-1)),
+        y: CHILD::META_MASK.y | (1 << (Self::EXTENT_LOG2.y-1)),
+        z: CHILD::META_MASK.z | (1 << (Self::EXTENT_LOG2.z-1)),
     };
     const LEVEL: usize = CHILD::LEVEL + 1;
     fn new() -> Self {
@@ -207,15 +212,9 @@ where
             child_iterator: None,
         }
     }
-}
-
-impl<CHILD: ~const NodeConst + Node, const FANOUT_LOG2: ConstUVec3> const NodeConst
-    for InternalNode<CHILD, FANOUT_LOG2>
-where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
-{
-    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]) {
-        metas[Self::LEVEL as usize].write(NodeMeta {
+    fn write_meta(metas: &mut Vec<NodeMeta<Self::Voxel>>) {
+        CHILD::write_meta(metas);
+        metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
             setter: Self::set_in_pools,
@@ -223,7 +222,6 @@ where
             extent_mask: Self::EXTENT_MASK,
             fanout_log2: FANOUT_LOG2.to_glam(),
         });
-        CHILD::write_meta(metas);
     }
 }
 

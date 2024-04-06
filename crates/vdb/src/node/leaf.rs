@@ -1,5 +1,5 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, NodeConst, Pool};
+use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
@@ -64,6 +64,11 @@ where
         x: Self::EXTENT.x - 1,
         y: Self::EXTENT.y - 1,
         z: Self::EXTENT.z - 1,
+    };
+    const META_MASK: UVec3 = UVec3 {
+        x: 1 << (LOG2.x-1),
+        y: 1 << (LOG2.y-1),
+        z: 1 << (LOG2.z-1),
     };
     const LEVEL: usize = 0;
     fn new() -> Self {
@@ -162,14 +167,9 @@ where
         let node = unsafe { pools[0].get_item::<Self>(ptr) };
         std::iter::once((offset, unsafe { std::mem::transmute(node) }))
     }
-}
 
-impl<const LOG2: ConstUVec3> const NodeConst for LeafNode<LOG2>
-where
-    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
-{
-    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::Voxel>>]) {
-        metas[Self::LEVEL].write(NodeMeta {
+    fn write_meta(metas: &mut Vec<NodeMeta<Self::Voxel>>) {
+        metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,
             extent_log2: Self::EXTENT_LOG2,
@@ -179,6 +179,7 @@ where
         });
     }
 }
+
 
 impl<const LOG2: ConstUVec3> std::fmt::Debug for LeafNode<LOG2>
 where
