@@ -64,9 +64,9 @@ where
         z: Self::EXTENT.z - 1,
     };
     const META_MASK: UVec3 = UVec3 {
-        x: CHILD::META_MASK.x | (1 << (Self::EXTENT_LOG2.x-1)),
-        y: CHILD::META_MASK.y | (1 << (Self::EXTENT_LOG2.y-1)),
-        z: CHILD::META_MASK.z | (1 << (Self::EXTENT_LOG2.z-1)),
+        x: CHILD::META_MASK.x | (1 << (Self::EXTENT_LOG2.x - 1)),
+        y: CHILD::META_MASK.y | (1 << (Self::EXTENT_LOG2.y - 1)),
+        z: CHILD::META_MASK.z | (1 << (Self::EXTENT_LOG2.z - 1)),
     };
     const LEVEL: usize = CHILD::LEVEL + 1;
     fn new() -> Self {

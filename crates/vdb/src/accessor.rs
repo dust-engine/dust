@@ -132,7 +132,8 @@ where
     [(); ROOT::LEVEL + 1]: Sized,
 {
     pub fn accessor(&self) -> Accessor<ROOT> {
-        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL + 1] = MaybeUninit::uninit_array();
+        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL + 1] =
+            MaybeUninit::uninit_array();
         let metas_src = Self::metas();
         assert_eq!(metas.len(), metas_src.len());
         for (dst, src) in metas.iter_mut().zip(metas_src.into_iter()) {
@@ -141,12 +142,13 @@ where
         Accessor {
             tree: self,
             ptrs: [0; ROOT::LEVEL],
-            metas: unsafe{MaybeUninit::array_assume_init(metas)},
+            metas: unsafe { MaybeUninit::array_assume_init(metas) },
             last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
         }
     }
     pub fn accessor_mut(&mut self) -> AccessorMut<ROOT> {
-        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL + 1] = MaybeUninit::uninit_array();
+        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL + 1] =
+            MaybeUninit::uninit_array();
         let metas_src = Self::metas();
         assert_eq!(metas.len(), metas_src.len());
         for (dst, src) in metas.iter_mut().zip(metas_src.into_iter()) {
@@ -155,7 +157,7 @@ where
         AccessorMut {
             tree: self,
             ptrs: [0; ROOT::LEVEL],
-            metas: unsafe{MaybeUninit::array_assume_init(metas)},
+            metas: unsafe { MaybeUninit::array_assume_init(metas) },
             last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
         }
     }

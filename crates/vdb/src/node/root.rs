@@ -174,7 +174,6 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     }
 }
 
-
 impl<CHILD: Node> std::fmt::Debug for RootNode<CHILD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("RootNode")

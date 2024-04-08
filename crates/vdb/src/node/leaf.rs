@@ -66,9 +66,9 @@ where
         z: Self::EXTENT.z - 1,
     };
     const META_MASK: UVec3 = UVec3 {
-        x: 1 << (LOG2.x-1),
-        y: 1 << (LOG2.y-1),
-        z: 1 << (LOG2.z-1),
+        x: 1 << (LOG2.x - 1),
+        y: 1 << (LOG2.y - 1),
+        z: 1 << (LOG2.z - 1),
     };
     const LEVEL: usize = 0;
     fn new() -> Self {
@@ -179,7 +179,6 @@ where
         });
     }
 }
-
 
 impl<const LOG2: ConstUVec3> std::fmt::Debug for LeafNode<LOG2>
 where

@@ -55,5 +55,5 @@ fn side_panel_system(mut contexts: EguiContexts, mut state: Local<UIState>) {
             }
         }
         ui.label("Hello World!");
-     });
+    });
 }

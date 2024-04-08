@@ -122,11 +122,10 @@ where
                 (position, leaf)
             })
     }
-    
+
     pub fn metas() -> Vec<NodeMeta<ROOT::Voxel>> {
         let mut vec = Vec::with_capacity(ROOT::LEVEL + 1);
         ROOT::write_meta(&mut vec);
         vec
     }
 }
-
