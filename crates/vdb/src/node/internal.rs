@@ -1,11 +1,7 @@
 use super::{size_of_grid, NodeMeta};
 use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
 use glam::UVec3;
-use std::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    mem::{size_of, MaybeUninit},
-};
+use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of};
 
 #[derive(Clone, Copy)]
 pub union InternalNodeEntry {

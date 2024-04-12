@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, marker::PhantomData, mem::MaybeUninit};
+use std::{cell::UnsafeCell, marker::PhantomData};
 
 use glam::UVec3;
 

@@ -1,11 +1,7 @@
 use super::{size_of_grid, NodeMeta};
 use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
 use glam::UVec3;
-use std::{
-    cell::UnsafeCell,
-    iter::Once,
-    mem::{size_of, MaybeUninit},
-};
+use std::{cell::UnsafeCell, iter::Once, mem::size_of};
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
 /// so that the occupancy mask happens to be exactly 64 bits.

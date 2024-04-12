@@ -2980,7 +2980,6 @@ dependencies = [
  "arrayvec",
  "ash",
  "bevy",
- "bytemuck",
  "crossbeam-channel",
  "crossbeam-queue",
  "cstr",
