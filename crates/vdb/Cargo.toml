@@ -13,3 +13,7 @@ bevy = { version = "0.13", default-features = false, features = ["bevy_asset"] }
 
 [dev-dependencies]
 rand = "0.8.5"
+
+[profile.dev]
+opt-level = 3
+overflow-checks = false

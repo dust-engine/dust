@@ -14,8 +14,9 @@ use bevy::{
     utils::{tracing, BoxedFuture},
 };
 use dot_vox::{Color, DotVoxData, Rotation, SceneNode};
+use rayon::prelude::*;
 
-use crate::{VoxBundle, VoxModel, VoxPalette};
+use crate::{Tree, VoxBundle, VoxMaterial, VoxGeometry, VoxPalette};
 
 
 enum WorldOrParent<'w, 'q> {
@@ -242,17 +243,19 @@ impl AssetLoader for VoxLoader {
                     .into_iter()
                     .map(|a| Some(a))
                     .collect();
-                let mut handles: BTreeMap<u32, Handle<VoxModel>> = BTreeMap::default();
-                for &model_id in referenced_models.iter() {
-                    let Some(model) = models.get_mut(model_id as usize) else {
-                        return Err(VoxLoadingError::ParseError("Model not found"));
-                    };
-                    let model = model.take().unwrap();
-                    let handle = load_context
-                        .add_labeled_asset(format!("Model{}", model_id), VoxModel(model));
-                    handles.insert(model_id, handle);
-                }
-                handles
+                let referenced_models = referenced_models.iter().map(|model_id| (*model_id, models.get_mut(*model_id as usize).unwrap().take().unwrap())).collect::<Vec<_>>();
+                let handles = referenced_models.par_iter().map(|(model_id, model)| {
+                    let (tree, palette_indexes) = self.model_to_tree(model);
+
+                    (*model_id, (tree, palette_indexes.into_boxed_slice()))
+                }).collect_vec_list();
+                handles.into_iter().flat_map(|a| a).map(|(model_id, (tree, palette_indexes))| {
+                    let geometry = load_context
+                    .add_labeled_asset(format!("Geometry{}", model_id), VoxGeometry(tree));
+                    let material = load_context
+                        .add_labeled_asset(format!("Material{}", model_id), VoxMaterial(palette_indexes));
+                    (model_id, (geometry, material))
+                }).collect::<BTreeMap<_, _>>()
             };
 
             let palette_handle = load_context.add_labeled_asset(
@@ -263,10 +266,11 @@ impl AssetLoader for VoxLoader {
             referenced_instances
                 .into_iter()
                 .for_each(|(model_id, entity_id)| {
-                    let handle = model_handles.get(&model_id).unwrap();
+                    let (geometry, material) = model_handles.get(&model_id).unwrap();
 
                     let mut entity = world.entity_mut(entity_id);
-                    *entity.get_mut::<Handle<VoxModel>>().unwrap() = handle.clone();
+                    *entity.get_mut::<Handle<VoxGeometry>>().unwrap() = geometry.clone();
+                    *entity.get_mut::<Handle<VoxMaterial>>().unwrap() = material.clone();
                     *entity.get_mut::<Handle<VoxPalette>>().unwrap() = palette_handle.clone();
                 });
             let scene = bevy::scene::Scene::new(world);
@@ -278,5 +282,134 @@ impl AssetLoader for VoxLoader {
 
     fn extensions(&self) -> &[&str] {
         &["vox"]
+    }
+}
+impl VoxLoader {
+    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, Vec<u8>) {
+        let mut tree = crate::Tree::new();
+        let mut palette_index_collector = ModelIndexCollector::new();
+        let mut accessor = tree.accessor_mut();
+        let size_y = model.size.y;
+        for voxel in model.voxels.iter() {
+            let voxel = dot_vox::Voxel {
+                x: voxel.x,
+                y: voxel.z,
+                z: (size_y - voxel.y as u32 - 1) as u8,
+                i: voxel.i,
+            };
+            let coords: UVec3 = UVec3 {
+                x: voxel.x as u32,
+                y: voxel.y as u32,
+                z: voxel.z as u32,
+            };
+
+            accessor.set(coords, Some(true));
+            palette_index_collector.set(voxel);
+        }
+
+        let palette_indexes = palette_index_collector.into_iter();
+        for (location, leaf) in tree.iter_leaf_mut() {
+            let block_index = (location.x >> 2, location.y >> 2, location.z >> 2);
+            let block_index = block_index.0 as usize
+                + block_index.1 as usize * 64
+                + block_index.2 as usize * 64 * 64;
+
+            leaf.material_ptr = palette_indexes.running_sum()[block_index];
+        }
+
+        let palette_indexes: Vec<u8> = palette_indexes.collect();
+
+
+        (tree, palette_indexes)
+    }
+}
+
+
+/// dox_vox::Voxel to solid materials
+pub struct ModelIndexCollector {
+    grid: Box<[u8; 256 * 256 * 256]>,
+    block_counts: Box<[u32; 64 * 64 * 64]>,
+    count: usize,
+}
+
+impl ModelIndexCollector {
+    pub fn new() -> Self {
+        unsafe {
+            let grid_ptr =
+                std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u8; 256 * 256 * 256]>());
+            let block_counts_ptr =
+                std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u32; 64 * 64 * 64]>());
+
+            Self {
+                count: 0,
+                grid: Box::from_raw(grid_ptr as *mut [u8; 256 * 256 * 256]),
+                block_counts: Box::from_raw(block_counts_ptr as *mut [u32; 64 * 64 * 64]),
+            }
+        }
+    }
+    pub fn set(&mut self, voxel: dot_vox::Voxel) {
+        self.count += 1;
+        let block_index = (voxel.x >> 2, voxel.y >> 2, voxel.z >> 2);
+        let block_index =
+            block_index.0 as usize + block_index.1 as usize * 64 + block_index.2 as usize * 64 * 64;
+
+        self.block_counts[block_index] += 1;
+
+        let index = (voxel.z & 0b11) | ((voxel.y & 0b11) << 2) | ((voxel.x & 0b11) << 4);
+        // Use one-based index here so that 0 indicates null
+        self.grid[block_index * 4 * 4 * 4 + index as usize] = voxel.i + 1;
+    }
+}
+pub struct ModelIndexCollectorIterator {
+    collector: ModelIndexCollector,
+    current: usize,
+}
+
+impl ModelIndexCollectorIterator {
+    pub fn running_sum(&self) -> &[u32; 64 * 64 * 64] {
+        &self.collector.block_counts
+    }
+}
+
+impl Iterator for ModelIndexCollectorIterator {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current < 256 * 256 * 256 {
+            let val = self.collector.grid[self.current];
+            self.current += 1;
+            if val == 0 {
+                continue;
+            }
+            return Some(val - 1); // Convert back into zero-based index here
+        }
+        None
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len(), Some(self.len()))
+    }
+}
+impl ExactSizeIterator for ModelIndexCollectorIterator {
+    fn len(&self) -> usize {
+        self.collector.count
+    }
+}
+
+impl IntoIterator for ModelIndexCollector {
+    type Item = u8;
+
+    type IntoIter = ModelIndexCollectorIterator;
+
+    fn into_iter(mut self) -> Self::IntoIter {
+        let mut sum: u32 = 0;
+        for i in self.block_counts.iter_mut() {
+            let value = *i;
+            *i = sum;
+            sum += value;
+        }
+        ModelIndexCollectorIterator {
+            collector: self,
+            current: 0,
+        }
     }
 }
