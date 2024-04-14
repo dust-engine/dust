@@ -621,6 +621,7 @@ dependencies = [
  "bevy_ptr",
  "bevy_reflect",
  "bevy_render",
+ "bevy_scene",
  "bevy_tasks",
  "bevy_time",
  "bevy_transform",
@@ -658,7 +659,7 @@ dependencies = [
 name = "bevy_math"
 version = "0.13.0"
 dependencies = [
- "glam 0.25.0",
+ "glam",
  "serde",
 ]
 
@@ -666,7 +667,7 @@ dependencies = [
 name = "bevy_mikktspace"
 version = "0.13.0"
 dependencies = [
- "glam 0.25.0",
+ "glam",
 ]
 
 [[package]]
@@ -683,7 +684,7 @@ dependencies = [
  "bevy_utils",
  "downcast-rs",
  "erased-serde",
- "glam 0.25.0",
+ "glam",
  "serde",
  "smol_str",
  "thiserror",
@@ -749,6 +750,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.58",
+]
+
+[[package]]
+name = "bevy_scene"
+version = "0.13.0"
+dependencies = [
+ "bevy_app",
+ "bevy_asset",
+ "bevy_derive",
+ "bevy_ecs",
+ "bevy_hierarchy",
+ "bevy_reflect",
+ "bevy_transform",
+ "bevy_utils",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -1375,6 +1393,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dot_vox"
+version = "5.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd05cab02d6074145c6f92ddf1b57357e4bc1424f87c790c044de62bdc94c13a"
+dependencies = [
+ "ahash",
+ "lazy_static",
+ "log",
+ "nom",
+]
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1398,10 +1428,22 @@ dependencies = [
 name = "dust_vdb"
 version = "0.1.0"
 dependencies = [
+ "bevy",
  "fxhash",
- "glam 0.24.2",
+ "glam",
  "nohash",
  "rand",
+]
+
+[[package]]
+name = "dust_vox"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "dot_vox",
+ "dust_vdb",
+ "rhyolite",
+ "thiserror",
 ]
 
 [[package]]
@@ -1447,7 +1489,7 @@ checksum = "95ed933078d2e659745df651f4c180511cd582e5b9414ff896e7d50d207e3103"
 dependencies = [
  "const_panic",
  "encase_derive",
- "glam 0.25.0",
+ "glam",
  "thiserror",
 ]
 
@@ -1818,12 +1860,6 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
-
-[[package]]
-name = "glam"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
@@ -1959,7 +1995,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f33ddb7f7143d9e703c072e88b98cd8b9719f174137a671429351bd2ee43c02a"
 dependencies = [
  "constgebra",
- "glam 0.25.0",
+ "glam",
 ]
 
 [[package]]

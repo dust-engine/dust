@@ -1,0 +1,11 @@
+[package]
+name = "dust_vox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { version = "0.13", default-features = false, features = ["bevy_scene"] }
+rhyolite = { path = "../../../rhyolite" }
+dust_vdb = { path = "../vdb" }
+dot_vox = "5.1"
+thiserror = "1"
