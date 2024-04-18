@@ -1,35 +1,49 @@
 #![feature(generic_const_exprs)]
+#![feature(alloc_layout_extra)]
 
+use bevy::prelude::IntoSystemConfigs;
+use bevy::{
+    app::{App, Plugin, PostUpdate, Update},
+    asset::{
+        processor::{LoadAndSave, LoadTransformAndSave},
+        Asset, AssetApp, Handle,
+    },
+    ecs::{bundle::Bundle, component::Component},
+    reflect::TypePath,
+    transform::components::{GlobalTransform, Transform},
+};
+use blas::VoxBLASBuilder;
+use dot_vox::Color;
+use dust_vdb::hierarchy;
 use std::ops::{Deref, DerefMut};
 
-use bevy::{
-    app::{App, Plugin}, asset::{processor::{LoadAndSave, LoadTransformAndSave}, Asset, AssetApp, Handle}, ecs::{bundle::Bundle, component::Component}, reflect::TypePath, transform::components::{GlobalTransform, Transform}
-};
-use dot_vox::Color;
-use dust_vdb::{hierarchy};
-
-mod loader;
 mod blas;
+mod loader;
 
 type TreeRoot = hierarchy!(4, 2, 2);
 type Tree = dust_vdb::Tree<TreeRoot>;
 
 pub use loader::*;
+use rhyolite::ash::vk;
+use rhyolite::RhyoliteApp;
+use rhyolite_rtx::{BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin};
 
 #[derive(Asset, TypePath)]
-pub struct VoxGeometry(Tree);
+pub struct VoxGeometry {
+    tree: Tree,
+    unit_size: f32,
+}
 impl Deref for VoxGeometry {
     type Target = Tree;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.tree
     }
 }
 impl DerefMut for VoxGeometry {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.tree
     }
 }
-
 
 #[derive(Asset, TypePath)]
 pub struct VoxMaterial(Box<[u8]>);
@@ -59,7 +73,6 @@ impl DerefMut for VoxPalette {
     }
 }
 
-
 /// Marker component for Vox instances
 #[derive(Component)]
 pub struct VoxInstance;
@@ -82,5 +95,15 @@ impl Plugin for VoxPlugin {
             .init_asset::<VoxGeometry>()
             .init_asset::<VoxPalette>()
             .init_asset::<VoxMaterial>();
+
+        app.add_plugins((
+            RtxPlugin,
+            BLASStagingBuilderPlugin::<VoxBLASBuilder>::default(),
+        ));
+
+        app.add_systems(
+            PostUpdate,
+            blas::sync_asset_events_system.before(BLASBuilderSet),
+        );
     }
 }

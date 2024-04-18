@@ -1,4 +1,7 @@
-use std::{collections::{BTreeMap, BTreeSet}, ops::{Deref, DerefMut}};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::{Deref, DerefMut},
+};
 
 use bevy::{
     asset::{Asset, AssetLoader, AsyncReadExt, Handle},
@@ -16,8 +19,7 @@ use bevy::{
 use dot_vox::{Color, DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
 
-use crate::{Tree, VoxBundle, VoxMaterial, VoxGeometry, VoxPalette};
-
+use crate::{Tree, VoxBundle, VoxGeometry, VoxMaterial, VoxPalette};
 
 enum WorldOrParent<'w, 'q> {
     World(&'w mut World),
@@ -213,9 +215,11 @@ impl AssetLoader for VoxLoader {
                 .map_err(|reason| VoxLoadingError::ParseError(reason))?;
             tracing::info!("Vox file deserialized: {} models", file.models.len());
 
+            let unit_size: f32 = 1.0;
+
             let mut world = World::default();
             let mut traverser = SceneGraphTraverser {
-                unit_size: 1.0,
+                unit_size,
                 scene: &file,
                 models: BTreeSet::new(),
                 instances: Vec::new(),
@@ -243,19 +247,38 @@ impl AssetLoader for VoxLoader {
                     .into_iter()
                     .map(|a| Some(a))
                     .collect();
-                let referenced_models = referenced_models.iter().map(|model_id| (*model_id, models.get_mut(*model_id as usize).unwrap().take().unwrap())).collect::<Vec<_>>();
-                let handles = referenced_models.par_iter().map(|(model_id, model)| {
-                    let (tree, palette_indexes) = self.model_to_tree(model);
+                let referenced_models = referenced_models
+                    .iter()
+                    .map(|model_id| {
+                        (
+                            *model_id,
+                            models.get_mut(*model_id as usize).unwrap().take().unwrap(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let handles = referenced_models
+                    .par_iter()
+                    .map(|(model_id, model)| {
+                        let (tree, palette_indexes) = self.model_to_tree(model);
 
-                    (*model_id, (tree, palette_indexes.into_boxed_slice()))
-                }).collect_vec_list();
-                handles.into_iter().flat_map(|a| a).map(|(model_id, (tree, palette_indexes))| {
-                    let geometry = load_context
-                    .add_labeled_asset(format!("Geometry{}", model_id), VoxGeometry(tree));
-                    let material = load_context
-                        .add_labeled_asset(format!("Material{}", model_id), VoxMaterial(palette_indexes));
-                    (model_id, (geometry, material))
-                }).collect::<BTreeMap<_, _>>()
+                        (*model_id, (tree, palette_indexes.into_boxed_slice()))
+                    })
+                    .collect_vec_list();
+                handles
+                    .into_iter()
+                    .flat_map(|a| a)
+                    .map(|(model_id, (tree, palette_indexes))| {
+                        let geometry = load_context.add_labeled_asset(
+                            format!("Geometry{}", model_id),
+                            VoxGeometry { tree, unit_size },
+                        );
+                        let material = load_context.add_labeled_asset(
+                            format!("Material{}", model_id),
+                            VoxMaterial(palette_indexes),
+                        );
+                        (model_id, (geometry, material))
+                    })
+                    .collect::<BTreeMap<_, _>>()
             };
 
             let palette_handle = load_context.add_labeled_asset(
@@ -319,11 +342,9 @@ impl VoxLoader {
 
         let palette_indexes: Vec<u8> = palette_indexes.collect();
 
-
         (tree, palette_indexes)
     }
 }
-
 
 /// dox_vox::Voxel to solid materials
 pub struct ModelIndexCollector {

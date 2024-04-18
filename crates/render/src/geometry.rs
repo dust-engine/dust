@@ -1,5 +1,4 @@
-pub struct RootGeometry {
-}
+pub struct RootGeometry {}
 impl rhyolite::accel_struct::BlasMarker for GeometryMarker {
     type GeometryKey = UntypedAssetId;
     type Marker = GeometryKey;
