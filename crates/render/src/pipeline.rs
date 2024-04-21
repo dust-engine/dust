@@ -1,14 +1,14 @@
 use std::{alloc::Layout, marker::PhantomData};
 
 use bevy::{asset::AssetServer, ecs::system::Resource};
-use rhyolite::pipeline::sbt::SbtManager;
+use rhyolite_rtx::SbtManager;
 
-use crate::material::{Material, SbtMarker};
+use crate::material::{Material, MaterialSbtMarker};
 
 pub trait RayTracingPipeline: Resource + Sized {
     const NUM_RAYTYPES: usize;
-    fn manager(&self) -> &SbtManager<SbtMarker<Self>, { Self::NUM_RAYTYPES }>;
-    fn manager_mut(&mut self) -> &mut SbtManager<SbtMarker<Self>, { Self::NUM_RAYTYPES }>;
+    fn manager(&self) -> &SbtManager<MaterialSbtMarker<Self>, { Self::NUM_RAYTYPES }>;
+    fn manager_mut(&mut self) -> &mut SbtManager<MaterialSbtMarker<Self>, { Self::NUM_RAYTYPES }>;
 }
 
 #[derive(Resource)]

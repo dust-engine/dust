@@ -1,24 +1,24 @@
 use std::{alloc::Layout, collections::BTreeMap};
 
 use bevy::{
-    asset::{AssetEvent, AssetId, Assets, Handle},
-    ecs::{
+    asset::{AssetEvent, AssetId, Assets, Handle}, ecs::{
         change_detection::DetectChangesMut,
         component::Component,
         entity::Entity,
         event::EventReader,
-        query::QueryItem,
+        query::{Added, Changed, Or, QueryItem, With},
         system::{lifetimeless::SRes, Commands, Local, Query, SystemParamItem},
-    },
-    math::Vec3A,
-    utils::tracing,
+    }, math::Vec3A, transform::components::GlobalTransform, utils::tracing
 };
 use dust_vdb::Node;
 use rhyolite::{ash::vk, Allocator};
-use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder};
+use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder, SbtMarker, TLASBuilder, BLAS};
 
 use crate::{TreeRoot, VoxGeometry, VoxInstance};
 
+
+/// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.
+/// Expects asset with `AssetId<VoxGeometry>` to be loaded at the time when the builder is run.
 #[derive(Component)]
 pub struct VoxBLASBuilder;
 
@@ -90,12 +90,20 @@ impl BLASStagingBuilder for VoxBLASBuilder {
     }
 }
 
+#[derive(Component)]
+pub struct BLASRef(Entity);
+
+/// Listen to asset events and spawn BLAS entities for each added asset.
 pub(crate) fn sync_asset_events_system(
     mut commands: Commands,
     mut events: EventReader<AssetEvent<VoxGeometry>>,
     mut query: Query<&mut VoxBLASBuilder>,
     mut entity_map: Local<BTreeMap<AssetId<VoxGeometry>, Entity>>,
+    changes: Query<Entity, (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxBLASBuilder>)>
 ) {
+    for change in changes.iter() {
+        commands.entity(change).insert(BLASRef(change));
+    }
     for event in events.read() {
         match event {
             AssetEvent::Added { id } => {
@@ -116,5 +124,29 @@ pub(crate) fn sync_asset_events_system(
             }
             _ => {}
         }
+    }
+}
+
+
+pub struct VoxTLASBuilder;
+impl TLASBuilder for VoxTLASBuilder {
+    type Marker = VoxInstance;
+
+    type QueryData = (&'static GlobalTransform, &'static BLASRef);
+
+    type QueryFilter = ();
+
+    type ChangeFilter = Changed<GlobalTransform>;
+
+    type Params = Query<'static, 'static, &'static BLAS>;
+
+    fn instance(
+        params: &mut SystemParamItem<Self::Params>,
+        (transform, blas): &QueryItem<Self::QueryData>,
+        mut dst: rhyolite_rtx::TLASInstanceData,
+    ) {
+        let blas = params.get(blas.0).unwrap();
+        dst.set_transform(transform.compute_matrix());
+        dst.set_blas(blas);
     }
 }

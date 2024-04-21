@@ -18,9 +18,10 @@ use bevy::{
 };
 use rhyolite::{
     ash::vk,
-    pipeline::{HitGroup, HitgroupHandle, PipelineCache},
+    pipeline::{PipelineCache},
     shader::SpecializedShader,
 };
+use rhyolite_rtx::{HitGroup, HitgroupHandle, SbtMarker};
 
 use crate::pipeline::{RayTracingPipeline, RayTracingPipelineBuilder};
 
@@ -173,11 +174,11 @@ struct MaterialData {
     hitgroup_params: Option<Box<[u8]>>,
 }
 
-pub struct SbtMarker<P: RayTracingPipeline> {
+pub struct MaterialSbtMarker<P: RayTracingPipeline> {
     _marker: PhantomData<P>,
 }
 
-impl<P: RayTracingPipeline> rhyolite::pipeline::sbt::SbtMarker for SbtMarker<P> {
+impl<P: RayTracingPipeline> SbtMarker for MaterialSbtMarker<P> {
     type HitgroupKey = UntypedAssetId;
 
     type Marker = MaterialKey<P>;

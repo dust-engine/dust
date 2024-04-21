@@ -12,7 +12,7 @@ use bevy::{
     reflect::TypePath,
     transform::components::{GlobalTransform, Transform},
 };
-use blas::VoxBLASBuilder;
+use blas::{VoxBLASBuilder, VoxTLASBuilder};
 use dot_vox::Color;
 use dust_vdb::hierarchy;
 use std::ops::{Deref, DerefMut};
@@ -26,7 +26,7 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 pub use loader::*;
 use rhyolite::ash::vk;
 use rhyolite::RhyoliteApp;
-use rhyolite_rtx::{BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin};
+use rhyolite_rtx::{BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, TLASBuilder, TLASBuilderPlugin};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
@@ -99,6 +99,7 @@ impl Plugin for VoxPlugin {
         app.add_plugins((
             RtxPlugin,
             BLASStagingBuilderPlugin::<VoxBLASBuilder>::default(),
+            TLASBuilderPlugin::<VoxTLASBuilder>::default(),
         ));
 
         app.add_systems(
