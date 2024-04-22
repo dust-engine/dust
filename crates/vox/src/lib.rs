@@ -1,7 +1,9 @@
 #![feature(generic_const_exprs)]
 #![feature(alloc_layout_extra)]
 
+use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::IntoSystemConfigs;
+use bevy::reflect::Reflect;
 use bevy::{
     app::{App, Plugin, PostUpdate, Update},
     asset::{
@@ -74,7 +76,8 @@ impl DerefMut for VoxPalette {
 }
 
 /// Marker component for Vox instances
-#[derive(Component)]
+#[derive(Component, Default, Reflect)]
+#[reflect(Component)]
 pub struct VoxInstance;
 
 /// Entities loaded into the scene will have this bundle added.
@@ -85,6 +88,7 @@ pub struct VoxBundle {
     geometry: Handle<VoxGeometry>,
     material: Handle<VoxMaterial>,
     palette: Handle<VoxPalette>,
+    marker: VoxInstance,
 }
 
 pub struct VoxPlugin;
@@ -94,7 +98,8 @@ impl Plugin for VoxPlugin {
         app.init_asset_loader::<VoxLoader>()
             .init_asset::<VoxGeometry>()
             .init_asset::<VoxPalette>()
-            .init_asset::<VoxMaterial>();
+            .init_asset::<VoxMaterial>()
+            .register_type::<VoxInstance>();
 
         app.add_plugins((
             RtxPlugin,

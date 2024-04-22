@@ -1,13 +1,8 @@
-use std::{alloc::Layout, collections::BTreeMap};
+use std::{alloc::Layout, collections::BTreeMap, ops::Deref};
 
 use bevy::{
     asset::{AssetEvent, AssetId, Assets, Handle}, ecs::{
-        change_detection::DetectChangesMut,
-        component::Component,
-        entity::Entity,
-        event::EventReader,
-        query::{Added, Changed, Or, QueryItem, With},
-        system::{lifetimeless::SRes, Commands, Local, Query, SystemParamItem},
+        change_detection::DetectChangesMut, component::Component, entity::Entity, event::EventReader, query::{Added, Changed, Or, QueryItem, With}, removal_detection::RemovedComponents, system::{lifetimeless::SRes, Commands, Local, Query, SystemParamItem}
     }, math::Vec3A, transform::components::GlobalTransform, utils::tracing
 };
 use dust_vdb::Node;
@@ -99,10 +94,30 @@ pub(crate) fn sync_asset_events_system(
     mut events: EventReader<AssetEvent<VoxGeometry>>,
     mut query: Query<&mut VoxBLASBuilder>,
     mut entity_map: Local<BTreeMap<AssetId<VoxGeometry>, Entity>>,
-    changes: Query<Entity, (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxBLASBuilder>)>
+    changes: Query<(Entity, &AssetId<VoxGeometry>), (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxBLASBuilder>)>,
+    mut instance_blas_relations: Local<BTreeMap<Entity, AssetId<VoxGeometry>>>,
+    mut instance_blas_relations_reverse: Local<BTreeMap<AssetId<VoxGeometry>, Vec<Entity>>>,
+    instances: Query<(Entity, &Handle<VoxGeometry>), Or<(Added<Handle<VoxGeometry>>, Changed<Handle<VoxGeometry>>)>>,
+    mut instances_removal: RemovedComponents<Handle<VoxGeometry>>
 ) {
-    for change in changes.iter() {
-        commands.entity(change).insert(BLASRef(change));
+    // Maintain the instance-model tables. (long term, rewrite this with entity relations)
+    for removal in instances_removal.read() {
+        let handle = instance_blas_relations.remove(&removal).unwrap();
+        instance_blas_relations_reverse.get_mut(&handle).unwrap().retain(|&entity| entity != removal);
+    }
+    for (entity, handle) in instances.iter() {
+        instance_blas_relations.insert(entity, handle.id());
+        instance_blas_relations_reverse
+            .entry(handle.id())
+            .or_default()
+            .push(entity);
+    }
+
+
+    for (entity, change) in changes.iter() {
+        for instance in instance_blas_relations_reverse[change].iter() {
+            commands.entity(*instance).insert(BLASRef(entity));
+        }
     }
     for event in events.read() {
         match event {
@@ -138,6 +153,8 @@ impl TLASBuilder for VoxTLASBuilder {
 
     type ChangeFilter = Changed<GlobalTransform>;
 
+    type AddFilter = Added<BLASRef>;
+
     type Params = Query<'static, 'static, &'static BLAS>;
 
     fn instance(
@@ -148,5 +165,7 @@ impl TLASBuilder for VoxTLASBuilder {
         let blas = params.get(blas.0).unwrap();
         dst.set_transform(transform.compute_matrix());
         dst.set_blas(blas);
+        dst.set_custom_index_and_mask(0, 0);
+        dst.set_sbt_offset_and_flags(0, vk::GeometryInstanceFlagsKHR::empty());
     }
 }
