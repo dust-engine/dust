@@ -1278,6 +1278,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "dust_pbr"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rhyolite",
+ "rhyolite_rtx",
+]
+
+[[package]]
+name = "dust_render"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rhyolite",
+ "rhyolite_egui",
+ "rhyolite_rtx",
+]
+
+[[package]]
 name = "dust_vdb"
 version = "0.1.0"
 dependencies = [
@@ -2709,16 +2728,6 @@ name = "regex-syntax"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adad44e29e4c806119491a7f06f03de4d1af22c3a680dd47f1e6e179439d1f56"
-
-[[package]]
-name = "render"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "rhyolite",
- "rhyolite_egui",
- "rhyolite_rtx",
-]
 
 [[package]]
 name = "renderdoc-sys"

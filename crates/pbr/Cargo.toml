@@ -1,10 +1,9 @@
 [package]
-name = "dust_render"
+name = "dust_pbr"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 rhyolite = { path = "../../../rhyolite" }
-rhyolite_egui = { path = "../../../rhyolite/crates/egui" }
 rhyolite_rtx = { path = "../../../rhyolite/crates/rtx" }
 bevy = { version = "0.13", default-features = false }
