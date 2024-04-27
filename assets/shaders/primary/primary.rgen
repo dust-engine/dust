@@ -1,0 +1,9 @@
+#include "../headers/header.glsl"
+#include "../headers/layout.playout"
+
+
+layout(location = 0) rayPayloadEXT uint _rayPayloadNotUsed;
+
+
+void main() {
+}

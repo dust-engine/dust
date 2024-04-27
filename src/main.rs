@@ -29,6 +29,9 @@ fn main() {
     .add_plugins(RhyolitePlugin::default())
     .add_plugins(SwapchainPlugin::default());
 
+    
+    app.add_plugins(dust_pbr::PbrRendererPlugin);
+
     app.add_plugins(VoxPlugin);
 
     app.add_systems(Startup, startup_system);

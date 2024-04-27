@@ -80,6 +80,10 @@ impl DerefMut for VoxPalette {
 #[reflect(Component)]
 pub struct VoxInstance;
 
+#[derive(Component, Default, Reflect)]
+#[reflect(Component)]
+pub struct VoxModel;
+
 /// Entities loaded into the scene will have this bundle added.
 #[derive(Bundle, Default)]
 pub struct VoxBundle {

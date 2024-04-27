@@ -7,18 +7,17 @@ use bevy::{
 };
 use dust_vdb::Node;
 use rhyolite::{ash::vk, Allocator};
-use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder, SbtMarker, TLASBuilder, BLAS};
+use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder, TLASBuilder, BLAS};
 
-use crate::{TreeRoot, VoxGeometry, VoxInstance};
+use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette};
 
 
 /// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.
 /// Expects asset with `AssetId<VoxGeometry>` to be loaded at the time when the builder is run.
-#[derive(Component)]
 pub struct VoxBLASBuilder;
 
 impl BLASBuildMarker for VoxBLASBuilder {
-    type Marker = VoxBLASBuilder;
+    type Marker = VoxModel;
 
     type QueryData = &'static AssetId<VoxGeometry>;
 
@@ -92,9 +91,9 @@ pub struct BLASRef(Entity);
 pub(crate) fn sync_asset_events_system(
     mut commands: Commands,
     mut events: EventReader<AssetEvent<VoxGeometry>>,
-    mut query: Query<&mut VoxBLASBuilder>,
+    mut query: Query<&mut VoxModel>,
     mut entity_map: Local<BTreeMap<AssetId<VoxGeometry>, Entity>>,
-    changes: Query<(Entity, &AssetId<VoxGeometry>), (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxBLASBuilder>)>,
+    changes: Query<(Entity, &AssetId<VoxGeometry>), (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxModel>)>,
     mut instance_blas_relations: Local<BTreeMap<Entity, AssetId<VoxGeometry>>>,
     mut instance_blas_relations_reverse: Local<BTreeMap<AssetId<VoxGeometry>, Vec<Entity>>>,
     instances: Query<(Entity, &Handle<VoxGeometry>), Or<(Added<Handle<VoxGeometry>>, Changed<Handle<VoxGeometry>>)>>,
@@ -123,7 +122,7 @@ pub(crate) fn sync_asset_events_system(
         match event {
             AssetEvent::Added { id } => {
                 tracing::info!("Adding new VoxGeometry Asset {:?}", id);
-                let entity = commands.spawn((VoxBLASBuilder, id.clone())).id();
+                let entity = commands.spawn((VoxModel, id.clone())).id();
                 entity_map.insert(id.clone(), entity);
             }
             AssetEvent::Modified { id } => {
@@ -169,3 +168,43 @@ impl TLASBuilder for VoxTLASBuilder {
         dst.set_sbt_offset_and_flags(0, vk::GeometryInstanceFlagsKHR::empty());
     }
 }
+
+
+pub struct SBTBuilder;
+impl rhyolite_rtx::SBTBuilder for SBTBuilder {
+    type HitgroupKey =  ();
+
+    type Marker = VoxModel;
+
+    type QueryData = &'static AssetId<VoxGeometry>;
+
+    type QueryFilter = ();
+
+    type Params = (
+        SRes<Assets<VoxMaterial>>,
+        SRes<Assets<VoxGeometry>>,
+        SRes<Assets<VoxPalette>>
+    );
+
+    fn hitgroup_param(
+        params: &mut SystemParamItem<Self::Params>,
+        data: &QueryItem<Self::QueryData>,
+        ret: &mut [u8],
+    ) {
+        todo!()
+    }
+
+    fn hitgroup_handle(
+        params: &mut SystemParamItem<Self::Params>,
+        data: &QueryItem<Self::QueryData>,
+    ) -> rhyolite_rtx::HitgroupHandle {
+        todo!()
+    }
+
+    fn hitgroup_key(
+        params: &mut SystemParamItem<Self::Params>,
+        data: &QueryItem<Self::QueryData>,
+    ) -> Self::HitgroupKey {
+        todo!()
+    }
+}   
