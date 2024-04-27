@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::{ops::DerefMut, sync::Arc};
 
-use bevy::{asset::Assets, ecs::{system::{Res, ResMut, Resource}, world::FromWorld}, utils::smallvec::SmallVec};
+use bevy::{asset::Assets, ecs::{query::With, system::{In, Local, Query, Res, ResMut, Resource}, world::FromWorld}, utils::smallvec::SmallVec};
+use bytemuck::{Pod, Zeroable};
 use rhyolite::{
-    ash::vk, dispose::RenderObject, ecs::RenderCommands, pipeline::{CachedPipeline, DescriptorSetLayout, PipelineCache, PipelineLayout}, shader::{ShaderModule, SpecializedShader}, DeferredOperationTaskPool
+    ash::vk, commands::{CommonCommands, ResourceTransitionCommands}, dispose::RenderObject, ecs::{Barriers, RenderCommands}, pipeline::{CachedPipeline, DescriptorSetLayout, PipelineCache, PipelineLayout}, shader::{ShaderModule, SpecializedShader}, staging::UniformBelt, Access, DeferredOperationTaskPool, ImageLike, SwapchainImage
 };
 use rhyolite_rtx::{
     PipelineGroupManager, RayTracingPipeline, RayTracingPipelineBuildInfoCommon, RayTracingPipelineManager, SbtManager
@@ -10,6 +11,7 @@ use rhyolite_rtx::{
 
 #[derive(Resource)]
 pub struct PbrPipeline {
+    layout: Arc<PipelineLayout>,
     manager: PipelineGroupManager<1>,
     pipelines: SmallVec<[CachedPipeline<RenderObject<RayTracingPipeline>>; 1]>
 }
@@ -23,7 +25,7 @@ impl FromWorld for PbrPipeline {
         let desc0 = DescriptorSetLayout::new(
             device.clone(),
             &playout_macro::layout!("../../../assets/shaders/headers/layout.playout", 0),
-            vk::DescriptorSetLayoutCreateFlags::empty(),
+            vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR,
         )
         .unwrap();
         let layout = PipelineLayout::new(
@@ -37,10 +39,11 @@ impl FromWorld for PbrPipeline {
             vk::PipelineLayoutCreateFlags::empty(),
         )
         .unwrap();
+    let layout = Arc::new(layout);
 
         let manager = PipelineGroupManager::new([RayTracingPipelineManager::new(
             RayTracingPipelineBuildInfoCommon {
-                layout: Arc::new(layout),
+                layout: layout.clone(),
                 flags: vk::PipelineCreateFlags::empty(),
                 max_pipeline_ray_recursion_depth: 1,
                 max_pipeline_ray_payload_size: 0,
@@ -56,8 +59,15 @@ impl FromWorld for PbrPipeline {
             vec![],
             pipeline_cache,
         )]);
-        Self { manager, pipelines: SmallVec::new() }
+        Self { layout, manager, pipelines: SmallVec::new() }
     }
+}
+
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy)]
+struct RayGenParams {
+    color: [f32; 4],
 }
 
 impl PbrPipeline {
@@ -74,20 +84,68 @@ impl PbrPipeline {
         }
         this.pipelines = this.manager.build(&pipeline_cache, &shaders, &pool).unwrap_or_default();
     }
+
+    pub fn trace_primary_rays_barrier(
+        In(mut barriers): In<Barriers>,
+        mut windows: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
+    ) {
+        let Ok(mut swapchain) = windows.get_single_mut() else {
+            return;
+        };
+        barriers.transition(swapchain.deref_mut(), Access {
+            stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            access: vk::AccessFlags2::SHADER_STORAGE_WRITE,
+        }, false, vk::ImageLayout::GENERAL);
+    }
     pub fn trace_primary_rays(
-        commands: RenderCommands<'c'>,
+        mut commands: RenderCommands<'u'>,
         mut this: ResMut<Self>,
         pipeline_cache: Res<PipelineCache>,
         shaders: Res<Assets<ShaderModule>>,
-        pool: Res<DeferredOperationTaskPool>
+        pool: Res<DeferredOperationTaskPool>,
+        mut uniform_belt: ResMut<UniformBelt>,
+        windows: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
+        mut count: Local<usize>
     ) {
+        let Ok(swapchain) = windows.get_single() else {
+            return;
+        };
         if this.pipelines.is_empty() {
             return;
         }
+        let this = &mut *this;
         let pipeline = &mut this.pipelines[Self::PRIMARY_RAY];
         let Some(pipeline) = pipeline_cache.retrieve(pipeline, &shaders, &pool) else {
             return;
         };
-        println!("We have the pipeline now");
+
+        *count += 1;
+        if (*count < 100) {
+            return;
+        }
+
+        commands.push_descriptor_set(
+            &this.layout,
+            0, &[
+                vk::WriteDescriptorSet {
+                descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                dst_binding: 0,
+                ..Default::default()
+                }.image_info(&[
+                    vk::DescriptorImageInfo {
+                        image_view: swapchain.view,
+                        image_layout: vk::ImageLayout::GENERAL,
+                        sampler: vk::Sampler::null(),
+                    }
+                ])
+            ], vk::PipelineBindPoint::RAY_TRACING_KHR);
+
+        let mut sbt = pipeline.use_on(&mut commands).trace_rays(&mut uniform_belt, &mut commands);
+
+        sbt.bind_raygen(0, &RayGenParams {
+            color: [0.0, 0.0, 0.0, 1.0],
+        });
+
+        sbt.trace(0, swapchain.extent());
     }
 }

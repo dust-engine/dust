@@ -36,14 +36,6 @@ fn main() {
 
     app.add_systems(Startup, startup_system);
 
-    app.add_systems(
-        PostUpdate,
-        clear_main_window_color
-            .with_barriers(clear_main_window_color_barriers)
-            .after(acquire_swapchain_image::<With<PrimaryWindow>>)
-            .before(present),
-    );
-
     let primary_window = app
         .world
         .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -53,49 +45,14 @@ fn main() {
     app.world
         .entity_mut(primary_window)
         .insert(SwapchainConfig {
-            image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE,
+            srgb_format: false,
             ..Default::default()
         });
 
     app.run();
 }
 
-fn clear_main_window_color_barriers(
-    In(mut barriers): In<Barriers>,
-    mut windows: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
-) {
-    let Ok(swapchain) = windows.get_single_mut() else {
-        return;
-    };
-    barriers.transition(
-        swapchain.into_inner(),
-        Access::CLEAR,
-        false,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-    );
-}
-fn clear_main_window_color(
-    mut commands: RenderCommands<'g'>,
-    windows: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
-) {
-    let Ok(swapchain) = windows.get_single() else {
-        return;
-    };
-    commands.clear_color_image(
-        swapchain.image,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        &vk::ClearColorValue {
-            float32: [0.0, 0.4, 0.0, 1.0],
-        },
-        &[vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        }],
-    )
-}
 
 fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
     let scene: Handle<Scene> = asset_server.load("castle.vox");

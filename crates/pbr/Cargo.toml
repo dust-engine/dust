@@ -8,4 +8,4 @@ rhyolite = { path = "../../../rhyolite" }
 rhyolite_rtx = { path = "../../../rhyolite/crates/rtx" }
 bevy = { version = "0.13", default-features = false }
 playout_macro = { path = "../../../playout/macro" }
-
+bytemuck = { version = "1.15.0", features = ["derive"] }
