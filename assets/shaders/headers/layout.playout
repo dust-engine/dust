@@ -1,6 +1,8 @@
 #[set]
 struct StandardLayout {
+    #![stage(RAYGEN)]
+    acceleration_structure: AccelerationStructure,
+
     #![stage(MISS | CLOSEST_HIT | RAYGEN)]
     img_illuminance: StorageImage<RGBA16_Float>,
-    acceleration_structure: AccelerationStructure,
 }
