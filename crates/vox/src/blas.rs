@@ -1,16 +1,25 @@
 use std::{alloc::Layout, collections::BTreeMap, ops::Deref};
 
 use bevy::{
-    asset::{AssetEvent, AssetId, Assets, Handle}, ecs::{
-        change_detection::DetectChangesMut, component::Component, entity::Entity, event::EventReader, query::{Added, Changed, Or, QueryItem, With}, removal_detection::RemovedComponents, system::{lifetimeless::SRes, Commands, Local, Query, SystemParamItem}
-    }, math::Vec3A, transform::components::GlobalTransform, utils::tracing
+    asset::{AssetEvent, AssetId, Assets, Handle},
+    ecs::{
+        change_detection::DetectChangesMut,
+        component::Component,
+        entity::Entity,
+        event::EventReader,
+        query::{Added, Changed, Or, QueryItem, With},
+        removal_detection::RemovedComponents,
+        system::{lifetimeless::SRes, Commands, Local, Query, SystemParamItem},
+    },
+    math::Vec3A,
+    transform::components::GlobalTransform,
+    utils::tracing,
 };
 use dust_vdb::Node;
 use rhyolite::{ash::vk, Allocator};
 use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder, TLASBuilder, BLAS};
 
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette};
-
 
 /// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.
 /// Expects asset with `AssetId<VoxGeometry>` to be loaded at the time when the builder is run.
@@ -93,16 +102,25 @@ pub(crate) fn sync_asset_events_system(
     mut events: EventReader<AssetEvent<VoxGeometry>>,
     mut query: Query<&mut VoxModel>,
     mut entity_map: Local<BTreeMap<AssetId<VoxGeometry>, Entity>>,
-    changes: Query<(Entity, &AssetId<VoxGeometry>), (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxModel>)>,
+    changes: Query<
+        (Entity, &AssetId<VoxGeometry>),
+        (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxModel>),
+    >,
     mut instance_blas_relations: Local<BTreeMap<Entity, AssetId<VoxGeometry>>>,
     mut instance_blas_relations_reverse: Local<BTreeMap<AssetId<VoxGeometry>, Vec<Entity>>>,
-    instances: Query<(Entity, &Handle<VoxGeometry>), Or<(Added<Handle<VoxGeometry>>, Changed<Handle<VoxGeometry>>)>>,
-    mut instances_removal: RemovedComponents<Handle<VoxGeometry>>
+    instances: Query<
+        (Entity, &Handle<VoxGeometry>),
+        Or<(Added<Handle<VoxGeometry>>, Changed<Handle<VoxGeometry>>)>,
+    >,
+    mut instances_removal: RemovedComponents<Handle<VoxGeometry>>,
 ) {
     // Maintain the instance-model tables. (long term, rewrite this with entity relations)
     for removal in instances_removal.read() {
         let handle = instance_blas_relations.remove(&removal).unwrap();
-        instance_blas_relations_reverse.get_mut(&handle).unwrap().retain(|&entity| entity != removal);
+        instance_blas_relations_reverse
+            .get_mut(&handle)
+            .unwrap()
+            .retain(|&entity| entity != removal);
     }
     for (entity, handle) in instances.iter() {
         instance_blas_relations.insert(entity, handle.id());
@@ -111,7 +129,6 @@ pub(crate) fn sync_asset_events_system(
             .or_default()
             .push(entity);
     }
-
 
     for (entity, change) in changes.iter() {
         for instance in instance_blas_relations_reverse[change].iter() {
@@ -141,7 +158,6 @@ pub(crate) fn sync_asset_events_system(
     }
 }
 
-
 pub struct VoxTLASBuilder;
 impl TLASBuilder for VoxTLASBuilder {
     type Marker = VoxInstance;
@@ -169,10 +185,9 @@ impl TLASBuilder for VoxTLASBuilder {
     }
 }
 
-
 pub struct SBTBuilder;
 impl rhyolite_rtx::SBTBuilder for SBTBuilder {
-    type HitgroupKey =  ();
+    type HitgroupKey = ();
 
     type Marker = VoxModel;
 
@@ -183,7 +198,7 @@ impl rhyolite_rtx::SBTBuilder for SBTBuilder {
     type Params = (
         SRes<Assets<VoxMaterial>>,
         SRes<Assets<VoxGeometry>>,
-        SRes<Assets<VoxPalette>>
+        SRes<Assets<VoxPalette>>,
     );
 
     fn hitgroup_param(
@@ -207,4 +222,4 @@ impl rhyolite_rtx::SBTBuilder for SBTBuilder {
     ) -> Self::HitgroupKey {
         todo!()
     }
-}   
+}

@@ -1,5 +1,5 @@
 [package]
-name = "dust_pbr"
+name = "dust-pbr"
 version = "0.1.0"
 edition = "2021"
 

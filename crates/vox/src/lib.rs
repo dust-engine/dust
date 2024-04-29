@@ -28,7 +28,9 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 pub use loader::*;
 use rhyolite::ash::vk;
 use rhyolite::RhyoliteApp;
-use rhyolite_rtx::{BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, TLASBuilder, TLASBuilderPlugin};
+use rhyolite_rtx::{
+    BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, TLASBuilder, TLASBuilderPlugin,
+};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {

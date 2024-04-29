@@ -1,0 +1,22 @@
+[package]
+name = "dust-log"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tracing = "0.1"
+sentry = { version = "^0.32", optional = true, features=["tracing"] }
+tracing-subscriber = "^0.3"
+bevy = { version = "0.13", default-features = false }
+rhyolite = { path = "../../../rhyolite" }
+
+
+aftermath-rs = { version = "0.1.3", optional = true }
+
+
+[features]
+aftermath = ["dep:aftermath-rs"]
+
+default = ["sentry"]

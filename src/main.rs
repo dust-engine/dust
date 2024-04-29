@@ -1,6 +1,7 @@
 use bevy::asset::{AssetServer, Handle};
 use bevy::ecs::schedule::IntoSystemConfigs;
 use bevy::scene::{Scene, SceneBundle};
+use bevy::utils::tracing::instrument::WithSubscriber;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
 
@@ -18,18 +19,20 @@ use rhyolite::{
 
 fn main() {
     let mut app = bevy::app::App::new();
-    app.add_plugins(bevy::DefaultPlugins.set::<bevy::asset::AssetPlugin>(
-        bevy::asset::AssetPlugin {
-            mode: bevy::asset::AssetMode::Processed,
-            ..Default::default()
-        },
-    ))
-    .add_plugins(SurfacePlugin::default())
-    .add_plugins(DebugUtilsPlugin::default())
-    .add_plugins(RhyolitePlugin::default())
-    .add_plugins(SwapchainPlugin::default());
+    app.add_plugins(dust_log::LogPlugin)
+        .add_plugins(
+            bevy::DefaultPlugins
+                .set::<bevy::asset::AssetPlugin>(bevy::asset::AssetPlugin {
+                    mode: bevy::asset::AssetMode::Processed,
+                    ..Default::default()
+                })
+                .disable::<bevy::log::LogPlugin>(),
+        )
+        .add_plugins(SurfacePlugin::default())
+        .add_plugins(DebugUtilsPlugin::default())
+        .add_plugins(RhyolitePlugin::default())
+        .add_plugins(SwapchainPlugin::default());
 
-    
     app.add_plugins(dust_pbr::PbrRendererPlugin);
 
     app.add_plugins(VoxPlugin);
@@ -45,14 +48,15 @@ fn main() {
     app.world
         .entity_mut(primary_window)
         .insert(SwapchainConfig {
-            image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE,
+            image_usage: vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::COLOR_ATTACHMENT
+                | vk::ImageUsageFlags::STORAGE,
             srgb_format: false,
             ..Default::default()
         });
 
     app.run();
 }
-
 
 fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
     let scene: Handle<Scene> = asset_server.load("castle.vox");

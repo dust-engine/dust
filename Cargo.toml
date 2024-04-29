@@ -12,8 +12,9 @@ members = [
 [dependencies]
 bevy = { version = "0.13", default-features = false, features = ["bevy_scene"] }
 rhyolite = { path = "../rhyolite" }
-dust_vox = { path = "./crates/vox" }
-dust_pbr = { path = "./crates/pbr" }
+dust-vox = { path = "./crates/vox" }
+dust-pbr = { path = "./crates/pbr" }
+dust-log = { path = "./crates/log" }
 
 
 [patch.crates-io]
