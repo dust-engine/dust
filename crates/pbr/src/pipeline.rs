@@ -162,7 +162,6 @@ impl PbrPipeline {
             return;
         };
         let Some(accel_struct) = accel_struct.into_inner().deref_mut() else {
-            println!("AS not ready...");
             return;
         };
 

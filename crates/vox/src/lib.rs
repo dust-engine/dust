@@ -29,7 +29,7 @@ pub use loader::*;
 use rhyolite::ash::vk;
 use rhyolite::RhyoliteApp;
 use rhyolite_rtx::{
-    BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, TLASBuilder, TLASBuilderPlugin,
+    BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, TLASBuilderSet, TLASBuilderPlugin,
 };
 
 #[derive(Asset, TypePath)]
@@ -115,7 +115,7 @@ impl Plugin for VoxPlugin {
 
         app.add_systems(
             PostUpdate,
-            blas::sync_asset_events_system.before(BLASBuilderSet),
+            blas::sync_asset_events_system.before(BLASBuilderSet).before(TLASBuilderSet),
         );
     }
 }
