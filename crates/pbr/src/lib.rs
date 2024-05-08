@@ -1,3 +1,5 @@
+#![feature(array_try_map)]
+
 mod pipeline;
 
 use bevy::{

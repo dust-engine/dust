@@ -14,7 +14,7 @@ use bevy::{
     reflect::TypePath,
     transform::components::{GlobalTransform, Transform},
 };
-use blas::{VoxBLASBuilder, VoxTLASBuilder};
+use blas::{VoxBLASBuilder, VoxSbtBuilder, VoxTLASBuilder};
 use dot_vox::Color;
 use dust_vdb::hierarchy;
 use std::ops::{Deref, DerefMut};
@@ -29,7 +29,7 @@ pub use loader::*;
 use rhyolite::ash::vk;
 use rhyolite::RhyoliteApp;
 use rhyolite_rtx::{
-    BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, TLASBuilderSet, TLASBuilderPlugin,
+    BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin, TLASBuilderSet
 };
 
 #[derive(Asset, TypePath)]
@@ -111,6 +111,7 @@ impl Plugin for VoxPlugin {
             RtxPlugin,
             BLASStagingBuilderPlugin::<VoxBLASBuilder>::default(),
             TLASBuilderPlugin::<VoxTLASBuilder>::default(),
+            SbtPlugin::<dust_pbr::PbrPipeline, VoxSbtBuilder>::default(),
         ));
 
         app.add_systems(

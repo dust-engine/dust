@@ -1317,6 +1317,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "dot_vox",
+ "dust-pbr",
  "dust-vdb",
  "rayon",
  "rhyolite",

@@ -15,9 +15,10 @@ use bevy::{
     transform::components::GlobalTransform,
     utils::tracing,
 };
+use dust_pbr::PbrPipeline;
 use dust_vdb::Node;
 use rhyolite::{ash::vk, Allocator};
-use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder, TLASBuilder, BLAS};
+use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder, HitgroupHandle, TLASBuilder, BLAS};
 
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette};
 
@@ -185,9 +186,22 @@ impl TLASBuilder for VoxTLASBuilder {
     }
 }
 
-pub struct SBTBuilder;
-impl rhyolite_rtx::SBTBuilder for SBTBuilder {
-    type HitgroupKey = ();
+
+#[repr(C)]
+pub struct ShaderParams {
+    /// Pointer to a list of u64 indexed by block id
+    geometry_ptr: u64,
+
+    /// Pointer to a list of u8, indexed by voxel id, each denoting offset into palette_ptr.
+    /// Voxel id is defined as block id + offset inside block.
+    material_ptr: u64,
+
+    /// Pointer to a list of 256 u8 colors
+    palette_ptr: u64,
+}
+
+pub struct VoxSbtBuilder;
+impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
 
     type Marker = VoxModel;
 
@@ -199,14 +213,19 @@ impl rhyolite_rtx::SBTBuilder for SBTBuilder {
         SRes<Assets<VoxMaterial>>,
         SRes<Assets<VoxGeometry>>,
         SRes<Assets<VoxPalette>>,
+        SRes<PbrPipeline>,
+        Local<'static, Option<HitgroupHandle>>,
     );
 
     fn hitgroup_param(
         params: &mut SystemParamItem<Self::Params>,
         data: &QueryItem<Self::QueryData>,
-        ret: &mut [u8],
+        raytype: u32,
+        ret: &mut Self::InlineParam,
     ) {
-        todo!()
+        ret.geometry_ptr = 1;
+        ret.material_ptr = 2;
+        ret.palette_ptr = 3;
     }
 
     fn hitgroup_handle(
@@ -215,11 +234,10 @@ impl rhyolite_rtx::SBTBuilder for SBTBuilder {
     ) -> rhyolite_rtx::HitgroupHandle {
         todo!()
     }
-
-    fn hitgroup_key(
-        params: &mut SystemParamItem<Self::Params>,
-        data: &QueryItem<Self::QueryData>,
-    ) -> Self::HitgroupKey {
-        todo!()
-    }
+    
+    type AddFilter = ();
+    
+    type ChangeFilter = ();
+    
+    type InlineParam = ShaderParams;
 }
