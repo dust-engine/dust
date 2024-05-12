@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 #![feature(alloc_layout_extra)]
 
+use bevy::ecs::entity::Entity;
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::ecs::system::lifetimeless::{SRes, SResMut};
 use bevy::ecs::system::{Res, SystemParamItem};
@@ -33,9 +34,7 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 pub use loader::*;
 use rhyolite::ash::vk;
 use rhyolite::{Allocator, Buffer, RhyoliteApp};
-use rhyolite_rtx::{
-    BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin, TLASBuilderSet
-};
+use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin, TLASBuilderSet};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
@@ -86,29 +85,40 @@ impl DerefMut for VoxPalette {
 impl AssetUpload for VoxPalette {
     type GPUAsset = VoxPaletteGPU;
 
-    type Params = (
-        SRes<Allocator>,
-        SResMut<StagingBelt>
-    );
-    
+    type Params = (SRes<Allocator>, SResMut<StagingBelt>);
+
     fn upload_asset(
         &self,
         commands: &mut impl TransferCommands,
         (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
     ) -> Self::GPUAsset {
-        let data = unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const u8, self.0.len() * 4)};
+        let data =
+            unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const u8, self.0.len() * 4) };
         let buffer = Buffer::new_resource_init(
-            allocator.clone(), staging_belt,
-            data, 1,vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, commands,
+            allocator.clone(),
+            staging_belt,
+            data,
+            1,
+            vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            commands,
         );
         VoxPaletteGPU(buffer.unwrap())
     }
 }
 
 /// Marker component for Vox instances
-#[derive(Component, Default, Reflect)]
+#[derive(Component, Reflect)]
 #[reflect(Component)]
-pub struct VoxInstance;
+pub struct VoxInstance {
+    model: Entity,
+}
+impl Default for VoxInstance {
+    fn default() -> Self {
+        Self {
+            model: Entity::from_raw(u32::MAX),
+        }
+    }
+}
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -116,13 +126,18 @@ pub struct VoxModel;
 
 /// Entities loaded into the scene will have this bundle added.
 #[derive(Bundle, Default)]
-pub struct VoxBundle {
-    transform: Transform,
-    global_transform: GlobalTransform,
+pub struct VoxModelBundle {
     geometry: Handle<VoxGeometry>,
     material: Handle<VoxMaterial>,
     palette: Handle<VoxPalette>,
-    marker: VoxInstance,
+    marker: VoxModel,
+}
+
+#[derive(Bundle, Default)]
+pub struct VoxInstanceBundle {
+    transform: Transform,
+    global_transform: GlobalTransform,
+    instance: VoxInstance,
 }
 
 pub struct VoxPlugin;
@@ -132,19 +147,15 @@ impl Plugin for VoxPlugin {
         app.init_asset_loader::<VoxLoader>()
             .init_asset::<VoxGeometry>()
             .init_asset::<VoxMaterial>()
-            .register_type::<VoxInstance>();
+            .register_type::<VoxInstance>()
+            .register_type::<VoxModel>();
 
         app.add_plugins((
             RtxPlugin,
-            BLASStagingBuilderPlugin::<VoxBLASBuilder>::default(),
+            BLASBuilderPlugin::<VoxBLASBuilder>::default(),
             TLASBuilderPlugin::<VoxTLASBuilder>::default(),
             SbtPlugin::<dust_pbr::PbrPipeline, VoxSbtBuilder>::default(),
             AssetUploadPlugin::<VoxPalette>::default(),
         ));
-
-        app.add_systems(
-            PostUpdate,
-            blas::sync_asset_events_system.before(BLASBuilderSet).before(TLASBuilderSet),
-        );
     }
 }

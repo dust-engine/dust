@@ -9,7 +9,10 @@ use bevy::{
         event::EventReader,
         query::{Added, Changed, Or, QueryItem, With},
         removal_detection::RemovedComponents,
-        system::{lifetimeless::SRes, Commands, Local, Query, SystemParamItem},
+        system::{
+            lifetimeless::{SRes, SResMut},
+            Commands, Local, Query, SystemParamItem,
+        },
     },
     math::Vec3A,
     transform::components::GlobalTransform,
@@ -17,7 +20,7 @@ use bevy::{
 };
 use dust_pbr::PbrPipeline;
 use dust_vdb::Node;
-use rhyolite::{ash::vk, Allocator};
+use rhyolite::{ash::vk, commands::TransferCommands, staging::StagingBelt, Allocator, Buffer};
 use rhyolite_rtx::{BLASBuildGeometry, BLASBuilder, HitgroupHandle, TLASBuilder, BLAS};
 
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette, VoxPaletteGPU};
@@ -31,153 +34,99 @@ impl BLASBuilder for VoxBLASBuilder {
 
     type QueryFilter = ();
 
-    type Params = SRes<Assets<VoxGeometry>>;
+    type Params = (
+        SRes<Assets<VoxGeometry>>,
+        SRes<Allocator>,
+        SResMut<StagingBelt>,
+    );
 
-    
-    type GeometryIterator<'a> = std::iter::Once<BLASBuildGeometry<vk::DeviceSize>>;
+    type BufferType = Buffer;
+    type GeometryIterator<'a> = std::iter::Once<BLASBuildGeometry<Buffer>>;
     fn geometries<'a>(
-        assets: &'a mut SystemParamItem<Self::Params>,
+        (assets, allocator, staging_belt): &'a mut SystemParamItem<Self::Params>,
         data: &'a QueryItem<Self::QueryData>,
-        dst: &mut [u8],
+        commands: &mut impl TransferCommands,
     ) -> Self::GeometryIterator<'a> {
-        let geometry = assets.get(**data).unwrap();
+        let geometry = assets.get(*data).unwrap();
+        let leaf_count = geometry.tree.iter_leaf().count();
 
         let leaf_extent_int = <<TreeRoot as Node>::LeafType as Node>::EXTENT;
         let leaf_extent: Vec3A = leaf_extent_int.as_vec3a();
         let leaf_extent: Vec3A = geometry.unit_size * leaf_extent;
         let mut current_location = 0;
-        let mut leaf_count = 0;
-        for (position, _) in geometry.tree.iter_leaf() {
-            leaf_count += 1;
-            let aabb = {
-                let position = position.as_vec3a();
-                let max_position = leaf_extent + position;
-                vk::AabbPositionsKHR {
-                    min_x: position.x,
-                    min_y: position.y,
-                    min_z: position.z,
-                    max_x: max_position.x,
-                    max_y: max_position.y,
-                    max_z: max_position.z,
+
+        let buffer = Buffer::new_resource_init_with(
+            allocator.clone(),
+            staging_belt,
+            leaf_count as u64 * std::mem::size_of::<vk::AabbPositionsKHR>() as u64,
+            1,
+            vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            commands,
+            |dst| {
+                for (position, _) in geometry.tree.iter_leaf() {
+                    let aabb = {
+                        let position = position.as_vec3a();
+                        let max_position = leaf_extent + position;
+                        vk::AabbPositionsKHR {
+                            min_x: position.x,
+                            min_y: position.y,
+                            min_z: position.z,
+                            max_x: max_position.x,
+                            max_y: max_position.y,
+                            max_z: max_position.z,
+                        }
+                    };
+                    let dst_slice = &mut dst[current_location
+                        ..(current_location + std::mem::size_of::<vk::AabbPositionsKHR>())];
+                    dst_slice.copy_from_slice(unsafe {
+                        std::slice::from_raw_parts(
+                            &aabb as *const vk::AabbPositionsKHR as *const u8,
+                            std::mem::size_of::<vk::AabbPositionsKHR>(),
+                        )
+                    });
+                    current_location += std::mem::size_of::<vk::AabbPositionsKHR>();
                 }
-            };
-            let dst_slice = &mut dst[current_location
-                ..(current_location + std::mem::size_of::<vk::AabbPositionsKHR>())];
-            dst_slice.copy_from_slice(unsafe {
-                std::slice::from_raw_parts(
-                    &aabb as *const vk::AabbPositionsKHR as *const u8,
-                    std::mem::size_of::<vk::AabbPositionsKHR>(),
-                )
-            });
-            current_location += std::mem::size_of::<vk::AabbPositionsKHR>();
-        }
+            },
+        )
+        .unwrap();
+
         std::iter::once(BLASBuildGeometry::Aabbs {
-            buffer: 0,
+            buffer,
             stride: std::mem::size_of::<vk::AabbPositionsKHR>() as u64,
             flags: vk::GeometryFlagsKHR::OPAQUE,
-            primitive_count: leaf_count,
+            primitive_count: leaf_count as u32,
         })
-    }
-}
-
-#[derive(Component)]
-pub struct BLASRef(Entity);
-
-/// Listen to asset events and spawn BLAS entities for each added asset.
-pub(crate) fn sync_asset_events_system(
-    mut commands: Commands,
-    mut events: EventReader<AssetEvent<VoxGeometry>>,
-    mut query: Query<&mut VoxModel>,
-    mut entity_map: Local<BTreeMap<AssetId<VoxGeometry>, Entity>>,
-    changes: Query<
-        (Entity, &AssetId<VoxGeometry>),
-        (Or<(Added<BLAS>, Changed<BLAS>)>, With<VoxModel>),
-    >,
-    mut instance_blas_relations: Local<BTreeMap<Entity, AssetId<VoxGeometry>>>,
-    mut instance_blas_relations_reverse: Local<BTreeMap<AssetId<VoxGeometry>, Vec<Entity>>>,
-    instances: Query<
-        (Entity, &Handle<VoxGeometry>),
-        Or<(Added<Handle<VoxGeometry>>, Changed<Handle<VoxGeometry>>)>,
-    >,
-    mut instances_removal: RemovedComponents<Handle<VoxGeometry>>,
-) {
-    // Maintain the instance-model tables. (long term, rewrite this with entity relations)
-    for removal in instances_removal.read() {
-        let handle = instance_blas_relations.remove(&removal).unwrap();
-        instance_blas_relations_reverse
-            .get_mut(&handle)
-            .unwrap()
-            .retain(|&entity| entity != removal);
-    }
-    for (entity, handle) in instances.iter() {
-        instance_blas_relations.insert(entity, handle.id());
-        instance_blas_relations_reverse
-            .entry(handle.id())
-            .or_default()
-            .push(entity);
-    }
-
-    // For each VoxModel, whenever the BLAS gets built, notify the instances and update BLASRef.
-    for (entity, change) in changes.iter() {
-        for instance in instance_blas_relations_reverse[change].iter() {
-            commands.entity(*instance).insert(BLASRef(entity));
-        }
-    }
-    
-    // Create VoxModel entities using asset events.
-    for event in events.read() {
-        match event {
-            AssetEvent::Added { id } => {
-                tracing::info!("Adding new VoxGeometry Asset {:?}", id);
-                let entity = commands.spawn((VoxModel, id.clone())).id();
-                entity_map.insert(id.clone(), entity);
-            }
-            AssetEvent::Modified { id } => {
-                tracing::info!("VoxGeometry Asset {:?} modified", id);
-                let entity = entity_map.get(id).unwrap();
-                if let Ok(mut marker) = query.get_mut(*entity) {
-                    marker.set_changed();
-                }
-                // If we can't get the entity here, it's likely that the entity was just added
-                // this frame.
-            }
-            AssetEvent::Unused { id } => {
-                tracing::info!("VoxGeometry Asset {:?} unused", id);
-                let entity = entity_map.remove(id).unwrap();
-                commands.entity(entity).despawn();
-            }
-            _ => {}
-        }
     }
 }
 
 pub struct VoxTLASBuilder;
 impl TLASBuilder for VoxTLASBuilder {
-    type Marker = VoxInstance;
-
-    type QueryData = (&'static GlobalTransform, &'static BLASRef);
+    type QueryData = (&'static GlobalTransform, &'static VoxInstance);
 
     type QueryFilter = ();
 
     type ChangeFilter = Changed<GlobalTransform>;
 
-    type AddFilter = Added<BLASRef>;
-
     type Params = Query<'static, 'static, &'static BLAS>;
 
     fn instance(
         params: &mut SystemParamItem<Self::Params>,
-        (transform, blas): &QueryItem<Self::QueryData>,
+        (transform, instance): &QueryItem<Self::QueryData>,
         mut dst: rhyolite_rtx::TLASInstanceData,
     ) {
-        let blas = params.get(blas.0).unwrap();
+        if let Ok(blas) = params.get(instance.model) {
+            println!("Did set blas");
+            dst.set_blas(blas);
+        } else {
+            dst.disable();
+            return;
+        }
         dst.set_transform(transform.compute_matrix());
-        dst.set_blas(blas);
         dst.set_custom_index_and_mask(0, 0);
         dst.set_sbt_offset_and_flags(0, vk::GeometryInstanceFlagsKHR::empty());
     }
 }
-
 
 #[repr(C)]
 pub struct ShaderParams {
@@ -194,9 +143,6 @@ pub struct ShaderParams {
 
 pub struct VoxSbtBuilder;
 impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
-
-    type Marker = VoxModel;
-
     type QueryData = &'static AssetId<VoxGeometry>;
 
     type QueryFilter = ();
@@ -226,10 +172,7 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
     ) -> rhyolite_rtx::HitgroupHandle {
         todo!()
     }
-    
-    type AddFilter = (AssetLoaded<VoxModelGPU>, AssetLoaded<VoxPaletteGPU>, AssetLoaded<VoxGeometryGPU>, Without<SbtHandle>);
-    
-    type ChangeFilter = Or<(AssetChanged<VoxModelGPU, VoxPaletteGPU, VoxGeometryGPU>)>;
-    
+    type ChangeFilter = ();
+
     type InlineParam = ShaderParams;
 }

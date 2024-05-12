@@ -21,7 +21,8 @@ use rhyolite::{
     Access, DeferredOperationTaskPool, ImageLike, SwapchainImage,
 };
 use rhyolite_rtx::{
-    PipelineGroupManager, PipelineMarker, RayTracingPipeline, RayTracingPipelineBuildInfoCommon, RayTracingPipelineManager, SbtManager
+    PipelineGroupManager, PipelineMarker, RayTracingPipeline, RayTracingPipelineBuildInfoCommon,
+    RayTracingPipelineManager, SbtManager,
 };
 
 #[derive(Resource)]
@@ -34,7 +35,9 @@ impl PipelineMarker for PbrPipeline {
     const NUM_RAYTYPES: usize = 1;
 
     fn pipelines(&self) -> Option<[&RayTracingPipeline; Self::NUM_RAYTYPES]> {
-        self.pipelines.as_ref().and_then(|f| f.each_ref().try_map(|x| Some(x.get()?.get())))
+        self.pipelines
+            .as_ref()
+            .and_then(|f| f.each_ref().try_map(|x| Some(x.get()?.get())))
     }
 
     fn pipeline_group(&self) -> &PipelineGroupManager<{ Self::NUM_RAYTYPES }> {
