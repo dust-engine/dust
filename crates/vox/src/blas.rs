@@ -18,36 +18,22 @@ use bevy::{
 use dust_pbr::PbrPipeline;
 use dust_vdb::Node;
 use rhyolite::{ash::vk, Allocator};
-use rhyolite_rtx::{BLASBuildGeometry, BLASBuildMarker, BLASStagingBuilder, HitgroupHandle, TLASBuilder, BLAS};
+use rhyolite_rtx::{BLASBuildGeometry, BLASBuilder, HitgroupHandle, TLASBuilder, BLAS};
 
-use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette};
+use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette, VoxPaletteGPU};
 
 /// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.
 /// Expects asset with `AssetId<VoxGeometry>` to be loaded at the time when the builder is run.
 pub struct VoxBLASBuilder;
 
-impl BLASBuildMarker for VoxBLASBuilder {
-    type Marker = VoxModel;
-
-    type QueryData = &'static AssetId<VoxGeometry>;
+impl BLASBuilder for VoxBLASBuilder {
+    type QueryData = &'static Handle<VoxGeometry>;
 
     type QueryFilter = ();
 
     type Params = SRes<Assets<VoxGeometry>>;
-}
 
-impl BLASStagingBuilder for VoxBLASBuilder {
-    fn staging_layout(
-        params: &mut SystemParamItem<Self::Params>,
-        data: &QueryItem<Self::QueryData>,
-    ) -> Layout {
-        let num_primitives = params.get(**data).unwrap().tree.iter_leaf().count();
-        let (layout, stride) = Layout::new::<vk::AabbPositionsKHR>()
-            .repeat(num_primitives)
-            .unwrap();
-        debug_assert_eq!(stride, std::mem::size_of::<vk::AabbPositionsKHR>());
-        layout
-    }
+    
     type GeometryIterator<'a> = std::iter::Once<BLASBuildGeometry<vk::DeviceSize>>;
     fn geometries<'a>(
         assets: &'a mut SystemParamItem<Self::Params>,
@@ -131,11 +117,14 @@ pub(crate) fn sync_asset_events_system(
             .push(entity);
     }
 
+    // For each VoxModel, whenever the BLAS gets built, notify the instances and update BLASRef.
     for (entity, change) in changes.iter() {
         for instance in instance_blas_relations_reverse[change].iter() {
             commands.entity(*instance).insert(BLASRef(entity));
         }
     }
+    
+    // Create VoxModel entities using asset events.
     for event in events.read() {
         match event {
             AssetEvent::Added { id } => {
@@ -146,8 +135,11 @@ pub(crate) fn sync_asset_events_system(
             AssetEvent::Modified { id } => {
                 tracing::info!("VoxGeometry Asset {:?} modified", id);
                 let entity = entity_map.get(id).unwrap();
-                let mut marker = query.get_mut(*entity).unwrap();
-                marker.set_changed();
+                if let Ok(mut marker) = query.get_mut(*entity) {
+                    marker.set_changed();
+                }
+                // If we can't get the entity here, it's likely that the entity was just added
+                // this frame.
             }
             AssetEvent::Unused { id } => {
                 tracing::info!("VoxGeometry Asset {:?} unused", id);
@@ -212,7 +204,7 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
     type Params = (
         SRes<Assets<VoxMaterial>>,
         SRes<Assets<VoxGeometry>>,
-        SRes<Assets<VoxPalette>>,
+        SRes<Assets<VoxPaletteGPU>>,
         SRes<PbrPipeline>,
         Local<'static, Option<HitgroupHandle>>,
     );
@@ -235,9 +227,9 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         todo!()
     }
     
-    type AddFilter = ();
+    type AddFilter = (AssetLoaded<VoxModelGPU>, AssetLoaded<VoxPaletteGPU>, AssetLoaded<VoxGeometryGPU>, Without<SbtHandle>);
     
-    type ChangeFilter = ();
+    type ChangeFilter = Or<(AssetChanged<VoxModelGPU, VoxPaletteGPU, VoxGeometryGPU>)>;
     
     type InlineParam = ShaderParams;
 }

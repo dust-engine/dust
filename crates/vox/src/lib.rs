@@ -2,6 +2,8 @@
 #![feature(alloc_layout_extra)]
 
 use bevy::ecs::reflect::ReflectComponent;
+use bevy::ecs::system::lifetimeless::{SRes, SResMut};
+use bevy::ecs::system::{Res, SystemParamItem};
 use bevy::prelude::IntoSystemConfigs;
 use bevy::reflect::Reflect;
 use bevy::{
@@ -17,6 +19,9 @@ use bevy::{
 use blas::{VoxBLASBuilder, VoxSbtBuilder, VoxTLASBuilder};
 use dot_vox::Color;
 use dust_vdb::hierarchy;
+use rhyolite::commands::TransferCommands;
+use rhyolite::staging::StagingBelt;
+use rhyolite::utils::{AssetUpload, AssetUploadPlugin};
 use std::ops::{Deref, DerefMut};
 
 mod blas;
@@ -27,7 +32,7 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 
 pub use loader::*;
 use rhyolite::ash::vk;
-use rhyolite::RhyoliteApp;
+use rhyolite::{Allocator, Buffer, RhyoliteApp};
 use rhyolite_rtx::{
     BLASBuilderSet, BLASStagingBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin, TLASBuilderSet
 };
@@ -65,6 +70,8 @@ impl DerefMut for VoxMaterial {
 
 #[derive(Asset, TypePath)]
 pub struct VoxPalette(Vec<Color>);
+#[derive(Asset, TypePath)]
+pub struct VoxPaletteGPU(Buffer);
 impl Deref for VoxPalette {
     type Target = [Color];
     fn deref(&self) -> &Self::Target {
@@ -74,6 +81,27 @@ impl Deref for VoxPalette {
 impl DerefMut for VoxPalette {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+impl AssetUpload for VoxPalette {
+    type GPUAsset = VoxPaletteGPU;
+
+    type Params = (
+        SRes<Allocator>,
+        SResMut<StagingBelt>
+    );
+    
+    fn upload_asset(
+        &self,
+        commands: &mut impl TransferCommands,
+        (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
+    ) -> Self::GPUAsset {
+        let data = unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const u8, self.0.len() * 4)};
+        let buffer = Buffer::new_resource_init(
+            allocator.clone(), staging_belt,
+            data, 1,vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, commands,
+        );
+        VoxPaletteGPU(buffer.unwrap())
     }
 }
 
@@ -103,7 +131,6 @@ impl Plugin for VoxPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>()
             .init_asset::<VoxGeometry>()
-            .init_asset::<VoxPalette>()
             .init_asset::<VoxMaterial>()
             .register_type::<VoxInstance>();
 
@@ -112,6 +139,7 @@ impl Plugin for VoxPlugin {
             BLASStagingBuilderPlugin::<VoxBLASBuilder>::default(),
             TLASBuilderPlugin::<VoxTLASBuilder>::default(),
             SbtPlugin::<dust_pbr::PbrPipeline, VoxSbtBuilder>::default(),
+            AssetUploadPlugin::<VoxPalette>::default(),
         ));
 
         app.add_systems(
