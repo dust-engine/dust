@@ -3,7 +3,7 @@ use std::{alloc::Layout, collections::BTreeMap, ops::Deref};
 use bevy::{
     asset::{AssetEvent, AssetId, Assets, Handle},
     ecs::{
-        change_detection::DetectChangesMut,
+        change_detection::{DetectChanges, DetectChangesMut},
         component::Component,
         entity::Entity,
         event::EventReader,
@@ -13,6 +13,7 @@ use bevy::{
             lifetimeless::{SRes, SResMut},
             Commands, Local, Query, SystemParamItem,
         },
+        world::Ref,
     },
     math::Vec3A,
     transform::components::GlobalTransform,
@@ -102,13 +103,23 @@ impl BLASBuilder for VoxBLASBuilder {
 
 pub struct VoxTLASBuilder;
 impl TLASBuilder for VoxTLASBuilder {
-    type QueryData = (&'static GlobalTransform, &'static VoxInstance);
+    type QueryData = (Ref<'static, GlobalTransform>, Ref<'static, VoxInstance>);
 
     type QueryFilter = ();
 
-    type ChangeFilter = Changed<GlobalTransform>;
+    type Params = Query<'static, 'static, Ref<'static, BLAS>>;
 
-    type Params = Query<'static, 'static, &'static BLAS>;
+    fn should_update(
+        params: &mut SystemParamItem<Self::Params>,
+        (transform, instance): &QueryItem<Self::QueryData>,
+    ) -> bool {
+        let blas_changed = if let Ok(blas) = params.get(instance.model) {
+            blas.is_changed()
+        } else {
+            false
+        };
+        transform.is_changed() || blas_changed || instance.is_changed()
+    }
 
     fn instance(
         params: &mut SystemParamItem<Self::Params>,
@@ -116,15 +127,14 @@ impl TLASBuilder for VoxTLASBuilder {
         mut dst: rhyolite_rtx::TLASInstanceData,
     ) {
         if let Ok(blas) = params.get(instance.model) {
-            println!("Did set blas");
-            dst.set_blas(blas);
+            dst.set_blas(&blas);
         } else {
             dst.disable();
             return;
         }
         dst.set_transform(transform.compute_matrix());
-        dst.set_custom_index_and_mask(0, 0);
-        dst.set_sbt_offset_and_flags(0, vk::GeometryInstanceFlagsKHR::empty());
+        dst.set_custom_index_and_mask(23, 0);
+        dst.set_sbt_offset_and_flags(12, vk::GeometryInstanceFlagsKHR::empty());
     }
 }
 
