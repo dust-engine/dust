@@ -21,8 +21,7 @@ use rhyolite::{
     Access, DeferredOperationTaskPool, ImageLike, SwapchainImage,
 };
 use rhyolite_rtx::{
-    RayTracingPipeline, RayTracingPipelineBuildInfoCommon,
-    RayTracingPipelineManager,
+    RayTracingPipeline, RayTracingPipelineBuildInfoCommon, RayTracingPipelineManager, SbtManager,
 };
 
 #[derive(Resource)]
@@ -74,10 +73,7 @@ impl FromWorld for PbrPipeline {
             vec![],
             pipeline_cache,
         );
-        Self {
-            layout,
-            primary,
-        }
+        Self { layout, primary }
     }
 }
 
@@ -95,8 +91,10 @@ impl PbrPipeline {
         pipeline_cache: Res<PipelineCache>,
         shaders: Res<Assets<ShaderModule>>,
         pool: Res<DeferredOperationTaskPool>,
+        mut sbt: ResMut<SbtManager<Self>>,
     ) {
-        this.primary.try_build(&pipeline_cache, &shaders, &pool);
+        this.primary
+            .try_build(&pipeline_cache, &shaders, &pool, &mut sbt);
     }
 
     pub fn trace_primary_rays_barrier(
