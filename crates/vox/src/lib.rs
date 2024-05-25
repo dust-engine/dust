@@ -154,7 +154,7 @@ impl Plugin for VoxPlugin {
             RtxPlugin,
             BLASBuilderPlugin::<VoxBLASBuilder>::default(),
             TLASBuilderPlugin::<VoxTLASBuilder>::default(),
-            SbtPlugin::<dust_pbr::PbrPipeline, VoxSbtBuilder>::default(),
+            SbtPlugin::<VoxSbtBuilder>::default(),
             AssetUploadPlugin::<VoxPalette>::default(),
         ));
     }

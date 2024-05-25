@@ -21,28 +21,14 @@ use rhyolite::{
     Access, DeferredOperationTaskPool, ImageLike, SwapchainImage,
 };
 use rhyolite_rtx::{
-    PipelineGroupManager, PipelineMarker, RayTracingPipeline, RayTracingPipelineBuildInfoCommon,
-    RayTracingPipelineManager, SbtManager,
+    RayTracingPipeline, RayTracingPipelineBuildInfoCommon,
+    RayTracingPipelineManager,
 };
 
 #[derive(Resource)]
 pub struct PbrPipeline {
     layout: Arc<PipelineLayout>,
-    manager: PipelineGroupManager<1>,
-    pipelines: Option<[CachedPipeline<RenderObject<RayTracingPipeline>>; 1]>,
-}
-impl PipelineMarker for PbrPipeline {
-    const NUM_RAYTYPES: usize = 1;
-
-    fn pipelines(&self) -> Option<[&RayTracingPipeline; Self::NUM_RAYTYPES]> {
-        self.pipelines
-            .as_ref()
-            .and_then(|f| f.each_ref().try_map(|x| Some(x.get()?.get())))
-    }
-
-    fn pipeline_group(&self) -> &PipelineGroupManager<{ Self::NUM_RAYTYPES }> {
-        &self.manager
-    }
+    pub primary: RayTracingPipelineManager,
 }
 
 impl FromWorld for PbrPipeline {
@@ -70,7 +56,7 @@ impl FromWorld for PbrPipeline {
         .unwrap();
         let layout = Arc::new(layout);
 
-        let manager = PipelineGroupManager::new([RayTracingPipelineManager::new(
+        let primary = RayTracingPipelineManager::new(
             RayTracingPipelineBuildInfoCommon {
                 layout: layout.clone(),
                 flags: vk::PipelineCreateFlags::empty(),
@@ -87,11 +73,10 @@ impl FromWorld for PbrPipeline {
             vec![],
             vec![],
             pipeline_cache,
-        )]);
+        );
         Self {
             layout,
-            manager,
-            pipelines: None,
+            primary,
         }
     }
 }
@@ -111,21 +96,7 @@ impl PbrPipeline {
         shaders: Res<Assets<ShaderModule>>,
         pool: Res<DeferredOperationTaskPool>,
     ) {
-        if this.pipelines.is_none() {
-            // When to call this build method?
-            // 0. On initial.
-            // 1. On hot reload
-            // 2. On hitgroup addition / removal.
-            this.pipelines = this
-                .manager
-                .build(&pipeline_cache, &shaders, &pool)
-                .and_then(|x| x.into_inner().ok());
-        }
-        if let Some(pipelines) = this.pipelines.as_mut() {
-            pipelines.iter_mut().for_each(|x| {
-                pipeline_cache.retrieve(x, &shaders, &pool);
-            });
-        }
+        this.primary.try_build(&pipeline_cache, &shaders, &pool);
     }
 
     pub fn trace_primary_rays_barrier(
@@ -172,11 +143,7 @@ impl PbrPipeline {
             return;
         };
         let this = &mut *this;
-        let Some(pipelines) = this.pipelines.as_mut() else {
-            return;
-        };
-        let pipeline = &mut pipelines[Self::PRIMARY_RAY];
-        let Some(pipeline) = pipeline_cache.retrieve(pipeline, &shaders, &pool) else {
+        let Some(pipeline) = this.primary.get_pipeline_mut().and_then(|x| x.get_mut()) else {
             return;
         };
         let Some(accel_struct) = accel_struct.into_inner().deref_mut() else {

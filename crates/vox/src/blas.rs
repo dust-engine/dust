@@ -1,7 +1,7 @@
 use std::{alloc::Layout, collections::BTreeMap, ops::Deref};
 
 use bevy::{
-    asset::{AssetEvent, AssetId, Assets, Handle},
+    asset::{AssetEvent, AssetId, AssetServer, Assets, Handle},
     ecs::{
         change_detection::{DetectChanges, DetectChangesMut},
         component::Component,
@@ -21,8 +21,8 @@ use bevy::{
 };
 use dust_pbr::PbrPipeline;
 use dust_vdb::Node;
-use rhyolite::{ash::vk, commands::TransferCommands, staging::StagingBelt, Allocator, Buffer};
-use rhyolite_rtx::{BLASBuildGeometry, BLASBuilder, HitgroupHandle, TLASBuilder, BLAS};
+use rhyolite::{ash::vk, commands::TransferCommands, pipeline::PipelineCache, shader::{ShaderModule, SpecializedShader}, staging::StagingBelt, Allocator, Buffer};
+use rhyolite_rtx::{BLASBuildGeometry, BLASBuilder, HitGroup, HitgroupHandle, TLASBuilder, BLAS};
 
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette, VoxPaletteGPU};
 
@@ -153,15 +153,17 @@ pub struct ShaderParams {
 
 pub struct VoxSbtBuilder;
 impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
-    type QueryData = &'static AssetId<VoxGeometry>;
+    type QueryData = &'static Handle<VoxGeometry>;
 
     type QueryFilter = ();
 
     type Params = (
+        SRes<AssetServer>,
         SRes<Assets<VoxMaterial>>,
         SRes<Assets<VoxGeometry>>,
         SRes<Assets<VoxPaletteGPU>>,
-        SRes<PbrPipeline>,
+        SResMut<PbrPipeline>,
+        SRes<PipelineCache>,
         Local<'static, Option<HitgroupHandle>>,
     );
 
@@ -180,9 +182,43 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         params: &mut SystemParamItem<Self::Params>,
         data: &QueryItem<Self::QueryData>,
     ) -> rhyolite_rtx::HitgroupHandle {
-        todo!()
+        let (assets, materials, geometry, palette, pipeline, pipeline_cache, hitgroup_handle) = params;
+        *hitgroup_handle.get_or_insert_with(|| {
+            let mut hitgroup = HitGroup::new(vk::RayTracingShaderGroupTypeKHR::PROCEDURAL_HIT_GROUP);
+            let rint = hitgroup.add_intersection_shader(
+                SpecializedShader {
+                    stage: vk::ShaderStageFlags::INTERSECTION_KHR,
+                    shader: assets.load("shaders/primary/primary.rint"),
+                    ..Default::default()
+                },
+            );
+            let rchit = hitgroup.add_closest_hit_shader(
+                SpecializedShader {
+                    stage: vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                    shader: assets.load("shaders/primary/primary.rchit"),
+                    ..Default::default()
+                },
+            );
+            hitgroup.add_group(Some(rchit), None, Some(rint));
+            pipeline.primary.add_hitgroup(
+                hitgroup,
+                pipeline_cache,
+            )
+        })
     }
     type ChangeFilter = ();
 
     type InlineParam = ShaderParams;
+    
+    const NUM_RAYTYPES: u32 = 1;
+    
+    type SbtIndexType = PbrPipeline;
+    
+    fn pipeline<'a>(
+        params: &'a mut SystemParamItem<Self::Params>,
+        raytype: u32,
+    ) -> Option<&'a rhyolite_rtx::RayTracingPipeline> {
+        let (assets, materials, geometry, palette, pipeline, pipeline_cache, hitgroup_handle) = params;
+        pipeline.primary.get_pipeline().and_then(|x| x.get()).map(|x| x.get())
+    }
 }

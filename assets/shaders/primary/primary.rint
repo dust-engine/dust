@@ -1,0 +1,7 @@
+#include "../headers/header.glsl"
+#include "../headers/layout.playout"
+
+
+void main() {
+    reportIntersectionEXT(1.2, 0);
+}
