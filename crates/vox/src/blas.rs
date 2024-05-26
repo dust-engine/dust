@@ -29,7 +29,9 @@ use rhyolite::{
     staging::StagingBelt,
     Allocator, Buffer,
 };
-use rhyolite_rtx::{BLASBuildGeometry, BLASBuilder, HitGroup, HitgroupHandle, TLASBuilder, BLAS};
+use rhyolite_rtx::{
+    BLASBuildGeometry, BLASBuilder, HitGroup, HitgroupHandle, SbtIndex, TLASBuilder, BLAS,
+};
 
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette, VoxPaletteGPU};
 
@@ -110,7 +112,11 @@ impl BLASBuilder for VoxBLASBuilder {
 
 pub struct VoxTLASBuilder;
 impl TLASBuilder for VoxTLASBuilder {
-    type QueryData = (Ref<'static, GlobalTransform>, Ref<'static, VoxInstance>);
+    type QueryData = (
+        Ref<'static, GlobalTransform>,
+        Ref<'static, VoxInstance>,
+        Ref<'static, SbtIndex<PbrPipeline>>,
+    );
 
     type QueryFilter = ();
 
@@ -118,19 +124,18 @@ impl TLASBuilder for VoxTLASBuilder {
 
     fn should_update(
         params: &mut SystemParamItem<Self::Params>,
-        (transform, instance): &QueryItem<Self::QueryData>,
+        (transform, instance, sbt_index): &QueryItem<Self::QueryData>,
     ) -> bool {
-        let blas_changed = if let Ok(blas) = params.get(instance.model) {
-            blas.is_changed()
-        } else {
-            false
-        };
-        transform.is_changed() || blas_changed || instance.is_changed()
+        let blas_changed = params
+            .get(instance.model)
+            .map(|x| x.is_changed())
+            .unwrap_or(false);
+        transform.is_changed() || blas_changed || instance.is_changed() || sbt_index.is_changed()
     }
 
     fn instance(
         params: &mut SystemParamItem<Self::Params>,
-        (transform, instance): &QueryItem<Self::QueryData>,
+        (transform, instance, sbt_index): &QueryItem<Self::QueryData>,
         mut dst: rhyolite_rtx::TLASInstanceData,
     ) {
         if let Ok(blas) = params.get(instance.model) {
@@ -141,7 +146,7 @@ impl TLASBuilder for VoxTLASBuilder {
         }
         dst.set_transform(transform.compute_matrix());
         dst.set_custom_index_and_mask(23, 0);
-        dst.set_sbt_offset_and_flags(12, vk::GeometryInstanceFlagsKHR::empty());
+        dst.set_sbt_offset_and_flags(***sbt_index, vk::GeometryInstanceFlagsKHR::empty());
     }
 }
 

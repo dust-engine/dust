@@ -136,6 +136,7 @@ impl PbrPipeline {
         mut uniform_belt: ResMut<UniformBelt>,
         windows: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
         accel_struct: ResMut<rhyolite_rtx::TLASDeviceBuildStore<rhyolite_rtx::DefaultTLAS>>,
+        hitgroup_sbt: Res<SbtManager<Self>>,
     ) {
         let Ok(swapchain) = windows.get_single() else {
             return;
@@ -187,6 +188,6 @@ impl PbrPipeline {
             },
         );
 
-        sbt.trace(0, swapchain.extent());
+        sbt.trace(0, swapchain.extent(), &hitgroup_sbt);
     }
 }
