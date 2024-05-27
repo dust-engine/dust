@@ -1,39 +1,29 @@
-use std::{alloc::Layout, collections::BTreeMap, ops::Deref};
-
 use bevy::{
-    asset::{AssetEvent, AssetId, AssetServer, Assets, Handle},
+    asset::{AssetServer, Assets, Handle},
     ecs::{
-        change_detection::{DetectChanges, DetectChangesMut},
-        component::Component,
-        entity::Entity,
-        event::EventReader,
-        query::{Added, Changed, Or, QueryItem, With},
-        removal_detection::RemovedComponents,
+        change_detection::DetectChanges,
+        query::{Changed, QueryItem},
         system::{
             lifetimeless::{SRes, SResMut},
-            Commands, Local, Query, SystemParamItem,
+            Local, Query, SystemParamItem,
         },
         world::Ref,
     },
     math::Vec3A,
     transform::components::GlobalTransform,
-    utils::tracing,
 };
 use dust_pbr::PbrPipeline;
 use dust_vdb::Node;
 use rhyolite::{
-    ash::vk,
-    commands::TransferCommands,
-    pipeline::PipelineCache,
-    shader::{ShaderModule, SpecializedShader},
-    staging::StagingBelt,
-    Allocator, Buffer,
+    ash::vk, commands::TransferCommands, pipeline::PipelineCache, shader::SpecializedShader,
+    staging::StagingBelt, Allocator, Buffer,
 };
 use rhyolite_rtx::{
-    BLASBuildGeometry, BLASBuilder, HitGroup, HitgroupHandle, SbtIndex, TLASBuilder, BLAS,
+    BLASBuildGeometry, BLASBuilder, HitGroup, HitgroupHandle, SbtIndex, SbtManager, TLASBuilder,
+    BLAS,
 };
 
-use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxPalette, VoxPaletteGPU};
+use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial, VoxPaletteGPU};
 
 /// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.
 /// Expects asset with `AssetId<VoxGeometry>` to be loaded at the time when the builder is run.
@@ -112,41 +102,43 @@ impl BLASBuilder for VoxBLASBuilder {
 
 pub struct VoxTLASBuilder;
 impl TLASBuilder for VoxTLASBuilder {
-    type QueryData = (
-        Ref<'static, GlobalTransform>,
-        Ref<'static, VoxInstance>,
-        Ref<'static, SbtIndex<PbrPipeline>>,
-    );
+    type QueryData = (Ref<'static, GlobalTransform>, Ref<'static, VoxInstance>);
 
     type QueryFilter = ();
 
-    type Params = Query<'static, 'static, Ref<'static, BLAS>>;
+    type Params = (
+        Query<'static, 'static, (Ref<'static, BLAS>, Ref<'static, SbtIndex<PbrPipeline>>)>,
+        SRes<SbtManager<PbrPipeline>>,
+    );
 
     fn should_update(
-        params: &mut SystemParamItem<Self::Params>,
-        (transform, instance, sbt_index): &QueryItem<Self::QueryData>,
+        (query, _): &mut SystemParamItem<Self::Params>,
+        (transform, instance): &QueryItem<Self::QueryData>,
     ) -> bool {
-        let blas_changed = params
+        let blas_changed = query
             .get(instance.model)
-            .map(|x| x.is_changed())
+            .map(|(blas, sbt_index)| blas.is_changed() || sbt_index.is_changed())
             .unwrap_or(false);
-        transform.is_changed() || blas_changed || instance.is_changed() || sbt_index.is_changed()
+        transform.is_changed() || blas_changed || instance.is_changed()
     }
 
     fn instance(
-        params: &mut SystemParamItem<Self::Params>,
-        (transform, instance, sbt_index): &QueryItem<Self::QueryData>,
+        (query, sbt_manager): &mut SystemParamItem<Self::Params>,
+        (transform, instance): &QueryItem<Self::QueryData>,
         mut dst: rhyolite_rtx::TLASInstanceData,
     ) {
-        if let Ok(blas) = params.get(instance.model) {
-            dst.set_blas(&blas);
-        } else {
-            dst.disable();
-            return;
+        if let Ok((blas, sbt_index)) = query.get(instance.model) {
+            if sbt_manager.index_available(&sbt_index) {
+                dst.set_blas(&blas);
+                dst.set_sbt_offset_and_flags(**sbt_index, vk::GeometryInstanceFlagsKHR::empty());
+                dst.set_transform(transform.compute_matrix());
+                dst.set_custom_index_and_mask(23, 0);
+                return;
+            } else {
+                // TODO: Test when item requiring new hitgroup pops into view
+            }
         }
-        dst.set_transform(transform.compute_matrix());
-        dst.set_custom_index_and_mask(23, 0);
-        dst.set_sbt_offset_and_flags(***sbt_index, vk::GeometryInstanceFlagsKHR::empty());
+        dst.disable();
     }
 }
 

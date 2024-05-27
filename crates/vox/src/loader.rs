@@ -1,10 +1,7 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::{Deref, DerefMut},
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::{
-    asset::{Asset, AssetLoader, AsyncReadExt, Handle},
+    asset::{AssetLoader, AsyncReadExt},
     ecs::{
         bundle::Bundle,
         entity::Entity,
@@ -12,11 +9,10 @@ use bevy::{
     },
     hierarchy::{BuildWorldChildren, WorldChildBuilder},
     math::{IVec3, Quat, UVec3, Vec3A, Vec3Swizzles},
-    reflect::TypePath,
     transform::components::{GlobalTransform, Transform},
     utils::{tracing, BoxedFuture},
 };
-use dot_vox::{Color, DotVoxData, Rotation, SceneNode};
+use dot_vox::{DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
 
 use crate::{

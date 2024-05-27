@@ -4,15 +4,11 @@
 use bevy::ecs::entity::Entity;
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::ecs::system::lifetimeless::{SRes, SResMut};
-use bevy::ecs::system::{Res, SystemParamItem};
-use bevy::prelude::IntoSystemConfigs;
+use bevy::ecs::system::SystemParamItem;
 use bevy::reflect::Reflect;
 use bevy::{
-    app::{App, Plugin, PostUpdate, Update},
-    asset::{
-        processor::{LoadAndSave, LoadTransformAndSave},
-        Asset, AssetApp, Handle,
-    },
+    app::{App, Plugin},
+    asset::{Asset, AssetApp, Handle},
     ecs::{bundle::Bundle, component::Component},
     reflect::TypePath,
     transform::components::{GlobalTransform, Transform},
@@ -33,8 +29,8 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 
 pub use loader::*;
 use rhyolite::ash::vk;
-use rhyolite::{Allocator, Buffer, RhyoliteApp};
-use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin, TLASBuilderSet};
+use rhyolite::{Allocator, Buffer};
+use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
