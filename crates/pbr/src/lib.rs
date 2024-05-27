@@ -1,6 +1,7 @@
 #![feature(array_try_map)]
 
 mod pipeline;
+pub mod camera;
 
 use bevy::{
     app::{App, Plugin, PostUpdate, Startup},

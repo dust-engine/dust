@@ -2,6 +2,7 @@ use bevy::asset::{AssetServer, Handle};
 use bevy::ecs::schedule::IntoSystemConfigs;
 use bevy::scene::{Scene, SceneBundle};
 use bevy::utils::tracing::instrument::WithSubscriber;
+use dust_pbr::camera::CameraBundle;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
 
@@ -64,4 +65,6 @@ fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
         scene,
         ..Default::default()
     });
+
+    commands.spawn(CameraBundle::default());
 }

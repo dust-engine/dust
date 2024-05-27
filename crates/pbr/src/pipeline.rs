@@ -1,13 +1,11 @@
 use std::{ops::DerefMut, sync::Arc};
 
 use bevy::{
-    asset::Assets,
-    ecs::{
+    asset::Assets, ecs::{
         query::With,
         system::{In, Local, Query, Res, ResMut, Resource},
         world::FromWorld,
-    },
-    utils::smallvec::SmallVec,
+    }, transform::components::GlobalTransform, utils::smallvec::SmallVec
 };
 use bytemuck::{Pod, Zeroable};
 use rhyolite::{
@@ -24,10 +22,14 @@ use rhyolite_rtx::{
     RayTracingPipeline, RayTracingPipelineBuildInfoCommon, RayTracingPipelineManager, SbtManager,
 };
 
+use crate::camera::{CameraBundle, CameraUniform, PinholeProjection};
+
 #[derive(Resource)]
 pub struct PbrPipeline {
     layout: Arc<PipelineLayout>,
     pub primary: RayTracingPipelineManager,
+
+
 }
 
 impl FromWorld for PbrPipeline {
@@ -69,7 +71,11 @@ impl FromWorld for PbrPipeline {
                 shader: assets.load("shaders/primary/primary.rgen"),
                 ..Default::default()
             }],
-            vec![],
+            vec![SpecializedShader {
+                stage: vk::ShaderStageFlags::MISS_KHR,
+                shader: assets.load("shaders/primary/primary.rmiss"),
+                ..Default::default()
+            }],
             vec![],
             pipeline_cache,
         );
@@ -77,11 +83,6 @@ impl FromWorld for PbrPipeline {
     }
 }
 
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
-struct RayGenParams {
-    color: [f32; 4],
-}
 
 impl PbrPipeline {
     const PRIMARY_RAY: usize = 0;
@@ -130,13 +131,12 @@ impl PbrPipeline {
     pub fn trace_primary_rays(
         mut commands: RenderCommands<'u'>,
         mut this: ResMut<Self>,
-        pipeline_cache: Res<PipelineCache>,
-        shaders: Res<Assets<ShaderModule>>,
-        pool: Res<DeferredOperationTaskPool>,
         mut uniform_belt: ResMut<UniformBelt>,
         windows: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
         accel_struct: ResMut<rhyolite_rtx::TLASDeviceBuildStore<rhyolite_rtx::DefaultTLAS>>,
         hitgroup_sbt: Res<SbtManager<Self>>,
+        cameras: Query<(&GlobalTransform, &PinholeProjection)>,
+        mut last_frame_camera: Local<Option<CameraUniform>>,
     ) {
         let Ok(swapchain) = windows.get_single() else {
             return;
@@ -148,6 +148,15 @@ impl PbrPipeline {
         let Some(accel_struct) = accel_struct.into_inner().deref_mut() else {
             return;
         };
+
+        let (transform, projection) = cameras.single();
+        let camera = CameraUniform::from_transform_projection(transform, projection, swapchain.extent().x as f32 / swapchain.extent().y as f32);
+        
+        let mut job = uniform_belt.start(&mut commands);
+        let current_camera_uniform = job.push_item(&camera);
+        let last_frame_camera_uniform = job.push_item(last_frame_camera.as_ref().unwrap_or(&camera));
+        last_frame_camera.replace(camera);
+        drop(job);
 
         commands.push_descriptor_set(
             &this.layout,
@@ -164,8 +173,25 @@ impl PbrPipeline {
                         .acceleration_structures(&[accel_struct.raw()]),
                 ),
                 vk::WriteDescriptorSet {
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                     dst_binding: 1,
+                    ..Default::default()
+                }
+                .buffer_info(&[
+                    vk::DescriptorBufferInfo {
+                        buffer: last_frame_camera_uniform.buffer,
+                        offset: last_frame_camera_uniform.offset,
+                        range: last_frame_camera_uniform.size,
+                    },
+                    vk::DescriptorBufferInfo {
+                        buffer: current_camera_uniform.buffer,
+                        offset: current_camera_uniform.offset,
+                        range: current_camera_uniform.size,
+                    },
+                ]),
+                vk::WriteDescriptorSet {
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    dst_binding: 3,
                     ..Default::default()
                 }
                 .image_info(&[vk::DescriptorImageInfo {
@@ -183,9 +209,10 @@ impl PbrPipeline {
 
         sbt.bind_raygen(
             0,
-            &RayGenParams {
-                color: [0.0, 0.0, 1.0, 1.0],
-            },
+            &(),
+        );
+        sbt.bind_miss(
+            [&()],
         );
 
         sbt.trace(0, swapchain.extent(), &hitgroup_sbt);
