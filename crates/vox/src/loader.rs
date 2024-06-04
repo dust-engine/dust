@@ -67,7 +67,7 @@ impl<'a> SceneGraphTraverser<'a> {
                     transform: Transform::default(),
                     global_transform: GlobalTransform::default(),
                     instance: VoxInstance {
-                        model: Entity::from_raw(0),
+                        model: Entity::from_raw(u32::MAX),
                     },
                 })
                 .id();

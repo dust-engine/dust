@@ -8,5 +8,5 @@ layout(shaderRecordEXT) buffer Sbt {
 } sbt;
 
 void main() {
-    imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(1.0, 1.0, 1.0, 1.0));
+    imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(1.0, 0.0, 0.0, 1.0));
 }

@@ -40,13 +40,14 @@ fn main() {
 
     app.add_systems(Startup, startup_system);
 
-    let primary_window = app
-        .world
+    let world = app.world_mut();
+
+    let primary_window = world
         .query_filtered::<Entity, With<PrimaryWindow>>()
-        .iter(&app.world)
+        .iter(world)
         .next()
         .unwrap();
-    app.world
+    world
         .entity_mut(primary_window)
         .insert(SwapchainConfig {
             image_usage: vk::ImageUsageFlags::TRANSFER_DST

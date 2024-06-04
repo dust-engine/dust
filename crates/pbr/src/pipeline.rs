@@ -5,9 +5,8 @@ use bevy::{
         query::With,
         system::{In, Local, Query, Res, ResMut, Resource},
         world::FromWorld,
-    }, transform::components::GlobalTransform, utils::smallvec::SmallVec
+    }, transform::components::GlobalTransform
 };
-use bytemuck::{Pod, Zeroable};
 use rhyolite::{
     ash::vk,
     commands::{CommonCommands, ResourceTransitionCommands},

@@ -1,4 +1,4 @@
-use bevy::{a11y::accesskit::Vec2, ecs::{bundle::Bundle, component::Component}, math::{Mat4, UVec2, Vec3}, transform::{components::{GlobalTransform, Transform}, TransformBundle}};
+use bevy::{a11y::accesskit::Vec2, ecs::{bundle::Bundle, component::Component}, math::{Mat4, UVec2, Vec3}, transform::{components::{GlobalTransform, Transform}, bundles::TransformBundle}};
 
 #[derive(Clone, Component)]
 pub struct PinholeProjection {
