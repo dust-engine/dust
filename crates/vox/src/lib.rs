@@ -1,10 +1,11 @@
 #![feature(generic_const_exprs)]
 #![feature(alloc_layout_extra)]
 
-use bevy::ecs::entity::Entity;
-use bevy::ecs::reflect::ReflectComponent;
+use bevy::ecs::entity::{Entity, MapEntities};
+use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
 use bevy::ecs::system::lifetimeless::{SRes, SResMut};
 use bevy::ecs::system::SystemParamItem;
+use bevy::prelude::EntityMapper;
 use bevy::reflect::Reflect;
 use bevy::{
     app::{App, Plugin},
@@ -104,10 +105,16 @@ impl AssetUpload for VoxPalette {
 
 /// Marker component for Vox instances
 #[derive(Component, Reflect)]
-#[reflect(Component)]
+#[reflect(Component, MapEntities)]
 pub struct VoxInstance {
     model: Entity,
 }
+impl MapEntities for VoxInstance {
+  fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+    self.model = entity_mapper.map_entity(self.model);
+  }
+}
+
 impl Default for VoxInstance {
     fn default() -> Self {
         Self {

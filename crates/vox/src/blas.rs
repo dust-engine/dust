@@ -136,6 +136,7 @@ impl TLASBuilder for VoxTLASBuilder {
                 return;
             } else {
                 // TODO: Test when item requiring new hitgroup pops into view
+                panic!();
             }
         }
         dst.disable();
