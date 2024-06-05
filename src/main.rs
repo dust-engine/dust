@@ -2,6 +2,7 @@ use bevy::asset::{AssetServer, Handle};
 use bevy::ecs::schedule::IntoSystemConfigs;
 use bevy::scene::{Scene, SceneBundle};
 use bevy::utils::tracing::instrument::WithSubscriber;
+use bevy::math::Vec3;
 use dust_pbr::camera::CameraBundle;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
@@ -33,6 +34,11 @@ fn main() {
         .add_plugins(DebugUtilsPlugin::default())
         .add_plugins(RhyolitePlugin::default())
         .add_plugins(SwapchainPlugin::default());
+
+
+    app
+        .add_plugins(smooth_bevy_cameras::LookTransformPlugin)
+        .add_plugins(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default());
 
     app.add_plugins(dust_pbr::PbrRendererPlugin);
 
@@ -67,5 +73,15 @@ fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..Default::default()
     });
 
-    commands.spawn(CameraBundle::default());
+    use smooth_bevy_cameras::{LookTransform, controllers::fps::{FpsCameraBundle, FpsCameraController}, LookTransformPlugin, Smoother};
+    commands.spawn(CameraBundle::default())
+        .insert(FpsCameraBundle::new(
+            FpsCameraController {
+                translate_sensitivity: 60.0,
+                ..Default::default()
+            },
+            Vec3::new(0., 0., 0.),
+            Vec3::new(-2.0, 5.0, 5.0),
+            Vec3::Y,
+        ));
 }

@@ -132,7 +132,7 @@ impl TLASBuilder for VoxTLASBuilder {
                 dst.set_blas(&blas);
                 dst.set_sbt_offset_and_flags(**sbt_index, vk::GeometryInstanceFlagsKHR::empty());
                 dst.set_transform(transform.compute_matrix());
-                dst.set_custom_index_and_mask(23, 0);
+                dst.set_custom_index_and_mask(23, u8::MAX);
                 return;
             } else {
                 // TODO: Test when item requiring new hitgroup pops into view

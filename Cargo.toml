@@ -15,6 +15,7 @@ rhyolite = { path = "../rhyolite" }
 dust-vox = { path = "./crates/vox" }
 dust-pbr = { path = "./crates/pbr" }
 dust-log = { path = "./crates/log" }
+smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "73c42f9714e55a03fe36730df2fd37c0ffebd260" }
 
 
 [patch.crates-io]
