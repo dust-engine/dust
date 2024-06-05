@@ -9,8 +9,9 @@ use bevy::{
     },
     hierarchy::{BuildWorldChildren, WorldChildBuilder},
     math::{IVec3, Quat, UVec3, Vec3A, Vec3Swizzles},
+    scene::Scene,
     transform::components::{GlobalTransform, Transform},
-    utils::{tracing, BoxedFuture},
+    utils::{tracing, ConditionalSendFuture},
 };
 use dot_vox::{DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
@@ -204,7 +205,7 @@ pub enum VoxLoadingError {
 pub struct VoxLoader;
 
 impl AssetLoader for VoxLoader {
-    type Asset = bevy::scene::Scene;
+    type Asset = Scene;
     type Settings = ();
     type Error = VoxLoadingError;
     fn load<'a>(
@@ -212,8 +213,8 @@ impl AssetLoader for VoxLoader {
         reader: &'a mut bevy::asset::io::Reader,
         _settings: &'a Self::Settings,
         load_context: &'a mut bevy::asset::LoadContext,
-    ) -> BoxedFuture<'a, Result<bevy::scene::Scene, VoxLoadingError>> {
-        Box::pin(async {
+    ) -> impl ConditionalSendFuture<Output = Result<Scene, VoxLoadingError>> {
+        async {
             tracing::info!("Loading vox file {}", load_context.path().display());
             let mut buffer = Vec::new();
             reader.read_to_end(&mut buffer).await?;
@@ -310,7 +311,7 @@ impl AssetLoader for VoxLoader {
 
             tracing::info!("Scene spawned");
             Ok(scene)
-        })
+        }
     }
 
     fn extensions(&self) -> &[&str] {

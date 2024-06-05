@@ -3,8 +3,6 @@
 
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
-use bevy::ecs::system::lifetimeless::{SRes, SResMut};
-use bevy::ecs::system::SystemParamItem;
 use bevy::prelude::EntityMapper;
 use bevy::reflect::Reflect;
 use bevy::{
@@ -14,23 +12,19 @@ use bevy::{
     reflect::TypePath,
     transform::components::{GlobalTransform, Transform},
 };
-use blas::{VoxBLASBuilder, VoxSbtBuilder, VoxTLASBuilder};
 use dot_vox::Color;
 use dust_vdb::hierarchy;
-use rhyolite::commands::TransferCommands;
-use rhyolite::staging::StagingBelt;
-use rhyolite::utils::{AssetUpload, AssetUploadPlugin};
+use rhyolite::utils::AssetUploadPlugin;
 use std::ops::{Deref, DerefMut};
 
-mod blas;
+mod builder;
 mod loader;
+mod resource;
 
 type TreeRoot = hierarchy!(4, 2, 2);
 type Tree = dust_vdb::Tree<TreeRoot>;
 
 pub use loader::*;
-use rhyolite::ash::vk;
-use rhyolite::{Allocator, Buffer};
 use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
 
 #[derive(Asset, TypePath)]
@@ -66,8 +60,7 @@ impl DerefMut for VoxMaterial {
 
 #[derive(Asset, TypePath)]
 pub struct VoxPalette(Vec<Color>);
-#[derive(Asset, TypePath)]
-pub struct VoxPaletteGPU(Buffer);
+
 impl Deref for VoxPalette {
     type Target = [Color];
     fn deref(&self) -> &Self::Target {
@@ -79,29 +72,6 @@ impl DerefMut for VoxPalette {
         &mut self.0
     }
 }
-impl AssetUpload for VoxPalette {
-    type GPUAsset = VoxPaletteGPU;
-
-    type Params = (SRes<Allocator>, SResMut<StagingBelt>);
-
-    fn upload_asset(
-        &self,
-        commands: &mut impl TransferCommands,
-        (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
-    ) -> Self::GPUAsset {
-        let data =
-            unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const u8, self.0.len() * 4) };
-        let buffer = Buffer::new_resource_init(
-            allocator.clone(),
-            staging_belt,
-            data,
-            1,
-            vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-            commands,
-        );
-        VoxPaletteGPU(buffer.unwrap())
-    }
-}
 
 /// Marker component for Vox instances
 #[derive(Component, Reflect)]
@@ -110,9 +80,9 @@ pub struct VoxInstance {
     model: Entity,
 }
 impl MapEntities for VoxInstance {
-  fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
-    self.model = entity_mapper.map_entity(self.model);
-  }
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.model = entity_mapper.map_entity(self.model);
+    }
 }
 
 impl Default for VoxInstance {
@@ -155,9 +125,9 @@ impl Plugin for VoxPlugin {
 
         app.add_plugins((
             RtxPlugin,
-            BLASBuilderPlugin::<VoxBLASBuilder>::default(),
-            TLASBuilderPlugin::<VoxTLASBuilder>::default(),
-            SbtPlugin::<VoxSbtBuilder>::default(),
+            BLASBuilderPlugin::<builder::VoxBLASBuilder>::default(),
+            TLASBuilderPlugin::<builder::VoxTLASBuilder>::default(),
+            SbtPlugin::<builder::VoxSbtBuilder>::default(),
             AssetUploadPlugin::<VoxPalette>::default(),
         ));
     }
