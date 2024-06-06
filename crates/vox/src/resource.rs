@@ -1,9 +1,6 @@
 use bevy::ecs::system::lifetimeless::{SRes, SResMut};
 use bevy::ecs::system::SystemParamItem;
-use bevy::{
-    asset::Asset,
-    reflect::TypePath,
-};
+use bevy::{asset::Asset, reflect::TypePath};
 use rhyolite::commands::TransferCommands;
 use rhyolite::staging::StagingBelt;
 use rhyolite::utils::AssetUpload;
@@ -14,7 +11,7 @@ use crate::VoxPalette;
 use rhyolite::{Allocator, Buffer};
 
 #[derive(Asset, TypePath)]
-pub struct VoxPaletteGPU(Buffer);
+pub struct VoxPaletteGPU(pub(crate) Buffer);
 
 impl AssetUpload for VoxPalette {
     type GPUAsset = VoxPaletteGPU;

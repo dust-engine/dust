@@ -16,14 +16,14 @@ use dust_pbr::PbrPipeline;
 use dust_vdb::Node;
 use rhyolite::{
     ash::vk, commands::TransferCommands, pipeline::PipelineCache, shader::SpecializedShader,
-    staging::StagingBelt, Allocator, Buffer,
+    staging::StagingBelt, Allocator, Buffer, BufferLike,
 };
 use rhyolite_rtx::{
     BLASBuildGeometry, BLASBuilder, HitGroup, HitgroupHandle, SbtIndex, SbtManager, TLASBuilder,
     BLAS,
 };
 
-use crate::resource::VoxPaletteGPU;
+use crate::{resource::VoxPaletteGPU, VoxPalette};
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial};
 
 /// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.
@@ -129,7 +129,7 @@ impl TLASBuilder for VoxTLASBuilder {
         mut dst: rhyolite_rtx::TLASInstanceData,
     ) {
         if let Ok((blas, sbt_index)) = query.get(instance.model) {
-            if sbt_manager.index_available(&sbt_index) {
+            if sbt_manager.index_available(&sbt_index) && sbt_index.is_enabled() {
                 dst.set_blas(&blas);
                 dst.set_sbt_offset_and_flags(**sbt_index, vk::GeometryInstanceFlagsKHR::empty());
                 dst.set_transform(transform.compute_matrix());
@@ -137,7 +137,6 @@ impl TLASBuilder for VoxTLASBuilder {
                 return;
             } else {
                 // TODO: Test when item requiring new hitgroup pops into view
-                panic!();
             }
         }
         dst.disable();
@@ -159,7 +158,11 @@ pub struct ShaderParams {
 
 pub struct VoxSbtBuilder;
 impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
-    type QueryData = &'static Handle<VoxGeometry>;
+    type QueryData = (
+        Ref<'static, Handle<VoxGeometry>>,
+        Ref<'static, Handle<VoxMaterial>>,
+        Ref<'static, Handle<VoxPalette>>,
+    );
 
     type QueryFilter = ();
 
@@ -173,15 +176,35 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         Local<'static, Option<HitgroupHandle>>,
     );
 
+    fn is_enabled(
+        params: &mut SystemParamItem<Self::Params>,
+        data: &QueryItem<Self::QueryData>,
+    ) -> bool {
+        let (geometry, material, palette) = data;
+        let (assets, materials, geometry, palettes, pipeline, pipeline_cache, hitgroup_handle) =
+            params;
+        palettes
+            .get(palette.id().untyped().typed_unchecked())
+            .is_some()
+    }
+
     fn hitgroup_param(
         params: &mut SystemParamItem<Self::Params>,
         data: &QueryItem<Self::QueryData>,
         raytype: u32,
         ret: &mut Self::InlineParam,
     ) {
+        let (geometry, material, palette) = data;
+        let (assets, materials, geometry, palettes, pipeline, pipeline_cache, hitgroup_handle) =
+            params;
+
+        let palette = palettes
+            .get(palette.id().untyped().typed_unchecked())
+            .unwrap();
+        ret.palette_ptr = palette.0.device_address();
+
         ret.geometry_ptr = 1;
         ret.material_ptr = 2;
-        ret.palette_ptr = 3;
     }
 
     fn hitgroup_handle(
@@ -207,7 +230,14 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
             pipeline.primary.add_hitgroup(hitgroup, pipeline_cache)
         })
     }
-    type ChangeFilter = Changed<Handle<VoxGeometry>>;
+
+    fn should_update(
+        params: &mut SystemParamItem<Self::Params>,
+        data: &QueryItem<Self::QueryData>,
+    ) -> bool {
+        let (geometry, material, palette) = data;
+        material.is_changed() || geometry.is_changed() || palette.is_changed()
+    }
 
     type InlineParam = ShaderParams;
 
