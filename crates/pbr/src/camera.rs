@@ -1,4 +1,12 @@
-use bevy::{a11y::accesskit::Vec2, ecs::{bundle::Bundle, component::Component}, math::{Mat4, UVec2, Vec3}, transform::{components::{GlobalTransform, Transform}, bundles::TransformBundle}};
+use bevy::{
+    a11y::accesskit::Vec2,
+    ecs::{bundle::Bundle, component::Component},
+    math::{Mat4, UVec2, Vec3},
+    transform::{
+        bundles::TransformBundle,
+        components::{GlobalTransform, Transform},
+    },
+};
 
 #[derive(Clone, Component)]
 pub struct PinholeProjection {
@@ -51,11 +59,7 @@ impl CameraUniform {
         aspect_ratio: f32,
     ) -> Self {
         let proj = {
-            Mat4::perspective_infinite_reverse_rh(
-                projection.fov,
-                aspect_ratio,
-                projection.near,
-            )
+            Mat4::perspective_infinite_reverse_rh(projection.fov, aspect_ratio, projection.near)
         };
         let view_proj = proj * transform.compute_matrix().inverse();
         let view = &transform.affine().matrix3;

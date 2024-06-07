@@ -1,11 +1,13 @@
 use std::{ops::DerefMut, sync::Arc};
 
 use bevy::{
-    asset::Assets, ecs::{
+    asset::Assets,
+    ecs::{
         query::With,
         system::{In, Local, Query, Res, ResMut, Resource},
         world::FromWorld,
-    }, transform::components::GlobalTransform
+    },
+    transform::components::GlobalTransform,
 };
 use rhyolite::{
     ash::vk,
@@ -27,8 +29,6 @@ use crate::camera::{CameraBundle, CameraUniform, PinholeProjection};
 pub struct PbrPipeline {
     layout: Arc<PipelineLayout>,
     pub primary: RayTracingPipelineManager,
-
-
 }
 
 impl FromWorld for PbrPipeline {
@@ -81,7 +81,6 @@ impl FromWorld for PbrPipeline {
         Self { layout, primary }
     }
 }
-
 
 impl PbrPipeline {
     const PRIMARY_RAY: usize = 0;
@@ -149,11 +148,16 @@ impl PbrPipeline {
         };
 
         let (transform, projection) = cameras.single();
-        let camera = CameraUniform::from_transform_projection(transform, projection, swapchain.extent().x as f32 / swapchain.extent().y as f32);
-        
+        let camera = CameraUniform::from_transform_projection(
+            transform,
+            projection,
+            swapchain.extent().x as f32 / swapchain.extent().y as f32,
+        );
+
         let mut job = uniform_belt.start(&mut commands);
         let current_camera_uniform = job.push_item(&camera);
-        let last_frame_camera_uniform = job.push_item(last_frame_camera.as_ref().unwrap_or(&camera));
+        let last_frame_camera_uniform =
+            job.push_item(last_frame_camera.as_ref().unwrap_or(&camera));
         last_frame_camera.replace(camera);
         drop(job);
 
@@ -206,13 +210,8 @@ impl PbrPipeline {
             .use_on(&mut commands)
             .trace_rays(&mut uniform_belt, &mut commands);
 
-        sbt.bind_raygen(
-            0,
-            &(),
-        );
-        sbt.bind_miss(
-            [&()],
-        );
+        sbt.bind_raygen(0, &());
+        sbt.bind_miss([&()]);
 
         sbt.trace(0, swapchain.extent(), &hitgroup_sbt);
     }

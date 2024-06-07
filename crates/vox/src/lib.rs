@@ -14,7 +14,9 @@ use bevy::{
 };
 use dot_vox::Color;
 use dust_vdb::hierarchy;
+use rhyolite::ash::vk;
 use rhyolite::utils::AssetUploadPlugin;
+use rhyolite::RhyoliteApp;
 use std::ops::{Deref, DerefMut};
 
 mod builder;
@@ -129,6 +131,13 @@ impl Plugin for VoxPlugin {
             TLASBuilderPlugin::<builder::VoxTLASBuilder>::default(),
             SbtPlugin::<builder::VoxSbtBuilder>::default(),
             AssetUploadPlugin::<VoxPalette>::default(),
+            AssetUploadPlugin::<VoxGeometry>::default(),
+            AssetUploadPlugin::<VoxMaterial>::default(),
         ));
+
+        app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.shader_int16).unwrap();
+        app.enable_feature::<vk::PhysicalDevice8BitStorageFeatures>(|x| &mut x.storage_buffer8_bit_access).unwrap();
+        app.enable_feature::<vk::PhysicalDevice16BitStorageFeatures>(|x| &mut x.storage_buffer16_bit_access).unwrap();
+        app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8).unwrap();
     }
 }

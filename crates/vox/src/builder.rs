@@ -23,7 +23,10 @@ use rhyolite_rtx::{
     BLAS,
 };
 
-use crate::{resource::VoxPaletteGPU, VoxPalette};
+use crate::{
+    resource::{VoxGeometryGPU, VoxMaterialGPU, VoxPaletteGPU},
+    VoxPalette,
+};
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial};
 
 /// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.
@@ -168,8 +171,8 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
 
     type Params = (
         SRes<AssetServer>,
-        SRes<Assets<VoxMaterial>>,
-        SRes<Assets<VoxGeometry>>,
+        SRes<Assets<VoxMaterialGPU>>,
+        SRes<Assets<VoxGeometryGPU>>,
         SRes<Assets<VoxPaletteGPU>>,
         SResMut<PbrPipeline>,
         SRes<PipelineCache>,
@@ -181,11 +184,14 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         data: &QueryItem<Self::QueryData>,
     ) -> bool {
         let (geometry, material, palette) = data;
-        let (assets, materials, geometry, palettes, pipeline, pipeline_cache, hitgroup_handle) =
+        let (assets, materials, geometries, palettes, pipeline, pipeline_cache, hitgroup_handle) =
             params;
         palettes
             .get(palette.id().untyped().typed_unchecked())
             .is_some()
+            && geometries
+                .get(geometry.id().untyped().typed_unchecked())
+                .is_some()
     }
 
     fn hitgroup_param(
@@ -195,16 +201,21 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         ret: &mut Self::InlineParam,
     ) {
         let (geometry, material, palette) = data;
-        let (assets, materials, geometry, palettes, pipeline, pipeline_cache, hitgroup_handle) =
+        let (assets, materials, geometries, palettes, pipeline, pipeline_cache, hitgroup_handle) =
             params;
 
         let palette = palettes
             .get(palette.id().untyped().typed_unchecked())
             .unwrap();
+        let geometry = geometries
+            .get(geometry.id().untyped().typed_unchecked())
+            .unwrap();
+        let material = materials
+            .get(material.id().untyped().typed_unchecked())
+            .unwrap();
         ret.palette_ptr = palette.0.device_address();
-
-        ret.geometry_ptr = 1;
-        ret.material_ptr = 2;
+        ret.geometry_ptr = geometry.0.device_address();
+        ret.material_ptr = material.0.device_address();
     }
 
     fn hitgroup_handle(

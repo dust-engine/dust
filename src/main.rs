@@ -1,8 +1,8 @@
 use bevy::asset::{AssetServer, Handle};
 use bevy::ecs::schedule::IntoSystemConfigs;
+use bevy::math::Vec3;
 use bevy::scene::{Scene, SceneBundle};
 use bevy::utils::tracing::instrument::WithSubscriber;
-use bevy::math::Vec3;
 use dust_pbr::camera::CameraBundle;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
@@ -35,9 +35,7 @@ fn main() {
         .add_plugins(RhyolitePlugin::default())
         .add_plugins(SwapchainPlugin::default());
 
-
-    app
-        .add_plugins(smooth_bevy_cameras::LookTransformPlugin)
+    app.add_plugins(smooth_bevy_cameras::LookTransformPlugin)
         .add_plugins(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default());
 
     app.add_plugins(dust_pbr::PbrRendererPlugin);
@@ -53,15 +51,13 @@ fn main() {
         .iter(world)
         .next()
         .unwrap();
-    world
-        .entity_mut(primary_window)
-        .insert(SwapchainConfig {
-            image_usage: vk::ImageUsageFlags::TRANSFER_DST
-                | vk::ImageUsageFlags::COLOR_ATTACHMENT
-                | vk::ImageUsageFlags::STORAGE,
-            srgb_format: false,
-            ..Default::default()
-        });
+    world.entity_mut(primary_window).insert(SwapchainConfig {
+        image_usage: vk::ImageUsageFlags::TRANSFER_DST
+            | vk::ImageUsageFlags::COLOR_ATTACHMENT
+            | vk::ImageUsageFlags::STORAGE,
+        srgb_format: false,
+        ..Default::default()
+    });
 
     app.run();
 }
@@ -73,8 +69,12 @@ fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..Default::default()
     });
 
-    use smooth_bevy_cameras::{LookTransform, controllers::fps::{FpsCameraBundle, FpsCameraController}, LookTransformPlugin, Smoother};
-    commands.spawn(CameraBundle::default())
+    use smooth_bevy_cameras::{
+        controllers::fps::{FpsCameraBundle, FpsCameraController},
+        LookTransform, LookTransformPlugin, Smoother,
+    };
+    commands
+        .spawn(CameraBundle::default())
         .insert(FpsCameraBundle::new(
             FpsCameraController {
                 translate_sensitivity: 60.0,
