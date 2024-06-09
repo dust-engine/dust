@@ -63,7 +63,7 @@ impl BLASBuilder for VoxBLASBuilder {
             allocator.clone(),
             staging_belt,
             leaf_count as u64 * std::mem::size_of::<vk::AabbPositionsKHR>() as u64,
-            1,
+            8,
             vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                 | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             commands,

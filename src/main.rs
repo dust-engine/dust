@@ -1,13 +1,16 @@
 use bevy::asset::{AssetServer, Handle};
 use bevy::ecs::schedule::IntoSystemConfigs;
 use bevy::math::Vec3;
+use bevy::prelude::Component;
 use bevy::scene::{Scene, SceneBundle};
+use bevy::time::Time;
+use bevy::transform::components::Transform;
 use bevy::utils::tracing::instrument::WithSubscriber;
 use dust_pbr::camera::CameraBundle;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
 
-use bevy::app::{PluginGroup, PostUpdate, Startup};
+use bevy::app::{PluginGroup, PostUpdate, Startup, Update};
 use bevy::ecs::system::{Commands, In, Query, Res};
 use bevy::ecs::{entity::Entity, query::With};
 use bevy::window::PrimaryWindow;
@@ -42,7 +45,8 @@ fn main() {
 
     app.add_plugins(VoxPlugin);
 
-    app.add_systems(Startup, startup_system);
+    app.add_systems(Startup, startup_system)
+        .add_systems(Update, teapot_move_system);
 
     let world = app.world_mut();
 
@@ -69,10 +73,14 @@ fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..Default::default()
     });
 
-    use smooth_bevy_cameras::{
-        controllers::fps::{FpsCameraBundle, FpsCameraController},
-        LookTransform, LookTransformPlugin, Smoother,
-    };
+    commands
+        .spawn(SceneBundle {
+            scene: asset_server.load("teapot.vox"),
+            ..Default::default()
+        })
+        .insert(TeaPot);
+
+    use smooth_bevy_cameras::controllers::fps::{FpsCameraBundle, FpsCameraController};
     commands
         .spawn(CameraBundle::default())
         .insert(FpsCameraBundle::new(
@@ -84,4 +92,13 @@ fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
             Vec3::new(-2.0, 5.0, 5.0),
             Vec3::Y,
         ));
+}
+
+#[derive(Component)]
+pub struct TeaPot;
+fn teapot_move_system(time: Res<Time>, mut query: Query<&mut Transform, With<TeaPot>>) {
+    for mut teapot in query.iter_mut() {
+        *teapot =
+            Transform::from_translation(Vec3::new(time.elapsed_seconds().sin() * 50.0, 200.0, 0.0));
+    }
 }
