@@ -189,19 +189,22 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         palettes
             .get(palette.id().untyped().typed_unchecked())
             .is_some()
-            && geometries
-                .get(geometry.id().untyped().typed_unchecked())
-                .is_some()
+        && geometries
+            .get(geometry.id().untyped().typed_unchecked())
+            .is_some()
+        && materials
+            .get(material.id().untyped().typed_unchecked())
+            .is_some()
     }
 
     fn hitgroup_param(
         params: &mut SystemParamItem<Self::Params>,
         data: &QueryItem<Self::QueryData>,
-        raytype: u32,
+        _raytype: u32,
         ret: &mut Self::InlineParam,
     ) {
         let (geometry, material, palette) = data;
-        let (assets, materials, geometries, palettes, pipeline, pipeline_cache, hitgroup_handle) =
+        let (_assets, materials, geometries, palettes, _pipeline, _pipeline_cache, _hitgroup_handle) =
             params;
 
         let palette = palettes
@@ -220,9 +223,9 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
 
     fn hitgroup_handle(
         params: &mut SystemParamItem<Self::Params>,
-        data: &QueryItem<Self::QueryData>,
+        _data: &QueryItem<Self::QueryData>,
     ) -> rhyolite_rtx::HitgroupHandle {
-        let (assets, materials, geometry, palette, pipeline, pipeline_cache, hitgroup_handle) =
+        let (assets, _materials, _geometry, _palette, pipeline, pipeline_cache, hitgroup_handle) =
             params;
         *hitgroup_handle.get_or_insert_with(|| {
             let mut hitgroup =
@@ -243,7 +246,7 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
     }
 
     fn should_update(
-        params: &mut SystemParamItem<Self::Params>,
+        _params: &mut SystemParamItem<Self::Params>,
         data: &QueryItem<Self::QueryData>,
     ) -> bool {
         let (geometry, material, palette) = data;
@@ -258,9 +261,9 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
 
     fn pipeline<'a>(
         params: &'a mut SystemParamItem<Self::Params>,
-        raytype: u32,
+        _raytype: u32,
     ) -> Option<&'a rhyolite_rtx::RayTracingPipeline> {
-        let (assets, materials, geometry, palette, pipeline, pipeline_cache, hitgroup_handle) =
+        let (_assets, _materials, _geometry, _palette, pipeline, _pipeline_cache, _hitgroup_handle) =
             params;
         pipeline
             .primary

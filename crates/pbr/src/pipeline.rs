@@ -104,9 +104,6 @@ impl PbrPipeline {
         let Ok(mut swapchain) = windows.get_single_mut() else {
             return;
         };
-        let Some(accel_struct) = accel_struct.into_inner().deref_mut() else {
-            return;
-        };
         barriers.transition(
             swapchain.deref_mut(),
             Access {
@@ -116,6 +113,9 @@ impl PbrPipeline {
             false,
             vk::ImageLayout::GENERAL,
         );
+        let Some(accel_struct) = accel_struct.into_inner().deref_mut() else {
+            return;
+        };
         barriers.transition(
             accel_struct,
             Access {
