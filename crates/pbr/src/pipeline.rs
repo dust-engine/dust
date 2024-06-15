@@ -10,6 +10,7 @@ use bevy::{
     transform::components::GlobalTransform,
 };
 use rhyolite::{
+    ash::khr,
     ash::vk,
     commands::{CommonCommands, ResourceTransitionCommands},
     dispose::RenderObject,
@@ -17,7 +18,7 @@ use rhyolite::{
     pipeline::{CachedPipeline, DescriptorSetLayout, PipelineCache, PipelineLayout},
     shader::{ShaderModule, SpecializedShader},
     staging::UniformBelt,
-    Access, DeferredOperationTaskPool, ImageLike, SwapchainImage,
+    Access, DeferredOperationTaskPool, Device, ImageLike, SwapchainImage,
 };
 use rhyolite_rtx::{
     RayTracingPipeline, RayTracingPipelineBuildInfoCommon, RayTracingPipelineManager, SbtManager,
@@ -100,6 +101,8 @@ impl PbrPipeline {
         In(mut barriers): In<Barriers>,
         mut windows: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
         accel_struct: ResMut<rhyolite_rtx::TLASDeviceBuildStore<rhyolite_rtx::DefaultTLAS>>,
+        mut hitgroup_sbt: ResMut<SbtManager<Self>>,
+        device: Res<Device>,
     ) {
         let Ok(mut swapchain) = windows.get_single_mut() else {
             return;
@@ -116,11 +119,30 @@ impl PbrPipeline {
         let Some(accel_struct) = accel_struct.into_inner().deref_mut() else {
             return;
         };
+        let Some(sbt) = hitgroup_sbt.buffer_mut() else {
+            return;
+        };
         barriers.transition(
             accel_struct,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                 access: vk::AccessFlags2::ACCELERATION_STRUCTURE_READ_KHR,
+            },
+            true,
+            (),
+        );
+        barriers.transition(
+            sbt,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: if device
+                    .get_extension::<khr::ray_tracing_maintenance1::Meta>()
+                    .is_ok()
+                {
+                    vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR
+                } else {
+                    vk::AccessFlags2::SHADER_READ
+                },
             },
             true,
             (),
@@ -140,7 +162,7 @@ impl PbrPipeline {
             return;
         };
         let this = &mut *this;
-        let Some(pipeline) = this.primary.get_pipeline_mut().and_then(|x| x.get_mut()) else {
+        let Some(pipeline) = this.primary.get_pipeline() else {
             return;
         };
         let Some(accel_struct) = accel_struct.into_inner().deref_mut() else {

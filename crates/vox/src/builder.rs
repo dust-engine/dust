@@ -189,12 +189,12 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         palettes
             .get(palette.id().untyped().typed_unchecked())
             .is_some()
-        && geometries
-            .get(geometry.id().untyped().typed_unchecked())
-            .is_some()
-        && materials
-            .get(material.id().untyped().typed_unchecked())
-            .is_some()
+            && geometries
+                .get(geometry.id().untyped().typed_unchecked())
+                .is_some()
+            && materials
+                .get(material.id().untyped().typed_unchecked())
+                .is_some()
     }
 
     fn hitgroup_param(
@@ -204,8 +204,15 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
         ret: &mut Self::InlineParam,
     ) {
         let (geometry, material, palette) = data;
-        let (_assets, materials, geometries, palettes, _pipeline, _pipeline_cache, _hitgroup_handle) =
-            params;
+        let (
+            _assets,
+            materials,
+            geometries,
+            palettes,
+            _pipeline,
+            _pipeline_cache,
+            _hitgroup_handle,
+        ) = params;
 
         let palette = palettes
             .get(palette.id().untyped().typed_unchecked())
@@ -265,10 +272,6 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
     ) -> Option<&'a rhyolite_rtx::RayTracingPipeline> {
         let (_assets, _materials, _geometry, _palette, pipeline, _pipeline_cache, _hitgroup_handle) =
             params;
-        pipeline
-            .primary
-            .get_pipeline()
-            .and_then(|x| x.get())
-            .map(|x| x.get())
+        pipeline.primary.get_pipeline().map(|x| x.get())
     }
 }

@@ -135,9 +135,17 @@ impl Plugin for VoxPlugin {
             AssetUploadPlugin::<VoxMaterial>::default(),
         ));
 
-        app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.shader_int16).unwrap();
-        app.enable_feature::<vk::PhysicalDevice8BitStorageFeatures>(|x| &mut x.storage_buffer8_bit_access).unwrap();
-        app.enable_feature::<vk::PhysicalDevice16BitStorageFeatures>(|x| &mut x.storage_buffer16_bit_access).unwrap();
-        app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8).unwrap();
+        app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.shader_int16)
+            .unwrap();
+        app.enable_feature::<vk::PhysicalDevice8BitStorageFeatures>(|x| {
+            &mut x.storage_buffer8_bit_access
+        })
+        .unwrap();
+        app.enable_feature::<vk::PhysicalDevice16BitStorageFeatures>(|x| {
+            &mut x.storage_buffer16_bit_access
+        })
+        .unwrap();
+        app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8)
+            .unwrap();
     }
 }
