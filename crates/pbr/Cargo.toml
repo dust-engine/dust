@@ -6,5 +6,5 @@ edition = "2021"
 [dependencies]
 rhyolite = { path = "../../../rhyolite" }
 rhyolite_rtx = { path = "../../../rhyolite/crates/rtx" }
-bevy = { version = "0.14.0-dev", default-features = false }
+bevy = { version = "0.14.0-rc.3", default-features = false }
 playout_macro = { path = "../../../playout/macro" }

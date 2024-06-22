@@ -6,6 +6,7 @@ mod sentry;
 
 pub struct LogPlugin;
 impl Plugin for LogPlugin {
+    #[allow(unused_variables)]
     fn build(&self, app: &mut App) {
         let subscriber = Registry::default();
 

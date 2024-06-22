@@ -1,26 +1,19 @@
 use bevy::asset::{AssetServer, Handle};
-use bevy::ecs::schedule::IntoSystemConfigs;
 use bevy::math::Vec3;
 use bevy::prelude::Component;
 use bevy::scene::{Scene, SceneBundle};
 use bevy::time::Time;
 use bevy::transform::components::Transform;
-use bevy::utils::tracing::instrument::WithSubscriber;
 use dust_pbr::camera::CameraBundle;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
 
-use bevy::app::{PluginGroup, PostUpdate, Startup, Update};
-use bevy::ecs::system::{Commands, In, Query, Res};
+use bevy::app::{PluginGroup, Startup, Update};
+use bevy::ecs::system::{Commands, Query, Res};
 use bevy::ecs::{entity::Entity, query::With};
 use bevy::window::PrimaryWindow;
-use rhyolite::commands::{CommonCommands, ResourceTransitionCommands};
 use rhyolite::debug::DebugUtilsPlugin;
-use rhyolite::ecs::{Barriers, IntoRenderSystemConfigs, RenderCommands};
-use rhyolite::{
-    acquire_swapchain_image, present, Access, RhyolitePlugin, SurfacePlugin, SwapchainConfig,
-    SwapchainImage, SwapchainPlugin,
-};
+use rhyolite::{RhyolitePlugin, SurfacePlugin, SwapchainConfig, SwapchainPlugin};
 
 fn main() {
     let mut app = bevy::app::App::new();

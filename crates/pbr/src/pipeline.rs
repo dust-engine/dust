@@ -13,18 +13,15 @@ use rhyolite::{
     ash::khr,
     ash::vk,
     commands::{CommonCommands, ResourceTransitionCommands},
-    dispose::RenderObject,
     ecs::{Barriers, RenderCommands},
-    pipeline::{CachedPipeline, DescriptorSetLayout, PipelineCache, PipelineLayout},
+    pipeline::{DescriptorSetLayout, PipelineCache, PipelineLayout},
     shader::{ShaderModule, SpecializedShader},
     staging::UniformBelt,
     Access, DeferredOperationTaskPool, Device, ImageLike, SwapchainImage,
 };
-use rhyolite_rtx::{
-    RayTracingPipeline, RayTracingPipelineBuildInfoCommon, RayTracingPipelineManager, SbtManager,
-};
+use rhyolite_rtx::{RayTracingPipelineBuildInfoCommon, RayTracingPipelineManager, SbtManager};
 
-use crate::camera::{CameraBundle, CameraUniform, PinholeProjection};
+use crate::camera::{CameraUniform, PinholeProjection};
 
 #[derive(Resource)]
 pub struct PbrPipeline {

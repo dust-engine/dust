@@ -4,7 +4,7 @@ pub mod camera;
 mod pipeline;
 
 use bevy::{
-    app::{App, Plugin, PostUpdate, Startup},
+    app::{App, Plugin, PostUpdate},
     ecs::{query::With, schedule::IntoSystemConfigs},
     window::PrimaryWindow,
 };

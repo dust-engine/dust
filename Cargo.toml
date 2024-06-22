@@ -10,7 +10,7 @@ members = [
 
 
 [dependencies]
-bevy = { version = "0.14.0-dev", default-features = false, features = ["bevy_scene"] }
+bevy = { version = "0.14.0-rc.3", default-features = false, features = ["bevy_scene"] }
 rhyolite = { path = "../rhyolite" }
 dust-vox = { path = "./crates/vox" }
 dust-pbr = { path = "./crates/pbr" }

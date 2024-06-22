@@ -9,7 +9,7 @@ edition = "2021"
 glam = "^0.27"
 fxhash = "0.2"
 nohash = "0.2.0"
-bevy = { version = "0.14.0-dev", default-features = false, features = ["bevy_asset"] }
+bevy = { version = "0.14.0-rc.3", default-features = false, features = ["bevy_asset"] }
 
 [dev-dependencies]
 rand = "0.8.5"

@@ -1,11 +1,7 @@
 use bevy::{
-    a11y::accesskit::Vec2,
     ecs::{bundle::Bundle, component::Component},
-    math::{Mat4, UVec2, Vec3},
-    transform::{
-        bundles::TransformBundle,
-        components::{GlobalTransform, Transform},
-    },
+    math::{Mat4, Vec3},
+    transform::{bundles::TransformBundle, components::GlobalTransform},
 };
 
 #[derive(Clone, Component)]

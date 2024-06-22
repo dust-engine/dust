@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { version = "0.14.0-dev", default-features = false, features = ["bevy_scene"] }
+bevy = { version = "0.14.0-rc.3", default-features = false, features = ["bevy_scene"] }
 rhyolite = { path = "../../../rhyolite" }
 dust-vdb = { path = "../vdb" }
 dust-pbr = { path = "../pbr" }
