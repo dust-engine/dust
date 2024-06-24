@@ -1,8 +1,10 @@
 #![feature(generic_const_exprs)]
 #![feature(alloc_layout_extra)]
 
+use bevy::app::Update;
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
+use bevy::math::UVec3;
 use bevy::prelude::EntityMapper;
 use bevy::reflect::Reflect;
 use bevy::{
@@ -22,6 +24,7 @@ use std::ops::{Deref, DerefMut};
 mod builder;
 mod loader;
 mod resource;
+mod physics;
 
 type TreeRoot = hierarchy!(4, 2, 2);
 type Tree = dust_vdb::Tree<TreeRoot>;
@@ -32,7 +35,17 @@ use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
     tree: Tree,
+    aabb_min: UVec3,
+    aabb_max: UVec3,
     unit_size: f32,
+}
+impl VoxGeometry {
+    pub fn aabb(&self) -> (UVec3, UVec3) {
+        (self.aabb_min, self.aabb_max)
+    }
+    pub fn size(&self) -> UVec3 {
+        self.aabb_max - self.aabb_min + UVec3::ONE
+    }
 }
 impl Deref for VoxGeometry {
     type Target = Tree;
@@ -147,5 +160,7 @@ impl Plugin for VoxPlugin {
         .unwrap();
         app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8)
             .unwrap();
+
+        app.add_systems(Update, physics::insert_collider_system);
     }
 }

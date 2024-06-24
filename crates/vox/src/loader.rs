@@ -271,16 +271,16 @@ impl AssetLoader for VoxLoader {
                 let handles = models
                     .par_iter()
                     .map(|(model_id, model)| {
-                        let (tree, palette_indexes) = self.model_to_tree(model);
+                        let (tree, palette_indexes, min, max) = self.model_to_tree(model);
 
-                        (*model_id, (tree, palette_indexes.into_boxed_slice()))
+                        (*model_id, (tree, palette_indexes.into_boxed_slice(), min, max))
                     })
                     .collect_vec_list();
                 let bundles = handles.into_iter().flat_map(|a| a).map(
-                    |(model_id, (tree, palette_indexes))| {
+                    |(model_id, (tree, palette_indexes, aabb_min, aabb_max))| {
                         let geometry = load_context.add_labeled_asset(
                             format!("Geometry{}", model_id),
-                            VoxGeometry { tree, unit_size },
+                            VoxGeometry { tree, unit_size, aabb_max, aabb_min },
                         );
                         let material = load_context.add_labeled_asset(
                             format!("Material{}", model_id),
@@ -319,11 +319,14 @@ impl AssetLoader for VoxLoader {
     }
 }
 impl VoxLoader {
-    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, Vec<u8>) {
+    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, Vec<u8>, UVec3, UVec3) {
         let mut tree = crate::Tree::new();
         let mut palette_index_collector = ModelIndexCollector::new();
         let mut accessor = tree.accessor_mut();
         let size_y = model.size.y;
+
+        let mut min = UVec3::MAX;
+        let mut max = UVec3::MIN;
         for voxel in model.voxels.iter() {
             let voxel = dot_vox::Voxel {
                 x: voxel.x,
@@ -338,6 +341,8 @@ impl VoxLoader {
             };
 
             accessor.set(coords, Some(true));
+            min = min.min(coords);
+            max = max.max(coords);
             palette_index_collector.set(voxel);
         }
 
@@ -353,7 +358,7 @@ impl VoxLoader {
 
         let palette_indexes: Vec<u8> = palette_indexes.collect();
 
-        (tree, palette_indexes)
+        (tree, palette_indexes, min, max)
     }
 }
 

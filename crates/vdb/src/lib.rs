@@ -7,6 +7,7 @@
 mod accessor;
 mod bitmask;
 mod node;
+mod parry;
 mod pool;
 mod tree;
 

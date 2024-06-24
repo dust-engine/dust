@@ -10,6 +10,7 @@ glam = "^0.27"
 fxhash = "0.2"
 nohash = "0.2.0"
 bevy = { version = "0.14.0-rc.3", default-features = false, features = ["bevy_asset"] }
+parry3d = "0.15"
 
 [dev-dependencies]
 rand = "0.8.5"

@@ -25,7 +25,7 @@ pub struct NodeMeta<V> {
     pub(crate) extent_mask: UVec3, // = (1 << extent_log2) - 1
 }
 
-pub trait Node: 'static + Default + Debug {
+pub trait Node: 'static + Default + Debug + Send + Sync {
     /// span of the node.
     type LeafType: IsLeaf;
     const EXTENT_LOG2: UVec3;
