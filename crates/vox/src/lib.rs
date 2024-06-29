@@ -23,18 +23,19 @@ use std::ops::{Deref, DerefMut};
 
 mod builder;
 mod loader;
-mod resource;
 mod physics;
+mod resource;
 
 type TreeRoot = hierarchy!(4, 2, 2);
 type Tree = dust_vdb::Tree<TreeRoot>;
+type ImmutableTree = dust_vdb::ImmutableTree<TreeRoot>;
 
 pub use loader::*;
 use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
-    tree: Tree,
+    tree: ImmutableTree,
     aabb_min: UVec3,
     aabb_max: UVec3,
     unit_size: f32,
@@ -48,7 +49,7 @@ impl VoxGeometry {
     }
 }
 impl Deref for VoxGeometry {
-    type Target = Tree;
+    type Target = ImmutableTree;
     fn deref(&self) -> &Self::Target {
         &self.tree
     }

@@ -273,14 +273,22 @@ impl AssetLoader for VoxLoader {
                     .map(|(model_id, model)| {
                         let (tree, palette_indexes, min, max) = self.model_to_tree(model);
 
-                        (*model_id, (tree, palette_indexes.into_boxed_slice(), min, max))
+                        (
+                            *model_id,
+                            (tree, palette_indexes.into_boxed_slice(), min, max),
+                        )
                     })
                     .collect_vec_list();
                 let bundles = handles.into_iter().flat_map(|a| a).map(
                     |(model_id, (tree, palette_indexes, aabb_min, aabb_max))| {
                         let geometry = load_context.add_labeled_asset(
                             format!("Geometry{}", model_id),
-                            VoxGeometry { tree, unit_size, aabb_max, aabb_min },
+                            VoxGeometry {
+                                tree: tree.freeze(),
+                                unit_size,
+                                aabb_max,
+                                aabb_min,
+                            },
                         );
                         let material = load_context.add_labeled_asset(
                             format!("Material{}", model_id),

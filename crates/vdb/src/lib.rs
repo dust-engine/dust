@@ -3,9 +3,11 @@
 #![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(alloc_layout_extra)]
+#![feature(mapped_lock_guards)]
 
 mod accessor;
 mod bitmask;
+mod immutable;
 mod node;
 mod parry;
 mod pool;
@@ -16,6 +18,7 @@ pub use pool::Pool;
 pub use tree::Tree;
 
 pub use accessor::Accessor;
+pub use immutable::*;
 pub use node::*;
 
 pub extern crate self as dust_vdb;

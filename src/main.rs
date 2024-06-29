@@ -1,4 +1,3 @@
-
 use bevy::asset::{AssetServer, Handle};
 use bevy::input::mouse::MouseMotion;
 use bevy::input::ButtonInput;
@@ -8,7 +7,10 @@ use bevy::scene::{Scene, SceneBundle};
 use bevy::time::Time;
 use bevy::transform::bundles::TransformBundle;
 use bevy::transform::components::Transform;
-use bevy_rapier3d::control::{CharacterAutostep, CharacterLength, KinematicCharacterController, KinematicCharacterControllerOutput};
+use bevy_rapier3d::control::{
+    CharacterAutostep, CharacterLength, KinematicCharacterController,
+    KinematicCharacterControllerOutput,
+};
 use bevy_rapier3d::geometry::Collider;
 use bevy_rapier3d::plugin::NoUserData;
 use dust_pbr::camera::CameraBundle;
@@ -87,7 +89,7 @@ fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
             transform: TransformBundle {
                 local: Transform::from_translation(Vec3::new(0.0, 400.0, 0.0)),
                 ..Default::default()
-            },  
+            },
             ..Default::default()
         })
         .insert(Collider::capsule_y(10.0, 3.0))
@@ -165,10 +167,11 @@ fn player_movement(
             *gravity_movement = 0.0;
         }
     }
-    controller.translation = Some(Quat::from_axis_angle(Vec3::Y, orientation.x) * (movement * time.delta_seconds()));
+    controller.translation =
+        Some(Quat::from_axis_angle(Vec3::Y, orientation.x) * (movement * time.delta_seconds()));
 
     // Look transform
-    
+
     for event in mouse_events.read() {
         let sensitivity = 0.001;
         orientation.x -= event.delta.x * sensitivity;
@@ -176,5 +179,6 @@ fn player_movement(
         orientation.y = orientation.y.clamp(-89.9, 89.9); // Limit pitch
     }
 
-    transform.rotation = Quat::from_euler(bevy::math::EulerRot::YXZ, orientation.x, orientation.y, 0.0);
+    transform.rotation =
+        Quat::from_euler(bevy::math::EulerRot::YXZ, orientation.x, orientation.y, 0.0);
 }
