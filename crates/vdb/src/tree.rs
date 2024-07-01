@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 
 use glam::UVec3;
 
-use crate::{Node, NodeMeta, Pool};
+use crate::{AabbU32, Node, NodeMeta, Pool};
 
 pub struct Tree<ROOT: Node>
 where
@@ -10,6 +10,7 @@ where
 {
     pub(crate) root: ROOT,
     pub(crate) pool: [Pool; ROOT::LEVEL as usize],
+    pub(crate) aabb: AabbU32,
 }
 
 /// ```
@@ -44,6 +45,7 @@ where
         Self {
             root: ROOT::default(),
             pool: pools,
+            aabb: AabbU32::default(),
         }
     }
     pub unsafe fn alloc_node<CHILD: Node>(&mut self) -> u32 {
@@ -75,13 +77,12 @@ where
     }
 
     #[inline]
-    pub fn get_value(&self, coords: UVec3) -> Option<ROOT::Voxel> {
-        self.root.get(&self.pool, coords, &mut [])
-    }
-
-    #[inline]
-    pub fn set_value(&mut self, coords: UVec3, value: Option<ROOT::Voxel>) {
-        self.root.set(&mut self.pool, coords, value, &mut [])
+    pub fn set_value(&mut self, coords: UVec3, value: bool) {
+        if value {
+            self.aabb.min = self.aabb.min.min(coords);
+            self.aabb.max = self.aabb.max.max(coords);
+        }
+        self.root.set(&mut self.pool, coords, value, &mut []);
     }
 
     /// ```
@@ -103,15 +104,6 @@ where
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
 
-    pub fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a ROOT::LeafType)> {
-        self.root
-            .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
-            .map(|(position, leaf)| unsafe {
-                let leaf: &'a ROOT::LeafType = &*leaf.get();
-                (position, leaf)
-            })
-    }
-
     pub fn iter_leaf_mut<'a>(
         &'a mut self,
     ) -> impl Iterator<Item = (UVec3, &'a mut ROOT::LeafType)> {
@@ -123,9 +115,46 @@ where
             })
     }
 
-    pub fn metas() -> Vec<NodeMeta<ROOT::Voxel>> {
+    pub fn metas() -> Vec<NodeMeta> {
         let mut vec = Vec::with_capacity(ROOT::LEVEL + 1);
         ROOT::write_meta(&mut vec);
         vec
+    }
+}
+
+pub trait TreeLike {
+    type ROOT: Node;
+    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)>;
+    fn get_value(&self, coords: UVec3) -> bool;
+
+    fn root(&self) -> &Self::ROOT;
+    fn aabb(&self) -> AabbU32;
+}
+
+impl<ROOT: Node> TreeLike for Tree<ROOT>
+where
+    [(); ROOT::LEVEL as usize]: Sized,
+{
+    type ROOT = ROOT;
+    
+    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)> {
+        self.root
+            .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
+            .map(|(position, leaf)| unsafe {
+                let leaf: &'a ROOT::LeafType = &*leaf.get();
+                (position, leaf)
+            })
+    }
+    
+    fn get_value(&self, coords: UVec3) -> bool {
+        self.root.get(&self.pool, coords, &mut [])
+    }
+    
+    fn root(&self) -> &Self::ROOT {
+        &self.root
+    }
+    
+    fn aabb(&self) -> AabbU32 {
+        self.aabb
     }
 }

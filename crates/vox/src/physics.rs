@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use bevy::prelude::*;
-use bevy_rapier3d::geometry::Collider;
+use bevy_rapier3d::{geometry::Collider, parry::shape::{Shape, SharedShape}};
 
 use crate::{Tree, VoxGeometry, VoxInstance, VoxModel};
 
@@ -16,11 +18,7 @@ pub(crate) fn insert_collider_system(
         let Some(geometry) = geometries.get(geometry_handle) else {
             continue;
         };
-        let size = geometry.size();
-        commands.entity(entity).insert(Collider::cuboid(
-            size.x as f32,
-            size.y as f32,
-            size.z as f32,
-        ));
+        let shape = SharedShape::new(geometry.tree.snapshot());
+        commands.entity(entity).insert(Collider::from(shape));
     }
 }

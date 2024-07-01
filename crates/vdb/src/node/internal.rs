@@ -1,6 +1,7 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
-use glam::UVec3;
+use crate::{bitmask::SetBitIterator, AabbU16, BitMask, ConstUVec3, Node, Pool};
+use glam::{U16Vec3, UVec3};
+use parry3d::bounding_volume::Aabb;
 use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of};
 
 #[derive(Clone, Copy)]
@@ -13,8 +14,8 @@ pub union InternalNodeEntry {
     pub free: u32,
 }
 
-/// Internal nodes are always 4x4x4 so that the child mask contains exactly 64 voxels.
-/// Size: 3 - 66 u32
+/// Internal nodes can be 2*2*2.
+/// Size: 8 byte (mask) + 32 byte + 16 bytes for stats
 #[repr(C)]
 pub struct InternalNode<CHILD: Node, const FANOUT_LOG2: ConstUVec3>
 where
@@ -22,8 +23,10 @@ where
 {
     /// This is 0 if that tile is completely air, and 1 otherwise.
     pub child_mask: BitMask<{ size_of_grid(FANOUT_LOG2) }>,
+
     /// points to self.child_mask.count_ones() LeafNodes or InternalNodes
     pub child_ptrs: [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
+    
     _marker: PhantomData<CHILD>,
 }
 impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Default for InternalNode<CHILD, FANOUT_LOG2>
@@ -73,16 +76,15 @@ where
         }
     }
 
-    type Voxel = CHILD::Voxel;
     #[inline]
-    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> Option<Self::Voxel> {
+    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> bool {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
             | (internal_offset.z as usize);
         let has_child = self.child_mask.get(index);
         if !has_child {
-            return None;
+            return false;
         }
         unsafe {
             let child_ptr = self.child_ptrs[index].occupied;
@@ -99,14 +101,14 @@ where
         &mut self,
         pools: &mut [Pool],
         coords: UVec3,
-        value: Option<Self::Voxel>,
+        value: bool,
         cached_path: &mut [u32],
-    ) {
+    ) -> bool {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
             | (internal_offset.z as usize);
-        if value.is_some() {
+        if value {
             // set
             let has_child = self.child_mask.get(index);
             if !has_child {
@@ -135,7 +137,7 @@ where
         coords: UVec3,
         ptr: u32,
         cached_path: &mut [u32],
-    ) -> Option<Self::Voxel> {
+    ) -> bool {
         if cached_path.len() > 0 {
             cached_path[Self::LEVEL] = ptr;
         }
@@ -148,9 +150,9 @@ where
         pools: &mut [Pool],
         coords: UVec3,
         ptr: u32,
-        value: Option<Self::Voxel>,
+        value: bool,
         cached_path: &mut [u32],
-    ) {
+    ) -> bool {
         // Safety: r was taken from pools[Self::LEVEL] and we know that self.set only access pools[CHILD::LEVEL].
         if cached_path.len() > 0 {
             cached_path[Self::LEVEL] = ptr;
@@ -208,7 +210,7 @@ where
             child_iterator: None,
         }
     }
-    fn write_meta(metas: &mut Vec<NodeMeta<Self::Voxel>>) {
+    fn write_meta(metas: &mut Vec<NodeMeta>) {
         CHILD::write_meta(metas);
         metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),

@@ -11,7 +11,7 @@ where
 {
     tree: &'a Tree<ROOT>,
     ptrs: [u32; ROOT::LEVEL],
-    metas: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL + 1],
+    metas: [NodeMeta; ROOT::LEVEL + 1],
     last_coords: UVec3,
 }
 
@@ -39,7 +39,7 @@ where
     [(); ROOT::LEVEL + 1]: Sized,
 {
     #[inline]
-    pub fn get(&mut self, coords: UVec3) -> Option<ROOT::Voxel>
+    pub fn get(&mut self, coords: UVec3) -> bool
     where
         ROOT: Node,
     {
@@ -69,7 +69,7 @@ where
 {
     tree: &'a mut Tree<ROOT>,
     ptrs: [u32; ROOT::LEVEL],
-    metas: [NodeMeta<ROOT::Voxel>; ROOT::LEVEL + 1],
+    metas: [NodeMeta; ROOT::LEVEL + 1],
     last_coords: UVec3,
 }
 
@@ -79,7 +79,7 @@ where
     [(); ROOT::LEVEL + 1]: Sized,
 {
     #[inline]
-    pub fn get(&mut self, coords: UVec3) -> Option<ROOT::Voxel>
+    pub fn get(&mut self, coords: UVec3) -> bool
     where
         ROOT: Node,
     {
@@ -102,10 +102,14 @@ where
     }
 
     #[inline]
-    pub fn set(&mut self, coords: UVec3, value: Option<ROOT::Voxel>)
+    pub fn set(&mut self, coords: UVec3, value: bool)
     where
         ROOT: Node,
     {
+        if value {
+            self.tree.aabb.min = self.tree.aabb.min.min(coords);
+            self.tree.aabb.max = self.tree.aabb.max.max(coords);
+        }
         let lca_level = lowest_common_ancestor_level(
             self.last_coords,
             coords,
@@ -132,7 +136,7 @@ where
     [(); ROOT::LEVEL + 1]: Sized,
 {
     pub fn accessor(&self) -> Accessor<ROOT> {
-        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL + 1] =
+        let mut metas: [MaybeUninit<NodeMeta>; ROOT::LEVEL + 1] =
             MaybeUninit::uninit_array();
         let metas_src = Self::metas();
         assert_eq!(metas.len(), metas_src.len());
@@ -147,7 +151,7 @@ where
         }
     }
     pub fn accessor_mut(&mut self) -> AccessorMut<ROOT> {
-        let mut metas: [MaybeUninit<NodeMeta<ROOT::Voxel>>; ROOT::LEVEL + 1] =
+        let mut metas: [MaybeUninit<NodeMeta>; ROOT::LEVEL + 1] =
             MaybeUninit::uninit_array();
         let metas_src = Self::metas();
         assert_eq!(metas.len(), metas_src.len());
@@ -208,13 +212,13 @@ mod tests {
             let z: u8 = rng.gen();
             let location = UVec3::new(x as u32, y as u32, z as u32);
             set_locations.push(location);
-            tree.set_value(location, Some(true));
+            tree.set_value(location, true);
         }
 
         let mut accessor = tree.accessor();
         for location in set_locations.choose_multiple(&mut rng, 100) {
             let result = accessor.get(*location);
-            assert_eq!(result, Some(true));
+            assert!(result);
         }
     }
 }

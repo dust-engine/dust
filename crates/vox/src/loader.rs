@@ -14,6 +14,7 @@ use bevy::{
     utils::{tracing, ConditionalSendFuture},
 };
 use dot_vox::{DotVoxData, Rotation, SceneNode};
+use dust_vdb::TreeLike;
 use rayon::prelude::*;
 
 use crate::{
@@ -272,7 +273,6 @@ impl AssetLoader for VoxLoader {
                     .par_iter()
                     .map(|(model_id, model)| {
                         let (tree, palette_indexes, min, max) = self.model_to_tree(model);
-
                         (
                             *model_id,
                             (tree, palette_indexes.into_boxed_slice(), min, max),
@@ -348,7 +348,7 @@ impl VoxLoader {
                 z: voxel.z as u32,
             };
 
-            accessor.set(coords, Some(true));
+            accessor.set(coords, true);
             min = min.min(coords);
             max = max.max(coords);
             palette_index_collector.set(voxel);

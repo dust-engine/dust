@@ -14,8 +14,6 @@ where
 {
     /// This is 1 for occupied voxels and 0 for unoccupied voxels
     pub occupancy: BitMask<{ size_of_grid(LOG2) }>,
-    /// This is 1 for voxels located on the surface
-    pub active: BitMask<{ size_of_grid(LOG2) }>,
     /// A pointer to self.occupancy.count_ones() material values
     pub material_ptr: u32,
 }
@@ -70,42 +68,31 @@ where
     fn new() -> Self {
         Self {
             occupancy: BitMask::new(),
-            active: BitMask::new(),
             material_ptr: 0,
         }
     }
 
-    type Voxel = bool;
-
     #[inline]
-    fn get(&self, _: &[Pool], coords: UVec3, _cached_path: &mut [u32]) -> Option<Self::Voxel> {
+    fn get(&self, _: &[Pool], coords: UVec3, _cached_path: &mut [u32]) -> bool {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
-        let occupied = self.occupancy.get(index);
-        if !occupied {
-            return None;
-        }
-        let active = self.active.get(index);
-        return Some(active);
+        self.occupancy.get(index)
     }
     #[inline]
     fn set(
         &mut self,
         _: &mut [Pool],
         coords: UVec3,
-        value: Option<Self::Voxel>,
+        value: bool,
         _cached_path: &mut [u32],
-    ) {
+    ) -> bool {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
-        if let Some(voxel) = value {
-            self.occupancy.set(index, true);
-            self.active.set(index, voxel);
-        } else {
-            self.occupancy.set(index, false);
-        }
+        let prev_value = self.occupancy.get(index);
+        self.occupancy.set(index, value);
+        prev_value
     }
     #[inline]
     fn get_in_pools(
@@ -113,7 +100,7 @@ where
         coords: UVec3,
         ptr: u32,
         cached_path: &mut [u32],
-    ) -> Option<Self::Voxel> {
+    ) -> bool {
         if cached_path.len() > 0 {
             cached_path[0] = ptr;
         }
@@ -126,9 +113,9 @@ where
         pools: &mut [Pool],
         coords: UVec3,
         ptr: u32,
-        value: Option<Self::Voxel>,
+        value: bool,
         cached_path: &mut [u32],
-    ) {
+    ) -> bool {
         if cached_path.len() > 0 {
             cached_path[0] = ptr;
         }
@@ -164,7 +151,7 @@ where
         std::iter::once((offset, unsafe { std::mem::transmute(node) }))
     }
 
-    fn write_meta(metas: &mut Vec<NodeMeta<Self::Voxel>>) {
+    fn write_meta(metas: &mut Vec<NodeMeta>) {
         metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             getter: Self::get_in_pools,

@@ -2,7 +2,7 @@ use std::{cell::UnsafeCell, marker::PhantomData};
 
 use glam::UVec3;
 
-use crate::{Node, Pool};
+use crate::{AabbU32, Node, Pool};
 
 use super::NodeMeta;
 
@@ -28,6 +28,8 @@ impl std::hash::Hash for RootKey {
 pub struct RootNode<CHILD: Node> {
     /// Map from [`RootKey`] to tiles.
     map: std::collections::HashMap<RootKey, RootNodeEntry, nohash::BuildNoHashHasher<u64>>,
+    num_occupied: u32,
+    aabb: AabbU32,
     _marker: PhantomData<CHILD>,
 }
 
@@ -54,17 +56,18 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         Self {
             map: Default::default(),
             _marker: PhantomData,
+            num_occupied: 0,
+            aabb: Default::default(),
         }
     }
 
-    type Voxel = CHILD::Voxel;
     #[inline]
-    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> Option<Self::Voxel> {
+    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> bool {
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let entry = self.map.get(&RootKey(root_offset));
         if let Some(entry) = entry {
             match entry {
-                RootNodeEntry::Free(_material_id) => None,
+                RootNodeEntry::Free(_material_id) => false,
                 RootNodeEntry::Occupied(ptr) => unsafe {
                     let _child_node = pools[CHILD::LEVEL].get_item::<CHILD>(*ptr);
                     let new_coords = UVec3 {
@@ -76,7 +79,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
                 },
             }
         } else {
-            None
+            false
         }
     }
 
@@ -84,14 +87,14 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         &mut self,
         pools: &mut [Pool],
         coords: UVec3,
-        value: Option<Self::Voxel>,
+        value: bool,
         cached_path: &mut [u32],
-    ) {
+    ) -> bool {
         // ptr is meaningless and always 0 for root nodes.
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let key = RootKey(root_offset);
 
-        if value.is_some() {
+        if value {
             // Ensure that the node contains stuff on ptr
             if !self.map.contains_key(&key) {
                 let new_node_ptr = unsafe { pools[CHILD::LEVEL].alloc::<CHILD>() };
@@ -109,6 +112,8 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
                 z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
             };
             CHILD::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
+        } else {
+            todo!()
         }
     }
 
@@ -117,7 +122,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         _coords: UVec3,
         _ptr: u32,
         _cached_path: &mut [u32],
-    ) -> Option<Self::Voxel> {
+    ) -> bool {
         unreachable!("Root Node is never kept in a pool!")
     }
 
@@ -125,9 +130,9 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         _pools: &mut [Pool],
         _coords: UVec3,
         _ptr: u32,
-        _value: Option<Self::Voxel>,
+        _value: bool,
         _cached_path: &mut [u32],
-    ) {
+    ) -> bool {
         unreachable!("Root Node is never kept in a pool!")
     }
     type Iterator<'a> = RootIterator<'a, CHILD>;
@@ -161,7 +166,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     ) -> Self::LeafIterator<'a> {
         unreachable!("Root Node is never kept in a pool!")
     }
-    fn write_meta(metas: &mut Vec<NodeMeta<Self::Voxel>>) {
+    fn write_meta(metas: &mut Vec<NodeMeta>) {
         CHILD::write_meta(metas);
         metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),

@@ -6,7 +6,7 @@ use std::{
 
 use glam::UVec3;
 
-use crate::{Node, Pool, Tree};
+use crate::{tree::TreeLike, AabbU32, Node, Pool, Tree};
 
 struct ImmutableTreeSharedInfo<ROOT: Node>
 where
@@ -33,7 +33,11 @@ where
 {
     shared: Arc<ImmutableTreeSharedInfo<ROOT>>,
     root: Arc<ROOT>,
+    aabb: AabbU32,
 }
+
+/// Represents a snapshot of an `ImmutableTree` at a certain point in the past.
+/// Difference from `ImmutableTree` is that `ImmutableTreeSnapshot` cannot be further modified.
 pub struct ImmutableTreeSnapshot<ROOT: Node>
 where
     [(); ROOT::LEVEL as usize]: Sized,
@@ -43,6 +47,7 @@ where
     generation: u64,
     shared: Arc<ImmutableTreeSharedInfo<ROOT>>,
     root: Arc<ROOT>,
+    aabb: AabbU32,
 }
 impl<ROOT: Node> Drop for ImmutableTreeSnapshot<ROOT>
 where
@@ -77,19 +82,8 @@ where
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             shared: self.shared.clone(),
             root: self.root.clone(),
+            aabb: self.aabb,
         }
-    }
-
-    pub fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a ROOT::LeafType)> {
-        // No need to lock the pools here. Although the allocators are protected by a mutex,
-        // trees have shared ownership to the allocated slots.
-        let pools = unsafe { &*self.shared.pool.get() };
-        self.root
-            .iter_leaf(pools, UVec3 { x: 0, y: 0, z: 0 })
-            .map(|(position, leaf)| unsafe {
-                let leaf: &'a ROOT::LeafType = &*leaf.get();
-                (position, leaf)
-            })
     }
 }
 
@@ -105,7 +99,7 @@ where
             recycled_generation: AtomicU64::new(0),
         });
         let root = Arc::new(self.root);
-        ImmutableTree { shared, root }
+        ImmutableTree { shared, root, aabb: self.aabb }
     }
 }
 
@@ -115,5 +109,65 @@ where
 {
     fn from(tree: Tree<ROOT>) -> Self {
         tree.freeze()
+    }
+}
+
+
+impl<ROOT: Node> TreeLike for ImmutableTree<ROOT>
+where
+    [(); ROOT::LEVEL as usize]: Sized, {
+        type ROOT = ROOT;
+    
+    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)> {
+        // No need to lock the pools here. Although the allocators are protected by a mutex,
+        // trees have shared ownership to the allocated slots.
+        let pools = unsafe { &*self.shared.pool.get() };
+        self.root
+            .iter_leaf(pools, UVec3 { x: 0, y: 0, z: 0 })
+            .map(|(position, leaf)| unsafe {
+                let leaf: &'a ROOT::LeafType = &*leaf.get();
+                (position, leaf)
+            })
+    }
+    
+    fn get_value(&self, coords: UVec3) -> bool {
+        todo!()
+    }
+    
+    fn root(&self) -> &Self::ROOT {
+        &self.root
+    }
+    fn aabb(&self) -> AabbU32 {
+        self.aabb
+    }
+}
+
+
+impl<ROOT: Node> TreeLike for ImmutableTreeSnapshot<ROOT>
+where
+    [(); ROOT::LEVEL as usize]: Sized, {
+        type ROOT = ROOT;
+    
+    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)> {
+        // No need to lock the pools here. Although the allocators are protected by a mutex,
+        // trees have shared ownership to the allocated slots.
+        let pools = unsafe { &*self.shared.pool.get() };
+        self.root
+            .iter_leaf(pools, UVec3 { x: 0, y: 0, z: 0 })
+            .map(|(position, leaf)| unsafe {
+                let leaf: &'a ROOT::LeafType = &*leaf.get();
+                (position, leaf)
+            })
+    }
+    
+    fn get_value(&self, coords: UVec3) -> bool {
+        todo!()
+    }
+    
+    fn root(&self) -> &Self::ROOT {
+        &self.root
+    }
+    fn aabb(&self) -> AabbU32 {
+        self.aabb
     }
 }

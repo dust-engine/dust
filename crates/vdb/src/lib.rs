@@ -15,7 +15,7 @@ mod tree;
 
 pub use bitmask::BitMask;
 pub use pool::Pool;
-pub use tree::Tree;
+pub use tree::{Tree, TreeLike};
 
 pub use accessor::Accessor;
 pub use immutable::*;
@@ -36,6 +36,38 @@ impl ConstUVec3 {
             x: self.x,
             y: self.y,
             z: self.z,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Aabb<T> {
+    pub min: T,
+    pub max: T,
+}
+pub type AabbU16 = Aabb<glam::U16Vec3>;
+pub type AabbU32 = Aabb<glam::UVec3>;
+impl Default for AabbU16 {
+    fn default() -> Self {
+        Aabb {
+            min: glam::U16Vec3::MAX,
+            max: glam::U16Vec3::MIN,
+        }
+    }
+}
+impl Default for AabbU32 {
+    fn default() -> Self {
+        Aabb {
+            min: glam::UVec3::MAX,
+            max: glam::UVec3::MIN,
+        }
+    }
+}
+impl From<AabbU16> for AabbU32 {
+    fn from(aabb: AabbU16) -> Self {
+        Aabb {
+            min: aabb.min.into(),
+            max: aabb.max.into(),
         }
     }
 }
