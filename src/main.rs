@@ -41,9 +41,6 @@ fn main() {
         .add_plugins(RhyolitePlugin::default())
         .add_plugins(SwapchainPlugin::default());
 
-    app.add_plugins(smooth_bevy_cameras::LookTransformPlugin)
-        .add_plugins(smooth_bevy_cameras::controllers::fps::FpsCameraPlugin::default());
-
     app.add_plugins(dust_pbr::PbrRendererPlugin);
 
     app.add_plugins(VoxPlugin);

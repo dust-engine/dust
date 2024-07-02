@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 
 use glam::UVec3;
 
-use crate::{AabbU32, Node, NodeMeta, Pool};
+use crate::{AabbU32, Node, NodeMeta, Pool, VdbShape};
 
 pub struct Tree<ROOT: Node>
 where
@@ -129,6 +129,9 @@ pub trait TreeLike {
 
     fn root(&self) -> &Self::ROOT;
     fn aabb(&self) -> AabbU32;
+    fn as_shape(self) -> VdbShape<Self> where Self: Sized {
+        VdbShape::new(self)
+    }
 }
 
 impl<ROOT: Node> TreeLike for Tree<ROOT>

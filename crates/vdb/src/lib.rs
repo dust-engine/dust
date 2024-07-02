@@ -20,6 +20,7 @@ pub use tree::{Tree, TreeLike};
 pub use accessor::Accessor;
 pub use immutable::*;
 pub use node::*;
+pub use parry::*;
 
 pub extern crate self as dust_vdb;
 

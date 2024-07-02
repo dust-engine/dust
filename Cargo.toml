@@ -15,7 +15,6 @@ rhyolite = { path = "../rhyolite" }
 dust-vox = { path = "./crates/vox" }
 dust-pbr = { path = "./crates/pbr" }
 dust-log = { path = "./crates/log" }
-smooth-bevy-cameras = { git = "https://github.com/Neo-Zhixing/smooth-bevy-cameras", rev = "73c42f9714e55a03fe36730df2fd37c0ffebd260" }
 
 [dependencies.bevy_rapier3d]
 git = "https://github.com/dimforge/bevy_rapier"
@@ -26,3 +25,7 @@ features = ["dim3", "headless"]
 [patch.crates-io]
 bevy = { path = "../bevy" }
 ash = { git = "https://github.com/Neo-Zhixing/ash.git", branch = "meta" }
+parry3d = { path = "../parry/crates/parry3d" }
+
+[patch."https://github.com/dimforge/bevy_rapier"]
+bevy_rapier3d = { path = "../bevy_rapier/bevy_rapier3d"}
