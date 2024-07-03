@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_rapier3d::{geometry::Collider, parry::shape::{Shape, SharedShape}};
+use dust_vdb::VdbShape;
 
 use crate::{Tree, VoxGeometry, VoxInstance, VoxModel};
 
@@ -11,7 +12,6 @@ pub(crate) fn insert_collider_system(
     models: Query<&Handle<VoxGeometry>, With<VoxModel>>,
     geometries: Res<Assets<VoxGeometry>>,
 ) {
-    use dust_vdb::TreeLike;
     for (entity, instance) in instances.iter() {
         let Ok(geometry_handle) = models.get(instance.model) else {
             continue;
@@ -19,7 +19,7 @@ pub(crate) fn insert_collider_system(
         let Some(geometry) = geometries.get(geometry_handle) else {
             continue;
         };
-        let shape = SharedShape::new(geometry.tree.snapshot().as_shape());
+        let shape = SharedShape::new(VdbShape::new(Arc::new(geometry.tree.snapshot())));
         commands.entity(entity).insert(Collider::from(shape));
     }
 }

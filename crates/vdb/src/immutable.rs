@@ -85,6 +85,18 @@ where
             aabb: self.aabb,
         }
     }
+
+    pub fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <ROOT as Node>::LeafType)> {
+        // No need to lock the pools here. Although the allocators are protected by a mutex,
+        // trees have shared ownership to the allocated slots.
+        let pools = unsafe { &*self.shared.pool.get() };
+        self.root
+            .iter_leaf(pools, UVec3 { x: 0, y: 0, z: 0 })
+            .map(|(position, leaf)| unsafe {
+                let leaf: &'a ROOT::LeafType = &*leaf.get();
+                (position, leaf)
+            })
+    }
 }
 
 impl<ROOT: Node> Tree<ROOT>
@@ -116,27 +128,11 @@ where
 impl<ROOT: Node> TreeLike for ImmutableTree<ROOT>
 where
     [(); ROOT::LEVEL as usize]: Sized, {
-        type ROOT = ROOT;
-    
-    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)> {
-        // No need to lock the pools here. Although the allocators are protected by a mutex,
-        // trees have shared ownership to the allocated slots.
-        let pools = unsafe { &*self.shared.pool.get() };
-        self.root
-            .iter_leaf(pools, UVec3 { x: 0, y: 0, z: 0 })
-            .map(|(position, leaf)| unsafe {
-                let leaf: &'a ROOT::LeafType = &*leaf.get();
-                (position, leaf)
-            })
-    }
     
     fn get_value(&self, coords: UVec3) -> bool {
         todo!()
     }
     
-    fn root(&self) -> &Self::ROOT {
-        &self.root
-    }
     fn aabb(&self) -> AabbU32 {
         self.aabb
     }
@@ -146,27 +142,11 @@ where
 impl<ROOT: Node> TreeLike for ImmutableTreeSnapshot<ROOT>
 where
     [(); ROOT::LEVEL as usize]: Sized, {
-        type ROOT = ROOT;
-    
-    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)> {
-        // No need to lock the pools here. Although the allocators are protected by a mutex,
-        // trees have shared ownership to the allocated slots.
-        let pools = unsafe { &*self.shared.pool.get() };
-        self.root
-            .iter_leaf(pools, UVec3 { x: 0, y: 0, z: 0 })
-            .map(|(position, leaf)| unsafe {
-                let leaf: &'a ROOT::LeafType = &*leaf.get();
-                (position, leaf)
-            })
-    }
     
     fn get_value(&self, coords: UVec3) -> bool {
         todo!()
     }
     
-    fn root(&self) -> &Self::ROOT {
-        &self.root
-    }
     fn aabb(&self) -> AabbU32 {
         self.aabb
     }

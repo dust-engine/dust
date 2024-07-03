@@ -13,6 +13,7 @@ members = [
 bevy = { version = "0.14.0-rc.3", default-features = false, features = ["bevy_scene"] }
 rhyolite = { path = "../rhyolite" }
 dust-vox = { path = "./crates/vox" }
+dust-vdb = { path = "./crates/vdb" }
 dust-pbr = { path = "./crates/pbr" }
 dust-log = { path = "./crates/log" }
 
@@ -26,6 +27,7 @@ features = ["dim3", "headless"]
 bevy = { path = "../bevy" }
 ash = { git = "https://github.com/Neo-Zhixing/ash.git", branch = "meta" }
 parry3d = { path = "../parry/crates/parry3d" }
+rapier3d = { path = "../rapier/crates/rapier3d" }
 
 [patch."https://github.com/dimforge/bevy_rapier"]
 bevy_rapier3d = { path = "../bevy_rapier/bevy_rapier3d"}

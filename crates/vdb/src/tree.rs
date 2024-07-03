@@ -103,6 +103,15 @@ where
     pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
+    
+    pub fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <ROOT as Node>::LeafType)> {
+        self.root
+            .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
+            .map(|(position, leaf)| unsafe {
+                let leaf: &'a ROOT::LeafType = &*leaf.get();
+                (position, leaf)
+            })
+    }
 
     pub fn iter_leaf_mut<'a>(
         &'a mut self,
@@ -122,41 +131,19 @@ where
     }
 }
 
-pub trait TreeLike {
-    type ROOT: Node;
-    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)>;
+pub trait TreeLike: Send + Sync {
     fn get_value(&self, coords: UVec3) -> bool;
 
-    fn root(&self) -> &Self::ROOT;
     fn aabb(&self) -> AabbU32;
-    fn as_shape(self) -> VdbShape<Self> where Self: Sized {
-        VdbShape::new(self)
-    }
 }
 
 impl<ROOT: Node> TreeLike for Tree<ROOT>
 where
     [(); ROOT::LEVEL as usize]: Sized,
 {
-    type ROOT = ROOT;
-    
-    fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <Self::ROOT as Node>::LeafType)> {
-        self.root
-            .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
-            .map(|(position, leaf)| unsafe {
-                let leaf: &'a ROOT::LeafType = &*leaf.get();
-                (position, leaf)
-            })
-    }
-    
     fn get_value(&self, coords: UVec3) -> bool {
         self.root.get(&self.pool, coords, &mut [])
     }
-    
-    fn root(&self) -> &Self::ROOT {
-        &self.root
-    }
-    
     fn aabb(&self) -> AabbU32 {
         self.aabb
     }

@@ -1298,6 +1298,7 @@ dependencies = [
  "bevy_rapier3d",
  "dust-log",
  "dust-pbr",
+ "dust-vdb",
  "dust-vox",
  "rhyolite",
 ]
@@ -1331,6 +1332,7 @@ dependencies = [
  "bevy",
  "fxhash",
  "glam",
+ "nalgebra",
  "nohash",
  "parry3d",
  "rand",
@@ -3103,8 +3105,6 @@ checksum = "9c8a99fddc9f0ba0a85884b8d14e3592853e787d581ca1816c91349b10e4eeab"
 [[package]]
 name = "rapier3d"
 version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b05f54a624b439d53ef9126cc4b6832cc5a5e33c137a493e15c197885c00d741"
 dependencies = [
  "approx",
  "arrayvec",

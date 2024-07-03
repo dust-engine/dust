@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use bevy::asset::{AssetServer, Handle};
 use bevy::input::mouse::MouseMotion;
 use bevy::input::ButtonInput;
-use bevy::math::{Quat, Vec2, Vec3, Vec3Swizzles, VectorSpace};
-use bevy::prelude::{Component, EventReader, KeyCode, Local, ResMut, Resource};
+use bevy::math::{Quat, Vec2, Vec3};
+use bevy::prelude::*;
 use bevy::scene::{Scene, SceneBundle};
 use bevy::time::Time;
 use bevy::transform::bundles::TransformBundle;
@@ -12,7 +14,7 @@ use bevy_rapier3d::control::{
     KinematicCharacterControllerOutput,
 };
 use bevy_rapier3d::geometry::Collider;
-use bevy_rapier3d::plugin::NoUserData;
+use bevy_rapier3d::parry::query::{DefaultQueryDispatcher, QueryDispatcher};
 use dust_pbr::camera::CameraBundle;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
@@ -26,6 +28,8 @@ use rhyolite::{RhyolitePlugin, SurfacePlugin, SwapchainConfig, SwapchainPlugin};
 
 fn main() {
     let mut app = bevy::app::App::new();
+
+    let query_dispatcher = DefaultQueryDispatcher.chain(dust_vdb::VdbQueryDispatcher);
     app.add_plugins(dust_log::LogPlugin)
         .add_plugins((
             bevy::DefaultPlugins
@@ -34,7 +38,9 @@ fn main() {
                     ..Default::default()
                 })
                 .disable::<bevy::log::LogPlugin>(),
-            bevy_rapier3d::plugin::RapierPhysicsPlugin::<()>::default(),
+            bevy_rapier3d::plugin::RapierPhysicsPlugin::<()>::default()
+            .with_query_dispatcher(Arc::new(query_dispatcher))
+            .with_narrow_phase_dispatcher(Arc::new(query_dispatcher)),
         ))
         .add_plugins(SurfacePlugin::default())
         .add_plugins(DebugUtilsPlugin::default())

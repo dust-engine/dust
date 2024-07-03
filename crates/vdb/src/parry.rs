@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
 use glam::Vec3;
-use parry3d::query::{PointQuery, RayCast};
+use parry3d::query::{PointQuery, RayCast, Unsupported};
 
 use crate::{ImmutableTree, ImmutableTreeSnapshot, Node, Tree, TreeLike};
 
-pub struct VdbShape<T> {
-    inner: Arc<T>,
+pub struct VdbShape {
+    inner: Arc<dyn TreeLike>,
     scale: Vec3,
 }
 
-impl<T: TreeLike> parry3d::query::RayCast for VdbShape<T>{
+impl parry3d::query::RayCast for VdbShape {
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &parry3d::query::Ray,
@@ -21,16 +21,16 @@ impl<T: TreeLike> parry3d::query::RayCast for VdbShape<T>{
     }
 }
 
-impl<T> VdbShape<T> {
-    pub fn new(inner: T) -> Self {
+impl VdbShape {
+    pub fn new(inner: Arc<dyn TreeLike>) -> Self {
         Self {
-            inner: Arc::new(inner),
+            inner,
             scale: Vec3::splat(1.0),
         }
     }
 }
 
-impl<T: TreeLike> parry3d::query::PointQuery for VdbShape<T>{
+impl parry3d::query::PointQuery for VdbShape {
     fn project_local_point(
         &self,
         pt: &parry3d::math::Point<parry3d::math::Real>,
@@ -46,7 +46,7 @@ impl<T: TreeLike> parry3d::query::PointQuery for VdbShape<T>{
         todo!()
     }
 }
-impl<T: TreeLike + Send + Sync + 'static> parry3d::shape::Shape for VdbShape<T> {
+impl parry3d::shape::Shape for VdbShape {
     fn compute_local_aabb(&self) -> parry3d::bounding_volume::Aabb {
         let aabb = self.inner.aabb();
         parry3d::bounding_volume::Aabb {
@@ -92,5 +92,105 @@ impl<T: TreeLike + Send + Sync + 'static> parry3d::shape::Shape for VdbShape<T> 
 
     fn ccd_angular_thickness(&self) -> parry3d::math::Real {
         todo!()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct VdbQueryDispatcher;
+impl parry3d::query::QueryDispatcherComposite for VdbQueryDispatcher {
+    fn intersection_test(
+        &self,
+        root_dispatcher: &dyn parry3d::query::QueryDispatcher,
+        pos12: &parry3d::math::Isometry<parry3d::math::Real>,
+        g1: &dyn parry3d::shape::Shape,
+        g2: &dyn parry3d::shape::Shape,
+    ) -> Result<bool, parry3d::query::Unsupported> {
+        Err(Unsupported)
+    }
+
+    fn distance(
+        &self,
+        root_dispatcher: &dyn parry3d::query::QueryDispatcher,
+        pos12: &parry3d::math::Isometry<parry3d::math::Real>,
+        g1: &dyn parry3d::shape::Shape,
+        g2: &dyn parry3d::shape::Shape,
+    ) -> Result<parry3d::math::Real, parry3d::query::Unsupported> {
+        Err(Unsupported)
+    }
+
+    fn contact(
+        &self,
+        root_dispatcher: &dyn parry3d::query::QueryDispatcher,
+        pos12: &parry3d::math::Isometry<parry3d::math::Real>,
+        g1: &dyn parry3d::shape::Shape,
+        g2: &dyn parry3d::shape::Shape,
+        prediction: parry3d::math::Real,
+    ) -> Result<Option<parry3d::query::Contact>, parry3d::query::Unsupported> {
+        Err(Unsupported)
+    }
+
+    fn closest_points(
+        &self,
+        root_dispatcher: &dyn parry3d::query::QueryDispatcher,
+        pos12: &parry3d::math::Isometry<parry3d::math::Real>,
+        g1: &dyn parry3d::shape::Shape,
+        g2: &dyn parry3d::shape::Shape,
+        max_dist: parry3d::math::Real,
+    ) -> Result<parry3d::query::ClosestPoints, parry3d::query::Unsupported> {
+        Err(Unsupported)
+    }
+
+    fn cast_shapes(
+        &self,
+        root_dispatcher: &dyn parry3d::query::QueryDispatcher,
+        pos12: &parry3d::math::Isometry<parry3d::math::Real>,
+        local_vel12: &parry3d::math::Vector<parry3d::math::Real>,
+        g1: &dyn parry3d::shape::Shape,
+        g2: &dyn parry3d::shape::Shape,
+        options: parry3d::query::ShapeCastOptions,
+    ) -> Result<Option<parry3d::query::ShapeCastHit>, parry3d::query::Unsupported> {
+        Err(Unsupported)
+    }
+
+    fn cast_shapes_nonlinear(
+        &self,
+        root_dispatcher: &dyn parry3d::query::QueryDispatcher,
+        motion1: &parry3d::query::NonlinearRigidMotion,
+        g1: &dyn parry3d::shape::Shape,
+        motion2: &parry3d::query::NonlinearRigidMotion,
+        g2: &dyn parry3d::shape::Shape,
+        start_time: parry3d::math::Real,
+        end_time: parry3d::math::Real,
+        stop_at_penetration: bool,
+    ) -> Result<Option<parry3d::query::ShapeCastHit>, parry3d::query::Unsupported> {
+        Err(Unsupported)
+    }
+}
+
+impl<A, B> parry3d::query::PersistentQueryDispatcherComposite<A, B> for VdbQueryDispatcher {
+    fn contact_manifolds(
+        &self,
+        root_dispatcher: &dyn parry3d::query::PersistentQueryDispatcher<A, B>,
+        pos12: &parry3d::math::Isometry<parry3d::math::Real>,
+        g1: &dyn parry3d::shape::Shape,
+        g2: &dyn parry3d::shape::Shape,
+        prediction: parry3d::math::Real,
+        manifolds: &mut Vec<parry3d::query::ContactManifold<A, B>>,
+        workspace: &mut Option<parry3d::query::ContactManifoldsWorkspace>,
+    ) -> Result<(), parry3d::query::Unsupported> {
+        Err(Unsupported)
+    }
+
+    fn contact_manifold_convex_convex(
+        &self,
+        pos12: &parry3d::math::Isometry<parry3d::math::Real>,
+        g1: &dyn parry3d::shape::Shape,
+        g2: &dyn parry3d::shape::Shape,
+        normal_constraints1: Option<&dyn parry3d::query::details::NormalConstraints>,
+        normal_constraints2: Option<&dyn parry3d::query::details::NormalConstraints>,
+        prediction: parry3d::math::Real,
+        manifold: &mut parry3d::query::ContactManifold<A, B>,
+    ) -> Result<(), parry3d::query::Unsupported> {
+        Err(Unsupported)
     }
 }
