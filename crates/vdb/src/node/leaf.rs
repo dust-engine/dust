@@ -1,6 +1,7 @@
 use super::{size_of_grid, NodeMeta};
 use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
-use glam::UVec3;
+use bevy::math::VectorSpace;
+use glam::{IVec3, UVec2, UVec3, Vec2, Vec3, Vec3A, Vec3Swizzles};
 use std::{cell::UnsafeCell, iter::Once, mem::size_of};
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
@@ -95,12 +96,7 @@ where
         prev_value
     }
     #[inline]
-    fn get_in_pools(
-        pools: &[Pool],
-        coords: UVec3,
-        ptr: u32,
-        cached_path: &mut [u32],
-    ) -> bool {
+    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool {
         if cached_path.len() > 0 {
             cached_path[0] = ptr;
         }
@@ -160,6 +156,54 @@ where
             extent_mask: Self::EXTENT_MASK,
             setter: Self::set_in_pools,
         });
+    }
+
+    #[inline]
+    fn cast_local_ray_and_get_normal(
+        &self,
+        ray: &parry3d::query::Ray,
+        solid: bool,
+        initial_intersection_t: Vec2,
+        pools: &[Pool],
+    ) -> Option<parry3d::query::RayIntersection> {
+        // Assume that the node is located at 0.0 - 4.0
+        let mut hit_distance: f32 = initial_intersection_t.x;
+        let initial_intersection_point: Vec3A = (ray.origin + ray.dir * hit_distance).into();
+        let mut position: IVec3 =
+            Vec3::from((initial_intersection_point * Self::EXTENT.as_vec3a()).floor())
+                .as_ivec3()
+                .clamp(IVec3::splat(0), Self::EXTENT.as_ivec3() - IVec3::splat(1));
+
+        let t_coef: Vec3A = 1.0 / Vec3A::from(ray.dir);
+        let t_bias: Vec3A = t_coef * Vec3A::from(ray.origin);
+
+        let step = Vec3A::from(ray.dir).signum();
+
+        let mut t_max: Vec3A =
+            ((position.as_vec3a() / Self::EXTENT.as_vec3a()) + step.max(Vec3A::ZERO)) * t_coef
+                - t_bias;
+
+        let t_delta = Vec3A::ONE * t_coef * step;
+        while !self.get(&mut [], position.try_into().unwrap(), &mut []) {
+            let comp_result = Vec3A::select(t_max.zxy().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE)
+                * Vec3A::select(t_max.yzx().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE);
+            let position_delta = (step * comp_result).as_ivec3();
+            position += position_delta;
+            hit_distance = t_max.x.min(t_max.y).min(t_max.z);
+            if hit_distance + 0.001 >= initial_intersection_t.y {
+                return None;
+            }
+            t_max += t_delta * comp_result;
+        }
+
+        let index = ((position.x as usize) << (LOG2.y + LOG2.z))
+            | ((position.y as usize) << LOG2.z)
+            | (position.z as usize);
+        Some(parry3d::query::RayIntersection {
+            feature: parry3d::shape::FeatureId::Face(index as u32),
+            time_of_impact: hit_distance,
+            normal: Default::default(),
+        })
     }
 }
 

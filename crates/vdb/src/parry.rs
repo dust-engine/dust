@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use glam::Vec3;
+use glam::{Vec2, Vec3, Vec3A};
 use parry3d::query::{PointQuery, RayCast, Unsupported};
 
-use crate::{ImmutableTree, ImmutableTreeSnapshot, Node, Tree, TreeLike};
+use crate::{ImmutableTree, ImmutableTreeSnapshot, MutableTree, Node, TreeLike};
 
 pub struct VdbShape {
     inner: Arc<dyn TreeLike>,
@@ -17,7 +17,8 @@ impl parry3d::query::RayCast for VdbShape {
         max_time_of_impact: parry3d::math::Real,
         solid: bool,
     ) -> Option<parry3d::query::RayIntersection> {
-        todo!()
+        self.inner
+            .cast_local_ray_and_get_normal(ray, max_time_of_impact, solid)
     }
 }
 
@@ -63,7 +64,11 @@ impl parry3d::shape::Shape for VdbShape {
         todo!()
     }
 
-    fn clone_scaled(&self, scale: &parry3d::math::Vector<parry3d::math::Real>, _num_subdivisions: u32) -> Option<Box<dyn parry3d::shape::Shape>> {
+    fn clone_scaled(
+        &self,
+        scale: &parry3d::math::Vector<parry3d::math::Real>,
+        _num_subdivisions: u32,
+    ) -> Option<Box<dyn parry3d::shape::Shape>> {
         let scale: Vec3 = (*scale).into();
         Some(Box::new(Self {
             inner: self.inner.clone(),
@@ -137,6 +142,7 @@ impl parry3d::query::QueryDispatcherComposite for VdbQueryDispatcher {
         g2: &dyn parry3d::shape::Shape,
         max_dist: parry3d::math::Real,
     ) -> Result<parry3d::query::ClosestPoints, parry3d::query::Unsupported> {
+        // best first search
         Err(Unsupported)
     }
 
@@ -193,4 +199,14 @@ impl<A, B> parry3d::query::PersistentQueryDispatcherComposite<A, B> for VdbQuery
     ) -> Result<(), parry3d::query::Unsupported> {
         Err(Unsupported)
     }
+}
+
+pub(crate) fn intersect_aabb(origin: Vec3A, dir: Vec3A, box_min: Vec3A, box_max: Vec3A) -> Vec2 {
+    let t_min = (box_min - origin) / dir;
+    let t_max = (box_max - origin) / dir;
+    let t1 = t_min.min(t_max);
+    let t2 = t_min.max(t_max);
+    let t_min = t1.max_element();
+    let t_max = t2.min_element();
+    return Vec2::new(t_min, t_max);
 }

@@ -1,8 +1,8 @@
 use super::{size_of_grid, NodeMeta};
 use crate::{bitmask::SetBitIterator, AabbU16, BitMask, ConstUVec3, Node, Pool};
-use glam::{U16Vec3, UVec3};
+use glam::{IVec3, U16Vec3, UVec3, Vec2, Vec3, Vec3A, Vec3Swizzles};
 use parry3d::bounding_volume::Aabb;
-use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of};
+use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of, ops::Sub};
 
 #[derive(Clone, Copy)]
 pub union InternalNodeEntry {
@@ -26,7 +26,7 @@ where
 
     /// points to self.child_mask.count_ones() LeafNodes or InternalNodes
     pub child_ptrs: [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
-    
+
     _marker: PhantomData<CHILD>,
 }
 impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Default for InternalNode<CHILD, FANOUT_LOG2>
@@ -132,12 +132,7 @@ where
         }
     }
     #[inline]
-    fn get_in_pools(
-        pools: &[Pool],
-        coords: UVec3,
-        ptr: u32,
-        cached_path: &mut [u32],
-    ) -> bool {
+    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool {
         if cached_path.len() > 0 {
             cached_path[Self::LEVEL] = ptr;
         }
@@ -220,6 +215,82 @@ where
             extent_mask: Self::EXTENT_MASK,
             fanout_log2: FANOUT_LOG2.to_glam(),
         });
+    }
+
+    #[inline]
+    fn cast_local_ray_and_get_normal(
+        &self,
+        ray: &parry3d::query::Ray,
+        solid: bool,
+        initial_intersection_t: Vec2,
+        pools: &[Pool],
+    ) -> Option<parry3d::query::RayIntersection> {
+        // Assume that the node is located at 0.0 - 4.0
+        let mut hit_distance: f32 = initial_intersection_t.x;
+        let initial_intersection_point: Vec3A = (ray.origin + ray.dir * hit_distance).into();
+        let fanout: UVec3 = UVec3::new(
+            1 << FANOUT_LOG2.x as u32,
+            1 << FANOUT_LOG2.y as u32,
+            1 << FANOUT_LOG2.z as u32,
+        );
+        let mut position: IVec3 =
+            Vec3::from((initial_intersection_point * fanout.as_vec3a()).floor())
+                .as_ivec3()
+                .clamp(IVec3::splat(0), fanout.as_ivec3() - IVec3::splat(1));
+
+        let t_coef: Vec3A = 1.0 / Vec3A::from(ray.dir);
+        let t_bias: Vec3A = t_coef * Vec3A::from(ray.origin);
+
+        let step = Vec3A::from(ray.dir).signum();
+
+        let mut t_max: Vec3A =
+            ((position.as_vec3a() / fanout.as_vec3a()) + step.max(Vec3A::ZERO)) * t_coef - t_bias;
+
+        let t_delta = (1.0 / fanout.as_vec3a()) * t_coef * step; // one to (1 / fanout)?
+
+        loop {
+            let comp_result = Vec3A::select(t_max.zxy().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE)
+                * Vec3A::select(t_max.yzx().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE);
+            let next_t_max = t_max + t_delta * comp_result;
+            let index = ((position.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
+                | ((position.y as usize) << FANOUT_LOG2.z)
+                | (position.z as usize);
+
+            let has_child = self.child_mask.get(index);
+            if has_child {
+                let child = unsafe {
+                    let child_ptr = self.child_ptrs[index].occupied;
+                    pools[Self::LEVEL - 1].get_item::<CHILD>(child_ptr)
+                };
+                let mut new_ray = parry3d::query::Ray {
+                    dir: ray.dir.component_mul(&fanout.as_vec3().into()),
+                    origin: ray.origin,
+                };
+                new_ray.origin.coords = new_ray
+                    .origin
+                    .coords
+                    .component_mul(&fanout.as_vec3().into())
+                    - parry3d::math::Vector::from(position.as_vec3());
+                if let Some(hit) = child.cast_local_ray_and_get_normal(
+                    &new_ray,
+                    solid,
+                    Vec2::new(hit_distance, t_max.x.min(t_max.y).min(t_max.z).min(initial_intersection_t.y)),
+                    pools,
+                ) {
+                    // hit_distance problematic here
+                    return Some(hit);
+                }
+            }
+
+            // Move to the next voxel
+            let position_delta = (step * comp_result).as_ivec3();
+            position += position_delta;
+            hit_distance = t_max.x.min(t_max.y).min(t_max.z);
+            if hit_distance + 0.001 >= initial_intersection_t.y {
+                return None;
+            }
+            t_max = next_t_max;
+        }
     }
 }
 

@@ -5,8 +5,9 @@ use std::{
 };
 
 use glam::UVec3;
+use parry3d::math::Vector;
 
-use crate::{tree::TreeLike, AabbU32, Node, Pool, Tree};
+use crate::{traversal::TreeTraversal, tree::TreeLike, AabbU32, MutableTree, Node, Pool};
 
 struct ImmutableTreeSharedInfo<ROOT: Node>
 where
@@ -99,7 +100,7 @@ where
     }
 }
 
-impl<ROOT: Node> Tree<ROOT>
+impl<ROOT: Node> MutableTree<ROOT>
 where
     [(); ROOT::LEVEL as usize]: Sized,
 {
@@ -111,43 +112,137 @@ where
             recycled_generation: AtomicU64::new(0),
         });
         let root = Arc::new(self.root);
-        ImmutableTree { shared, root, aabb: self.aabb }
+        ImmutableTree {
+            shared,
+            root,
+            aabb: self.aabb,
+        }
     }
 }
 
-impl<ROOT: Node> From<Tree<ROOT>> for ImmutableTree<ROOT>
+impl<ROOT: Node> From<MutableTree<ROOT>> for ImmutableTree<ROOT>
 where
     [(); ROOT::LEVEL as usize]: Sized,
 {
-    fn from(tree: Tree<ROOT>) -> Self {
+    fn from(tree: MutableTree<ROOT>) -> Self {
         tree.freeze()
     }
 }
 
-
 impl<ROOT: Node> TreeLike for ImmutableTree<ROOT>
 where
-    [(); ROOT::LEVEL as usize]: Sized, {
-    
+    [(); ROOT::LEVEL as usize]: Sized,
+{
     fn get_value(&self, coords: UVec3) -> bool {
         todo!()
     }
-    
+
     fn aabb(&self) -> AabbU32 {
         self.aabb
+    }
+
+    fn cast_local_ray_and_get_normal(
+        &self,
+        ray: &parry3d::query::Ray,
+        max_time_of_impact: parry3d::math::Real,
+        solid: bool,
+    ) -> Option<parry3d::query::RayIntersection> {
+        let mut initial_intersection = crate::intersect_aabb(
+            ray.origin.into(),
+            ray.dir.into(),
+            self.aabb.min.as_vec3a(),
+            self.aabb.max.as_vec3a(),
+        );
+        initial_intersection.y = initial_intersection.y.min(max_time_of_impact);
+        if initial_intersection.x >= initial_intersection.y {
+            // No intersection
+            return None;
+        }
+        if initial_intersection.y <= 0.0 {
+            return None;
+        }
+        let mut ray_prime = parry3d::query::Ray {
+            dir: ray.dir.component_div(&ROOT::EXTENT.as_vec3().into()),
+            origin: ray.origin,
+        };
+        ray_prime.origin.coords = ray_prime
+            .origin
+            .coords
+            .component_div(&ROOT::EXTENT.as_vec3().into());
+
+        self.root
+            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection, unsafe {
+                &*self.shared.pool.get()
+            })
     }
 }
 
-
 impl<ROOT: Node> TreeLike for ImmutableTreeSnapshot<ROOT>
 where
-    [(); ROOT::LEVEL as usize]: Sized, {
-    
+    [(); ROOT::LEVEL as usize]: Sized,
+{
     fn get_value(&self, coords: UVec3) -> bool {
         todo!()
     }
-    
+
     fn aabb(&self) -> AabbU32 {
         self.aabb
+    }
+
+    fn cast_local_ray_and_get_normal(
+        &self,
+        ray: &parry3d::query::Ray,
+        max_time_of_impact: parry3d::math::Real,
+        solid: bool,
+    ) -> Option<parry3d::query::RayIntersection> {
+        let mut initial_intersection = crate::intersect_aabb(
+            ray.origin.into(),
+            ray.dir.into(),
+            self.aabb.min.as_vec3a(),
+            self.aabb.max.as_vec3a(),
+        );
+        initial_intersection.y = initial_intersection.y.min(max_time_of_impact);
+        if initial_intersection.x >= initial_intersection.y {
+            // No intersection
+            return None;
+        }
+        if initial_intersection.y <= 0.0 {
+            return None;
+        }
+        let mut ray_prime = parry3d::query::Ray {
+            dir: ray.dir.component_div(&ROOT::EXTENT.as_vec3().into()),
+            origin: ray.origin,
+        };
+        ray_prime.origin.coords = ray_prime
+            .origin
+            .coords
+            .component_div(&ROOT::EXTENT.as_vec3().into());
+
+        self.root
+            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection, unsafe {
+                &*self.shared.pool.get()
+            })
+    }
+}
+
+impl<ROOT: Node> TreeTraversal for ImmutableTree<ROOT>
+where
+    [(); ROOT::LEVEL as usize]: Sized,
+{
+    type ROOT = ROOT;
+
+    fn root(&self) -> &ROOT {
+        &self.root
+    }
+}
+
+impl<ROOT: Node> TreeTraversal for ImmutableTreeSnapshot<ROOT>
+where
+    [(); ROOT::LEVEL as usize]: Sized,
+{
+    type ROOT = ROOT;
+
+    fn root(&self) -> &ROOT {
+        &self.root
     }
 }

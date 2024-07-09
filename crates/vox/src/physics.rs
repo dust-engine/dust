@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use bevy_rapier3d::{geometry::Collider, parry::shape::{Shape, SharedShape}};
+use bevy_rapier3d::{
+    geometry::Collider,
+    parry::shape::{Shape, SharedShape},
+};
 use dust_vdb::VdbShape;
 
 use crate::{Tree, VoxGeometry, VoxInstance, VoxModel};

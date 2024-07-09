@@ -4,6 +4,7 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(alloc_layout_extra)]
 #![feature(mapped_lock_guards)]
+#![feature(let_chains)]
 
 mod accessor;
 mod bitmask;
@@ -11,11 +12,12 @@ mod immutable;
 mod node;
 mod parry;
 mod pool;
+mod traversal;
 mod tree;
 
 pub use bitmask::BitMask;
 pub use pool::Pool;
-pub use tree::{Tree, TreeLike};
+pub use tree::{MutableTree, TreeLike};
 
 pub use accessor::Accessor;
 pub use immutable::*;

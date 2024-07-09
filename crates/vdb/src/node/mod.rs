@@ -6,7 +6,7 @@ use std::alloc::Layout;
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 
-use glam::UVec3;
+use glam::{UVec2, UVec3, Vec2};
 pub use internal::*;
 pub use leaf::*;
 pub use root::*;
@@ -15,10 +15,14 @@ use crate::{AabbU32, ConstUVec3, Pool};
 
 pub struct NodeMeta {
     pub(crate) layout: Layout,
-    pub(crate) getter:
-        fn(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool,
-    pub(crate) setter:
-        fn(pools: &mut [Pool], coords: UVec3, ptr: u32, value: bool, cached_path: &mut [u32]) -> bool,
+    pub(crate) getter: fn(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool,
+    pub(crate) setter: fn(
+        pools: &mut [Pool],
+        coords: UVec3,
+        ptr: u32,
+        value: bool,
+        cached_path: &mut [u32],
+    ) -> bool,
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
 
@@ -58,12 +62,7 @@ pub trait Node: 'static + Default + Debug + Send + Sync {
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
-    fn get_in_pools(
-        pools: &[Pool],
-        coords: UVec3,
-        ptr: u32,
-        cached_path: &mut [u32],
-    ) -> bool;
+    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool;
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
@@ -89,6 +88,16 @@ pub trait Node: 'static + Default + Debug + Send + Sync {
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a>;
 
     fn write_meta(metas: &mut Vec<NodeMeta>);
+
+    fn cast_local_ray_and_get_normal(
+        &self,
+        ray: &parry3d::query::Ray,
+        solid: bool,
+        initial_intersection_t: Vec2,
+        pools: &[Pool],
+    ) -> Option<parry3d::query::RayIntersection> {
+        None
+    }
 }
 
 /// Macro that simplifies tree type construction.

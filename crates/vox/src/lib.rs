@@ -27,7 +27,7 @@ mod physics;
 mod resource;
 
 type TreeRoot = hierarchy!(3, 3, 2);
-type Tree = dust_vdb::Tree<TreeRoot>;
+type Tree = dust_vdb::MutableTree<TreeRoot>;
 type ImmutableTree = dust_vdb::ImmutableTree<TreeRoot>;
 
 pub use loader::*;

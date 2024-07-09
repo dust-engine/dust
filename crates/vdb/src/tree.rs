@@ -1,10 +1,12 @@
 use std::mem::MaybeUninit;
 
 use glam::UVec3;
+use nalgebra::Vector3;
+use parry3d::query::RayCast;
 
-use crate::{AabbU32, Node, NodeMeta, Pool, VdbShape};
+use crate::{traversal::TreeTraversal, AabbU32, Node, NodeMeta, Pool, VdbShape};
 
-pub struct Tree<ROOT: Node>
+pub struct MutableTree<ROOT: Node>
 where
     [(); ROOT::LEVEL as usize]: Sized,
 {
@@ -24,7 +26,7 @@ where
 /// assert_eq!(tree.get_value(UVec3::new(0, 3, 0)), None);
 /// assert_eq!(tree.get_value(UVec3::new(0, 2, 2)), Some(false));
 /// ```
-impl<ROOT: Node> Tree<ROOT>
+impl<ROOT: Node> MutableTree<ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
 {
@@ -103,7 +105,7 @@ where
     pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
-    
+
     pub fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <ROOT as Node>::LeafType)> {
         self.root
             .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
@@ -135,9 +137,16 @@ pub trait TreeLike: Send + Sync {
     fn get_value(&self, coords: UVec3) -> bool;
 
     fn aabb(&self) -> AabbU32;
+
+    fn cast_local_ray_and_get_normal(
+        &self,
+        ray: &parry3d::query::Ray,
+        max_time_of_impact: parry3d::math::Real,
+        solid: bool,
+    ) -> Option<parry3d::query::RayIntersection>;
 }
 
-impl<ROOT: Node> TreeLike for Tree<ROOT>
+impl<ROOT: Node> TreeLike for MutableTree<ROOT>
 where
     [(); ROOT::LEVEL as usize]: Sized,
 {
@@ -146,5 +155,48 @@ where
     }
     fn aabb(&self) -> AabbU32 {
         self.aabb
+    }
+    fn cast_local_ray_and_get_normal(
+        &self,
+        ray: &parry3d::query::Ray,
+        max_time_of_impact: parry3d::math::Real,
+        solid: bool,
+    ) -> Option<parry3d::query::RayIntersection> {
+        let mut initial_intersection = crate::intersect_aabb(
+            ray.origin.into(),
+            ray.dir.into(),
+            self.aabb.min.as_vec3a(),
+            self.aabb.max.as_vec3a(),
+        );
+        initial_intersection.y = initial_intersection.y.min(max_time_of_impact);
+        if initial_intersection.x >= initial_intersection.y {
+            // No intersection
+            return None;
+        }
+        if initial_intersection.y <= 0.0 {
+            return None;
+        }
+        let mut ray_prime = parry3d::query::Ray {
+            dir: ray.dir.component_div(&ROOT::EXTENT.as_vec3().into()),
+            origin: ray.origin,
+        };
+        ray_prime.origin.coords = ray_prime
+            .origin
+            .coords
+            .component_div(&ROOT::EXTENT.as_vec3().into());
+
+        self.root
+            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection, &self.pool)
+    }
+}
+
+impl<ROOT: Node> TreeTraversal for MutableTree<ROOT>
+where
+    [(); ROOT::LEVEL as usize]: Sized,
+{
+    type ROOT = ROOT;
+
+    fn root(&self) -> &ROOT {
+        &self.root
     }
 }

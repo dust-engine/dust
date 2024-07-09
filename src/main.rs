@@ -15,6 +15,8 @@ use bevy_rapier3d::control::{
 };
 use bevy_rapier3d::geometry::Collider;
 use bevy_rapier3d::parry::query::{DefaultQueryDispatcher, QueryDispatcher};
+use bevy_rapier3d::pipeline::QueryFilter;
+use bevy_rapier3d::plugin::RapierContext;
 use dust_pbr::camera::CameraBundle;
 use dust_vox::VoxPlugin;
 use rhyolite::ash::vk;
@@ -39,8 +41,8 @@ fn main() {
                 })
                 .disable::<bevy::log::LogPlugin>(),
             bevy_rapier3d::plugin::RapierPhysicsPlugin::<()>::default()
-            .with_query_dispatcher(Arc::new(query_dispatcher))
-            .with_narrow_phase_dispatcher(Arc::new(query_dispatcher)),
+                .with_query_dispatcher(Arc::new(query_dispatcher))
+                .with_narrow_phase_dispatcher(Arc::new(query_dispatcher)),
         ))
         .add_plugins(SurfacePlugin::default())
         .add_plugins(DebugUtilsPlugin::default())
@@ -53,6 +55,7 @@ fn main() {
 
     app.add_systems(Startup, startup_system)
         .add_systems(Update, teapot_move_system)
+        .add_systems(Update, ray_cast)
         .add_systems(Update, player_movement);
 
     let world = app.world_mut();
@@ -113,12 +116,18 @@ fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
             apply_impulse_to_dynamic_bodies: true,
             snap_to_ground: None,
             ..Default::default()
-        });
+        })
+        .insert(Player);
 }
 
 #[derive(Component)]
 pub struct TeaPot;
+
+#[derive(Component)]
+pub struct Player;
+
 fn teapot_move_system(time: Res<Time>, mut query: Query<&mut Transform, With<TeaPot>>) {
+    return;
     for mut teapot in query.iter_mut() {
         *teapot =
             Transform::from_translation(Vec3::new(time.elapsed_seconds().sin() * 50.0, 200.0, 0.0));
@@ -159,17 +168,20 @@ fn player_movement(
         movement *= 2.0;
     }
 
-    *gravity_movement -= 1.0;
-    movement.y = *gravity_movement; // Gravity
+    //*gravity_movement -= 1.0;
+    //movement.y = *gravity_movement; // Gravity
 
     // Movement on the Y axis
     if keyboard.pressed(KeyCode::Space) {
         // If grounded
-        if output.map(|o| o.grounded).unwrap_or(false) {
-            movement.y = 5000.0;
-            *gravity_movement = 0.0;
-        }
+        movement.y = 100.0;
     }
+
+    if keyboard.pressed(KeyCode::ControlLeft) {
+        // If grounded
+        movement.y = -100.0;
+    }
+
     controller.translation =
         Some(Quat::from_axis_angle(Vec3::Y, orientation.x) * (movement * time.delta_seconds()));
 
@@ -184,4 +196,25 @@ fn player_movement(
 
     transform.rotation =
         Quat::from_euler(bevy::math::EulerRot::YXZ, orientation.x, orientation.y, 0.0);
+}
+
+fn ray_cast(
+    mut player: Query<(Entity, &GlobalTransform), With<Player>>,
+    rapier_context: Res<RapierContext>,
+) {
+    let (player, transform) = player.single();
+    let ray = transform.affine().transform_vector3(-Vec3::Z);
+
+    if let Some((entity, toi)) = rapier_context.cast_ray(
+        transform.translation(),
+        ray,
+        100000.0,
+        false,
+        QueryFilter::default().predicate(&|entity| entity != player),
+    ) {
+        // The first collider hit has the entity `entity` and it hit after
+        // the ray travelled a distance equal to `ray_dir * toi`.
+        let hit_point = transform.translation() + ray * toi;
+        println!("Entity {:?} hit at point {}", entity, hit_point);
+    }
 }

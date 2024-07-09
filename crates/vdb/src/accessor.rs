@@ -2,14 +2,14 @@ use std::mem::MaybeUninit;
 
 use glam::UVec3;
 
-use crate::{Node, NodeMeta, Tree};
+use crate::{MutableTree, Node, NodeMeta};
 
 pub struct Accessor<'a, ROOT: Node>
 where
     [(); ROOT::LEVEL + 1]: Sized,
     [(); ROOT::LEVEL as usize]: Sized,
 {
-    tree: &'a Tree<ROOT>,
+    tree: &'a MutableTree<ROOT>,
     ptrs: [u32; ROOT::LEVEL],
     metas: [NodeMeta; ROOT::LEVEL + 1],
     last_coords: UVec3,
@@ -67,7 +67,7 @@ where
     [(); ROOT::LEVEL as usize]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
 {
-    tree: &'a mut Tree<ROOT>,
+    tree: &'a mut MutableTree<ROOT>,
     ptrs: [u32; ROOT::LEVEL],
     metas: [NodeMeta; ROOT::LEVEL + 1],
     last_coords: UVec3,
@@ -130,14 +130,13 @@ where
     }
 }
 
-impl<ROOT: Node> Tree<ROOT>
+impl<ROOT: Node> MutableTree<ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
 {
     pub fn accessor(&self) -> Accessor<ROOT> {
-        let mut metas: [MaybeUninit<NodeMeta>; ROOT::LEVEL + 1] =
-            MaybeUninit::uninit_array();
+        let mut metas: [MaybeUninit<NodeMeta>; ROOT::LEVEL + 1] = MaybeUninit::uninit_array();
         let metas_src = Self::metas();
         assert_eq!(metas.len(), metas_src.len());
         for (dst, src) in metas.iter_mut().zip(metas_src.into_iter()) {
@@ -151,8 +150,7 @@ where
         }
     }
     pub fn accessor_mut(&mut self) -> AccessorMut<ROOT> {
-        let mut metas: [MaybeUninit<NodeMeta>; ROOT::LEVEL + 1] =
-            MaybeUninit::uninit_array();
+        let mut metas: [MaybeUninit<NodeMeta>; ROOT::LEVEL + 1] = MaybeUninit::uninit_array();
         let metas_src = Self::metas();
         assert_eq!(metas.len(), metas_src.len());
         for (dst, src) in metas.iter_mut().zip(metas_src.into_iter()) {
@@ -172,7 +170,7 @@ mod tests {
     use glam::UVec3;
 
     use super::lowest_common_ancestor_level;
-    use crate::{hierarchy, Node, Tree};
+    use crate::{hierarchy, MutableTree, Node};
 
     #[test]
     fn test() {
@@ -202,7 +200,7 @@ mod tests {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
 
-        type MyTree = Tree<hierarchy!(2, 4, 2)>;
+        type MyTree = MutableTree<hierarchy!(2, 4, 2)>;
         let mut tree = MyTree::new();
 
         let mut set_locations: Vec<UVec3> = Vec::with_capacity(100);

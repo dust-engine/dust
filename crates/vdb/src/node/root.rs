@@ -117,12 +117,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
         }
     }
 
-    fn get_in_pools(
-        _pools: &[Pool],
-        _coords: UVec3,
-        _ptr: u32,
-        _cached_path: &mut [u32],
-    ) -> bool {
+    fn get_in_pools(_pools: &[Pool], _coords: UVec3, _ptr: u32, _cached_path: &mut [u32]) -> bool {
         unreachable!("Root Node is never kept in a pool!")
     }
 

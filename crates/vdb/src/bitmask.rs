@@ -44,6 +44,9 @@ where
     pub fn get(&self, index: usize) -> bool {
         let i = index / size_of::<usize>() / 8;
         let j = index - i * size_of::<usize>() * 8;
+        if i >= self.data.len() {
+            return false;
+        }
         let val = self.data[i];
 
         let bit = (val >> j) & 1;
