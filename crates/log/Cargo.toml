@@ -9,7 +9,7 @@ edition = "2021"
 tracing = "0.1"
 sentry = { version = "^0.32", optional = true, features=["tracing"] }
 tracing-subscriber = "^0.3"
-bevy = { version = "0.14.0-rc.3", default-features = false }
+bevy = { version = "0.14.0", default-features = false }
 rhyolite = { path = "../../../rhyolite" }
 
 

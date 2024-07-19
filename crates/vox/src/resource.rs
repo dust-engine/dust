@@ -3,7 +3,7 @@ use bevy::ecs::system::SystemParamItem;
 use bevy::{asset::Asset, reflect::TypePath};
 use rhyolite::commands::TransferCommands;
 use rhyolite::staging::StagingBelt;
-use rhyolite::utils::AssetUpload;
+use rhyolite::utils::GPUAsset;
 
 use rhyolite::ash::vk;
 
@@ -14,18 +14,18 @@ use rhyolite::{Allocator, Buffer};
 #[derive(Asset, TypePath)]
 pub struct VoxPaletteGPU(pub(crate) Buffer);
 
-impl AssetUpload for VoxPalette {
-    type GPUAsset = VoxPaletteGPU;
+impl GPUAsset for VoxPaletteGPU {
+    type SourceAsset = VoxPalette;
 
     type Params = (SRes<Allocator>, SResMut<StagingBelt>);
 
     fn upload_asset(
-        &self,
+        source_asset: &Self::SourceAsset,
         commands: &mut impl TransferCommands,
         (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
-    ) -> Self::GPUAsset {
+    ) -> Self {
         let data =
-            unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const u8, self.0.len() * 4) };
+            unsafe { std::slice::from_raw_parts(source_asset.0.as_ptr() as *const u8, source_asset.0.len() * 4) };
         let buffer = Buffer::new_resource_init(
             allocator.clone(),
             staging_belt,
@@ -51,17 +51,17 @@ struct GPUVoxNode {
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometryGPU(pub(crate) Buffer);
-impl AssetUpload for VoxGeometry {
-    type GPUAsset = VoxGeometryGPU;
+impl GPUAsset for VoxGeometryGPU {
+    type SourceAsset = VoxGeometry;
 
     type Params = (SRes<Allocator>, SResMut<StagingBelt>);
 
     fn upload_asset(
-        &self,
+        source_asset: &Self::SourceAsset,
         commands: &mut impl TransferCommands,
         (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
-    ) -> Self::GPUAsset {
-        let leaf_count = self.tree.iter_leaf().count();
+    ) -> Self {
+        let leaf_count = source_asset.tree.iter_leaf().count();
         let mut current_location = 0;
 
         let buffer = Buffer::new_resource_init_with(
@@ -73,7 +73,7 @@ impl AssetUpload for VoxGeometry {
                 | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             commands,
             |dst| {
-                for (position, d) in self.tree.iter_leaf() {
+                for (position, d) in source_asset.tree.iter_leaf() {
                     let mut mask = [0_u64; 1];
                     d.get_occupancy(&mut mask);
                     let node = GPUVoxNode {
@@ -104,20 +104,20 @@ impl AssetUpload for VoxGeometry {
 
 #[derive(Asset, TypePath)]
 pub struct VoxMaterialGPU(pub(crate) Buffer);
-impl AssetUpload for VoxMaterial {
-    type GPUAsset = VoxMaterialGPU;
+impl GPUAsset for VoxMaterialGPU {
+    type SourceAsset = VoxMaterial;
 
     type Params = (SRes<Allocator>, SResMut<StagingBelt>);
 
     fn upload_asset(
-        &self,
+        source_asset: &Self::SourceAsset,
         commands: &mut impl TransferCommands,
         (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
-    ) -> Self::GPUAsset {
+    ) -> Self {
         let buffer = Buffer::new_resource_init(
             allocator.clone(),
             staging_belt,
-            &self,
+            &source_asset,
             1,
             vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                 | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
