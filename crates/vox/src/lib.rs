@@ -144,9 +144,9 @@ impl Plugin for VoxPlugin {
             BLASBuilderPlugin::<builder::VoxBLASBuilder>::default(),
             TLASBuilderPlugin::<builder::VoxTLASBuilder>::default(),
             SbtPlugin::<builder::VoxSbtBuilder>::default(),
-            AssetUploadPlugin::<VoxPalette>::default(),
-            AssetUploadPlugin::<VoxGeometry>::default(),
-            AssetUploadPlugin::<VoxMaterial>::default(),
+            AssetUploadPlugin::<crate::resource::VoxPaletteGPU>::default(),
+            AssetUploadPlugin::<crate::resource::VoxGeometryGPU>::default(),
+            AssetUploadPlugin::<crate::resource::VoxMaterialGPU>::default(),
         ));
 
         app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.shader_int16)

@@ -43,7 +43,7 @@ impl ConstUVec3 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Aabb<T> {
     pub min: T,
     pub max: T,

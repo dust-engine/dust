@@ -274,7 +274,14 @@ where
                 if let Some(hit) = child.cast_local_ray_and_get_normal(
                     &new_ray,
                     solid,
-                    Vec2::new(hit_distance, t_max.x.min(t_max.y).min(t_max.z).min(initial_intersection_t.y)),
+                    Vec2::new(
+                        hit_distance,
+                        t_max
+                            .x
+                            .min(t_max.y)
+                            .min(t_max.z)
+                            .min(initial_intersection_t.y),
+                    ),
                     pools,
                 ) {
                     // hit_distance problematic here

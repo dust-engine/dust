@@ -15,7 +15,7 @@ rhyolite = { path = "../rhyolite" }
 rhyolite_gizmos = { path = "../rhyolite/crates/gizmos" }
 dust-vox = { path = "./crates/vox" }
 dust-vdb = { path = "./crates/vdb" }
-dust-pbr = { path = "./crates/pbr" }
+dust-pbr = { path = "./crates/pbr", features = ["gizmos"] }
 dust-log = { path = "./crates/log" }
 
 [dependencies.bevy_rapier3d]

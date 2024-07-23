@@ -43,10 +43,12 @@ fn main() {
             bevy_rapier3d::plugin::RapierPhysicsPlugin::<()>::default()
                 .with_query_dispatcher(Arc::new(query_dispatcher))
                 .with_narrow_phase_dispatcher(Arc::new(query_dispatcher)),
+            bevy_rapier3d::prelude::RapierDebugRenderPlugin::default(),
         ))
         .add_plugins(SurfacePlugin::default())
         .add_plugins(DebugUtilsPlugin::default())
         .add_plugins(RhyolitePlugin::default())
+        .add_plugins(rhyolite_gizmos::GizmosPlugin)
         .add_plugins(SwapchainPlugin::default());
 
     app.add_plugins(dust_pbr::PbrRendererPlugin);

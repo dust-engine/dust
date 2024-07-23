@@ -200,7 +200,7 @@ where
             | ((position.y as usize) << LOG2.z)
             | (position.z as usize);
         Some(parry3d::query::RayIntersection {
-            feature: parry3d::shape::FeatureId::Face(index as u32),
+            feature: parry3d::shape::FeatureId::Vertex(index as u32),
             time_of_impact: hit_distance,
             normal: Default::default(),
         })

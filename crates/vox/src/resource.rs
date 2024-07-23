@@ -24,8 +24,12 @@ impl GPUAsset for VoxPaletteGPU {
         commands: &mut impl TransferCommands,
         (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
     ) -> Self {
-        let data =
-            unsafe { std::slice::from_raw_parts(source_asset.0.as_ptr() as *const u8, source_asset.0.len() * 4) };
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                source_asset.0.as_ptr() as *const u8,
+                source_asset.0.len() * 4,
+            )
+        };
         let buffer = Buffer::new_resource_init(
             allocator.clone(),
             staging_belt,

@@ -50,9 +50,11 @@ impl parry3d::query::PointQuery for VdbShape {
 impl parry3d::shape::Shape for VdbShape {
     fn compute_local_aabb(&self) -> parry3d::bounding_volume::Aabb {
         let aabb = self.inner.aabb();
+        let min = aabb.min.as_vec3();
+        let max = aabb.max.as_vec3();
         parry3d::bounding_volume::Aabb {
-            maxs: aabb.max.as_vec3().into(),
-            mins: aabb.min.as_vec3().into(),
+            maxs: max.into(),
+            mins: min.into(),
         }
     }
 
@@ -60,11 +62,11 @@ impl parry3d::shape::Shape for VdbShape {
         todo!()
     }
 
-    fn clone_box(&self) -> Box<dyn parry3d::shape::Shape> {
+    fn clone_dyn(&self) -> Box<dyn parry3d::shape::Shape> {
         todo!()
     }
 
-    fn clone_scaled(
+    fn scale_dyn(
         &self,
         scale: &parry3d::math::Vector<parry3d::math::Real>,
         _num_subdivisions: u32,
@@ -155,6 +157,16 @@ impl parry3d::query::QueryDispatcherComposite for VdbQueryDispatcher {
         g2: &dyn parry3d::shape::Shape,
         options: parry3d::query::ShapeCastOptions,
     ) -> Result<Option<parry3d::query::ShapeCastHit>, parry3d::query::Unsupported> {
+        if let Some(g1) = g1.downcast_ref::<VdbShape>()
+            && let Some(g2) = g2.as_support_map()
+        {
+            let support_pt = g2.local_support_point(local_vel12);
+            let ray = parry3d::query::Ray::new(pos12.transform_point(&support_pt), *local_vel12);
+            println!("Ray: {:?}", ray);
+            let ray_cast = g1.cast_local_ray(&ray, 10000.0, false);
+            println!("Cast shape: {:?}", ray_cast);
+            return Ok(None);
+        }
         Err(Unsupported)
     }
 

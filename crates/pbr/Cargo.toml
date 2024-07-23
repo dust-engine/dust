@@ -8,3 +8,8 @@ rhyolite = { path = "../../../rhyolite" }
 rhyolite_rtx = { path = "../../../rhyolite/crates/rtx" }
 bevy = { version = "0.14.0", default-features = false }
 playout_macro = { path = "../../../playout/macro" }
+
+rhyolite_gizmos = { path = "../../../rhyolite/crates/gizmos", optional = true }
+
+[features]
+gizmos = ["bevy/bevy_gizmos", "rhyolite_gizmos"]
