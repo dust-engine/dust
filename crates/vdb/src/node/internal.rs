@@ -1,8 +1,7 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, AabbU16, BitMask, ConstUVec3, Node, Pool};
-use glam::{IVec3, U16Vec3, UVec3, Vec2, Vec3, Vec3A, Vec3Swizzles};
-use parry3d::bounding_volume::Aabb;
-use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of, ops::Sub};
+use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
+use glam::UVec3;
+use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of};
 
 #[derive(Clone, Copy)]
 pub union InternalNodeEntry {
@@ -217,6 +216,7 @@ where
         });
     }
 
+    #[cfg(feature = "physics")]
     #[inline]
     fn cast_local_ray_and_get_normal(
         &self,

@@ -10,6 +10,8 @@ mod accessor;
 mod bitmask;
 mod immutable;
 mod node;
+
+#[cfg(feature = "physics")]
 mod parry;
 mod pool;
 mod traversal;
@@ -22,7 +24,9 @@ pub use tree::{MutableTree, TreeLike};
 pub use accessor::Accessor;
 pub use immutable::*;
 pub use node::*;
-pub use parry::*;
+
+#[cfg(feature = "physics")]
+pub use parry::{VdbQueryDispatcher, VdbShape};
 
 pub extern crate self as dust_vdb;
 

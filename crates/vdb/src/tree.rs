@@ -1,10 +1,8 @@
 use std::mem::MaybeUninit;
 
 use glam::UVec3;
-use nalgebra::Vector3;
-use parry3d::query::RayCast;
 
-use crate::{traversal::TreeTraversal, AabbU32, Node, NodeMeta, Pool, VdbShape};
+use crate::{AabbU32, Node, NodeMeta, Pool};
 
 pub struct MutableTree<ROOT: Node>
 where
@@ -138,11 +136,14 @@ pub trait TreeLike: Send + Sync {
 
     fn aabb(&self) -> AabbU32;
 
+    fn extent(&self) -> UVec3;
+
+    #[cfg(feature = "physics")]
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &parry3d::query::Ray,
-        max_time_of_impact: parry3d::math::Real,
         solid: bool,
+        initial_intersection_t: glam::Vec2,
     ) -> Option<parry3d::query::RayIntersection>;
 }
 
@@ -156,47 +157,17 @@ where
     fn aabb(&self) -> AabbU32 {
         self.aabb
     }
+    fn extent(&self) -> UVec3 {
+        ROOT::EXTENT
+    }
+    #[cfg(feature = "physics")]
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &parry3d::query::Ray,
-        max_time_of_impact: parry3d::math::Real,
         solid: bool,
+        initial_intersection_t: glam::Vec2,
     ) -> Option<parry3d::query::RayIntersection> {
-        let mut initial_intersection = crate::intersect_aabb(
-            ray.origin.into(),
-            ray.dir.into(),
-            self.aabb.min.as_vec3a(),
-            self.aabb.max.as_vec3a(),
-        );
-        initial_intersection.y = initial_intersection.y.min(max_time_of_impact);
-        if initial_intersection.x >= initial_intersection.y {
-            // No intersection
-            return None;
-        }
-        if initial_intersection.y <= 0.0 {
-            return None;
-        }
-        let mut ray_prime = parry3d::query::Ray {
-            dir: ray.dir.component_div(&ROOT::EXTENT.as_vec3().into()),
-            origin: ray.origin,
-        };
-        ray_prime.origin.coords = ray_prime
-            .origin
-            .coords
-            .component_div(&ROOT::EXTENT.as_vec3().into());
-
         self.root
-            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection, &self.pool)
-    }
-}
-
-impl<ROOT: Node> TreeTraversal for MutableTree<ROOT>
-where
-    [(); ROOT::LEVEL as usize]: Sized,
-{
-    type ROOT = ROOT;
-
-    fn root(&self) -> &ROOT {
-        &self.root
+            .cast_local_ray_and_get_normal(ray, solid, initial_intersection_t, &self.pool)
     }
 }

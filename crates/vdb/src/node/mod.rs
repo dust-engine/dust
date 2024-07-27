@@ -6,12 +6,12 @@ use std::alloc::Layout;
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 
-use glam::{UVec2, UVec3, Vec2};
+use glam::UVec3;
 pub use internal::*;
 pub use leaf::*;
 pub use root::*;
 
-use crate::{AabbU32, ConstUVec3, Pool};
+use crate::{ConstUVec3, Pool};
 
 pub struct NodeMeta {
     pub(crate) layout: Layout,
@@ -89,6 +89,7 @@ pub trait Node: 'static + Default + Debug + Send + Sync {
 
     fn write_meta(metas: &mut Vec<NodeMeta>);
 
+    #[cfg(feature = "physics")]
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &parry3d::query::Ray,

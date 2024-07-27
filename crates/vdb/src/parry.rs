@@ -17,8 +17,31 @@ impl parry3d::query::RayCast for VdbShape {
         max_time_of_impact: parry3d::math::Real,
         solid: bool,
     ) -> Option<parry3d::query::RayIntersection> {
+        let mut initial_intersection = intersect_aabb(
+            ray.origin.into(),
+            ray.dir.into(),
+            self.inner.aabb().min.as_vec3a(),
+            self.inner.aabb().max.as_vec3a(),
+        );
+        initial_intersection.y = initial_intersection.y.min(max_time_of_impact);
+        if initial_intersection.x >= initial_intersection.y {
+            // No intersection
+            return None;
+        }
+        if initial_intersection.y <= 0.0 {
+            return None;
+        }
+        let extent = self.inner.extent();
+        let mut ray_prime = parry3d::query::Ray {
+            dir: ray.dir.component_div(&extent.as_vec3().into()),
+            origin: ray.origin,
+        };
+        ray_prime.origin.coords = ray_prime
+            .origin
+            .coords
+            .component_div(&extent.as_vec3().into());
         self.inner
-            .cast_local_ray_and_get_normal(ray, max_time_of_impact, solid)
+            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection)
     }
 }
 

@@ -1,13 +1,11 @@
 use std::{
     cell::UnsafeCell,
-    ptr,
     sync::{atomic::AtomicU64, Arc, Mutex},
 };
 
 use glam::UVec3;
-use parry3d::math::Vector;
 
-use crate::{traversal::TreeTraversal, tree::TreeLike, AabbU32, MutableTree, Node, Pool};
+use crate::{tree::TreeLike, AabbU32, MutableTree, Node, Pool};
 
 struct ImmutableTreeSharedInfo<ROOT: Node>
 where
@@ -137,41 +135,23 @@ where
         todo!()
     }
 
+    fn extent(&self) -> UVec3 {
+        ROOT::EXTENT
+    }
+
     fn aabb(&self) -> AabbU32 {
         self.aabb
     }
 
+    #[cfg(feature = "physics")]
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &parry3d::query::Ray,
-        max_time_of_impact: parry3d::math::Real,
         solid: bool,
+        initial_intersection_t: glam::Vec2,
     ) -> Option<parry3d::query::RayIntersection> {
-        let mut initial_intersection = crate::intersect_aabb(
-            ray.origin.into(),
-            ray.dir.into(),
-            self.aabb.min.as_vec3a(),
-            self.aabb.max.as_vec3a(),
-        );
-        initial_intersection.y = initial_intersection.y.min(max_time_of_impact);
-        if initial_intersection.x >= initial_intersection.y {
-            // No intersection
-            return None;
-        }
-        if initial_intersection.y <= 0.0 {
-            return None;
-        }
-        let mut ray_prime = parry3d::query::Ray {
-            dir: ray.dir.component_div(&ROOT::EXTENT.as_vec3().into()),
-            origin: ray.origin,
-        };
-        ray_prime.origin.coords = ray_prime
-            .origin
-            .coords
-            .component_div(&ROOT::EXTENT.as_vec3().into());
-
         self.root
-            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection, unsafe {
+            .cast_local_ray_and_get_normal(ray, solid, initial_intersection_t, unsafe {
                 &*self.shared.pool.get()
             })
     }
@@ -189,60 +169,20 @@ where
         self.aabb
     }
 
+    fn extent(&self) -> UVec3 {
+        ROOT::EXTENT
+    }
+
+    #[cfg(feature = "physics")]
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &parry3d::query::Ray,
-        max_time_of_impact: parry3d::math::Real,
         solid: bool,
+        initial_intersection_t: glam::Vec2,
     ) -> Option<parry3d::query::RayIntersection> {
-        let mut initial_intersection = crate::intersect_aabb(
-            ray.origin.into(),
-            ray.dir.into(),
-            self.aabb.min.as_vec3a(),
-            self.aabb.max.as_vec3a(),
-        );
-        initial_intersection.y = initial_intersection.y.min(max_time_of_impact);
-        if initial_intersection.x >= initial_intersection.y {
-            // No intersection
-            return None;
-        }
-        if initial_intersection.y <= 0.0 {
-            return None;
-        }
-        let mut ray_prime = parry3d::query::Ray {
-            dir: ray.dir.component_div(&ROOT::EXTENT.as_vec3().into()),
-            origin: ray.origin,
-        };
-        ray_prime.origin.coords = ray_prime
-            .origin
-            .coords
-            .component_div(&ROOT::EXTENT.as_vec3().into());
-
         self.root
-            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection, unsafe {
+            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection_t, unsafe {
                 &*self.shared.pool.get()
             })
-    }
-}
-
-impl<ROOT: Node> TreeTraversal for ImmutableTree<ROOT>
-where
-    [(); ROOT::LEVEL as usize]: Sized,
-{
-    type ROOT = ROOT;
-
-    fn root(&self) -> &ROOT {
-        &self.root
-    }
-}
-
-impl<ROOT: Node> TreeTraversal for ImmutableTreeSnapshot<ROOT>
-where
-    [(); ROOT::LEVEL as usize]: Sized,
-{
-    type ROOT = ROOT;
-
-    fn root(&self) -> &ROOT {
-        &self.root
     }
 }

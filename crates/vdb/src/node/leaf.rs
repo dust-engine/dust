@@ -1,7 +1,6 @@
 use super::{size_of_grid, NodeMeta};
 use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
-use bevy::math::VectorSpace;
-use glam::{IVec3, UVec2, UVec3, Vec2, Vec3, Vec3A, Vec3Swizzles};
+use glam::UVec3;
 use std::{cell::UnsafeCell, iter::Once, mem::size_of};
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
@@ -158,6 +157,7 @@ where
         });
     }
 
+    #[cfg(feature = "physics")]
     #[inline]
     fn cast_local_ray_and_get_normal(
         &self,
