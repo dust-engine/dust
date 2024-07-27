@@ -4,8 +4,8 @@ pub mod camera;
 mod pipeline;
 
 use bevy::{
-    app::{App, Plugin, PostUpdate},
     ecs::{query::With, schedule::IntoSystemConfigs},
+    prelude::*,
     window::PrimaryWindow,
 };
 pub use pipeline::*;
@@ -38,6 +38,26 @@ impl Plugin for PbrRendererPlugin {
         #[cfg(feature = "gizmos")]
         {
             rhyolite_gizmos::add_draw_delegate::<gizmos::PbrRendererDelegate>(app);
+        }
+
+        {
+            // Config swapchain
+            use rhyolite::{ash::vk, SwapchainConfig};
+            let world = app.world_mut();
+            let primary_window = world
+                .query_filtered::<Entity, With<PrimaryWindow>>()
+                .iter(world)
+                .next()
+                .unwrap();
+            let mut primary_window = world.entity_mut(primary_window);
+            if !primary_window.contains::<SwapchainConfig>() {
+                primary_window.insert(SwapchainConfig::default());
+            }
+            let mut swapchain_config = primary_window.get_mut::<SwapchainConfig>().unwrap();
+            swapchain_config.image_usage |= vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::COLOR_ATTACHMENT
+                | vk::ImageUsageFlags::STORAGE;
+            swapchain_config.srgb_format = false;
         }
     }
     fn finish(&self, app: &mut App) {

@@ -8,21 +8,28 @@ members = [
   "crates/*",
 ]
 
+[features]
+default = ["gizmos", "physics", "debug"]
+gizmos = ["dust-pbr/gizmos", "rhyolite_gizmos"]
+physics = ["bevy_rapier3d", "dust-vdb/physics"]
+debug = ["bevy_rapier3d?/debug-render"]
+
 
 [dependencies]
-bevy = { version = "0.14.0", default-features = false, features = ["bevy_scene"] }
+bevy = { version = "0.14.0", default-features = false, features = ["bevy_scene", "bevy_asset"] }
 rhyolite = { path = "../rhyolite" }
-rhyolite_gizmos = { path = "../rhyolite/crates/gizmos" }
 dust-vox = { path = "./crates/vox" }
 dust-vdb = { path = "./crates/vdb" }
-dust-pbr = { path = "./crates/pbr", features = ["gizmos"] }
+dust-pbr = { path = "./crates/pbr" }
 dust-log = { path = "./crates/log" }
+rhyolite_gizmos = { path = "../rhyolite/crates/gizmos", optional = true }
 
 [dependencies.bevy_rapier3d]
 git = "https://github.com/dimforge/bevy_rapier"
 rev = "56f98706751cb5cf74cb82e2b73749282c8ed5ee"
 default-features = false
-features = ["dim3", "headless", "debug-render"]
+features = ["dim3", "headless"]
+optional = true
 
 [patch.crates-io]
 bevy = { path = "../bevy" }

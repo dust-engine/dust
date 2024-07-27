@@ -14,66 +14,28 @@ use bevy_rapier3d::control::{
     KinematicCharacterControllerOutput,
 };
 use bevy_rapier3d::geometry::Collider;
-use bevy_rapier3d::parry::query::{DefaultQueryDispatcher, QueryDispatcher};
 use bevy_rapier3d::pipeline::QueryFilter;
 use bevy_rapier3d::plugin::RapierContext;
 use dust_pbr::camera::CameraBundle;
-use dust_vox::VoxPlugin;
-use rhyolite::ash::vk;
 
 use bevy::app::{PluginGroup, Startup, Update};
 use bevy::ecs::system::{Commands, Query, Res};
 use bevy::ecs::{entity::Entity, query::With};
-use bevy::window::PrimaryWindow;
-use rhyolite::debug::DebugUtilsPlugin;
-use rhyolite::{RhyolitePlugin, SurfacePlugin, SwapchainConfig, SwapchainPlugin};
 
 fn main() {
     let mut app = bevy::app::App::new();
 
-    let query_dispatcher = DefaultQueryDispatcher.chain(dust_vdb::VdbQueryDispatcher);
-    app.add_plugins(dust_log::LogPlugin)
-        .add_plugins((
-            bevy::DefaultPlugins
-                .set::<bevy::asset::AssetPlugin>(bevy::asset::AssetPlugin {
-                    mode: bevy::asset::AssetMode::Processed,
-                    ..Default::default()
-                })
-                .disable::<bevy::log::LogPlugin>(),
-            bevy_rapier3d::plugin::RapierPhysicsPlugin::<()>::default()
-                .with_query_dispatcher(Arc::new(query_dispatcher))
-                .with_narrow_phase_dispatcher(Arc::new(query_dispatcher)),
-            bevy_rapier3d::prelude::RapierDebugRenderPlugin::default(),
-        ))
-        .add_plugins(SurfacePlugin::default())
-        .add_plugins(DebugUtilsPlugin::default())
-        .add_plugins(RhyolitePlugin::default())
-        .add_plugins(rhyolite_gizmos::GizmosPlugin)
-        .add_plugins(SwapchainPlugin::default());
-
-    app.add_plugins(dust_pbr::PbrRendererPlugin);
-
-    app.add_plugins(VoxPlugin);
+    app.add_plugins(
+        dust::DustPlugin.set::<bevy::asset::AssetPlugin>(bevy::asset::AssetPlugin {
+            mode: bevy::asset::AssetMode::Processed,
+            ..Default::default()
+        }),
+    );
 
     app.add_systems(Startup, startup_system)
         .add_systems(Update, teapot_move_system)
         .add_systems(Update, ray_cast)
         .add_systems(Update, player_movement);
-
-    let world = app.world_mut();
-
-    let primary_window = world
-        .query_filtered::<Entity, With<PrimaryWindow>>()
-        .iter(world)
-        .next()
-        .unwrap();
-    world.entity_mut(primary_window).insert(SwapchainConfig {
-        image_usage: vk::ImageUsageFlags::TRANSFER_DST
-            | vk::ImageUsageFlags::COLOR_ATTACHMENT
-            | vk::ImageUsageFlags::STORAGE,
-        srgb_format: false,
-        ..Default::default()
-    });
 
     app.run();
 }

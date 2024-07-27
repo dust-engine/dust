@@ -5,13 +5,16 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+physics = ["parry3d", "nalgebra"]
+
 [dependencies]
 glam = "^0.27"
 fxhash = "0.2"
 nohash = "0.2.0"
 bevy = { version = "0.14.0", default-features = false, features = ["bevy_asset"] }
-parry3d = "0.17"
-nalgebra = { version = "*", features = ["convert-glam027"] }
+parry3d = { version = "0.17", optional = true }
+nalgebra = { version = "*", features = ["convert-glam027"], optional = true }
 
 [dev-dependencies]
 rand = "0.8.5"
