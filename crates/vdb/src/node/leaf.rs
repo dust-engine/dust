@@ -162,11 +162,13 @@ where
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &parry3d::query::Ray,
-        solid: bool,
-        initial_intersection_t: Vec2,
-        pools: &[Pool],
+        _solid: bool,
+        initial_intersection_t: glam::Vec2,
+        _pools: &[Pool],
     ) -> Option<parry3d::query::RayIntersection> {
         // Assume that the node is located at 0.0 - 4.0
+
+        use glam::{IVec3, Vec3, Vec3A, Vec3Swizzles};
         let mut hit_distance: f32 = initial_intersection_t.x;
         let initial_intersection_point: Vec3A = (ray.origin + ray.dir * hit_distance).into();
         let mut position: IVec3 =

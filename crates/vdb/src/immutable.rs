@@ -181,7 +181,7 @@ where
         initial_intersection_t: glam::Vec2,
     ) -> Option<parry3d::query::RayIntersection> {
         self.root
-            .cast_local_ray_and_get_normal(&ray_prime, solid, initial_intersection_t, unsafe {
+            .cast_local_ray_and_get_normal(ray, solid, initial_intersection_t, unsafe {
                 &*self.shared.pool.get()
             })
     }

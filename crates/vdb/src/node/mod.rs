@@ -94,7 +94,7 @@ pub trait Node: 'static + Default + Debug + Send + Sync {
         &self,
         ray: &parry3d::query::Ray,
         solid: bool,
-        initial_intersection_t: Vec2,
+        initial_intersection_t: glam::Vec2,
         pools: &[Pool],
     ) -> Option<parry3d::query::RayIntersection> {
         None
