@@ -15,7 +15,7 @@ use bevy::{
     transform::components::{GlobalTransform, Transform},
 };
 use dot_vox::Color;
-use dust_vdb::hierarchy;
+use dust_vdb::{hierarchy, TreeLike};
 use rhyolite::ash::vk;
 use rhyolite::utils::AssetUploadPlugin;
 use rhyolite::RhyoliteApp;
@@ -26,7 +26,7 @@ mod loader;
 mod physics;
 mod resource;
 
-type TreeRoot = hierarchy!(3, 3, 2);
+type TreeRoot = hierarchy!(3, 3, 2, u32);
 type Tree = dust_vdb::MutableTree<TreeRoot>;
 type ImmutableTree = dust_vdb::ImmutableTree<TreeRoot>;
 
@@ -41,6 +41,14 @@ pub struct VoxGeometry {
     unit_size: f32,
 }
 impl VoxGeometry {
+    pub fn from_tree_with_unit_size(tree: ImmutableTree, unit_size: f32) -> Self {
+        Self {
+            aabb_min: UVec3::ZERO,
+            aabb_max: tree.extent(),
+            tree,
+            unit_size,
+        }
+    }
     pub fn aabb(&self) -> (UVec3, UVec3) {
         (self.aabb_min, self.aabb_max)
     }
@@ -116,10 +124,10 @@ pub struct VoxModel;
 /// Entities loaded into the scene will have this bundle added.
 #[derive(Bundle, Default)]
 pub struct VoxModelBundle {
-    geometry: Handle<VoxGeometry>,
-    material: Handle<VoxMaterial>,
-    palette: Handle<VoxPalette>,
-    marker: VoxModel,
+    pub geometry: Handle<VoxGeometry>,
+    pub material: Handle<VoxMaterial>,
+    pub palette: Handle<VoxPalette>,
+    pub marker: VoxModel,
 }
 
 #[derive(Bundle, Default)]

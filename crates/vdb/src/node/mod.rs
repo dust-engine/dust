@@ -29,7 +29,7 @@ pub struct NodeMeta {
     pub(crate) extent_mask: UVec3, // = (1 << extent_log2) - 1
 }
 
-pub trait Node: 'static + Default + Debug + Send + Sync {
+pub trait Node: 'static + Send + Sync + Default {
     /// span of the node.
     type LeafType: IsLeaf;
     const EXTENT_LOG2: UVec3;
@@ -41,7 +41,6 @@ pub trait Node: 'static + Default + Debug + Send + Sync {
 
     /// This is 0 for leaf nodes and +1 for each layer of nodes above leaves.
     const LEVEL: usize;
-    fn new() -> Self;
 
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
@@ -115,8 +114,8 @@ pub trait Node: 'static + Default + Debug + Send + Sync {
 /// ```
 #[macro_export]
 macro_rules! hierarchy {
-    ($e: tt) => {
-        $crate::LeafNode<{dust_vdb::ConstUVec3{x:$e,y:$e,z:$e}}>
+    ($e: tt, $t: ty) => {
+        $crate::LeafNode<{dust_vdb::ConstUVec3{x:$e,y:$e,z:$e}}, $t>
     };
     (#, $($n:tt),+) => {
         $crate::RootNode<hierarchy!($($n),*)>

@@ -361,7 +361,7 @@ impl VoxLoader {
                 + block_index.1 as usize * 64
                 + block_index.2 as usize * 64 * 64;
 
-            leaf.material_ptr = palette_indexes.running_sum()[block_index];
+            leaf.value = palette_indexes.running_sum()[block_index];
         }
 
         let palette_indexes: Vec<u8> = palette_indexes.collect();

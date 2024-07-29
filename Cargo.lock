@@ -3059,6 +3059,18 @@ version = "0.1.0"
 dependencies = [
  "Inflector",
  "bitflags 2.6.0",
+ "proc-macro2",
+ "syn 2.0.72",
+]
+
+[[package]]
+name = "playout"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42f456857dbc32f5ba3520992cec410e1aee4b969f448ee1f4962ea461dd9beb"
+dependencies = [
+ "Inflector",
+ "bitflags 2.6.0",
  "glsl",
  "proc-macro2",
  "syn 2.0.72",
@@ -3069,7 +3081,7 @@ name = "playout_macro"
 version = "0.1.0"
 dependencies = [
  "itertools",
- "playout",
+ "playout 0.1.0",
  "proc-macro2",
  "quote",
  "syn 2.0.72",
@@ -3383,7 +3395,7 @@ dependencies = [
  "log",
  "once_cell",
  "petgraph",
- "playout",
+ "playout 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "raw-window-handle",
  "raw-window-metal",
  "shaderc",

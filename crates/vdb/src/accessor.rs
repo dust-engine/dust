@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test() {
-        type MyTreeRoot = hierarchy!(2, 4, 2);
+        type MyTreeRoot = hierarchy!(2, 4, 2, u32);
         let mask: UVec3 = MyTreeRoot::META_MASK;
         assert_eq!(
             mask,
@@ -200,7 +200,7 @@ mod tests {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
 
-        type MyTree = MutableTree<hierarchy!(2, 4, 2)>;
+        type MyTree = MutableTree<hierarchy!(2, 4, 2, u32)>;
         let mut tree = MyTree::new();
 
         let mut set_locations: Vec<UVec3> = Vec::with_capacity(100);

@@ -67,13 +67,6 @@ where
         z: CHILD::META_MASK.z | (1 << (Self::EXTENT_LOG2.z - 1)),
     };
     const LEVEL: usize = CHILD::LEVEL + 1;
-    fn new() -> Self {
-        Self {
-            child_mask: BitMask::new(),
-            child_ptrs: [InternalNodeEntry { free: 0 }; size_of_grid(FANOUT_LOG2)],
-            _marker: PhantomData,
-        }
-    }
 
     #[inline]
     fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> bool {

@@ -52,15 +52,6 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
 
     const LEVEL: usize = CHILD::LEVEL + 1;
 
-    fn new() -> Self {
-        Self {
-            map: Default::default(),
-            _marker: PhantomData,
-            num_occupied: 0,
-            aabb: Default::default(),
-        }
-    }
-
     #[inline]
     fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> bool {
         let root_offset = coords >> CHILD::EXTENT_LOG2;

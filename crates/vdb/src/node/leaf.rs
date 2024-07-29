@@ -8,21 +8,21 @@ use std::{cell::UnsafeCell, iter::Once, mem::size_of};
 /// Size: 3 u32
 #[repr(C)]
 #[derive(Default, Clone)]
-pub struct LeafNode<const LOG2: ConstUVec3>
+pub struct LeafNode<const LOG2: ConstUVec3, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 1 for occupied voxels and 0 for unoccupied voxels
     pub occupancy: BitMask<{ size_of_grid(LOG2) }>,
     /// A pointer to self.occupancy.count_ones() material values
-    pub material_ptr: u32,
+    pub value: T,
 }
 
 pub trait IsLeaf: Node {
     fn get_occupancy(&self, data: &mut [u64]);
 }
 
-impl<const LOG2: ConstUVec3> IsLeaf for LeafNode<LOG2>
+impl<const LOG2: ConstUVec3, T: Send + Sync + 'static + Default> IsLeaf for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -40,7 +40,7 @@ where
     }
 }
 
-impl<const LOG2: ConstUVec3> Node for LeafNode<LOG2>
+impl<const LOG2: ConstUVec3, T: Send + Sync + 'static + Default> Node for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -65,12 +65,6 @@ where
         z: 1 << (LOG2.z - 1),
     };
     const LEVEL: usize = 0;
-    fn new() -> Self {
-        Self {
-            occupancy: BitMask::new(),
-            material_ptr: 0,
-        }
-    }
 
     #[inline]
     fn get(&self, _: &[Pool], coords: UVec3, _cached_path: &mut [u32]) -> bool {
@@ -209,7 +203,7 @@ where
     }
 }
 
-impl<const LOG2: ConstUVec3> std::fmt::Debug for LeafNode<LOG2>
+impl<const LOG2: ConstUVec3, T: Send + Sync + 'static> std::fmt::Debug for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {

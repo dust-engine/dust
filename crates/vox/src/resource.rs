@@ -86,7 +86,7 @@ impl GPUAsset for VoxGeometryGPU {
                         z: position.z as u16,
                         w: 0,
                         mask: mask[0],
-                        material_ptr: d.material_ptr,
+                        material_ptr: d.value,
                         avg_albedo: 0,
                     };
                     let dst_slice = &mut dst
