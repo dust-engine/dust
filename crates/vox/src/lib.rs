@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 #![feature(alloc_layout_extra)]
 
+use attributes::AttributeAllocator;
 use bevy::app::Update;
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
@@ -21,6 +22,7 @@ use rhyolite::utils::AssetUploadPlugin;
 use rhyolite::RhyoliteApp;
 use std::ops::{Deref, DerefMut};
 
+mod attributes;
 mod builder;
 mod loader;
 mod physics;
@@ -69,18 +71,7 @@ impl DerefMut for VoxGeometry {
 }
 
 #[derive(Asset, TypePath)]
-pub struct VoxMaterial(Box<[u8]>);
-impl Deref for VoxMaterial {
-    type Target = [u8];
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl DerefMut for VoxMaterial {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+pub struct VoxMaterial(AttributeAllocator);
 
 #[derive(Asset, TypePath)]
 pub struct VoxPalette(Vec<Color>);
@@ -141,8 +132,7 @@ pub struct VoxPlugin;
 
 impl Plugin for VoxPlugin {
     fn build(&self, app: &mut App) {
-        app.init_asset_loader::<VoxLoader>()
-            .init_asset::<VoxGeometry>()
+        app.init_asset::<VoxGeometry>()
             .init_asset::<VoxMaterial>()
             .register_type::<VoxInstance>()
             .register_type::<VoxModel>();
@@ -154,7 +144,6 @@ impl Plugin for VoxPlugin {
             SbtPlugin::<builder::VoxSbtBuilder>::default(),
             AssetUploadPlugin::<crate::resource::VoxPaletteGPU>::default(),
             AssetUploadPlugin::<crate::resource::VoxGeometryGPU>::default(),
-            AssetUploadPlugin::<crate::resource::VoxMaterialGPU>::default(),
         ));
 
         app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.shader_int16)
@@ -171,5 +160,8 @@ impl Plugin for VoxPlugin {
             .unwrap();
 
         app.add_systems(Update, physics::insert_collider_system);
+    }
+    fn finish(&self, app: &mut App) {
+        app.init_asset_loader::<VoxLoader>();
     }
 }

@@ -220,7 +220,7 @@ where
     ) -> Option<parry3d::query::RayIntersection> {
         // Assume that the node is located at 0.0 - 4.0
 
-        use glam::{IVec3, Vec3A, Vec3, Vec2, Vec3Swizzles};
+        use glam::{IVec3, Vec2, Vec3, Vec3A, Vec3Swizzles};
         let mut hit_distance: f32 = initial_intersection_t.x;
         let initial_intersection_point: Vec3A = (ray.origin + ray.dir * hit_distance).into();
         let fanout: UVec3 = UVec3::new(

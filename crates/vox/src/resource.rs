@@ -105,29 +105,3 @@ impl GPUAsset for VoxGeometryGPU {
         VoxGeometryGPU(buffer)
     }
 }
-
-#[derive(Asset, TypePath)]
-pub struct VoxMaterialGPU(pub(crate) Buffer);
-impl GPUAsset for VoxMaterialGPU {
-    type SourceAsset = VoxMaterial;
-
-    type Params = (SRes<Allocator>, SResMut<StagingBelt>);
-
-    fn upload_asset(
-        source_asset: &Self::SourceAsset,
-        commands: &mut impl TransferCommands,
-        (allocator, staging_belt): &mut SystemParamItem<Self::Params>,
-    ) -> Self {
-        let buffer = Buffer::new_resource_init(
-            allocator.clone(),
-            staging_belt,
-            &source_asset,
-            1,
-            vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-            commands,
-        )
-        .unwrap();
-        VoxMaterialGPU(buffer)
-    }
-}

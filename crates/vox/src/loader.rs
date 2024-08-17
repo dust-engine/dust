@@ -9,6 +9,7 @@ use bevy::{
     },
     hierarchy::{BuildWorldChildren, WorldChildBuilder},
     math::{IVec3, Quat, UVec3, Vec3A, Vec3Swizzles},
+    prelude::FromWorld,
     scene::Scene,
     transform::components::{GlobalTransform, Transform},
     utils::{tracing, ConditionalSendFuture},
@@ -16,9 +17,11 @@ use bevy::{
 use dot_vox::{DotVoxData, Rotation, SceneNode};
 use dust_vdb::TreeLike;
 use rayon::prelude::*;
+use rhyolite::Allocator;
 
 use crate::{
-    Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModelBundle, VoxPalette,
+    attributes::AttributeAllocator, Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial,
+    VoxModelBundle, VoxPalette,
 };
 
 enum WorldOrParent<'w, 'q> {
@@ -202,8 +205,16 @@ pub enum VoxLoadingError {
     IoError(#[from] std::io::Error),
 }
 
-#[derive(Default)]
-pub struct VoxLoader;
+pub struct VoxLoader {
+    allocator: Allocator,
+}
+impl FromWorld for VoxLoader {
+    fn from_world(world: &mut World) -> Self {
+        Self {
+            allocator: world.resource::<Allocator>().clone(),
+        }
+    }
+}
 
 impl AssetLoader for VoxLoader {
     type Asset = Scene;
@@ -272,15 +283,12 @@ impl AssetLoader for VoxLoader {
                 let handles = models
                     .par_iter()
                     .map(|(model_id, model)| {
-                        let (tree, palette_indexes, min, max) = self.model_to_tree(model);
-                        (
-                            *model_id,
-                            (tree, palette_indexes.into_boxed_slice(), min, max),
-                        )
+                        let (tree, attribute_allocator, min, max) = self.model_to_tree(model);
+                        (*model_id, (tree, attribute_allocator, min, max))
                     })
                     .collect_vec_list();
                 let bundles = handles.into_iter().flat_map(|a| a).map(
-                    |(model_id, (tree, palette_indexes, aabb_min, aabb_max))| {
+                    |(model_id, (tree, attribute_allocator, aabb_min, aabb_max))| {
                         let geometry = load_context.add_labeled_asset(
                             format!("Geometry{}", model_id),
                             VoxGeometry {
@@ -292,7 +300,7 @@ impl AssetLoader for VoxLoader {
                         );
                         let material = load_context.add_labeled_asset(
                             format!("Material{}", model_id),
-                            VoxMaterial(palette_indexes),
+                            VoxMaterial(attribute_allocator),
                         );
                         let bundle = VoxModelBundle {
                             geometry,
@@ -327,8 +335,10 @@ impl AssetLoader for VoxLoader {
     }
 }
 impl VoxLoader {
-    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, Vec<u8>, UVec3, UVec3) {
+    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, AttributeAllocator, UVec3, UVec3) {
         let mut tree = crate::Tree::new();
+
+        // Create 256x256x256 grid
         let mut palette_index_collector = ModelIndexCollector::new();
         let mut accessor = tree.accessor_mut();
         let size_y = model.size.y;
@@ -353,20 +363,33 @@ impl VoxLoader {
             max = max.max(coords);
             palette_index_collector.set(voxel);
         }
-
-        let palette_indexes = palette_index_collector.into_iter();
+        let mut attribute_allocator = AttributeAllocator::new_with_capacity(
+            self.allocator.clone(),
+            2 * model.voxels.len() as u64,
+            4,
+            64,
+        )
+        .unwrap();
+        let mut palette_indexes = palette_index_collector.into_iter(); // List of all set voxels
         for (location, leaf) in tree.iter_leaf_mut() {
             let block_index = (location.x >> 2, location.y >> 2, location.z >> 2);
             let block_index = block_index.0 as usize
                 + block_index.1 as usize * 64
                 + block_index.2 as usize * 64 * 64;
 
-            leaf.value = palette_indexes.running_sum()[block_index];
+            let num_active_voxels = palette_indexes.block_counts()[block_index];
+            leaf.value = attribute_allocator.allocate(num_active_voxels);
+
+            // Copy `num_active_voxels` voxels into the attribute buffer
+            for i in &mut attribute_allocator.buffer_mut()
+                [leaf.value as usize..(leaf.value + num_active_voxels) as usize]
+            {
+                *i = palette_indexes.next().unwrap();
+            }
         }
+        assert!(palette_indexes.next().is_none());
 
-        let palette_indexes: Vec<u8> = palette_indexes.collect();
-
-        (tree, palette_indexes, min, max)
+        (tree, attribute_allocator, min, max)
     }
 }
 
@@ -411,7 +434,7 @@ pub struct ModelIndexCollectorIterator {
 }
 
 impl ModelIndexCollectorIterator {
-    pub fn running_sum(&self) -> &[u32; 64 * 64 * 64] {
+    pub fn block_counts(&self) -> &[u32; 64 * 64 * 64] {
         &self.collector.block_counts
     }
 }
@@ -446,12 +469,6 @@ impl IntoIterator for ModelIndexCollector {
     type IntoIter = ModelIndexCollectorIterator;
 
     fn into_iter(mut self) -> Self::IntoIter {
-        let mut sum: u32 = 0;
-        for i in self.block_counts.iter_mut() {
-            let value = *i;
-            *i = sum;
-            sum += value;
-        }
         ModelIndexCollectorIterator {
             collector: self,
             current: 0,
