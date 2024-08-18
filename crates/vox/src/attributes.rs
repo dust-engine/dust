@@ -54,6 +54,7 @@ impl AttributeAllocator {
         }
         if self.head + increment >= self.buffer.len() as u32 {
             // overflow. panic
+            panic!()
         }
         let old_head = self.head;
         self.head += increment;

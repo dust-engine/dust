@@ -2,20 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::{
     asset::{AssetLoader, AsyncReadExt},
-    ecs::{
-        bundle::Bundle,
-        entity::Entity,
-        world::{EntityWorldMut, World},
-    },
-    hierarchy::{BuildWorldChildren, WorldChildBuilder},
-    math::{IVec3, Quat, UVec3, Vec3A, Vec3Swizzles},
-    prelude::FromWorld,
-    scene::Scene,
-    transform::components::{GlobalTransform, Transform},
+    math::Vec3A,
+    prelude::*,
     utils::{tracing, ConditionalSendFuture},
 };
 use dot_vox::{DotVoxData, Rotation, SceneNode};
-use dust_vdb::TreeLike;
 use rayon::prelude::*;
 use rhyolite::Allocator;
 
@@ -370,24 +361,26 @@ impl VoxLoader {
             64,
         )
         .unwrap();
-        let mut palette_indexes = palette_index_collector.into_iter(); // List of all set voxels
         for (location, leaf) in tree.iter_leaf_mut() {
             let block_index = (location.x >> 2, location.y >> 2, location.z >> 2);
             let block_index = block_index.0 as usize
                 + block_index.1 as usize * 64
                 + block_index.2 as usize * 64 * 64;
 
-            let num_active_voxels = palette_indexes.block_counts()[block_index];
+            let num_active_voxels = leaf.occupancy.count_ones() as u32;
+
             leaf.value = attribute_allocator.allocate(num_active_voxels);
+            let mut block_attributes = palette_index_collector.block_attributes(block_index);
 
             // Copy `num_active_voxels` voxels into the attribute buffer
             for i in &mut attribute_allocator.buffer_mut()
                 [leaf.value as usize..(leaf.value + num_active_voxels) as usize]
             {
-                *i = palette_indexes.next().unwrap();
+                *i = block_attributes.next().unwrap() - 1; // Convert back into zero-based index here
             }
+            assert!(block_attributes.next().is_none());
         }
-        assert!(palette_indexes.next().is_none());
+        attribute_allocator.buffer_mut().flush(..);
 
         (tree, attribute_allocator, min, max)
     }
@@ -396,7 +389,6 @@ impl VoxLoader {
 /// dox_vox::Voxel to solid materials
 pub struct ModelIndexCollector {
     grid: Box<[u8; 256 * 256 * 256]>,
-    block_counts: Box<[u32; 64 * 64 * 64]>,
     count: usize,
 }
 
@@ -405,13 +397,10 @@ impl ModelIndexCollector {
         unsafe {
             let grid_ptr =
                 std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u8; 256 * 256 * 256]>());
-            let block_counts_ptr =
-                std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u32; 64 * 64 * 64]>());
 
             Self {
                 count: 0,
                 grid: Box::from_raw(grid_ptr as *mut [u8; 256 * 256 * 256]),
-                block_counts: Box::from_raw(block_counts_ptr as *mut [u32; 64 * 64 * 64]),
             }
         }
     }
@@ -421,57 +410,14 @@ impl ModelIndexCollector {
         let block_index =
             block_index.0 as usize + block_index.1 as usize * 64 + block_index.2 as usize * 64 * 64;
 
-        self.block_counts[block_index] += 1;
-
         let index = (voxel.z & 0b11) | ((voxel.y & 0b11) << 2) | ((voxel.x & 0b11) << 4);
         // Use one-based index here so that 0 indicates null
         self.grid[block_index * 4 * 4 * 4 + index as usize] = voxel.i + 1;
     }
-}
-pub struct ModelIndexCollectorIterator {
-    collector: ModelIndexCollector,
-    current: usize,
-}
-
-impl ModelIndexCollectorIterator {
-    pub fn block_counts(&self) -> &[u32; 64 * 64 * 64] {
-        &self.collector.block_counts
-    }
-}
-
-impl Iterator for ModelIndexCollectorIterator {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.current < 256 * 256 * 256 {
-            let val = self.collector.grid[self.current];
-            self.current += 1;
-            if val == 0 {
-                continue;
-            }
-            return Some(val - 1); // Convert back into zero-based index here
-        }
-        None
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len(), Some(self.len()))
-    }
-}
-impl ExactSizeIterator for ModelIndexCollectorIterator {
-    fn len(&self) -> usize {
-        self.collector.count
-    }
-}
-
-impl IntoIterator for ModelIndexCollector {
-    type Item = u8;
-
-    type IntoIter = ModelIndexCollectorIterator;
-
-    fn into_iter(mut self) -> Self::IntoIter {
-        ModelIndexCollectorIterator {
-            collector: self,
-            current: 0,
-        }
+    pub fn block_attributes(&self, block_index: usize) -> impl Iterator<Item = u8> + '_ {
+        let base_index = block_index * 4 * 4 * 4;
+        self.grid[base_index..base_index + 4 * 4 * 4]
+            .iter()
+            .filter_map(|&x| if x == 0 { None } else { Some(x) })
     }
 }

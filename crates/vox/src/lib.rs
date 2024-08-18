@@ -3,13 +3,13 @@
 
 use attributes::AttributeAllocator;
 use bevy::app::Update;
+use bevy::asset::{AssetEvents, Assets};
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
 use bevy::math::UVec3;
-use bevy::prelude::EntityMapper;
+use bevy::prelude::*;
 use bevy::reflect::Reflect;
 use bevy::{
-    app::{App, Plugin},
     asset::{Asset, AssetApp, Handle},
     ecs::{bundle::Bundle, component::Component},
     reflect::TypePath,
@@ -18,8 +18,9 @@ use bevy::{
 use dot_vox::Color;
 use dust_vdb::{hierarchy, TreeLike};
 use rhyolite::ash::vk;
+use rhyolite::ecs::RenderCommands;
 use rhyolite::utils::AssetUploadPlugin;
-use rhyolite::RhyoliteApp;
+use rhyolite::{Device, RhyoliteApp};
 use std::ops::{Deref, DerefMut};
 
 mod attributes;
@@ -163,5 +164,33 @@ impl Plugin for VoxPlugin {
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
+
+        if app
+            .world()
+            .resource::<Device>()
+            .physical_device()
+            .properties()
+            .memory_model
+            .storage_buffer_should_use_staging()
+        {
+            println!("Using staging buffer for VoxMaterial");
+            app.add_systems(PostUpdate, update_materials_system);
+        }
+    }
+}
+
+fn update_materials_system(
+    mut render_commands: RenderCommands<'t'>,
+    mut asset_events: EventReader<AssetEvent<VoxMaterial>>,
+    mut materials: ResMut<Assets<VoxMaterial>>,
+) {
+    for event in asset_events.read() {
+        match event {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                let material = materials.get_mut_untracked(*id).unwrap();
+                material.0.buffer_mut().sync(&mut render_commands);
+            }
+            _input => {}
+        }
     }
 }
