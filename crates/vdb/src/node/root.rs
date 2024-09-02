@@ -4,7 +4,7 @@ use glam::UVec3;
 
 use crate::{AabbU32, Node, Pool};
 
-use super::NodeMeta;
+use super::{IsLeaf, NodeMeta};
 
 pub enum RootNodeEntry {
     Occupied(u32),
@@ -53,12 +53,15 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     const LEVEL: usize = CHILD::LEVEL + 1;
 
     #[inline]
-    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> bool {
+    fn get<'a>(&'a self, pools: &'a [Pool], coords: UVec3, cached_path: &mut [u32], result: &mut bool) -> Option<&'a Self::LeafType> {
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let entry = self.map.get(&RootKey(root_offset));
         if let Some(entry) = entry {
             match entry {
-                RootNodeEntry::Free(_material_id) => false,
+                RootNodeEntry::Free(_material_id) =>  {
+                    *result = false;
+                    None
+                },
                 RootNodeEntry::Occupied(ptr) => unsafe {
                     let _child_node = pools[CHILD::LEVEL].get_item::<CHILD>(*ptr);
                     let new_coords = UVec3 {
@@ -66,21 +69,23 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
                         y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
                         z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
                     };
-                    CHILD::get_in_pools(pools, new_coords, *ptr, cached_path)
+                    CHILD::get_in_pools(pools, new_coords, *ptr, cached_path, result)
                 },
             }
         } else {
-            false
+            *result = false;
+            None
         }
     }
 
-    fn set(
-        &mut self,
-        pools: &mut [Pool],
+    fn set<'a>(
+        &'a mut self,
+        pools: &'a mut [Pool],
         coords: UVec3,
         value: bool,
         cached_path: &mut [u32],
-    ) -> bool {
+        result: &mut bool,
+    ) -> &'a mut Self::LeafType {
         // ptr is meaningless and always 0 for root nodes.
         let root_offset = coords >> CHILD::EXTENT_LOG2;
         let key = RootKey(root_offset);
@@ -102,23 +107,24 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
                 y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
                 z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
             };
-            CHILD::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
+            CHILD::set_in_pools(pools, new_coords, child_ptr, value, cached_path, result)
         } else {
             todo!()
         }
     }
 
-    fn get_in_pools(_pools: &[Pool], _coords: UVec3, _ptr: u32, _cached_path: &mut [u32]) -> bool {
+    fn get_in_pools<'a>(_pools: &'a [Pool], _coords: UVec3, _ptr: u32, _cached_path: &mut [u32], _result: &mut bool) -> Option<&'a Self::LeafType> {
         unreachable!("Root Node is never kept in a pool!")
     }
 
-    fn set_in_pools(
-        _pools: &mut [Pool],
+    fn set_in_pools<'a>(
+        _pools: &'a mut [Pool],
         _coords: UVec3,
         _ptr: u32,
         _value: bool,
         _cached_path: &mut [u32],
-    ) -> bool {
+        _result: &mut bool
+    ) -> &'a mut Self::LeafType {
         unreachable!("Root Node is never kept in a pool!")
     }
     type Iterator<'a> = RootIterator<'a, CHILD>;
@@ -152,7 +158,7 @@ impl<CHILD: Node> Node for RootNode<CHILD> {
     ) -> Self::LeafIterator<'a> {
         unreachable!("Root Node is never kept in a pool!")
     }
-    fn write_meta(metas: &mut Vec<NodeMeta>) {
+    fn write_meta(metas: &mut Vec<NodeMeta<Self::LeafType>>) {
         CHILD::write_meta(metas);
         metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),

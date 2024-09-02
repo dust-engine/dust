@@ -1,5 +1,8 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
+use crate::{
+    bitmask::{IsBitMask, SetBitIterator},
+    BitMask, ConstUVec3, Node, Pool,
+};
 use glam::UVec3;
 use std::{cell::UnsafeCell, iter::Once, mem::size_of};
 
@@ -19,28 +22,44 @@ where
 }
 
 pub trait IsLeaf: Node {
-    fn get_occupancy(&self, data: &mut [u64]);
+    /// Total number of voxels in the leaf node.
+    type Occupancy: IsBitMask;
+    type Value: Default + Send + Sync + PartialEq + Eq + Clone + Copy;
+    fn get_occupancy(&self) -> &Self::Occupancy;
+
+    fn get_value(&self) -> &Self::Value;
+    fn set_value(&mut self, value: Self::Value);
+
+    fn get_offset(&self, coords: UVec3) -> u32;
 }
 
-impl<const LOG2: ConstUVec3, T: Send + Sync + 'static + Default> IsLeaf for LeafNode<LOG2, T>
+impl<const LOG2: ConstUVec3, T: Copy + Eq + Send + Sync + 'static + Default> IsLeaf
+    for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
-    fn get_occupancy(&self, data: &mut [u64]) {
+    type Value = T;
+    type Occupancy = BitMask<{ size_of_grid(LOG2) }>;
+    fn get_offset(&self, coords: UVec3) -> u32 {
+        let voxel_id = (coords.x << 4) | (coords.y << 2) | coords.z;
+        let mask: usize = self.occupancy.as_slice()[0];
+        let masked = mask & ((1 << voxel_id) - 1);
+        masked.count_ones()
+    }
+    fn get_value(&self) -> &Self::Value {
+        &self.value
+    }
+    fn set_value(&mut self, value: Self::Value) {
+        self.value = value;
+    }
+    fn get_occupancy(&self) -> &Self::Occupancy {
         debug_assert_eq!(std::mem::size_of::<u64>(), std::mem::size_of::<usize>());
-        let len = self.occupancy.data.len();
-        debug_assert!(data.len() >= len);
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                self.occupancy.data.as_ptr() as *mut u64,
-                data.as_mut_ptr(),
-                len,
-            );
-        }
+        &self.occupancy
     }
 }
 
-impl<const LOG2: ConstUVec3, T: Send + Sync + 'static + Default> Node for LeafNode<LOG2, T>
+impl<const LOG2: ConstUVec3, T: Copy + Eq + Send + Sync + 'static + Default> Node
+    for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
@@ -66,50 +85,61 @@ where
     };
     const LEVEL: usize = 0;
 
-    #[inline]
-    fn get(&self, _: &[Pool], coords: UVec3, _cached_path: &mut [u32]) -> bool {
-        let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
-            | ((coords.y as usize) << LOG2.z)
-            | (coords.z as usize);
-        self.occupancy.get(index)
-    }
-    #[inline]
-    fn set(
-        &mut self,
-        _: &mut [Pool],
+    fn set<'a>(
+        &'a mut self,
+        _pools: &'a mut [Pool],
         coords: UVec3,
         value: bool,
         _cached_path: &mut [u32],
-    ) -> bool {
+        _touched_nodes: Option<&mut Vec<(u32, u32)>>,
+    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
-        let prev_value = self.occupancy.get(index);
         self.occupancy.set(index, value);
-        prev_value
+        (None, self)
     }
     #[inline]
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool {
-        if cached_path.len() > 0 {
-            cached_path[0] = ptr;
-        }
-        let leaf_node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
-        leaf_node.get(&[], coords, cached_path)
-    }
-
-    #[inline]
-    fn set_in_pools(
-        pools: &mut [Pool],
+    fn set_in_pools<'a>(
+        pools: &'a mut [Pool],
         coords: UVec3,
-        ptr: u32,
+        ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-    ) -> bool {
+        touched_nodes: Option<&mut Vec<(u32, u32)>>,
+    ) -> (Option<&'a mut Self>, &'a mut Self) {
+        let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
+            | ((coords.y as usize) << LOG2.z)
+            | (coords.z as usize);
+        let (old_leaf_node, old_value): (*mut _, bool) = unsafe {
+            let old_leaf_node = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
+            let old_value = old_leaf_node.occupancy.get(index);
+            (old_leaf_node, old_value)
+        };
         if cached_path.len() > 0 {
-            cached_path[0] = ptr;
+            cached_path[0] = *ptr;
         }
-        let leaf_node = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(ptr) };
-        leaf_node.set(&mut [], coords, value, cached_path)
+        if let Some(touched_nodes) = touched_nodes {
+            // Copy on write
+            if old_value == value {
+                return (None, unsafe { &mut *old_leaf_node });
+            }
+
+            let new_node_ptr = unsafe { pools[Self::LEVEL].alloc_uninitialized() };
+            if cached_path.len() > 0 {
+                cached_path[0] = new_node_ptr;
+            }
+            touched_nodes.push((Self::LEVEL as u32, *ptr));
+            *ptr = new_node_ptr;
+            let new_leaf_node = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(new_node_ptr) };
+            unsafe { std::ptr::copy_nonoverlapping(old_leaf_node, new_leaf_node, 1) };
+            new_leaf_node.occupancy.set(index, value);
+            return (Some(unsafe { &mut *old_leaf_node }), new_leaf_node);
+        } else {
+            let old_leaf_node: &mut _ = unsafe { &mut *old_leaf_node };
+            old_leaf_node.occupancy.set(index, value);
+            return (None, old_leaf_node);
+        }
     }
 
     type Iterator<'a> = LeafNodeIterator<'a, LOG2>;
@@ -140,10 +170,9 @@ where
         std::iter::once((offset, unsafe { std::mem::transmute(node) }))
     }
 
-    fn write_meta(metas: &mut Vec<NodeMeta>) {
+    fn write_meta(metas: &mut Vec<NodeMeta<Self>>) {
         metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
-            getter: Self::get_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             fanout_log2: LOG2.to_glam(),
             extent_mask: Self::EXTENT_MASK,
@@ -151,6 +180,7 @@ where
         });
     }
 
+    /*
     #[cfg(feature = "physics")]
     #[inline]
     fn cast_local_ray_and_get_normal(
@@ -180,7 +210,11 @@ where
                 - t_bias;
 
         let t_delta = Vec3A::ONE * t_coef * step;
-        while !self.get(&mut [], position.try_into().unwrap(), &mut []) {
+        while !{
+            let mut result = false;
+            self.get(&mut [], position.try_into().unwrap(), &mut [], &mut result);
+            result
+        } {
             let comp_result = Vec3A::select(t_max.zxy().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE)
                 * Vec3A::select(t_max.yzx().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE);
             let position_delta = (step * comp_result).as_ivec3();
@@ -201,6 +235,7 @@ where
             normal: Default::default(),
         })
     }
+    */
 }
 
 impl<const LOG2: ConstUVec3, T: Send + Sync + 'static> std::fmt::Debug for LeafNode<LOG2, T>
@@ -219,7 +254,7 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     location_offset: UVec3,
-    bits_iterator: SetBitIterator<'a, { size_of_grid(LOG2) }>,
+    bits_iterator: SetBitIterator<std::iter::Cloned<std::slice::Iter<'a, usize>>>,
 }
 impl<'a, const LOG2: ConstUVec3> Iterator for LeafNodeIterator<'a, LOG2>
 where

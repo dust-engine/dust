@@ -78,14 +78,12 @@ impl GPUAsset for VoxGeometryGPU {
             commands,
             |dst| {
                 for (position, d) in source_asset.tree.iter_leaf() {
-                    let mut mask = [0_u64; 1];
-                    d.get_occupancy(&mut mask);
                     let node = GPUVoxNode {
                         x: position.x as u16,
                         y: position.y as u16,
                         z: position.z as u16,
                         w: 0,
-                        mask: mask[0],
+                        mask: d.get_occupancy().as_slice()[0] as u64,
                         material_ptr: d.value,
                         avg_albedo: 0,
                     };

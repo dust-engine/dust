@@ -1,3 +1,5 @@
+use bevy::prelude::*;
+use dust_vdb::IsDefault;
 use rhyolite::{
     ash::{
         prelude::VkResult,
@@ -80,5 +82,53 @@ impl AttributeAllocator {
     }
     pub fn buffer_mut(&mut self) -> &mut ManagedBuffer {
         &mut self.buffer
+    }
+}
+
+#[derive(Default)]
+pub struct VoxelPaletteIndex(pub u8);
+impl IsDefault for VoxelPaletteIndex {
+    fn is_default(&self) -> bool {
+        self.0 == 0
+    }
+}
+#[derive(Asset, TypePath)]
+pub struct VoxMaterial(pub AttributeAllocator);
+
+impl dust_vdb::Attributes for VoxMaterial {
+    /// 0 for air, and 1 ..= 255 for the offset into the palette.
+    type Value = VoxelPaletteIndex;
+    type Ptr = u32;
+    type Occupancy = dust_vdb::BitMask<64>;
+
+    fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+        VoxelPaletteIndex(self.0.buffer()[*ptr as usize + offset as usize])
+    }
+
+    fn copy_attribute(
+        &mut self,
+        ptr: &Self::Ptr,
+        original_mask: &Self::Occupancy,
+        new_mask: &Self::Occupancy,
+    ) -> Self::Ptr {
+        let mut new_ptr = self.0.allocate(new_mask.count_ones() as u32);
+        let mut old_ptr = *ptr;
+        for bit in (original_mask | new_mask).iter_set_bits() {
+            if new_mask.get(bit) && original_mask.get(bit) {
+                // copy it over
+                self.0.buffer_mut()[new_ptr as usize] = self.0.buffer()[old_ptr as usize];
+            }
+            if new_mask.get(bit) {
+                new_ptr += 1;
+            }
+            if original_mask.get(bit) {
+                old_ptr += 1;
+            }
+        }
+        new_ptr
+    }
+
+    fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+        self.0.buffer_mut()[*ptr as usize + offset as usize] = value.0;
     }
 }

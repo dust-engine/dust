@@ -1,7 +1,7 @@
-use super::{size_of_grid, NodeMeta};
+use super::{size_of_grid, IsLeaf, NodeMeta};
 use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
 use glam::UVec3;
-use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of};
+use std::{cell::UnsafeCell, marker::PhantomData, mem::size_of, result};
 
 #[derive(Clone, Copy)]
 pub union InternalNodeEntry {
@@ -68,34 +68,14 @@ where
     };
     const LEVEL: usize = CHILD::LEVEL + 1;
 
-    #[inline]
-    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> bool {
-        let internal_offset = coords >> CHILD::EXTENT_LOG2;
-        let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
-            | ((internal_offset.y as usize) << FANOUT_LOG2.z)
-            | (internal_offset.z as usize);
-        let has_child = self.child_mask.get(index);
-        if !has_child {
-            return false;
-        }
-        unsafe {
-            let child_ptr = self.child_ptrs[index].occupied;
-            let new_coords = UVec3 {
-                x: coords.x & ((1_u32 << CHILD::EXTENT_LOG2.x) - 1),
-                y: coords.y & ((1_u32 << CHILD::EXTENT_LOG2.y) - 1),
-                z: coords.z & ((1_u32 << CHILD::EXTENT_LOG2.z) - 1),
-            };
-            <CHILD as Node>::get_in_pools(pools, new_coords, child_ptr, cached_path)
-        }
-    }
-    #[inline]
-    fn set(
-        &mut self,
-        pools: &mut [Pool],
+    fn set<'a>(
+        &'a mut self,
+        pools: &'a mut [Pool],
         coords: UVec3,
         value: bool,
         cached_path: &mut [u32],
-    ) -> bool {
+        touched_nodes: Option<&mut Vec<(u32, u32)>>,
+    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
@@ -104,12 +84,13 @@ where
             // set
             let has_child = self.child_mask.get(index);
             if !has_child {
-                // ensure have children
-                self.child_mask.set(index, true);
                 unsafe {
+                    // ensure have children
+                    let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
+                    self.child_mask.set(index, true);
+
                     // allocate a child node
-                    let allocated_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
-                    self.child_ptrs[index].occupied = allocated_ptr;
+                    self.child_ptrs[index].occupied = allocated_child_ptr;
                 }
             }
             // TODO: propagate when filled.
@@ -117,36 +98,70 @@ where
             // clear
             todo!() // TODO: clear recursively, propagate if completely cleared
         }
-        unsafe {
-            let new_coords = coords & CHILD::EXTENT_MASK;
-            let child_ptr = self.child_ptrs[index].occupied;
-            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
-        }
+        let new_coords = coords & CHILD::EXTENT_MASK;
+        let child_ptr = unsafe { &mut self.child_ptrs[index].occupied };
+        <CHILD as Node>::set_in_pools(
+            pools,
+            new_coords,
+            child_ptr,
+            value,
+            cached_path,
+            touched_nodes,
+        )
     }
     #[inline]
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool {
-        if cached_path.len() > 0 {
-            cached_path[Self::LEVEL] = ptr;
-        }
-        let node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
-        node.get(pools, coords, cached_path)
-    }
-
-    #[inline]
-    fn set_in_pools(
-        pools: &mut [Pool],
+    fn set_in_pools<'a>(
+        pools: &'a mut [Pool],
         coords: UVec3,
-        ptr: u32,
+        ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-    ) -> bool {
-        // Safety: r was taken from pools[Self::LEVEL] and we know that self.set only access pools[CHILD::LEVEL].
-        if cached_path.len() > 0 {
-            cached_path[Self::LEVEL] = ptr;
-        }
+        mut touched_nodes: Option<&mut Vec<(u32, u32)>>,
+    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
         unsafe {
-            let r = pools[Self::LEVEL].get_item_mut::<Self>(ptr) as *mut Self;
-            (*r).set(pools, coords, value, cached_path)
+            let mut node: *mut _ = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
+
+            let internal_offset = coords >> CHILD::EXTENT_LOG2;
+            let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
+                | ((internal_offset.y as usize) << FANOUT_LOG2.z)
+                | (internal_offset.z as usize);
+            if value {
+                // set
+                let has_child = (&mut *node).child_mask.get(index);
+                if !has_child {
+                    // ensure have children
+                    let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
+
+                    if let Some(touched_nodes) = touched_nodes.as_mut() {
+                        let new_node_ptr = pools[Self::LEVEL].alloc_uninitialized();
+                        let new_node = pools[Self::LEVEL].get_item_mut::<Self>(new_node_ptr);
+                        std::ptr::copy_nonoverlapping(node, new_node, 1);
+                        // allocate a child node
+                        touched_nodes.push((Self::LEVEL as u32, *ptr));
+                        *ptr = new_node_ptr;
+                        node = new_node;
+                    }
+                    (&mut *node).child_mask.set(index, true);
+                    (&mut *node).child_ptrs[index].occupied = allocated_child_ptr;
+                }
+                // TODO: propagate when filled.
+            } else {
+                // clear
+                todo!() // TODO: clear recursively, propagate if completely cleared
+            }
+            if cached_path.len() > 0 {
+                cached_path[Self::LEVEL] = *ptr;
+            }
+            let new_coords = coords & CHILD::EXTENT_MASK;
+            let child_ptr = &mut (&mut *node).child_ptrs[index].occupied;
+            <CHILD as Node>::set_in_pools(
+                pools,
+                new_coords,
+                child_ptr,
+                value,
+                cached_path,
+                touched_nodes,
+            )
         }
     }
 
@@ -197,11 +212,10 @@ where
             child_iterator: None,
         }
     }
-    fn write_meta(metas: &mut Vec<NodeMeta>) {
+    fn write_meta(metas: &mut Vec<NodeMeta<Self::LeafType>>) {
         CHILD::write_meta(metas);
         metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
-            getter: Self::get_in_pools,
             setter: Self::set_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             extent_mask: Self::EXTENT_MASK,
@@ -209,6 +223,7 @@ where
         });
     }
 
+    /*
     #[cfg(feature = "physics")]
     #[inline]
     fn cast_local_ray_and_get_normal(
@@ -294,6 +309,7 @@ where
             t_max = next_t_max;
         }
     }
+    */
 }
 
 /// When the alternate flag was specified, also print the child pointers.
@@ -315,7 +331,7 @@ where
 {
     pools: &'a [Pool],
     location_offset: UVec3,
-    child_mask_iterator: SetBitIterator<'a, { size_of_grid(FANOUT_LOG2) }>,
+    child_mask_iterator: SetBitIterator<std::iter::Cloned<std::slice::Iter<'a, usize>>>,
     child_iterator: Option<CHILD::Iterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
 }
@@ -361,7 +377,7 @@ where
 {
     pools: &'a [Pool],
     location_offset: UVec3,
-    child_mask_iterator: SetBitIterator<'a, { size_of_grid(FANOUT_LOG2) }>,
+    child_mask_iterator: SetBitIterator<std::iter::Cloned<std::slice::Iter<'a, usize>>>,
     child_iterator: Option<CHILD::LeafIterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
 }

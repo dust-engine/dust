@@ -21,7 +21,7 @@ pub use bitmask::BitMask;
 pub use pool::Pool;
 pub use tree::{MutableTree, TreeLike};
 
-pub use accessor::Accessor;
+pub use accessor::*;
 pub use immutable::*;
 pub use node::*;
 

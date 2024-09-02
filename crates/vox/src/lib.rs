@@ -1,9 +1,9 @@
 #![feature(generic_const_exprs)]
 #![feature(alloc_layout_extra)]
 
-use attributes::AttributeAllocator;
+use attributes::{AttributeAllocator, VoxMaterial};
 use bevy::app::Update;
-use bevy::asset::{AssetEvents, Assets};
+use bevy::asset::Assets;
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
 use bevy::math::UVec3;
@@ -21,12 +21,13 @@ use rhyolite::ash::vk;
 use rhyolite::ecs::RenderCommands;
 use rhyolite::utils::AssetUploadPlugin;
 use rhyolite::{Device, RhyoliteApp};
+use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
 mod attributes;
 mod builder;
 mod loader;
-mod physics;
+//mod physics;
 mod resource;
 
 type TreeRoot = hierarchy!(3, 3, 2, u32);
@@ -72,20 +73,40 @@ impl DerefMut for VoxGeometry {
 }
 
 #[derive(Asset, TypePath)]
-pub struct VoxMaterial(AttributeAllocator);
-
-#[derive(Asset, TypePath)]
-pub struct VoxPalette(Vec<Color>);
+pub struct VoxPalette(Box<[Color; 256]>);
 
 impl Deref for VoxPalette {
     type Target = [Color];
     fn deref(&self) -> &Self::Target {
-        &self.0
+        self.0.as_slice()
     }
 }
 impl DerefMut for VoxPalette {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        self.0.as_mut_slice()
+    }
+}
+impl VoxPalette {
+    pub fn colorful() -> Self {
+        use bevy::color::{Hsva, Srgba};
+        let mut hue = 0.0;
+        let saturation = 0.8;
+        let value = 0.9;
+
+        let mut arr: Box<[MaybeUninit<Color>; 255]> = Box::new([MaybeUninit::uninit(); 255]);
+        for x in 0..255 {
+            let color = Hsva::new(hue, saturation, value, 1.0);
+            let rgb_color: Srgba = color.into();
+            let rgb_color: [u8; 4] = rgb_color.to_u8_array();
+            arr[x].write(Color {
+                r: rgb_color[0],
+                g: rgb_color[1],
+                b: rgb_color[2],
+                a: rgb_color[3],
+            });
+            hue += 360.0 / 255.0;
+        }
+        unsafe { std::mem::transmute(arr) }
     }
 }
 
@@ -160,7 +181,7 @@ impl Plugin for VoxPlugin {
         app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8)
             .unwrap();
 
-        app.add_systems(Update, physics::insert_collider_system);
+        //app.add_systems(Update, physics::insert_collider_system);
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();

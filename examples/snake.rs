@@ -68,7 +68,7 @@ fn startup_system(
                 1.0,
             )),
             material: materials.add(VoxMaterial::new()),
-            palette: todo!(),
+            palette: palettes.add(VoxPalette::colorful()),
             ..Default::default()
         })
         .id();

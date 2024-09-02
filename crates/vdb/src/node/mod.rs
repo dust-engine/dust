@@ -1,28 +1,29 @@
 mod internal;
 mod leaf;
-mod root;
+//mod root;
 
-use std::alloc::Layout;
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
+use std::{alloc::Layout, result};
 
 use glam::UVec3;
 pub use internal::*;
 pub use leaf::*;
-pub use root::*;
+//pub use root::*;
 
 use crate::{ConstUVec3, Pool};
 
-pub struct NodeMeta {
+pub struct NodeMeta<V> {
     pub(crate) layout: Layout,
-    pub(crate) getter: fn(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool,
-    pub(crate) setter: fn(
-        pools: &mut [Pool],
+    //pub(crate) getter: for<'a> fn(pools: &'a [Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32], result: &mut bool) -> Option<&'a V>,
+    pub(crate) setter: for<'a> fn(
+        pools: &'a mut [Pool],
         coords: UVec3,
-        ptr: u32,
+        ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-    ) -> bool,
+        touched_nodes: Option<&mut Vec<(u32, u32)>>,
+    ) -> (Option<&'a mut V>, &'a mut V),
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
 
@@ -45,34 +46,34 @@ pub trait Node: 'static + Send + Sync + Default {
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
     /// Implementation will write to cached_path for all levels below the current level.
-    fn get(&self, pools: &[Pool], coords: UVec3, cached_path: &mut [u32]) -> bool;
-    /// Set the value of a voxel at the specified coordinates within the node space.
-    /// This is called when the node was owned.
-    /// Implementation will write to cached_path for all levels below the current level.
-    /// Returns the previous value.
-    fn set(
-        &mut self,
-        pools: &mut [Pool],
-        coords: UVec3,
-        value: bool,
-        cached_path: &mut [u32],
-    ) -> bool;
+    //fn get<'a>(&'a self, pools: &'a [Pool], coords: UVec3, cached_path: &mut [u32]) -> Option<&'a Self::LeafType>;
 
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
-    fn get_in_pools(pools: &[Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32]) -> bool;
+    //fn get_in_pools<'a>(pools: &'a [Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32], prev_result: &mut bool) ->  Option<&'a Self::LeafType>;
+
+    fn set<'a>(
+        &'a mut self,
+        pools: &'a mut [Pool],
+        coords: UVec3,
+        value: bool,
+        cached_path: &mut [u32],
+        touched_nodes: Option<&mut Vec<(u32, u32)>>,
+    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType);
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
-    /// Returns the previous value.
-    fn set_in_pools(
-        pools: &mut [Pool],
+    /// Returns a reference to the old leaf, and a reference to the new one.
+    /// The old leaf is None if the node was not changed or if the old leaf node did not exist.
+    fn set_in_pools<'a>(
+        pools: &'a mut [Pool],
         coords: UVec3,
-        ptr: u32,
+        ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-    ) -> bool;
+        touched_nodes: Option<&mut Vec<(u32, u32)>>, // When None, copy on write is disabled.
+    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType);
 
     type Iterator<'a>: Iterator<Item = UVec3>;
     /// This is called when the node was owned as the root node in the tree.
@@ -86,7 +87,7 @@ pub trait Node: 'static + Send + Sync + Default {
     /// This is called when the node was located in a node pool.
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a>;
 
-    fn write_meta(metas: &mut Vec<NodeMeta>);
+    fn write_meta(metas: &mut Vec<NodeMeta<Self::LeafType>>);
 
     #[cfg(feature = "physics")]
     fn cast_local_ray_and_get_normal(

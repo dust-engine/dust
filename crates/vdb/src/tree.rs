@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 
 use glam::UVec3;
 
-use crate::{AabbU32, Node, NodeMeta, Pool};
+use crate::{AabbU32, IsLeaf, Node, NodeMeta, Pool};
 
 pub struct MutableTree<ROOT: Node>
 where
@@ -82,7 +82,8 @@ where
             self.aabb.min = self.aabb.min.min(coords);
             self.aabb.max = self.aabb.max.max(coords);
         }
-        self.root.set(&mut self.pool, coords, value, &mut []);
+        let mut _result = false;
+        //self.root.set(&mut self.pool, coords, value, &mut [], &mut _result);
     }
 
     /// ```
@@ -124,7 +125,7 @@ where
             })
     }
 
-    pub fn metas() -> Vec<NodeMeta> {
+    pub fn metas() -> Vec<NodeMeta<ROOT::LeafType>> {
         let mut vec = Vec::with_capacity(ROOT::LEVEL + 1);
         ROOT::write_meta(&mut vec);
         vec
@@ -152,7 +153,9 @@ where
     [(); ROOT::LEVEL as usize]: Sized,
 {
     fn get_value(&self, coords: UVec3) -> bool {
-        self.root.get(&self.pool, coords, &mut [])
+        let mut result = false;
+        //self.root.get(&self.pool, coords, &mut [], &mut result);
+        result
     }
     fn aabb(&self) -> AabbU32 {
         self.aabb

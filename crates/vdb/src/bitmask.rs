@@ -1,4 +1,4 @@
-use std::mem::size_of;
+use std::{mem::size_of, ops::BitOr, process::Output};
 
 #[derive(Clone)]
 pub struct BitMask<const SIZE: usize>
@@ -64,11 +64,11 @@ where
         }
     }
 
-    pub fn iter_set_bits(&self) -> SetBitIterator<SIZE> {
+    pub fn iter_set_bits(&self) -> SetBitIterator<std::iter::Cloned<std::slice::Iter<usize>>> {
         SetBitIterator {
-            bitmask: self,
+            state: 0,
+            inner: self.data.iter().cloned(),
             i: 0,
-            state: self.data[0],
         }
     }
 
@@ -76,8 +76,14 @@ where
         self.data.iter().all(|&a| a == 0)
     }
 
+    pub fn is_maxed(&self) -> bool {
+        self.data.iter().all(|&a| a == usize::MAX)
+    }
     pub fn count_ones(&self) -> usize {
         self.data.iter().map(|a| a.count_ones() as usize).sum()
+    }
+    pub fn as_slice(&self) -> &[usize] {
+        &self.data
     }
 }
 
@@ -91,30 +97,21 @@ where
 /// assert_eq!(iter.next(), Some(101));
 /// assert!(iter.next().is_none());
 /// ```
-pub struct SetBitIterator<'a, const SIZE: usize>
-where
-    [(); SIZE / size_of::<usize>() / 8]: Sized,
-{
-    bitmask: &'a BitMask<SIZE>,
+pub struct SetBitIterator<T: Iterator<Item = usize>> {
+    inner: T,
     i: usize,
     state: usize,
 }
 
-impl<'a, const SIZE: usize> Iterator for SetBitIterator<'a, SIZE>
-where
-    [(); SIZE / size_of::<usize>() / 8]: Sized,
-{
+impl<T: Iterator<Item = usize>> Iterator for SetBitIterator<T> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         const NUM_BITS: usize = std::mem::size_of::<usize>() * 8;
         loop {
             if self.state == 0 {
-                if self.i == self.bitmask.data.len() - 1 {
-                    return None;
-                }
                 self.i += 1;
-                self.state = self.bitmask.data[self.i];
+                self.state = self.inner.next()?;
                 continue;
             }
 
@@ -124,5 +121,54 @@ where
             self.state ^= t;
             return Some(result);
         }
+    }
+}
+
+pub struct OrredBitMask<'a, const SIZE: usize>
+where
+    [(); SIZE / size_of::<usize>() / 8]: Sized,
+{
+    left: &'a [usize; SIZE / size_of::<usize>() / 8],
+    right: &'a [usize; SIZE / size_of::<usize>() / 8],
+}
+impl<'a, const SIZE: usize> BitOr for &'a BitMask<SIZE>
+where
+    [(); SIZE / size_of::<usize>() / 8]: Sized,
+{
+    type Output = OrredBitMask<'a, SIZE>;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        OrredBitMask {
+            left: &self.data,
+            right: &rhs.data,
+        }
+    }
+}
+impl<'a, const SIZE: usize> OrredBitMask<'a, SIZE>
+where
+    [(); SIZE / size_of::<usize>() / 8]: Sized,
+{
+    pub fn iter_set_bits(&self) -> SetBitIterator<impl Iterator<Item = usize> + '_> {
+        SetBitIterator {
+            state: 0,
+            inner: self.left.iter().zip(self.right.iter()).map(|(a, b)| a | b),
+            i: 0,
+        }
+    }
+}
+
+pub trait IsBitMask {
+    const MAXED: Self;
+    fn is_maxed(&self) -> bool;
+}
+
+impl<const SIZE: usize> IsBitMask for BitMask<SIZE>
+where
+    [(); SIZE / size_of::<usize>() / 8]: Sized,
+{
+    const MAXED: Self = BitMask {
+        data: [usize::MAX; SIZE / size_of::<usize>() / 8],
+    };
+    fn is_maxed(&self) -> bool {
+        self.is_maxed()
     }
 }

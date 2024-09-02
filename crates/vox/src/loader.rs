@@ -11,8 +11,8 @@ use rayon::prelude::*;
 use rhyolite::Allocator;
 
 use crate::{
-    attributes::AttributeAllocator, Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial,
-    VoxModelBundle, VoxPalette,
+    attributes::{AttributeAllocator, VoxelPaletteIndex},
+    Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModelBundle, VoxPalette,
 };
 
 enum WorldOrParent<'w, 'q> {
@@ -253,7 +253,11 @@ impl AssetLoader for VoxLoader {
 
             let palette_handle = load_context.add_labeled_asset(
                 "Palette".into(),
-                VoxPalette(std::mem::take(&mut file.palette)),
+                VoxPalette(unsafe {
+                    let arr = std::mem::take(&mut file.palette).into_boxed_slice();
+                    assert_eq!(arr.len(), 256);
+                    Box::from_raw(Box::into_raw(arr) as *mut [_; 256])
+                }),
             );
 
             let model_handles = {
@@ -279,7 +283,7 @@ impl AssetLoader for VoxLoader {
                     })
                     .collect_vec_list();
                 let bundles = handles.into_iter().flat_map(|a| a).map(
-                    |(model_id, (tree, attribute_allocator, aabb_min, aabb_max))| {
+                    |(model_id, (tree, material, aabb_min, aabb_max))| {
                         let geometry = load_context.add_labeled_asset(
                             format!("Geometry{}", model_id),
                             VoxGeometry {
@@ -289,10 +293,8 @@ impl AssetLoader for VoxLoader {
                                 aabb_min,
                             },
                         );
-                        let material = load_context.add_labeled_asset(
-                            format!("Material{}", model_id),
-                            VoxMaterial(attribute_allocator),
-                        );
+                        let material = load_context
+                            .add_labeled_asset(format!("Material{}", model_id), material);
                         let bundle = VoxModelBundle {
                             geometry,
                             material,
@@ -326,12 +328,20 @@ impl AssetLoader for VoxLoader {
     }
 }
 impl VoxLoader {
-    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, AttributeAllocator, UVec3, UVec3) {
+    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial, UVec3, UVec3) {
         let mut tree = crate::Tree::new();
+        let mut attribute_allocator = AttributeAllocator::new_with_capacity(
+            self.allocator.clone(),
+            2 * model.voxels.len() as u64,
+            4,
+            64,
+        )
+        .unwrap();
+        let mut material = VoxMaterial(attribute_allocator);
 
         // Create 256x256x256 grid
         let mut palette_index_collector = ModelIndexCollector::new();
-        let mut accessor = tree.accessor_mut();
+        let mut accessor = tree.accessor_mut(&mut material);
         let size_y = model.size.y;
 
         let mut min = UVec3::MAX;
@@ -349,40 +359,14 @@ impl VoxLoader {
                 z: voxel.z as u32,
             };
 
-            accessor.set(coords, true);
+            accessor.set(coords, VoxelPaletteIndex(voxel.i + 1));
             min = min.min(coords);
             max = max.max(coords);
             palette_index_collector.set(voxel);
         }
-        let mut attribute_allocator = AttributeAllocator::new_with_capacity(
-            self.allocator.clone(),
-            2 * model.voxels.len() as u64,
-            4,
-            64,
-        )
-        .unwrap();
-        for (location, leaf) in tree.iter_leaf_mut() {
-            let block_index = (location.x >> 2, location.y >> 2, location.z >> 2);
-            let block_index = block_index.0 as usize
-                + block_index.1 as usize * 64
-                + block_index.2 as usize * 64 * 64;
+        material.0.buffer_mut().flush(..);
 
-            let num_active_voxels = leaf.occupancy.count_ones() as u32;
-
-            leaf.value = attribute_allocator.allocate(num_active_voxels);
-            let mut block_attributes = palette_index_collector.block_attributes(block_index);
-
-            // Copy `num_active_voxels` voxels into the attribute buffer
-            for i in &mut attribute_allocator.buffer_mut()
-                [leaf.value as usize..(leaf.value + num_active_voxels) as usize]
-            {
-                *i = block_attributes.next().unwrap() - 1; // Convert back into zero-based index here
-            }
-            assert!(block_attributes.next().is_none());
-        }
-        attribute_allocator.buffer_mut().flush(..);
-
-        (tree, attribute_allocator, min, max)
+        (tree, material, min, max)
     }
 }
 
