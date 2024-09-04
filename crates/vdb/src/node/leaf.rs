@@ -26,6 +26,7 @@ pub trait IsLeaf: Node {
     type Occupancy: IsBitMask;
     type Value: Default + Send + Sync + PartialEq + Eq + Clone + Copy;
     fn get_occupancy(&self) -> &Self::Occupancy;
+    fn set_occupancy(&mut self, occupancy: Self::Occupancy);
 
     fn get_value(&self) -> &Self::Value;
     fn set_value(&mut self, value: Self::Value);
@@ -53,8 +54,10 @@ where
         self.value = value;
     }
     fn get_occupancy(&self) -> &Self::Occupancy {
-        debug_assert_eq!(std::mem::size_of::<u64>(), std::mem::size_of::<usize>());
         &self.occupancy
+    }
+    fn set_occupancy(&mut self, occupancy: Self::Occupancy) {
+        self.occupancy = occupancy;
     }
 }
 

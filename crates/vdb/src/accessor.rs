@@ -141,7 +141,7 @@ where
                 None,
             )
         };
-        assert!(old_leaf_node.is_none());
+        assert!(old_leaf_node.is_none()); // Handle this case later.
 
         let mut attrib_ptr = *new_leaf_node.get_value();
         if !new_leaf_node.get_occupancy().is_maxed() {
@@ -151,6 +151,7 @@ where
                 &ATTRIBS::Occupancy::MAXED,
             );
             new_leaf_node.set_value(attrib_ptr);
+            new_leaf_node.set_occupancy(ATTRIBS::Occupancy::MAXED);
         }
         self.attributes
             .set_attribute(&attrib_ptr, new_leaf_node.get_offset(coords), value);

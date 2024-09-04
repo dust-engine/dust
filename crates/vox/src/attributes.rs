@@ -55,6 +55,7 @@ impl AttributeAllocator {
             return indice;
         }
         if self.head + increment >= self.buffer.len() as u32 {
+            println!("Out of memory {} {} {}", self.head, increment, self.buffer.len());
             // overflow. panic
             panic!()
         }

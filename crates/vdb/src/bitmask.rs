@@ -65,9 +65,10 @@ where
     }
 
     pub fn iter_set_bits(&self) -> SetBitIterator<std::iter::Cloned<std::slice::Iter<usize>>> {
+        let mut iter = self.data.iter().cloned();
         SetBitIterator {
-            state: 0,
-            inner: self.data.iter().cloned(),
+            state: iter.next().unwrap_or(0),
+            inner: iter,
             i: 0,
         }
     }
@@ -148,9 +149,10 @@ where
     [(); SIZE / size_of::<usize>() / 8]: Sized,
 {
     pub fn iter_set_bits(&self) -> SetBitIterator<impl Iterator<Item = usize> + '_> {
+        let mut iter = self.left.iter().zip(self.right.iter()).map(|(a, b)| a | b);
         SetBitIterator {
-            state: 0,
-            inner: self.left.iter().zip(self.right.iter()).map(|(a, b)| a | b),
+            state: iter.next().unwrap_or(0),
+            inner: iter,
             i: 0,
         }
     }
