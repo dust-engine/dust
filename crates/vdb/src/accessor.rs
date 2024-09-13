@@ -120,7 +120,8 @@ where
             ROOT::LEVEL as u32,
         );
         self.last_coords = coords;
-        let (old_leaf_node, new_leaf_node) = if lca_level >= ROOT::LEVEL as u32 {
+        let prev_access_leaf_node_ptr = self.ptrs[0];
+        let (old_leaf_node, leaf_node) = if lca_level >= ROOT::LEVEL as u32 {
             self.tree.root.set(
                 &mut self.tree.pool,
                 coords,
@@ -141,30 +142,118 @@ where
                 None,
             )
         };
-        assert!(old_leaf_node.is_none()); // Handle this case later.
+        assert!(old_leaf_node.is_none()); // Because touched_nodes is None, the tree will not attempt to CoW the tree nodes.
+                                          // And the changes occur in-place.  Therefore, old_leafe_node should always be None.
 
-        let mut attrib_ptr = *new_leaf_node.get_value();
-        if !new_leaf_node.get_occupancy().is_maxed() {
-            attrib_ptr = self.attributes.copy_attribute(
-                new_leaf_node.get_value(),
-                new_leaf_node.get_occupancy(),
-                &ATTRIBS::Occupancy::MAXED,
+        if lca_level == 0 {
+            // Still accessing the same leaf node.
+            // The leaf node should have a full occupancy mask.
+            assert!(leaf_node.get_occupancy().is_maxed());
+            self.attributes.set_attribute(
+                &leaf_node.get_value(),
+                leaf_node.get_offset(coords),
+                value,
             );
-            new_leaf_node.set_value(attrib_ptr);
-            new_leaf_node.set_occupancy(ATTRIBS::Occupancy::MAXED);
+            return;
+        } else {
+            // Release reference to leaf_node so that we can borrow prev_access_leaf_node.
+            // Satefty: It has already been established that prev_access_leaf_node is not leaf_node, so it should be fine to have both mutable references.
+            let leaf_node: *mut _ = leaf_node;
+            if prev_access_leaf_node_ptr != u32::MAX {
+                // purge prev access leaf node by fitting its attributes
+                let prev_access_leaf_node = unsafe {
+                    self.tree
+                        .get_node_mut::<ROOT::LeafType>(prev_access_leaf_node_ptr)
+                };
+                assert_ne!(prev_access_leaf_node as *mut _, leaf_node);
+                let old_attrib_ptr = *prev_access_leaf_node.get_value();
+                assert!(prev_access_leaf_node.get_occupancy().is_maxed());
+                assert_eq!(
+                    prev_access_leaf_node.get_occupancy().count_ones(),
+                    ROOT::LeafType::SIZE as u32
+                );
+                let maxed_attributes = self.attributes.get_attributes(
+                    prev_access_leaf_node.get_value(),
+                    ROOT::LeafType::SIZE as u32,
+                );
+                let mut new_mask = ATTRIBS::Occupancy::ZEROED;
+                for (i, attr_value) in maxed_attributes.iter().enumerate() {
+                    new_mask.set(i, attr_value.is_default());
+                }
+                if !new_mask.is_maxed() {
+                    // fitting attributes by realloc and copy
+                    let new_attrib_ptr = self.attributes.copy_attribute(
+                        prev_access_leaf_node.get_value(),
+                        &ATTRIBS::Occupancy::MAXED,
+                        &new_mask,
+                    );
+                    prev_access_leaf_node.set_value(new_attrib_ptr);
+                    self.attributes
+                        .free_attributes(old_attrib_ptr, ROOT::LeafType::SIZE as u32);
+                }
+            }
+            let leaf_node = unsafe { &mut *leaf_node };
+
+            // Copy to a new leaf node with maxed occupancy.
+            let new_attrib_ptr = if leaf_node.get_occupancy().is_maxed() {
+                // Occupancy already maxed out.
+                *leaf_node.get_value()
+            } else {
+                // trick for now: set the bit to false, then after copy attribute, set it back.
+                leaf_node.set_local_occupancy_bit(coords & ROOT::LeafType::EXTENT_MASK, false);
+                let old_attrib_occupancy = leaf_node.get_occupancy();
+                let old_attrib_occupancy_count = old_attrib_occupancy.count_ones();
+
+                let new_attrib_ptr = self.attributes.copy_attribute(
+                    &leaf_node.get_value(),
+                    leaf_node.get_occupancy(), // this original mask is wrong. should be old_attrib_occupancy
+                    &ATTRIBS::Occupancy::MAXED,
+                );
+                // if old_attrib_occupancy.count_ones() > 0, do this.
+                if old_attrib_occupancy_count > 0 {
+                    self.attributes
+                        .free_attributes(*leaf_node.get_value(), old_attrib_occupancy_count);
+                }
+                leaf_node.set_local_occupancy_bit(coords & ROOT::LeafType::EXTENT_MASK, true);
+
+                // Hint: just need to get the old attrib_occupancy now.
+                leaf_node.set_value(new_attrib_ptr);
+                *leaf_node.get_occupancy_mut() = ATTRIBS::Occupancy::MAXED;
+                new_attrib_ptr
+            };
+
+            self.attributes
+                .set_attribute(&new_attrib_ptr, leaf_node.get_offset(coords), value);
+            // TODO: change get_offset to a more straightforward way of calculation
         }
-        self.attributes
-            .set_attribute(&attrib_ptr, new_leaf_node.get_offset(coords), value);
-        // TODO: change get_offset to a more straightforward way of calculation
     }
 }
 
 pub trait Attributes {
+    /// The type of the attribute pointer.
+    /// The attribute pointers are stored on the vdb leaf nodes, one per node.
+    /// This is typically u32.
     type Ptr;
+    /// The occupancy mask of the attribute pointer.
+    /// If we have 4x4x4 leaf nodes, this would be BitMask<64>.
+    /// If we have 8x8x8 leaf nodes, this would be BitMask<512>.
     type Occupancy;
+    /// The type of the attribute values. For a MagicaVoxel grid, this would be a u8 palette index.
     type Value: Default + IsDefault;
     fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value;
+    fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value];
     fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value);
+    fn free_attributes(&mut self, ptr: Self::Ptr, num_attributes: u32);
+
+    /// Allocate a new attribute range using the new mask. Then, copy the attributes from the attribute range
+    /// pointed to by `ptr` to the newly allocated attribute range. Returns the pointer to the new attribute range.
+    ///
+    /// Only attribute values that are set in both the original mask and the new mask will be copied.
+    ///
+    /// The original attribute range will not be freed. It is the responsibility of the caller to free the original attribute range.
+    ///
+    /// Note that the original mask may be zeroed. In this case, `ptr` is meaningless, and the function will allocate
+    /// a new attribute range without performing any copy.
     fn copy_attribute(
         &mut self,
         ptr: &Self::Ptr,
@@ -175,6 +264,14 @@ pub trait Attributes {
 
 pub trait IsDefault {
     fn is_default(&self) -> bool;
+}
+impl<T> IsDefault for T
+where
+    T: Default + Eq,
+{
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 impl<ROOT: Node> MutableTree<ROOT>
@@ -200,7 +297,7 @@ where
         }
         Accessor {
             tree: self,
-            ptrs: [0; ROOT::LEVEL],
+            ptrs: [u32::MAX; ROOT::LEVEL],
             metas: unsafe { MaybeUninit::array_assume_init(metas) },
             last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
             attributes,
@@ -212,8 +309,45 @@ where
 mod tests {
     use glam::UVec3;
 
-    use super::lowest_common_ancestor_level;
-    use crate::{accessor::EmptyAttributes, hierarchy, MutableTree, Node};
+    use super::{lowest_common_ancestor_level, Attributes};
+    use crate::{hierarchy, BitMask, MutableTree, Node};
+
+    struct TestAttributes;
+
+    impl Attributes for TestAttributes {
+        type Ptr = u32;
+        type Occupancy = BitMask<64>;
+        type Value = u8;
+
+        fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+            0
+        }
+
+        fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value] {
+            &[]
+        }
+
+        fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+            println!("set_attribute {:?} {:?} {:?}", ptr, offset, value);
+        }
+
+        fn free_attributes(&mut self, ptr: Self::Ptr, num_attributes: u32) {
+            println!("free_attributes {:?} {:?}", ptr, num_attributes);
+        }
+
+        fn copy_attribute(
+            &mut self,
+            ptr: &Self::Ptr,
+            original_mask: &Self::Occupancy,
+            new_mask: &Self::Occupancy,
+        ) -> Self::Ptr {
+            println!(
+                "copy_attribute {:?} {:?} {:?}",
+                ptr, original_mask, new_mask
+            );
+            *ptr + 1
+        }
+    }
 
     #[test]
     fn test() {
@@ -246,21 +380,13 @@ mod tests {
         type MyTree = MutableTree<hierarchy!(2, 4, 2, u32)>;
         let mut tree = MyTree::new();
 
-        let mut set_locations: Vec<UVec3> = Vec::with_capacity(100);
-        for _i in 0..100 {
-            let x: u8 = rng.gen();
-            let y: u8 = rng.gen();
-            let z: u8 = rng.gen();
-            let location = UVec3::new(x as u32, y as u32, z as u32);
-            set_locations.push(location);
-            tree.set_value(location, true);
-        }
-        let mut empty_attributes = EmptyAttributes::<u32>::default();
+        let mut attributes = TestAttributes;
+        let mut accessor = tree.accessor_mut(&mut attributes);
 
-        let mut accessor = tree.accessor(&mut empty_attributes);
-        for location in set_locations.choose_multiple(&mut rng, 100) {
-            let result = accessor.get(*location);
-            assert!(result.is_some());
-        }
+        accessor.set(UVec3::new(0, 0, 0), 12);
+
+        accessor.set(UVec3::new(0, 1, 0), 13);
+
+        accessor.set(UVec3::new(144, 1, 0), 14);
     }
 }

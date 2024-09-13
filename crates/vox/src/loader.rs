@@ -330,13 +330,15 @@ impl AssetLoader for VoxLoader {
 impl VoxLoader {
     fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial, UVec3, UVec3) {
         let mut tree = crate::Tree::new();
-        let mut material = VoxMaterial(AttributeAllocator::new_with_capacity(
-            self.allocator.clone(),
-            64 * model.voxels.len() as u64,
-            4,
-            64,
-        )
-        .unwrap());
+        let mut material = VoxMaterial(
+            AttributeAllocator::new_with_capacity(
+                self.allocator.clone(),
+                64 * model.voxels.len() as u64,
+                4,
+                64,
+            )
+            .unwrap(),
+        );
 
         // Create 256x256x256 grid
         let mut palette_index_collector = ModelIndexCollector::new();

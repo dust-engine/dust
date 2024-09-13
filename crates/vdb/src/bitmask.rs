@@ -158,9 +158,12 @@ where
     }
 }
 
-pub trait IsBitMask {
+pub trait IsBitMask: Clone {
     const MAXED: Self;
+    const ZEROED: Self;
     fn is_maxed(&self) -> bool;
+    fn count_ones(&self) -> u32;
+    fn set(&mut self, index: usize, val: bool);
 }
 
 impl<const SIZE: usize> IsBitMask for BitMask<SIZE>
@@ -170,7 +173,16 @@ where
     const MAXED: Self = BitMask {
         data: [usize::MAX; SIZE / size_of::<usize>() / 8],
     };
+    const ZEROED: Self = BitMask {
+        data: [0; SIZE / size_of::<usize>() / 8],
+    };
     fn is_maxed(&self) -> bool {
         self.is_maxed()
+    }
+    fn count_ones(&self) -> u32 {
+        self.count_ones() as u32
+    }
+    fn set(&mut self, index: usize, val: bool) {
+        self.set(index, val);
     }
 }

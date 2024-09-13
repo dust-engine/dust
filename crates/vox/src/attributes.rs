@@ -55,7 +55,12 @@ impl AttributeAllocator {
             return indice;
         }
         if self.head + increment >= self.buffer.len() as u32 {
-            println!("Out of memory {} {} {}", self.head, increment, self.buffer.len());
+            println!(
+                "Out of memory {} {} {}",
+                self.head,
+                increment,
+                self.buffer.len()
+            );
             // overflow. panic
             panic!()
         }
@@ -86,24 +91,24 @@ impl AttributeAllocator {
     }
 }
 
-#[derive(Default)]
-pub struct VoxelPaletteIndex(pub u8);
-impl IsDefault for VoxelPaletteIndex {
-    fn is_default(&self) -> bool {
-        self.0 == 0
-    }
-}
 #[derive(Asset, TypePath)]
 pub struct VoxMaterial(pub AttributeAllocator);
 
 impl dust_vdb::Attributes for VoxMaterial {
     /// 0 for air, and 1 ..= 255 for the offset into the palette.
-    type Value = VoxelPaletteIndex;
+    type Value = u8;
     type Ptr = u32;
     type Occupancy = dust_vdb::BitMask<64>;
 
+    fn free_attributes(&mut self, ptr: Self::Ptr, num_attributes: u32) {
+        self.0.free(ptr, num_attributes);
+    }
+
     fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value {
-        VoxelPaletteIndex(self.0.buffer()[*ptr as usize + offset as usize])
+        self.0.buffer()[*ptr as usize + offset as usize]
+    }
+    fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value] {
+        &self.0.buffer()[*ptr as usize..(*ptr as usize + len as usize)]
     }
 
     fn copy_attribute(

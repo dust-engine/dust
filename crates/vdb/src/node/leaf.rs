@@ -26,12 +26,13 @@ pub trait IsLeaf: Node {
     type Occupancy: IsBitMask;
     type Value: Default + Send + Sync + PartialEq + Eq + Clone + Copy;
     fn get_occupancy(&self) -> &Self::Occupancy;
-    fn set_occupancy(&mut self, occupancy: Self::Occupancy);
+    fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
 
     fn get_value(&self) -> &Self::Value;
     fn set_value(&mut self, value: Self::Value);
 
     fn get_offset(&self, coords: UVec3) -> u32;
+    fn set_local_occupancy_bit(&mut self, coords: UVec3, value: bool);
 }
 
 impl<const LOG2: ConstUVec3, T: Copy + Eq + Send + Sync + 'static + Default> IsLeaf
@@ -42,11 +43,20 @@ where
     type Value = T;
     type Occupancy = BitMask<{ size_of_grid(LOG2) }>;
     fn get_offset(&self, coords: UVec3) -> u32 {
-        let voxel_id = (coords.x << 4) | (coords.y << 2) | coords.z;
+        let coords = coords & Self::EXTENT_MASK;
+        let voxel_id = (coords.x << (LOG2.y + LOG2.z)) | (coords.y << LOG2.z) | coords.z;
         let mask: usize = self.occupancy.as_slice()[0];
         let masked = mask & ((1 << voxel_id) - 1);
         masked.count_ones()
     }
+
+    fn set_local_occupancy_bit(&mut self, coords: UVec3, value: bool) {
+        let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
+            | ((coords.y as usize) << LOG2.z)
+            | (coords.z as usize);
+        self.occupancy.set(index, value);
+    }
+
     fn get_value(&self) -> &Self::Value {
         &self.value
     }
@@ -56,8 +66,8 @@ where
     fn get_occupancy(&self) -> &Self::Occupancy {
         &self.occupancy
     }
-    fn set_occupancy(&mut self, occupancy: Self::Occupancy) {
-        self.occupancy = occupancy;
+    fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy {
+        &mut self.occupancy
     }
 }
 
@@ -96,10 +106,7 @@ where
         _cached_path: &mut [u32],
         _touched_nodes: Option<&mut Vec<(u32, u32)>>,
     ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
-        let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
-            | ((coords.y as usize) << LOG2.z)
-            | (coords.z as usize);
-        self.occupancy.set(index, value);
+        self.set_local_occupancy_bit(coords, value);
         (None, self)
     }
     #[inline]
