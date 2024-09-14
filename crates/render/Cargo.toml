@@ -24,7 +24,7 @@ futures-lite = "1.11"
 crossbeam-channel = "^0.5"
 pin-project = "1"
 tracing = "0.1"
-crevice = { git = "https://github.com/LPGhatguy/crevice", features = ["glam"] }
+crevice = { git = "https://github.com/LPGhatguy/crevice", features = ["glam"], rev = "18ae25df9f37de69f02f1328851e7b9f4bca343c" }
 rand = "0.8"
 arrayvec = "0.7"
 

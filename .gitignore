@@ -1,5 +1,4 @@
 /target
-/Cargo.lock
 *.spv
 /imported_assets
 /assets/**/*.meta
