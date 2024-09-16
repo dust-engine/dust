@@ -28,11 +28,19 @@ pub trait IsLeaf: Node {
     fn get_occupancy(&self) -> &Self::Occupancy;
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
 
+    fn get_occupancy_at(&self, coords: UVec3) -> bool {
+        self.get_occupancy().get(Self::get_fully_mapped_offset(coords) as usize)
+    }
+    fn set_occupancy_at(&mut self, coords: UVec3, value: bool) {
+        let offset = Self::get_fully_mapped_offset(coords);
+        self.get_occupancy_mut().set(offset as usize, value);
+    }
+
     fn get_value(&self) -> &Self::Value;
     fn set_value(&mut self, value: Self::Value);
 
-    fn get_offset(&self, coords: UVec3) -> u32;
-    fn set_local_occupancy_bit(&mut self, coords: UVec3, value: bool);
+    fn get_attribute_offset(&self, coords: UVec3) -> u32;
+    fn get_fully_mapped_offset(coords: UVec3) -> u32;
 }
 
 impl<const LOG2: ConstUVec3, T: Copy + Eq + Send + Sync + 'static + Default> IsLeaf
@@ -42,7 +50,7 @@ where
 {
     type Value = T;
     type Occupancy = BitMask<{ size_of_grid(LOG2) }>;
-    fn get_offset(&self, coords: UVec3) -> u32 {
+    fn get_attribute_offset(&self, coords: UVec3) -> u32 {
         let coords = coords & Self::EXTENT_MASK;
         let voxel_id = (coords.x << (LOG2.y + LOG2.z)) | (coords.y << LOG2.z) | coords.z;
         let mask: usize = self.occupancy.as_slice()[0];
@@ -50,11 +58,12 @@ where
         masked.count_ones()
     }
 
-    fn set_local_occupancy_bit(&mut self, coords: UVec3, value: bool) {
+    fn get_fully_mapped_offset(coords: UVec3) -> u32 {
+        let coords = coords & Self::EXTENT_MASK;
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
-        self.occupancy.set(index, value);
+        index as u32
     }
 
     fn get_value(&self) -> &Self::Value {
@@ -106,7 +115,7 @@ where
         _cached_path: &mut [u32],
         _touched_nodes: Option<&mut Vec<(u32, u32)>>,
     ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
-        self.set_local_occupancy_bit(coords, value);
+        self.occupancy.set(Self::get_fully_mapped_offset(coords) as usize, value);
         (None, self)
     }
     #[inline]
@@ -147,7 +156,7 @@ where
             return (Some(unsafe { &mut *old_leaf_node }), new_leaf_node);
         } else {
             let old_leaf_node: &mut _ = unsafe { &mut *old_leaf_node };
-            old_leaf_node.occupancy.set(index, value);
+            //old_leaf_node.occupancy.set(index, value); the caller should set this on their own
             return (None, old_leaf_node);
         }
     }

@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use rhyolite::Allocator;
 
 use crate::{
-    attributes::{AttributeAllocator, VoxelPaletteIndex},
+    attributes::AttributeAllocator,
     Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModelBundle, VoxPalette,
 };
 
@@ -341,7 +341,6 @@ impl VoxLoader {
         );
 
         // Create 256x256x256 grid
-        let mut palette_index_collector = ModelIndexCollector::new();
         let mut accessor = tree.accessor_mut(&mut material);
         let size_y = model.size.y;
 
@@ -360,49 +359,14 @@ impl VoxLoader {
                 z: voxel.z as u32,
             };
 
-            accessor.set(coords, VoxelPaletteIndex(voxel.i + 1));
+            accessor.set(coords, voxel.i + 1);
             min = min.min(coords);
             max = max.max(coords);
-            palette_index_collector.set(voxel);
         }
+
+        accessor.end();
         material.0.buffer_mut().flush(..);
 
         (tree, material, min, max)
-    }
-}
-
-/// dox_vox::Voxel to solid materials
-pub struct ModelIndexCollector {
-    grid: Box<[u8; 256 * 256 * 256]>,
-    count: usize,
-}
-
-impl ModelIndexCollector {
-    pub fn new() -> Self {
-        unsafe {
-            let grid_ptr =
-                std::alloc::alloc_zeroed(std::alloc::Layout::new::<[u8; 256 * 256 * 256]>());
-
-            Self {
-                count: 0,
-                grid: Box::from_raw(grid_ptr as *mut [u8; 256 * 256 * 256]),
-            }
-        }
-    }
-    pub fn set(&mut self, voxel: dot_vox::Voxel) {
-        self.count += 1;
-        let block_index = (voxel.x >> 2, voxel.y >> 2, voxel.z >> 2);
-        let block_index =
-            block_index.0 as usize + block_index.1 as usize * 64 + block_index.2 as usize * 64 * 64;
-
-        let index = (voxel.z & 0b11) | ((voxel.y & 0b11) << 2) | ((voxel.x & 0b11) << 4);
-        // Use one-based index here so that 0 indicates null
-        self.grid[block_index * 4 * 4 * 4 + index as usize] = voxel.i + 1;
-    }
-    pub fn block_attributes(&self, block_index: usize) -> impl Iterator<Item = u8> + '_ {
-        let base_index = block_index * 4 * 4 * 4;
-        self.grid[base_index..base_index + 4 * 4 * 4]
-            .iter()
-            .filter_map(|&x| if x == 0 { None } else { Some(x) })
     }
 }

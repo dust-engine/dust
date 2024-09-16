@@ -135,6 +135,6 @@ impl dust_vdb::Attributes for VoxMaterial {
     }
 
     fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
-        self.0.buffer_mut()[*ptr as usize + offset as usize] = value.0;
+        self.0.buffer_mut()[*ptr as usize + offset as usize] = value;
     }
 }

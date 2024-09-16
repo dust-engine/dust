@@ -164,6 +164,7 @@ pub trait IsBitMask: Clone {
     fn is_maxed(&self) -> bool;
     fn count_ones(&self) -> u32;
     fn set(&mut self, index: usize, val: bool);
+    fn get(&self, index: usize) -> bool;
 }
 
 impl<const SIZE: usize> IsBitMask for BitMask<SIZE>
@@ -184,5 +185,8 @@ where
     }
     fn set(&mut self, index: usize, val: bool) {
         self.set(index, val);
+    }
+    fn get(&self, index: usize) -> bool {
+        self.get(index)
     }
 }

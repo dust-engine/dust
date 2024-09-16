@@ -1,8 +1,6 @@
 #![feature(generic_const_exprs)]
 #![feature(alloc_layout_extra)]
 
-use attributes::{AttributeAllocator, VoxMaterial};
-use bevy::app::Update;
 use bevy::asset::Assets;
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
@@ -36,6 +34,7 @@ type ImmutableTree = dust_vdb::ImmutableTree<TreeRoot>;
 
 pub use loader::*;
 use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
+pub use attributes::{AttributeAllocator, VoxMaterial};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
@@ -114,7 +113,7 @@ impl VoxPalette {
 #[derive(Component, Reflect)]
 #[reflect(Component, MapEntities)]
 pub struct VoxInstance {
-    model: Entity,
+    pub model: Entity,
 }
 impl MapEntities for VoxInstance {
     fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
@@ -145,9 +144,9 @@ pub struct VoxModelBundle {
 
 #[derive(Bundle, Default)]
 pub struct VoxInstanceBundle {
-    transform: Transform,
-    global_transform: GlobalTransform,
-    instance: VoxInstance,
+    pub transform: Transform,
+    pub global_transform: GlobalTransform,
+    pub instance: VoxInstance,
 }
 
 pub struct VoxPlugin;
