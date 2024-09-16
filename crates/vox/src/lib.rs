@@ -32,9 +32,9 @@ type TreeRoot = hierarchy!(3, 3, 2, u32);
 type Tree = dust_vdb::MutableTree<TreeRoot>;
 type ImmutableTree = dust_vdb::ImmutableTree<TreeRoot>;
 
+pub use attributes::{AttributeAllocator, VoxMaterial};
 pub use loader::*;
 use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
-pub use attributes::{AttributeAllocator, VoxMaterial};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {

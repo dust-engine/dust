@@ -11,8 +11,8 @@ use rayon::prelude::*;
 use rhyolite::Allocator;
 
 use crate::{
-    attributes::AttributeAllocator,
-    Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModelBundle, VoxPalette,
+    attributes::AttributeAllocator, Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial,
+    VoxModelBundle, VoxPalette,
 };
 
 enum WorldOrParent<'w, 'q> {

@@ -29,7 +29,8 @@ pub trait IsLeaf: Node {
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
 
     fn get_occupancy_at(&self, coords: UVec3) -> bool {
-        self.get_occupancy().get(Self::get_fully_mapped_offset(coords) as usize)
+        self.get_occupancy()
+            .get(Self::get_fully_mapped_offset(coords) as usize)
     }
     fn set_occupancy_at(&mut self, coords: UVec3, value: bool) {
         let offset = Self::get_fully_mapped_offset(coords);
@@ -115,9 +116,37 @@ where
         _cached_path: &mut [u32],
         _touched_nodes: Option<&mut Vec<(u32, u32)>>,
     ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
-        self.occupancy.set(Self::get_fully_mapped_offset(coords) as usize, value);
+        self.occupancy
+            .set(Self::get_fully_mapped_offset(coords) as usize, value);
         (None, self)
     }
+    /// Get the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was owned.
+    /// Implementation will write to cached_path for all levels below the current level.
+    fn get<'a>(
+        &'a self,
+        pools: &'a [Pool],
+        coords: UVec3,
+        cached_path: &mut [u32],
+    ) -> Option<&'a Self::LeafType> {
+        Some(self)
+    }
+
+    /// Get the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was located in a node pool.
+    /// Implementation will write to cached_path for all levels including the current level.
+    fn get_in_pools<'a>(
+        pools: &'a [Pool],
+        coords: UVec3,
+        ptr: u32,
+        cached_path: &mut [u32],
+    ) -> Option<&'a Self::LeafType> {
+        if cached_path.len() > 0 {
+            cached_path[Self::LEVEL] = ptr;
+        }
+        Some(unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) })
+    }
+
     #[inline]
     fn set_in_pools<'a>(
         pools: &'a mut [Pool],
@@ -196,6 +225,7 @@ where
             fanout_log2: LOG2.to_glam(),
             extent_mask: Self::EXTENT_MASK,
             setter: Self::set_in_pools,
+            getter: Self::get_in_pools,
         });
     }
 

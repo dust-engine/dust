@@ -117,18 +117,19 @@ impl dust_vdb::Attributes for VoxMaterial {
         original_mask: &Self::Occupancy,
         new_mask: &Self::Occupancy,
     ) -> Self::Ptr {
-        let mut new_ptr = self.0.allocate(new_mask.count_ones() as u32);
-        let mut old_ptr = *ptr;
+        let new_ptr = self.0.allocate(new_mask.count_ones() as u32);
+        let mut new_ptr_cur = new_ptr;
+        let mut old_ptr_cur = *ptr;
         for bit in (original_mask | new_mask).iter_set_bits() {
             if new_mask.get(bit) && original_mask.get(bit) {
                 // copy it over
-                self.0.buffer_mut()[new_ptr as usize] = self.0.buffer()[old_ptr as usize];
+                self.0.buffer_mut()[new_ptr_cur as usize] = self.0.buffer()[old_ptr_cur as usize];
             }
             if new_mask.get(bit) {
-                new_ptr += 1;
+                new_ptr_cur += 1;
             }
             if original_mask.get(bit) {
-                old_ptr += 1;
+                old_ptr_cur += 1;
             }
         }
         new_ptr

@@ -15,7 +15,12 @@ use crate::{ConstUVec3, Pool};
 
 pub struct NodeMeta<V> {
     pub(crate) layout: Layout,
-    //pub(crate) getter: for<'a> fn(pools: &'a [Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32], result: &mut bool) -> Option<&'a V>,
+    pub(crate) getter: for<'a> fn(
+        pools: &'a [Pool],
+        coords: UVec3,
+        ptr: u32,
+        cached_path: &mut [u32],
+    ) -> Option<&'a V>,
     pub(crate) setter: for<'a> fn(
         pools: &'a mut [Pool],
         coords: UVec3,
@@ -46,12 +51,22 @@ pub trait Node: 'static + Send + Sync + Default {
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
     /// Implementation will write to cached_path for all levels below the current level.
-    //fn get<'a>(&'a self, pools: &'a [Pool], coords: UVec3, cached_path: &mut [u32]) -> Option<&'a Self::LeafType>;
+    fn get<'a>(
+        &'a self,
+        pools: &'a [Pool],
+        coords: UVec3,
+        cached_path: &mut [u32],
+    ) -> Option<&'a Self::LeafType>;
 
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
-    //fn get_in_pools<'a>(pools: &'a [Pool], coords: UVec3, ptr: u32, cached_path: &mut [u32], prev_result: &mut bool) ->  Option<&'a Self::LeafType>;
+    fn get_in_pools<'a>(
+        pools: &'a [Pool],
+        coords: UVec3,
+        ptr: u32,
+        cached_path: &mut [u32],
+    ) -> Option<&'a Self::LeafType>;
 
     fn set<'a>(
         &'a mut self,

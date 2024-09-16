@@ -164,7 +164,45 @@ where
             )
         }
     }
+    /// Get the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was owned.
+    /// Implementation will write to cached_path for all levels below the current level.
+    fn get<'a>(
+        &'a self,
+        pools: &'a [Pool],
+        coords: UVec3,
+        cached_path: &mut [u32],
+    ) -> Option<&'a Self::LeafType> {
+        let internal_offset = coords >> CHILD::EXTENT_LOG2;
+        let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
+            | ((internal_offset.y as usize) << FANOUT_LOG2.z)
+            | (internal_offset.z as usize);
+        let has_child = self.child_mask.get(index);
+        if !has_child {
+            return None;
+        }
+        let new_coords = coords & CHILD::EXTENT_MASK;
+        let child_ptr = unsafe { self.child_ptrs[index].occupied };
+        <CHILD as Node>::get_in_pools(pools, new_coords, child_ptr, cached_path)
+    }
 
+    /// Get the value of a voxel at the specified coordinates within the node space.
+    /// This is called when the node was located in a node pool.
+    /// Implementation will write to cached_path for all levels including the current level.
+    fn get_in_pools<'a>(
+        pools: &'a [Pool],
+        coords: UVec3,
+        ptr: u32,
+        cached_path: &mut [u32],
+    ) -> Option<&'a Self::LeafType> {
+        unsafe {
+            let node = pools[Self::LEVEL].get_item::<Self>(ptr);
+            if cached_path.len() > 0 {
+                cached_path[Self::LEVEL] = ptr;
+            }
+            node.get(pools, coords, cached_path)
+        }
+    }
     type Iterator<'a> = InternalNodeIterator<'a, CHILD, FANOUT_LOG2>;
     #[inline]
     fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
@@ -217,6 +255,7 @@ where
         metas.push(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
             setter: Self::set_in_pools,
+            getter: Self::get_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             extent_mask: Self::EXTENT_MASK,
             fanout_log2: FANOUT_LOG2.to_glam(),

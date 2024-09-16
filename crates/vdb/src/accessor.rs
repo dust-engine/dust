@@ -110,6 +110,44 @@ where
     [(); ROOT::LEVEL as usize + 1]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
 {
+    pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
+        let lca_level = lowest_common_ancestor_level(
+            self.last_coords,
+            coords,
+            ROOT::META_MASK,
+            ROOT::LEVEL as u32,
+        );
+        self.last_coords = coords;
+        let leaf_node = if lca_level >= ROOT::LEVEL as u32 {
+            self.tree.root.get(&self.tree.pool, coords, &mut self.ptrs)
+        } else {
+            let meta = &self.metas[lca_level as usize];
+            let new_coords = coords & meta.extent_mask;
+            let ptr = self.ptrs[lca_level as usize];
+            (meta.getter)(&self.tree.pool, new_coords, ptr, &mut self.ptrs)
+        }?;
+        let occupied = leaf_node.get_occupancy_at(coords);
+        if !occupied {
+            return None;
+        }
+        if let Some(last_leaf) = self.last_leaf {
+            if last_leaf == self.ptrs[0] {
+                let last_leaf = unsafe { self.tree.get_node::<ROOT::LeafType>(last_leaf) };
+                if std::ptr::eq(last_leaf, leaf_node) {
+                    return Some(self.attributes.get_attribute(
+                        leaf_node.get_value(),
+                        <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+                    ));
+                }
+            }
+        }
+        let value = self.attributes.get_attribute(
+            leaf_node.get_value(),
+            leaf_node.get_attribute_offset(coords),
+        );
+        Some(value)
+    }
+
     #[inline]
     pub fn set(&mut self, coords: UVec3, value: ATTRIBS::Value)
     where
@@ -146,61 +184,64 @@ where
         assert!(old_leaf_node.is_none()); // Because touched_nodes is None, the tree will not attempt to CoW the tree nodes.
                                           // And the changes occur in-place.  Therefore, old_leafe_node should always be None.
 
-        if lca_level == 0 && let Some(last_leaf) = self.last_leaf {
-            // Still accessing the same leaf node.
-            // The leaf node should have a full occupancy mask.
-            assert_eq!(last_leaf, self.ptrs[0]);
-            leaf_node.set_occupancy_at(coords, true);
+        if let Some(last_leaf) = self.last_leaf {
+            if last_leaf == self.ptrs[0] {
+                // Still accessing the same leaf node.
+                leaf_node.set_occupancy_at(coords, true);
+                self.attributes.set_attribute(
+                    &leaf_node.get_value(),
+                    <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+                    value,
+                );
+                return;
+            }
+        }
+        // Release reference to leaf_node so that we can borrow prev_access_leaf_node.
+        // Satefty: It has already been established that prev_access_leaf_node is not leaf_node, so it should be fine to have both mutable references.
+        let leaf_node: *mut _ = leaf_node;
+        self.purge_prev_access_leaf_node();
+        let leaf_node = unsafe { &mut *leaf_node };
+        let previously_occupied = leaf_node.get_occupancy_at(coords);
+
+        // Copy to a new leaf node with maxed occupancy.
+        if previously_occupied {
             self.attributes.set_attribute(
+                leaf_node.get_value(),
+                leaf_node.get_attribute_offset(coords),
+                value,
+            );
+        } else {
+            // trick for now: set the bit to false, then after copy attribute, set it back.
+
+            let new_attrib_ptr = self.attributes.copy_attribute(
                 &leaf_node.get_value(),
+                leaf_node.get_occupancy(), // this original mask is wrong. should be old_attrib_occupancy
+                &ATTRIBS::Occupancy::MAXED,
+            );
+            self.last_leaf = Some(self.ptrs[0]);
+            // if old_attrib_occupancy.count_ones() > 0, free.
+            let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones(); // can optimize here
+            if old_attrib_occupancy_count > 0 {
+                self.attributes
+                    .free_attributes(*leaf_node.get_value(), old_attrib_occupancy_count);
+            }
+            leaf_node.set_occupancy_at(coords, true);
+
+            // Hint: just need to get the old attrib_occupancy now.
+            leaf_node.set_value(new_attrib_ptr);
+            self.attributes.set_attribute(
+                &new_attrib_ptr,
                 <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
                 value,
             );
-            return;
-        } else {
-            // Release reference to leaf_node so that we can borrow prev_access_leaf_node.
-            // Satefty: It has already been established that prev_access_leaf_node is not leaf_node, so it should be fine to have both mutable references.
-            let leaf_node: *mut _ = leaf_node;
-            self.purge_prev_access_leaf_node();
-            let leaf_node = unsafe { &mut *leaf_node };
-            let previously_occupied = leaf_node.get_occupancy_at(coords);
-
-            // Copy to a new leaf node with maxed occupancy.
-            if previously_occupied {
-                self.attributes
-                    .set_attribute(leaf_node.get_value(), leaf_node.get_attribute_offset(coords), value);
-            } else {
-                // trick for now: set the bit to false, then after copy attribute, set it back.
-
-                let new_attrib_ptr = self.attributes.copy_attribute(
-                    &leaf_node.get_value(),
-                    leaf_node.get_occupancy(), // this original mask is wrong. should be old_attrib_occupancy
-                    &ATTRIBS::Occupancy::MAXED,
-                );
-                self.last_leaf = Some(self.ptrs[0]);
-                // if old_attrib_occupancy.count_ones() > 0, free.
-                let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones(); // can optimize here
-                if old_attrib_occupancy_count > 0 {
-                    self.attributes
-                        .free_attributes(*leaf_node.get_value(), old_attrib_occupancy_count);
-                }
-                leaf_node.set_occupancy_at(coords, true);
-
-                // Hint: just need to get the old attrib_occupancy now.
-                leaf_node.set_value(new_attrib_ptr);
-                self.attributes
-                    .set_attribute(&new_attrib_ptr, <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords), value);
-            };
-        }
+        };
     }
 
     fn purge_prev_access_leaf_node(&mut self) {
         if let Some(last_leaf) = self.last_leaf {
             // purge prev access leaf node by fitting its attributes
-            let prev_access_leaf_node = unsafe {
-                self.tree
-                    .get_node_mut::<ROOT::LeafType>(last_leaf)
-            };
+            let prev_access_leaf_node =
+                unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
             let old_attrib_ptr = *prev_access_leaf_node.get_value();
             if !prev_access_leaf_node.get_occupancy().is_maxed() {
                 // fitting attributes by realloc and copy
@@ -317,11 +358,11 @@ mod tests {
     use glam::UVec3;
 
     use super::{lowest_common_ancestor_level, Attributes};
-    use crate::{hierarchy, BitMask, MutableTree, Node};
+    use crate::{hierarchy, BitMask, MutableTree, Node, TreeLike};
 
     #[derive(Default)]
     struct TestAttributes {
-        attribute_maps: Vec<Vec<u8>>
+        attribute_maps: Vec<Vec<u8>>,
     }
 
     impl Attributes for TestAttributes {
@@ -359,7 +400,12 @@ mod tests {
             if original_mask.is_zeroed() {
                 let new = vec![0; new_mask.count_ones() as usize];
                 self.attribute_maps.push(new);
-                println!("copy_attribute from null to {}: {} -> {}", self.attribute_maps.len(), original_mask.count_ones(), new_mask.count_ones());
+                println!(
+                    "copy_attribute from null to {}: {} -> {}",
+                    self.attribute_maps.len(),
+                    original_mask.count_ones(),
+                    new_mask.count_ones()
+                );
                 return self.attribute_maps.len() as u32 - 1;
             }
             let mut new = vec![0; new_mask.count_ones() as usize];
@@ -378,7 +424,13 @@ mod tests {
                     old_ptr += 1;
                 }
             }
-            println!("copy_attribute from {} to {}: {} -> {}", ptr, self.attribute_maps.len(), original_mask.count_ones(), new_mask.count_ones());
+            println!(
+                "copy_attribute from {} to {}: {} -> {}",
+                ptr,
+                self.attribute_maps.len(),
+                original_mask.count_ones(),
+                new_mask.count_ones()
+            );
             self.attribute_maps.push(new);
             self.attribute_maps.len() as u32 - 1
         }
@@ -418,11 +470,16 @@ mod tests {
         accessor.set(UVec3::new(0, 0, 0), 12);
         // Allocates full map for additional attributes
         assert_eq!(accessor.attributes.attribute_maps[0].len(), 64);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 0)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 5)), None);
 
         accessor.set(UVec3::new(0, 1, 0), 13);
         // Subsequent ops in the same leaf node should not allocate
         assert_eq!(accessor.attributes.attribute_maps[0].len(), 64);
         assert_eq!(accessor.attributes.attribute_maps.len(), 1);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 0)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 2)), None);
 
         accessor.set(UVec3::new(144, 1, 0), 14);
         // Transitioned to new block. The old maxed out block should be freed, with
@@ -430,21 +487,26 @@ mod tests {
         assert_eq!(accessor.attributes.attribute_maps[1].len(), 2);
         assert_eq!(accessor.attributes.attribute_maps[2].len(), 64);
         assert_eq!(accessor.attributes.attribute_maps.len(), 3);
+        assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
 
-        
         accessor.set(UVec3::new(0, 1, 2), 16);
         // Transitioned back to old block.
         assert_eq!(accessor.attributes.attribute_maps[2].len(), 0);
         assert_eq!(accessor.attributes.attribute_maps[3].len(), 1);
         assert_eq!(accessor.attributes.attribute_maps[4].len(), 64);
         assert_eq!(accessor.attributes.attribute_maps.len(), 5);
+        assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 2)), Some(16));
 
-        
         accessor.set(UVec3::new(144, 1, 0), 18);
         // Updating an existing attribute should not allocate.
         assert_eq!(accessor.attributes.attribute_maps[4].len(), 0);
         assert_eq!(accessor.attributes.attribute_maps[5].len(), 3);
         assert_eq!(accessor.attributes.attribute_maps.len(), 6);
+        assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(18));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 2)), Some(16));
+        assert_eq!(accessor.get(UVec3::new(0, 0, 0)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
 
         accessor.end();
     }
