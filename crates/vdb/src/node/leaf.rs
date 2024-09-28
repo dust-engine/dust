@@ -114,11 +114,10 @@ where
         coords: UVec3,
         value: bool,
         _cached_path: &mut [u32],
-        _touched_nodes: Option<&mut Vec<(u32, u32)>>,
-    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
+    ) -> &'a mut Self::LeafType {
         self.occupancy
             .set(Self::get_fully_mapped_offset(coords) as usize, value);
-        (None, self)
+        self
     }
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
@@ -154,8 +153,7 @@ where
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-        touched_nodes: Option<&mut Vec<(u32, u32)>>,
-    ) -> (Option<&'a mut Self>, &'a mut Self) {
+    ) -> &'a mut Self {
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
@@ -167,27 +165,9 @@ where
         if cached_path.len() > 0 {
             cached_path[0] = *ptr;
         }
-        if let Some(touched_nodes) = touched_nodes {
-            // Copy on write
-            if old_value == value {
-                return (None, unsafe { &mut *old_leaf_node });
-            }
-
-            let new_node_ptr = unsafe { pools[Self::LEVEL].alloc_uninitialized() };
-            if cached_path.len() > 0 {
-                cached_path[0] = new_node_ptr;
-            }
-            touched_nodes.push((Self::LEVEL as u32, *ptr));
-            *ptr = new_node_ptr;
-            let new_leaf_node = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(new_node_ptr) };
-            unsafe { std::ptr::copy_nonoverlapping(old_leaf_node, new_leaf_node, 1) };
-            new_leaf_node.occupancy.set(index, value);
-            return (Some(unsafe { &mut *old_leaf_node }), new_leaf_node);
-        } else {
-            let old_leaf_node: &mut _ = unsafe { &mut *old_leaf_node };
-            //old_leaf_node.occupancy.set(index, value); the caller should set this on their own
-            return (None, old_leaf_node);
-        }
+        let old_leaf_node: &mut _ = unsafe { &mut *old_leaf_node };
+        //old_leaf_node.occupancy.set(index, value); the caller should set this on their own
+        return old_leaf_node;
     }
 
     type Iterator<'a> = LeafNodeIterator<'a, LOG2>;

@@ -28,6 +28,18 @@ where
 
     _marker: PhantomData<CHILD>,
 }
+impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Clone for InternalNode<CHILD, FANOUT_LOG2>
+where
+    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    fn clone(&self) -> Self {
+        Self {
+            child_mask: self.child_mask.clone(),
+            child_ptrs: self.child_ptrs.clone(),
+            _marker: PhantomData,
+        }
+    }
+}
 impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Default for InternalNode<CHILD, FANOUT_LOG2>
 where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
@@ -74,8 +86,7 @@ where
         coords: UVec3,
         value: bool,
         cached_path: &mut [u32],
-        touched_nodes: Option<&mut Vec<(u32, u32)>>,
-    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
+    ) -> &'a mut Self::LeafType {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
@@ -100,14 +111,7 @@ where
         }
         let new_coords = coords & CHILD::EXTENT_MASK;
         let child_ptr = unsafe { &mut self.child_ptrs[index].occupied };
-        <CHILD as Node>::set_in_pools(
-            pools,
-            new_coords,
-            child_ptr,
-            value,
-            cached_path,
-            touched_nodes,
-        )
+        <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
     }
     #[inline]
     fn set_in_pools<'a>(
@@ -116,8 +120,7 @@ where
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-        mut touched_nodes: Option<&mut Vec<(u32, u32)>>,
-    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType) {
+    ) -> &'a mut Self::LeafType {
         unsafe {
             let mut node: *mut _ = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
 
@@ -131,16 +134,6 @@ where
                 if !has_child {
                     // ensure have children
                     let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
-
-                    if let Some(touched_nodes) = touched_nodes.as_mut() {
-                        let new_node_ptr = pools[Self::LEVEL].alloc_uninitialized();
-                        let new_node = pools[Self::LEVEL].get_item_mut::<Self>(new_node_ptr);
-                        std::ptr::copy_nonoverlapping(node, new_node, 1);
-                        // allocate a child node
-                        touched_nodes.push((Self::LEVEL as u32, *ptr));
-                        *ptr = new_node_ptr;
-                        node = new_node;
-                    }
                     (&mut *node).child_mask.set(index, true);
                     (&mut *node).child_ptrs[index].occupied = allocated_child_ptr;
                 }
@@ -154,14 +147,7 @@ where
             }
             let new_coords = coords & CHILD::EXTENT_MASK;
             let child_ptr = &mut (&mut *node).child_ptrs[index].occupied;
-            <CHILD as Node>::set_in_pools(
-                pools,
-                new_coords,
-                child_ptr,
-                value,
-                cached_path,
-                touched_nodes,
-            )
+            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
         }
     }
     /// Get the value of a voxel at the specified coordinates within the node space.

@@ -14,7 +14,7 @@ use bevy::{
     transform::components::{GlobalTransform, Transform},
 };
 use dot_vox::Color;
-use dust_vdb::{hierarchy, TreeLike};
+use dust_vdb::{hierarchy};
 use rhyolite::ash::vk;
 use rhyolite::ecs::RenderCommands;
 use rhyolite::utils::AssetUploadPlugin;
@@ -29,8 +29,8 @@ mod loader;
 mod resource;
 
 type TreeRoot = hierarchy!(3, 3, 2, u32);
-type Tree = dust_vdb::MutableTree<TreeRoot>;
-type ImmutableTree = dust_vdb::ImmutableTree<TreeRoot>;
+type Tree = dust_vdb::Tree<TreeRoot>;
+type ImTree = dust_vdb::ImTree<TreeRoot>;
 
 pub use attributes::{AttributeAllocator, VoxMaterial};
 pub use loader::*;
@@ -38,13 +38,13 @@ use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
-    tree: ImmutableTree,
+    tree: ImTree,
     aabb_min: UVec3,
     aabb_max: UVec3,
     unit_size: f32,
 }
 impl VoxGeometry {
-    pub fn from_tree_with_unit_size(tree: ImmutableTree, unit_size: f32) -> Self {
+    pub fn from_tree_with_unit_size(tree: ImTree, unit_size: f32) -> Self {
         Self {
             aabb_min: UVec3::ZERO,
             aabb_max: tree.extent(),
@@ -60,7 +60,7 @@ impl VoxGeometry {
     }
 }
 impl Deref for VoxGeometry {
-    type Target = ImmutableTree;
+    type Target = ImTree;
     fn deref(&self) -> &Self::Target {
         &self.tree
     }

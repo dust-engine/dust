@@ -8,7 +8,6 @@
 
 mod accessor;
 mod bitmask;
-mod immutable;
 mod node;
 
 #[cfg(feature = "physics")]
@@ -19,10 +18,9 @@ mod tree;
 
 pub use bitmask::BitMask;
 pub use pool::Pool;
-pub use tree::{MutableTree, TreeLike};
+pub use tree::Tree;
 
 pub use accessor::*;
-pub use immutable::*;
 pub use node::*;
 
 #[cfg(feature = "physics")]

@@ -4,7 +4,7 @@ use glam::UVec3;
 
 use crate::{AabbU32, IsLeaf, Node, NodeMeta, Pool};
 
-pub struct MutableTree<ROOT: Node>
+pub struct Tree<ROOT: Node>
 where
     [(); ROOT::LEVEL as usize]: Sized,
 {
@@ -24,7 +24,7 @@ where
 /// assert_eq!(tree.get_value(UVec3::new(0, 3, 0)), None);
 /// assert_eq!(tree.get_value(UVec3::new(0, 2, 2)), Some(false));
 /// ```
-impl<ROOT: Node> MutableTree<ROOT>
+impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
 {
@@ -129,48 +129,5 @@ where
         let mut vec = Vec::with_capacity(ROOT::LEVEL + 1);
         ROOT::write_meta(&mut vec);
         vec
-    }
-}
-
-pub trait TreeLike: Send + Sync {
-    fn get_value(&self, coords: UVec3) -> bool;
-
-    fn aabb(&self) -> AabbU32;
-
-    fn extent(&self) -> UVec3;
-
-    #[cfg(feature = "physics")]
-    fn cast_local_ray_and_get_normal(
-        &self,
-        ray: &parry3d::query::Ray,
-        solid: bool,
-        initial_intersection_t: glam::Vec2,
-    ) -> Option<parry3d::query::RayIntersection>;
-}
-
-impl<ROOT: Node> TreeLike for MutableTree<ROOT>
-where
-    [(); ROOT::LEVEL as usize]: Sized,
-{
-    fn get_value(&self, coords: UVec3) -> bool {
-        let mut result = false;
-        //self.root.get(&self.pool, coords, &mut [], &mut result);
-        result
-    }
-    fn aabb(&self) -> AabbU32 {
-        self.aabb
-    }
-    fn extent(&self) -> UVec3 {
-        ROOT::EXTENT
-    }
-    #[cfg(feature = "physics")]
-    fn cast_local_ray_and_get_normal(
-        &self,
-        ray: &parry3d::query::Ray,
-        solid: bool,
-        initial_intersection_t: glam::Vec2,
-    ) -> Option<parry3d::query::RayIntersection> {
-        self.root
-            .cast_local_ray_and_get_normal(ray, solid, initial_intersection_t, &self.pool)
     }
 }

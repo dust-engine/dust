@@ -1,21 +1,22 @@
-use std::mem::MaybeUninit;
+use std::{borrow::BorrowMut, mem::MaybeUninit, sync::MutexGuard};
 
+use crate::pool::Pool;
+use bevy::reflect::Access;
 use glam::UVec3;
 
-use crate::{bitmask::IsBitMask, IsLeaf, MutableTree, Node, NodeMeta};
+use crate::{bitmask::IsBitMask, IsLeaf, Node, NodeMeta, Tree};
 
-pub struct Accessor<'a, ROOT: Node, ATTRIBS, TREE>
+pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
     [(); ROOT::LEVEL as usize]: Sized,
 {
-    tree: TREE,
+    tree: &'a mut Tree<ROOT>,
     ptrs: [u32; ROOT::LEVEL],
     metas: [NodeMeta<ROOT::LeafType>; ROOT::LEVEL + 1],
     last_coords: UVec3,
-    last_leaf: Option<u32>,
     attributes: &'a mut ATTRIBS,
-    can_drop: bool,
+    last_leaf: Option<u32>,
 }
 
 #[inline]
@@ -36,68 +37,6 @@ fn lowest_common_ancestor_level(a: UVec3, b: UVec3, mask: UVec3, root_level: u32
     root_level + 1 - parent_index
 }
 
-/*
-// For CoW trees
-impl<'a, ROOT: Node, A: Attributes<LeafType = ROOT::LeafType>> AccessorMut<'a, ROOT, A>
-where
-    [(); ROOT::LEVEL as usize + 1]: Sized,
-    [(); ROOT::LEVEL + 1]: Sized,
-{
-    /*
-    #[inline]
-    pub fn get(&mut self, coords: UVec3) -> Option<A::Value>
-    where
-        ROOT: Node,
-    {
-        let mut result = false;
-        let leaf_node = Accessor::<ROOT, A>::get_inner(&self.tree, &mut self.last_coords, &mut self.ptrs, &self.metas, coords, &mut result)?;
-        if !result {
-            return None;
-        }
-        let value = self.attributes.get_attribute(leaf_node.get_value(), leaf_node.get_offset(coords));
-        Some(value)
-    }
-    */
-    #[inline]
-    fn set(&mut self, coords: UVec3, value: Option<A::Value>)
-    where
-        ROOT: Node,
-    {
-        if value.is_some() {
-            self.tree.aabb.min = self.tree.aabb.min.min(coords);
-            self.tree.aabb.max = self.tree.aabb.max.max(coords);
-        }
-        let lca_level = lowest_common_ancestor_level(
-            self.last_coords,
-            coords,
-            ROOT::META_MASK,
-            ROOT::LEVEL as u32,
-        );
-        self.last_coords = coords;
-        let mut nodes_to_remove = Vec::new();
-        let (old_leaf_node, new_leaf_node) = if lca_level >= ROOT::LEVEL as u32 {
-            self.tree
-                .root
-                .set(&mut self.tree.pool, coords, value.is_some(), &mut self.ptrs, Some(&mut nodes_to_remove))
-        } else {
-            let meta = &self.metas[lca_level as usize];
-            let new_coords = coords & meta.extent_mask;
-            let mut ptr = self.ptrs[lca_level as usize];
-            (meta.setter)(&mut self.tree.pool, new_coords, &mut ptr, value.is_some(), &mut self.ptrs, Some(&mut nodes_to_remove))
-        };
-        if let Some(old_leaf_node) = old_leaf_node {
-            // Needs reallocation
-            let new_ptr = self.attributes.move_attribute(
-                old_leaf_node.get_value(),
-                old_leaf_node.get_occupancy(),
-                new_leaf_node.get_occupancy(),
-            );
-            new_leaf_node.set_value(new_ptr);
-        }
-    }
-}
-*/
-
 impl<
         'a,
         ROOT: Node,
@@ -105,7 +44,7 @@ impl<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
             Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
-    > Accessor<'a, ROOT, ATTRIBS, &'a mut MutableTree<ROOT>>
+    > Accessor<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
@@ -160,13 +99,12 @@ where
             ROOT::LEVEL as u32,
         );
         self.last_coords = coords;
-        let (old_leaf_node, leaf_node) = if lca_level >= ROOT::LEVEL as u32 {
+        let leaf_node = if lca_level >= ROOT::LEVEL as u32 {
             self.tree.root.set(
                 &mut self.tree.pool,
                 coords,
                 !value.is_default(),
                 &mut self.ptrs,
-                None,
             )
         } else {
             let meta = &self.metas[lca_level as usize];
@@ -178,11 +116,8 @@ where
                 &mut ptr,
                 !value.is_default(),
                 &mut self.ptrs,
-                None,
             )
         };
-        assert!(old_leaf_node.is_none()); // Because touched_nodes is None, the tree will not attempt to CoW the tree nodes.
-                                          // And the changes occur in-place.  Therefore, old_leafe_node should always be None.
 
         if let Some(last_leaf) = self.last_leaf {
             if last_leaf == self.ptrs[0] {
@@ -258,20 +193,7 @@ where
         }
     }
     pub fn end(mut self) {
-        self.can_drop = true;
         self.purge_prev_access_leaf_node();
-    }
-}
-
-impl<'a, ROOT: Node, ATTRIBS, TREE> Drop for Accessor<'a, ROOT, ATTRIBS, TREE>
-where
-    [(); ROOT::LEVEL + 1]: Sized,
-    [(); ROOT::LEVEL as usize]: Sized,
-{
-    fn drop(&mut self) {
-        if !self.can_drop {
-            panic!("Call end() before dropping Accessor");
-        }
     }
 }
 
@@ -320,7 +242,7 @@ where
     }
 }
 
-impl<ROOT: Node> MutableTree<ROOT>
+impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
@@ -334,7 +256,7 @@ where
     >(
         &'a mut self,
         attributes: &'a mut A,
-    ) -> Accessor<'a, ROOT, A, &'a mut MutableTree<ROOT>> {
+    ) -> Accessor<'a, ROOT, A> {
         let mut metas: [MaybeUninit<NodeMeta<_>>; ROOT::LEVEL + 1] = MaybeUninit::uninit_array();
         let metas_src = Self::metas();
         assert_eq!(metas.len(), metas_src.len());
@@ -347,7 +269,6 @@ where
             metas: unsafe { MaybeUninit::array_assume_init(metas) },
             last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
             attributes,
-            can_drop: false,
             last_leaf: None,
         }
     }
@@ -358,7 +279,7 @@ mod tests {
     use glam::UVec3;
 
     use super::{lowest_common_ancestor_level, Attributes};
-    use crate::{hierarchy, BitMask, MutableTree, Node, TreeLike};
+    use crate::{hierarchy, BitMask, Node, Tree};
 
     #[derive(Default)]
     struct TestAttributes {
@@ -461,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_accessor() {
-        type MyTree = MutableTree<hierarchy!(2, 4, 2, u32)>;
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
         let mut tree = MyTree::new();
 
         let mut attributes = TestAttributes::default();

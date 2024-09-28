@@ -27,15 +27,14 @@ pub struct NodeMeta<V> {
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-        touched_nodes: Option<&mut Vec<(u32, u32)>>,
-    ) -> (Option<&'a mut V>, &'a mut V),
+    ) -> &'a mut V,
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
 
     pub(crate) extent_mask: UVec3, // = (1 << extent_log2) - 1
 }
 
-pub trait Node: 'static + Send + Sync + Default {
+pub trait Node: 'static + Send + Sync + Default + Clone {
     /// span of the node.
     type LeafType: IsLeaf;
     const EXTENT_LOG2: UVec3;
@@ -74,8 +73,7 @@ pub trait Node: 'static + Send + Sync + Default {
         coords: UVec3,
         value: bool,
         cached_path: &mut [u32],
-        touched_nodes: Option<&mut Vec<(u32, u32)>>,
-    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType);
+    ) -> &'a mut Self::LeafType;
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
@@ -87,8 +85,7 @@ pub trait Node: 'static + Send + Sync + Default {
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
-        touched_nodes: Option<&mut Vec<(u32, u32)>>, // When None, copy on write is disabled.
-    ) -> (Option<&'a mut Self::LeafType>, &'a mut Self::LeafType);
+    ) -> &'a mut Self::LeafType;
 
     type Iterator<'a>: Iterator<Item = UVec3>;
     /// This is called when the node was owned as the root node in the tree.

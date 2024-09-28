@@ -3,7 +3,7 @@ use std::sync::Arc;
 use glam::{Vec2, Vec3, Vec3A};
 use parry3d::query::{PointQuery, RayCast, Unsupported};
 
-use crate::{ImmutableTree, ImmutableTreeSnapshot, MutableTree, Node, TreeLike};
+use crate::{ImTree, ImTreeSnapshot, Node, Tree, TreeLike};
 
 pub struct VdbShape {
     inner: Arc<dyn TreeLike>,

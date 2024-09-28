@@ -52,9 +52,9 @@ fn startup_system(
     mut palettes: ResMut<Assets<VoxPalette>>,
     allocator: Res<Allocator>,
 ) {
-    use dust_vdb::{hierarchy, MutableTree};
+    use dust_vdb::{hierarchy, Tree};
     use dust_vox::{AttributeAllocator, VoxMaterial, VoxModelBundle};
-    let mut snake_tree = MutableTree::<hierarchy!(3, 3, 2, u32)>::new();
+    let mut snake_tree = Tree::<hierarchy!(3, 3, 2, u32)>::new();
 
     let mut material =
         VoxMaterial(AttributeAllocator::new_with_capacity(allocator.clone(), 1024, 4, 64).unwrap());
