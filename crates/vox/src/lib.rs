@@ -16,7 +16,7 @@ use bevy::{
 use dot_vox::Color;
 use dust_vdb::{hierarchy};
 use rhyolite::ash::vk;
-use rhyolite::ecs::RenderCommands;
+use rhyolite::ecs::{RenderCommands, RenderSystemPass};
 use rhyolite::utils::AssetUploadPlugin;
 use rhyolite::{Device, RhyoliteApp};
 use std::mem::MaybeUninit;
@@ -30,7 +30,6 @@ mod resource;
 
 type TreeRoot = hierarchy!(3, 3, 2, u32);
 type Tree = dust_vdb::Tree<TreeRoot>;
-type ImTree = dust_vdb::ImTree<TreeRoot>;
 
 pub use attributes::{AttributeAllocator, VoxMaterial};
 pub use loader::*;
@@ -38,29 +37,19 @@ use rhyolite_rtx::{BLASBuilderPlugin, RtxPlugin, SbtPlugin, TLASBuilderPlugin};
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
-    tree: ImTree,
-    aabb_min: UVec3,
-    aabb_max: UVec3,
+    tree: Tree,
     unit_size: f32,
 }
 impl VoxGeometry {
-    pub fn from_tree_with_unit_size(tree: ImTree, unit_size: f32) -> Self {
+    pub fn from_tree_with_unit_size(tree: Tree, unit_size: f32) -> Self {
         Self {
-            aabb_min: UVec3::ZERO,
-            aabb_max: tree.extent(),
             tree,
             unit_size,
         }
     }
-    pub fn aabb(&self) -> (UVec3, UVec3) {
-        (self.aabb_min, self.aabb_max)
-    }
-    pub fn size(&self) -> UVec3 {
-        self.aabb_max - self.aabb_min + UVec3::ONE
-    }
 }
 impl Deref for VoxGeometry {
-    type Target = ImTree;
+    type Target = Tree;
     fn deref(&self) -> &Self::Target {
         &self.tree
     }
@@ -180,7 +169,12 @@ impl Plugin for VoxPlugin {
         app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8)
             .unwrap();
 
-        //app.add_systems(Update, physics::insert_collider_system);
+        app.add_systems(PostUpdate, tree_bind_sparse_system
+            .with_option::<RenderSystemPass>(|entry| {
+            let item = entry.or_default();
+            item.is_queue_op = true;
+            item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
+        }));
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
@@ -195,6 +189,22 @@ impl Plugin for VoxPlugin {
         {
             println!("Using staging buffer for VoxMaterial");
             app.add_systems(PostUpdate, update_materials_system);
+        }
+    }
+}
+
+fn tree_bind_sparse_system(
+    mut asset_events: EventReader<AssetEvent<VoxGeometry>>,
+    mut geometries: ResMut<Assets<VoxGeometry>>,
+) {
+    // For all changed geometries, try to bind the sparse buffer if needed
+    for event in asset_events.read() {
+        match event {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                let geometry = geometries.get_mut_untracked(*id).unwrap();
+                geometry.tree.bind_sparse();
+            }
+            _input => {}
         }
     }
 }

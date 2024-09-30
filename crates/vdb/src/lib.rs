@@ -10,8 +10,8 @@ mod accessor;
 mod bitmask;
 mod node;
 
-#[cfg(feature = "physics")]
-mod parry;
+//#[cfg(feature = "physics")]
+//mod parry;
 mod pool;
 mod traversal;
 mod tree;
@@ -23,8 +23,8 @@ pub use tree::Tree;
 pub use accessor::*;
 pub use node::*;
 
-#[cfg(feature = "physics")]
-pub use parry::{VdbQueryDispatcher, VdbShape};
+//#[cfg(feature = "physics")]
+//pub use parry::{VdbQueryDispatcher, VdbShape};
 
 pub extern crate self as dust_vdb;
 

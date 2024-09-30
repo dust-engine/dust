@@ -278,19 +278,17 @@ impl AssetLoader for VoxLoader {
                 let handles = models
                     .par_iter()
                     .map(|(model_id, model)| {
-                        let (tree, attribute_allocator, min, max) = self.model_to_tree(model);
-                        (*model_id, (tree, attribute_allocator, min, max))
+                        let (tree, attribute_allocator) = self.model_to_tree(model);
+                        (*model_id, (tree, attribute_allocator))
                     })
                     .collect_vec_list();
                 let bundles = handles.into_iter().flat_map(|a| a).map(
-                    |(model_id, (tree, material, aabb_min, aabb_max))| {
+                    |(model_id, (tree, material))| {
                         let geometry = load_context.add_labeled_asset(
                             format!("Geometry{}", model_id),
                             VoxGeometry {
-                                tree: tree.freeze(),
+                                tree,
                                 unit_size,
-                                aabb_max,
-                                aabb_min,
                             },
                         );
                         let material = load_context
@@ -328,7 +326,7 @@ impl AssetLoader for VoxLoader {
     }
 }
 impl VoxLoader {
-    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial, UVec3, UVec3) {
+    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial) {
         let mut tree = crate::Tree::new();
         let mut material = VoxMaterial(
             AttributeAllocator::new_with_capacity(
@@ -367,6 +365,6 @@ impl VoxLoader {
         accessor.end();
         material.0.buffer_mut().flush(..);
 
-        (tree, material, min, max)
+        (tree, material)
     }
 }

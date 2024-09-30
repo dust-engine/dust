@@ -1378,6 +1378,7 @@ dependencies = [
  "nohash",
  "parry3d",
  "rand",
+ "rhyolite",
 ]
 
 [[package]]

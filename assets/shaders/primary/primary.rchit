@@ -37,7 +37,7 @@ void main() {
     #endif
 
     palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
-    u8vec4 color = sbt.paletteInfo.palette[palette_index];
+    u8vec4 color = sbt.paletteInfo.palette[palette_index-1];
 
     vec3 albedo = color.xyz / 255.0;
 

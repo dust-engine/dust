@@ -130,4 +130,8 @@ where
         ROOT::write_meta(&mut vec);
         vec
     }
+
+    pub fn bind_sparse(&mut self) -> impl ExactSizeIterator<Item = rhyolite::ash::vk::SparseMemoryBind> + '_ {
+        self.pool[0].bind_sparse()
+    }
 }

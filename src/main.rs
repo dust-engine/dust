@@ -34,7 +34,7 @@ fn main() {
 
     app.add_systems(Startup, startup_system)
         .add_systems(Update, teapot_move_system)
-        .add_systems(Update, ray_cast)
+        //.add_systems(Update, ray_cast)
         .add_systems(Update, player_movement);
 
     app.run();

@@ -28,6 +28,7 @@ impl PluginGroup for DustPlugin {
             .add(bevy::scene::ScenePlugin)
             .add::<bevy::winit::WinitPlugin>(bevy::winit::WinitPlugin::default());
 
+        /*
         #[cfg(feature = "physics")]
         {
             use bevy_rapier3d::parry::query::{DefaultQueryDispatcher, QueryDispatcher};
@@ -44,6 +45,7 @@ impl PluginGroup for DustPlugin {
                 group = group.add(bevy_rapier3d::prelude::RapierDebugRenderPlugin::default());
             }
         }
+        */
 
         group = group.add(rhyolite::SurfacePlugin::default());
 
