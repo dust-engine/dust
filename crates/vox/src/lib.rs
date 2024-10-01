@@ -14,11 +14,11 @@ use bevy::{
     transform::components::{GlobalTransform, Transform},
 };
 use dot_vox::Color;
-use dust_vdb::{hierarchy};
+use dust_vdb::hierarchy;
 use rhyolite::ash::vk;
-use rhyolite::ecs::{RenderCommands, RenderSystemPass};
+use rhyolite::ecs::{RenderCommands, RenderSystemPass, SubmissionInfo};
 use rhyolite::utils::AssetUploadPlugin;
-use rhyolite::{Device, RhyoliteApp};
+use rhyolite::{Device, Queues, RhyoliteApp};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
@@ -42,10 +42,7 @@ pub struct VoxGeometry {
 }
 impl VoxGeometry {
     pub fn from_tree_with_unit_size(tree: Tree, unit_size: f32) -> Self {
-        Self {
-            tree,
-            unit_size,
-        }
+        Self { tree, unit_size }
     }
 }
 impl Deref for VoxGeometry {
@@ -169,12 +166,14 @@ impl Plugin for VoxPlugin {
         app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8)
             .unwrap();
 
-        app.add_systems(PostUpdate, tree_bind_sparse_system
-            .with_option::<RenderSystemPass>(|entry| {
-            let item = entry.or_default();
-            item.is_queue_op = true;
-            item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
-        }));
+        app.add_systems(
+            PostUpdate,
+            tree_bind_sparse_system.with_option::<RenderSystemPass>(|entry| {
+                let item = entry.or_default();
+                item.is_queue_op = true;
+                item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
+            }),
+        );
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
@@ -196,16 +195,71 @@ impl Plugin for VoxPlugin {
 fn tree_bind_sparse_system(
     mut asset_events: EventReader<AssetEvent<VoxGeometry>>,
     mut geometries: ResMut<Assets<VoxGeometry>>,
+    submission_info: SubmissionInfo,
+    queues: Res<Queues>,
+    device: Res<Device>,
 ) {
+    let mut sparse_memory_binds: Vec<vk::SparseMemoryBind> = Vec::new();
+    let mut buffer_binds: Vec<vk::SparseBufferMemoryBindInfo> = Vec::new();
+
     // For all changed geometries, try to bind the sparse buffer if needed
     for event in asset_events.read() {
         match event {
             AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                 let geometry = geometries.get_mut_untracked(*id).unwrap();
-                geometry.tree.bind_sparse();
+                let (buffer, iter) = geometry.bind_sparse();
+                buffer_binds.push(vk::SparseBufferMemoryBindInfo {
+                    buffer,
+                    bind_count: iter.len() as u32,
+                    ..Default::default()
+                });
+                sparse_memory_binds.extend(iter);
             }
             _input => {}
         }
+    }
+    if buffer_binds.is_empty() {
+        return;
+    }
+    // Assign to p_binds later to avoid reallocations when extending sparse_memory_binds
+    buffer_binds.iter_mut().fold(0_usize, |count, item| unsafe {
+        item.p_binds = sparse_memory_binds.as_ptr().add(count);
+        count + item.bind_count as usize
+    });
+
+    let queue = queues.get(submission_info.queue);
+    let info = submission_info.info.lock().unwrap();
+    assert!(!info.last_buf_open);
+    let (semaphore_signals, semaphore_signal_values): (Vec<_>, Vec<_>) = info
+        .signal_semaphore
+        .iter()
+        .map(|semaphore| (semaphore.raw(), info.signal_semaphore_value))
+        .unzip();
+    let (semaphore_waits, semaphore_wait_values): (Vec<_>, Vec<_>) = info
+        .wait_semaphores
+        .iter()
+        .map(|(_stage, semaphore, value)| (semaphore.raw(), *value))
+        .unzip();
+    unsafe {
+        device
+            .queue_bind_sparse(
+                *queue,
+                &[vk::BindSparseInfo {
+                    ..Default::default()
+                }
+                .buffer_binds(&buffer_binds)
+                .signal_semaphores(&semaphore_signals)
+                .wait_semaphores(&semaphore_waits)
+                .push_next(
+                    &mut vk::TimelineSemaphoreSubmitInfo {
+                        ..Default::default()
+                    }
+                    .signal_semaphore_values(&semaphore_signal_values)
+                    .wait_semaphore_values(&semaphore_wait_values),
+                )],
+                vk::Fence::null(),
+            )
+            .unwrap();
     }
 }
 

@@ -230,11 +230,12 @@ impl Pool {
         }
     }
 
-    pub(crate) fn bind_sparse(&mut self) -> impl ExactSizeIterator<Item = vk::SparseMemoryBind> + '_ {
+    pub(crate) fn bind_sparse(&mut self) -> (vk::Buffer, impl ExactSizeIterator<Item = vk::SparseMemoryBind> + '_) {
         let num_chunks_to_bind = self.gpu_pool.as_ref().map(|x| x.num_chunks_to_bind).unwrap_or(0);
+        let buffer = self.gpu_pool.as_ref().map(|x| x.device_buffer).unwrap_or_default();
         let (chunk_allocations, allocator) = self.gpu_pool.as_mut().map(|x| (x.device_allocations.as_mut_slice(), Some(&x.allocator))).unwrap_or((&mut [], None));
         let num_skips = chunk_allocations.len() - num_chunks_to_bind as usize;
-        chunk_allocations.iter_mut().skip(num_skips).map(move |chunk| {
+        let iter = chunk_allocations.iter_mut().skip(num_skips).map(move |chunk| {
             let allocation = allocator.unwrap().get_allocation_info(chunk);
             vk::SparseMemoryBind {
                 resource_offset: allocation.offset,
@@ -243,7 +244,8 @@ impl Pool {
                 memory_offset: allocation.offset,
                 flags: vk::SparseMemoryBindFlags::empty(),
             }
-        })
+        });
+        (buffer,iter)
     }
 }
 

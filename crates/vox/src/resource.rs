@@ -8,7 +8,7 @@ use rhyolite::utils::GPUAsset;
 use rhyolite::ash::vk;
 
 use crate::{VoxGeometry, VoxMaterial, VoxPalette};
-use dust_vdb::{IsLeaf};
+use dust_vdb::IsLeaf;
 use rhyolite::{Allocator, Buffer};
 
 #[derive(Asset, TypePath)]

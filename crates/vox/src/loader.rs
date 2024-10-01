@@ -282,26 +282,25 @@ impl AssetLoader for VoxLoader {
                         (*model_id, (tree, attribute_allocator))
                     })
                     .collect_vec_list();
-                let bundles = handles.into_iter().flat_map(|a| a).map(
-                    |(model_id, (tree, material))| {
-                        let geometry = load_context.add_labeled_asset(
-                            format!("Geometry{}", model_id),
-                            VoxGeometry {
-                                tree,
-                                unit_size,
-                            },
-                        );
-                        let material = load_context
-                            .add_labeled_asset(format!("Material{}", model_id), material);
-                        let bundle = VoxModelBundle {
-                            geometry,
-                            material,
-                            palette: palette_handle.clone(),
-                            marker: crate::VoxModel,
-                        };
-                        bundle
-                    },
-                );
+                let bundles =
+                    handles
+                        .into_iter()
+                        .flat_map(|a| a)
+                        .map(|(model_id, (tree, material))| {
+                            let geometry = load_context.add_labeled_asset(
+                                format!("Geometry{}", model_id),
+                                VoxGeometry { tree, unit_size },
+                            );
+                            let material = load_context
+                                .add_labeled_asset(format!("Material{}", model_id), material);
+                            let bundle = VoxModelBundle {
+                                geometry,
+                                material,
+                                palette: palette_handle.clone(),
+                                marker: crate::VoxModel,
+                            };
+                            bundle
+                        });
                 let entities = world.spawn_batch(bundles);
                 BTreeMap::from_iter(referenced_models.into_iter().zip(entities))
             };

@@ -13,7 +13,7 @@ use bevy::{
     transform::components::GlobalTransform,
 };
 use dust_pbr::PbrPipeline;
-use dust_vdb::{Node};
+use dust_vdb::Node;
 use rhyolite::{
     ash::vk, commands::TransferCommands, pipeline::PipelineCache, shader::SpecializedShader,
     staging::StagingBelt, Allocator, Buffer, BufferLike,
