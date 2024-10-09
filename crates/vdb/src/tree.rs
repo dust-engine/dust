@@ -1,6 +1,7 @@
 use std::mem::MaybeUninit;
 
 use glam::UVec3;
+use rhyolite::{ash::vk, Allocator};
 
 use crate::{AabbU32, IsLeaf, Node, NodeMeta, Pool};
 
@@ -33,10 +34,35 @@ where
         ROOT: Node,
     {
         let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
-        for (i, meta) in Self::metas().iter().take(ROOT::LEVEL).enumerate() {
+        let metas = Self::metas();
+        for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate() {
+            // Create CPU pool for levels 1..LEVEL
             let pool = Pool::new(meta.layout, 10);
             pools[i].write(pool);
         }
+
+        let pools: [Pool; ROOT::LEVEL as usize] = unsafe {
+            // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504
+            (&*(&MaybeUninit::new(pools) as *const _ as *const MaybeUninit<_>)).assume_init_read()
+        };
+        Self {
+            root: ROOT::default(),
+            pool: pools,
+            aabb: AabbU32::default(),
+        }
+    }
+    pub fn new_with_gpu_mapped_leaves(allocator: Allocator, max_size: u64) -> Self
+    where
+        ROOT: Node,
+    {
+        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
+        let metas = Self::metas();
+        for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate().skip(1) {
+            // Create CPU pool for levels 1..LEVEL
+            let pool = Pool::new(meta.layout, 10);
+            pools[i].write(pool);
+        }
+        pools[0].write(Pool::new_gpu_pool(metas[0].layout, 10, allocator, max_size, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).unwrap());
 
         let pools: [Pool; ROOT::LEVEL as usize] = unsafe {
             // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504

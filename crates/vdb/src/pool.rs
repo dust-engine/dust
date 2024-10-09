@@ -82,8 +82,11 @@ impl Pool {
         chunk_size_log2: usize,
         allocator: rhyolite::Allocator,
         max_size: u64,
-        usage: vk::BufferUsageFlags,
+        mut usage: vk::BufferUsageFlags,
     ) -> VkResult<Self> {
+        if allocator.device().physical_device().properties().memory_model.storage_buffer_should_use_staging() {
+            usage |= vk::BufferUsageFlags::TRANSFER_DST;
+        }
         let device_buffer = unsafe {
             allocator.device().create_buffer(&vk::BufferCreateInfo {
                 flags: vk::BufferCreateFlags::SPARSE_RESIDENCY,

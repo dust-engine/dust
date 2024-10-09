@@ -326,7 +326,7 @@ impl AssetLoader for VoxLoader {
 }
 impl VoxLoader {
     fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial) {
-        let mut tree = crate::Tree::new();
+        let mut tree = crate::Tree::new_with_gpu_mapped_leaves(self.allocator, model.voxels.len());
         let mut material = VoxMaterial(
             AttributeAllocator::new_with_capacity(
                 self.allocator.clone(),
