@@ -155,6 +155,10 @@ impl Plugin for VoxPlugin {
 
         app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.shader_int16)
             .unwrap();
+        app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.sparse_residency_buffer)
+            .unwrap();
+        app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.sparse_binding)
+            .unwrap();
         app.enable_feature::<vk::PhysicalDevice8BitStorageFeatures>(|x| {
             &mut x.storage_buffer8_bit_access
         })
@@ -172,7 +176,8 @@ impl Plugin for VoxPlugin {
                 let item = entry.or_default();
                 item.is_queue_op = true;
                 item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
-            }),
+            })
+            .before(dust_pbr::PbrRendererSystemSet),
         );
     }
     fn finish(&self, app: &mut App) {
@@ -192,7 +197,7 @@ impl Plugin for VoxPlugin {
     }
 }
 
-fn tree_bind_sparse_system(
+pub fn tree_bind_sparse_system(
     mut asset_events: EventReader<AssetEvent<VoxGeometry>>,
     mut geometries: ResMut<Assets<VoxGeometry>>,
     submission_info: SubmissionInfo,

@@ -89,7 +89,7 @@ impl Pool {
         }
         let device_buffer = unsafe {
             allocator.device().create_buffer(&vk::BufferCreateInfo {
-                flags: vk::BufferCreateFlags::SPARSE_RESIDENCY,
+                flags: vk::BufferCreateFlags::SPARSE_RESIDENCY | vk::BufferCreateFlags::SPARSE_BINDING,
                 size: max_size,
                 usage,
                 ..Default::default()
@@ -139,7 +139,7 @@ impl Pool {
     unsafe fn alloc_new_chunk(&mut self) -> VkResult<()>{
         let (layout, _) = self.layout.repeat(1 << self.chunk_size_log2).unwrap();
         if let Some(gpu_pool) = self.gpu_pool.as_mut() {
-            if gpu_pool.allocator.device().physical_device().properties().memory_model.storage_buffer_should_use_staging() {
+            let ptr = if gpu_pool.allocator.device().physical_device().properties().memory_model.storage_buffer_should_use_staging() {
                 let device_allocation = gpu_pool.allocator.allocate_memory_for_buffer(
                     gpu_pool.device_buffer, &AllocationCreateInfo {
                         usage: rhyolite::vk_mem::MemoryUsage::AutoPreferDevice,
@@ -147,29 +147,34 @@ impl Pool {
                     ..Default::default()
                 })?;
                 
-                let (host_buffer, host_allocation) = gpu_pool.allocator.create_buffer(&vk::BufferCreateInfo {
+                let (host_buffer, mut host_allocation) = gpu_pool.allocator.create_buffer(&vk::BufferCreateInfo {
                     size: layout.size() as u64,
                     usage: vk::BufferUsageFlags::TRANSFER_SRC,
                     ..Default::default()
                 }, &AllocationCreateInfo {
-                    usage: rhyolite::vk_mem::MemoryUsage::AutoPreferHost,
+                    usage: rhyolite::vk_mem::MemoryUsage::Unknown,
                     required_flags: vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_CACHED,
                     ..Default::default()
                 })?;
-                self.chunks.push(gpu_pool.allocator.get_allocation_info(&host_allocation).mapped_data as *mut u8);
+                let ptr = gpu_pool.allocator.map_memory(&mut host_allocation)?;
                 gpu_pool.device_allocations.push(device_allocation);
                 gpu_pool.host_allocations.push((host_buffer, host_allocation));
+                ptr
 
             } else {
-                let allocation = gpu_pool.allocator.allocate_memory_for_buffer(
+                let mut allocation = gpu_pool.allocator.allocate_memory_for_buffer(
                     gpu_pool.device_buffer, &AllocationCreateInfo {
-                        usage: rhyolite::vk_mem::MemoryUsage::Auto,
-                        required_flags: vk::MemoryPropertyFlags::HOST_VISIBLE,
+                        usage: rhyolite::vk_mem::MemoryUsage::Unknown,
+                        required_flags: vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_CACHED,
+                        preferred_flags: vk::MemoryPropertyFlags::DEVICE_LOCAL,
                     ..Default::default()
                 })?;
-                self.chunks.push(gpu_pool.allocator.get_allocation_info(&allocation).mapped_data as *mut u8);
+                let ptr = gpu_pool.allocator.map_memory(&mut allocation)?;
                 gpu_pool.device_allocations.push(allocation);
-            }
+                ptr
+            };
+            assert!(!ptr.is_null());
+            self.chunks.push(ptr);
             gpu_pool.num_chunks_to_bind += 1;
         } else {
             let block = std::alloc::alloc_zeroed(layout);

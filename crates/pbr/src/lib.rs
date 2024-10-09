@@ -14,6 +14,9 @@ use rhyolite::{acquire_swapchain_image, ecs::IntoRenderSystemConfigs, present, R
 #[cfg(feature = "gizmos")]
 mod gizmos;
 
+#[derive(SystemSet, Hash, Debug, Clone, Eq, PartialEq)]
+pub struct PbrRendererSystemSet;
+
 pub struct PbrRendererPlugin;
 impl Plugin for PbrRendererPlugin {
     fn build(&self, app: &mut App) {
@@ -24,6 +27,7 @@ impl Plugin for PbrRendererPlugin {
                 .after(acquire_swapchain_image::<With<PrimaryWindow>>)
                 .after(rhyolite_rtx::build_tlas::<rhyolite_rtx::DefaultTLAS>)
                 .before(present)
+                .in_set(PbrRendererSystemSet)
                 .with_barriers(PbrPipeline::trace_primary_rays_barrier);
 
             // Draw the gizmos after the ray tracing renderer
