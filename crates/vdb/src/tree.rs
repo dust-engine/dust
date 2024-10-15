@@ -62,7 +62,7 @@ where
             let pool = Pool::new(meta.layout, 10);
             pools[i].write(pool);
         }
-        pools[0].write(Pool::new_gpu_pool(metas[0].layout, 10, allocator, max_size, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).unwrap());
+        pools[0].write(Pool::new_gpu_pool(metas[0].layout, 12, allocator, max_size, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).unwrap());
 
         let pools: [Pool; ROOT::LEVEL as usize] = unsafe {
             // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504

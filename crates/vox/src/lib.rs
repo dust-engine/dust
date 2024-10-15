@@ -233,7 +233,7 @@ pub fn tree_bind_sparse_system(
     });
 
     let queue = queues.get(submission_info.queue);
-    let info = submission_info.info.lock().unwrap();
+    let mut info = submission_info.info.lock().unwrap();
     assert!(!info.last_buf_open);
     let (semaphore_signals, semaphore_signal_values): (Vec<_>, Vec<_>) = info
         .signal_semaphore
@@ -266,6 +266,11 @@ pub fn tree_bind_sparse_system(
             )
             .unwrap();
     }
+    
+    info.signal_semaphore_value += 1;
+    info.wait_semaphores.clear();
+    info.signal_binary_semaphore = vk::Semaphore::null();
+    info.wait_binary_semaphore = vk::Semaphore::null();
 }
 
 fn update_materials_system(

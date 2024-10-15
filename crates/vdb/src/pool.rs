@@ -11,8 +11,10 @@ pub struct Pool {
     /// Top of free items.
     top: u32,
     /// Number of items to request when we run out of space.
-    /// When running out of space, request (1 << chunk_size_log2) * size bytes.
-    chunk_size_log2: usize,
+    /// When running out of space, request chunk_size bytes.
+    chunk_size: u64,
+    /// Log2 of number of items in a chunk
+    num_items_per_chunk: usize,
     chunks: Vec<*mut u8>,
 
     count: u32,
@@ -68,20 +70,22 @@ unsafe impl Sync for Pool {}
 /// }
 /// ```
 impl Pool {
-    pub fn new(layout: Layout, chunk_size_log2: usize) -> Self {
+    pub fn new(layout: Layout, num_items_per_chunk: usize) -> Self {
+        let chunk_size = layout.pad_to_align().size() * (1 << num_items_per_chunk);
         Self {
             layout: layout.pad_to_align(),
             head: u32::MAX,
             top: 0,
-            chunk_size_log2,
+            chunk_size: chunk_size as u64,
             chunks: Vec::new(),
             count: 0,
+            num_items_per_chunk,
             gpu_pool: None,
         }
     }
     pub fn new_gpu_pool(
         layout: Layout,
-        chunk_size_log2: usize,
+        min_num_items_per_chunk: usize,
         allocator: rhyolite::Allocator,
         max_size: u64,
         mut usage: vk::BufferUsageFlags,
@@ -97,14 +101,16 @@ impl Pool {
                 ..Default::default()
             }, None)?
         };
-        let mut pool = Self::new(layout, chunk_size_log2);
+        let device_buffer_memory_requirements = unsafe {
+            allocator.device().get_buffer_memory_requirements(device_buffer)
+        };
+        let mut pool = Self::new(layout, min_num_items_per_chunk);
+        // TODO: ensure that the chunk size plays well with the buffer alignment requirments.
         pool.gpu_pool = Some(GPUPool {
             device_allocations: Vec::new(),
             host_allocations: Vec::new(),
             device_buffer,
-            device_buffer_memory_requirements: unsafe {
-                allocator.device().get_buffer_memory_requirements(device_buffer)
-            },
+            device_buffer_memory_requirements,
             num_chunks_to_bind: 0,
             allocator,
         });
@@ -125,7 +131,7 @@ impl Pool {
         if self.head == u32::MAX {
             // allocate new
             let top = self.top;
-            let chunk_index = top as usize >> self.chunk_size_log2;
+            let chunk_index = top as usize >> self.num_items_per_chunk;
             if chunk_index >= self.chunks.len() {
                 // allocate new block
                 self.alloc_new_chunk();
@@ -142,12 +148,11 @@ impl Pool {
         }
     }
     unsafe fn alloc_new_chunk(&mut self) -> VkResult<()>{
-        let (chunk_layout, _) = self.layout.repeat(1 << self.chunk_size_log2).unwrap();
         if let Some(gpu_pool) = self.gpu_pool.as_mut() {
             let ptr = if gpu_pool.allocator.device().physical_device().properties().memory_model.storage_buffer_should_use_staging() {
                 let device_allocation = gpu_pool.allocator.allocate_memory(
                     &vk::MemoryRequirements {
-                        size: chunk_layout.size() as u64,
+                        size: self.chunk_size,
                         ..gpu_pool.device_buffer_memory_requirements
                     },
                     &AllocationCreateInfo {
@@ -157,7 +162,7 @@ impl Pool {
                 })?;
                 
                 let (host_buffer, mut host_allocation) = gpu_pool.allocator.create_buffer(&vk::BufferCreateInfo {
-                    size: chunk_layout.size() as u64,
+                    size: self.chunk_size,
                     usage: vk::BufferUsageFlags::TRANSFER_SRC,
                     ..Default::default()
                 }, &AllocationCreateInfo {
@@ -173,7 +178,7 @@ impl Pool {
             } else {
                 let mut allocation = gpu_pool.allocator.allocate_memory(
                     &vk::MemoryRequirements {
-                        size: chunk_layout.size() as u64,
+                        size: self.chunk_size,
                         ..gpu_pool.device_buffer_memory_requirements
                     },
                     &AllocationCreateInfo {
@@ -191,7 +196,8 @@ impl Pool {
             self.chunks.push(ptr);
             gpu_pool.num_chunks_to_bind += 1;
         } else {
-            let block = std::alloc::alloc_zeroed(chunk_layout);
+            let layout = Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
+            let block = std::alloc::alloc_zeroed(layout);
             self.chunks.push(block);
         }
         Ok(())
@@ -219,8 +225,8 @@ impl Pool {
 
     #[inline]
     pub unsafe fn get(&self, ptr: u32) -> *const u8 {
-        let chunk_index = (ptr as usize) >> self.chunk_size_log2;
-        let item_index = (ptr as usize) & ((1 << self.chunk_size_log2) - 1);
+        let chunk_index = (ptr as usize) >> self.num_items_per_chunk;
+        let item_index = (ptr as usize) & ((1 << self.num_items_per_chunk) - 1);
         return self
             .chunks
             .get_unchecked(chunk_index)
@@ -253,18 +259,16 @@ impl Pool {
     }
 
     pub(crate) fn bind_sparse(&mut self) -> (vk::Buffer, impl ExactSizeIterator<Item = vk::SparseMemoryBind> + '_) {
-        let (chunk_layout, _) = self.layout.repeat(1 << self.chunk_size_log2).unwrap();
-
-
         let num_chunks_to_bind = self.gpu_pool.as_ref().map(|x| x.num_chunks_to_bind).unwrap_or(0);
+        let chunk_size = self.chunk_size;
         let buffer = self.gpu_pool.as_ref().map(|x| x.device_buffer).unwrap_or_default();
         let (chunk_allocations, allocator) = self.gpu_pool.as_mut().map(|x| (x.device_allocations.as_mut_slice(), Some(&x.allocator))).unwrap_or((&mut [], None));
         let num_skips = chunk_allocations.len() - num_chunks_to_bind as usize;
         let iter = chunk_allocations.iter_mut().enumerate().skip(num_skips).map(move |(i, chunk)| {
             let allocation = allocator.unwrap().get_allocation_info(chunk);
             vk::SparseMemoryBind {
-                resource_offset: i as u64 * chunk_layout.size() as u64,
-                size: chunk_layout.size() as u64,
+                resource_offset: i as u64 * chunk_size,
+                size: chunk_size,
                 memory: allocation.device_memory,
                 memory_offset: allocation.offset,
                 flags: vk::SparseMemoryBindFlags::empty(),
@@ -303,7 +307,7 @@ impl Drop for Pool {
         } else {
             // CPU Pool. Drop all chunks using host allocator.
             unsafe {
-                let (layout, _) = self.layout.repeat(1 << self.chunk_size_log2).unwrap();
+                let layout = Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
                 for chunk in self.chunks.iter() {
                     let chunk = *chunk;
                     std::alloc::dealloc(chunk, layout);
