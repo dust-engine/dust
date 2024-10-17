@@ -36,8 +36,8 @@ where
         let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
         let metas = Self::metas();
         for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate() {
-            // Create CPU pool for levels 1..LEVEL
-            let pool = Pool::new(meta.layout, 10);
+            // Create CPU pool for levels 1..LEVEL. 1024 internal nodes at each level
+            let pool = Pool::new(meta.layout, meta.layout.pad_to_align().size() * (1 << 10));
             pools[i].write(pool);
         }
 
@@ -58,11 +58,12 @@ where
         let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] = MaybeUninit::uninit_array();
         let metas = Self::metas();
         for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate().skip(1) {
-            // Create CPU pool for levels 1..LEVEL
-            let pool = Pool::new(meta.layout, 10);
+            // Create CPU pool for levels 1..LEVEL. 1024 internal nodes at each level.
+            let pool = Pool::new(meta.layout, meta.layout.pad_to_align().size() * (1 << 10));
             pools[i].write(pool);
         }
-        pools[0].write(Pool::new_gpu_pool(metas[0].layout, 12, allocator, max_size, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).unwrap());
+        // 64KB GPU pages
+        pools[0].write(Pool::new_gpu_pool(metas[0].layout, 64 * 1024, allocator, max_size, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).unwrap());
 
         let pools: [Pool; ROOT::LEVEL as usize] = unsafe {
             // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504

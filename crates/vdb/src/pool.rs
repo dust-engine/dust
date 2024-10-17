@@ -14,7 +14,7 @@ pub struct Pool {
     /// When running out of space, request chunk_size bytes.
     chunk_size: u64,
     /// Log2 of number of items in a chunk
-    num_items_per_chunk: usize,
+    num_items_per_chunk: u32,
     chunks: Vec<*mut u8>,
 
     count: u32,
@@ -48,6 +48,15 @@ impl Drop for GPUPool {
 unsafe impl Send for Pool {}
 unsafe impl Sync for Pool {}
 
+
+fn bit_width(num: usize) -> u32 {
+    if num == 0 {
+        0
+    } else {
+        usize::BITS - num.leading_zeros()
+    }
+}
+
 /// A memory pool for objects of the same layout.
 /// ```
 /// use std::alloc::Layout;
@@ -70,8 +79,11 @@ unsafe impl Sync for Pool {}
 /// }
 /// ```
 impl Pool {
-    pub fn new(layout: Layout, num_items_per_chunk: usize) -> Self {
-        let chunk_size = layout.pad_to_align().size() * (1 << num_items_per_chunk);
+    pub fn new(layout: Layout, chunk_size: usize) -> Self {
+        let num_items_per_chunk = bit_width(chunk_size / layout.pad_to_align().size()) - 1;
+        assert_eq!(chunk_size % layout.pad_to_align().size(), 0, "Gaps in layout for the chosen chunk size");
+        assert_eq!(chunk_size, layout.pad_to_align().size() * (1 << num_items_per_chunk));
+    
         Self {
             layout: layout.pad_to_align(),
             head: u32::MAX,
@@ -85,7 +97,7 @@ impl Pool {
     }
     pub fn new_gpu_pool(
         layout: Layout,
-        min_num_items_per_chunk: usize,
+        min_chunk_size: usize,
         allocator: rhyolite::Allocator,
         max_size: u64,
         mut usage: vk::BufferUsageFlags,
@@ -104,7 +116,7 @@ impl Pool {
         let device_buffer_memory_requirements = unsafe {
             allocator.device().get_buffer_memory_requirements(device_buffer)
         };
-        let mut pool = Self::new(layout, min_num_items_per_chunk);
+        let mut pool = Self::new(layout, min_chunk_size.max(device_buffer_memory_requirements.alignment as usize));
         // TODO: ensure that the chunk size plays well with the buffer alignment requirments.
         pool.gpu_pool = Some(GPUPool {
             device_allocations: Vec::new(),
