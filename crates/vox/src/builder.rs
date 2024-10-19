@@ -24,7 +24,7 @@ use rhyolite_rtx::{
 };
 
 use crate::{
-    resource::{VoxGeometryGPU, VoxPaletteGPU},
+    resource::{VoxPaletteGPU},
     VoxPalette,
 };
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial};
@@ -172,7 +172,7 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
     type Params = (
         SRes<AssetServer>,
         SRes<Assets<VoxMaterial>>,
-        SRes<Assets<VoxGeometryGPU>>,
+        SRes<Assets<VoxGeometry>>,
         SRes<Assets<VoxPaletteGPU>>,
         SResMut<PbrPipeline>,
         SRes<PipelineCache>,
@@ -224,7 +224,7 @@ impl rhyolite_rtx::SBTBuilder for VoxSbtBuilder {
             .get(material.id().untyped().typed_unchecked())
             .unwrap();
         ret.palette_ptr = palette.0.device_address();
-        ret.geometry_ptr = geometry.0.device_address();
+        ret.geometry_ptr = geometry.gpu_mapped_leaves_device_address();
         ret.material_ptr = material.0.buffer().device_address();
     }
 

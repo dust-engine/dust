@@ -158,17 +158,17 @@ where
             let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones(); // can optimize here
             if old_attrib_occupancy_count > 0 {
                 self.attributes
-                    .free_attributes(*leaf_node.get_value(), old_attrib_occupancy_count);
+                    .free_attributes(leaf_node.get_value(), old_attrib_occupancy_count);
             }
             leaf_node.set_occupancy_at(coords, true);
 
             // Hint: just need to get the old attrib_occupancy now.
-            leaf_node.set_value(new_attrib_ptr);
             self.attributes.set_attribute(
                 &new_attrib_ptr,
                 <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
                 value,
             );
+            leaf_node.set_value(new_attrib_ptr);
         };
     }
 
@@ -177,7 +177,7 @@ where
             // purge prev access leaf node by fitting its attributes
             let prev_access_leaf_node =
                 unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
-            let old_attrib_ptr = *prev_access_leaf_node.get_value();
+            let old_attrib_ptr = prev_access_leaf_node.get_value();
             if !prev_access_leaf_node.get_occupancy().is_maxed() {
                 // fitting attributes by realloc and copy
                 let new_attrib_ptr = self.attributes.copy_attribute(
@@ -185,9 +185,9 @@ where
                     &ATTRIBS::Occupancy::MAXED,
                     prev_access_leaf_node.get_occupancy(),
                 );
-                prev_access_leaf_node.set_value(new_attrib_ptr);
                 self.attributes
                     .free_attributes(old_attrib_ptr, ROOT::LeafType::SIZE as u32);
+                prev_access_leaf_node.set_value(new_attrib_ptr);
             }
             self.last_leaf = None;
         }
@@ -211,7 +211,7 @@ pub trait Attributes {
     fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value;
     fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value];
     fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value);
-    fn free_attributes(&mut self, ptr: Self::Ptr, num_attributes: u32);
+    fn free_attributes(&mut self, ptr: &Self::Ptr, num_attributes: u32);
 
     /// Allocate a new attribute range using the new mask. Then, copy the attributes from the attribute range
     /// pointed to by `ptr` to the newly allocated attribute range. Returns the pointer to the new attribute range.
@@ -305,11 +305,11 @@ mod tests {
             self.attribute_maps[*ptr as usize][offset as usize] = value;
         }
 
-        fn free_attributes(&mut self, ptr: Self::Ptr, num_attributes: u32) {
+        fn free_attributes(&mut self, ptr: &Self::Ptr, num_attributes: u32) {
             println!("free {} attributes: {}", num_attributes, ptr);
-            let slice = &self.attribute_maps[ptr as usize];
+            let slice = &self.attribute_maps[*ptr as usize];
             assert_eq!(slice.len(), num_attributes as usize);
-            self.attribute_maps[ptr as usize] = Vec::new();
+            self.attribute_maps[*ptr as usize] = Vec::new();
         }
 
         fn copy_attribute(

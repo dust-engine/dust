@@ -24,7 +24,7 @@ where
 pub trait IsLeaf: Node {
     /// Total number of voxels in the leaf node.
     type Occupancy: IsBitMask;
-    type Value: Default + Send + Sync + PartialEq + Eq + Clone + Copy;
+    type Value: Default + Send + Sync + Clone;
     fn get_occupancy(&self) -> &Self::Occupancy;
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
 
@@ -44,7 +44,7 @@ pub trait IsLeaf: Node {
     fn get_fully_mapped_offset(coords: UVec3) -> u32;
 }
 
-impl<const LOG2: ConstUVec3, T: Copy + Eq + Send + Sync + 'static + Default> IsLeaf
+impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> IsLeaf
     for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
@@ -81,7 +81,7 @@ where
     }
 }
 
-impl<const LOG2: ConstUVec3, T: Copy + Eq + Send + Sync + 'static + Default> Node
+impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> Node
     for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,

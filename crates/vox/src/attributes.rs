@@ -8,6 +8,8 @@ use rhyolite::{
     Allocator, Device, ManagedBuffer,
 };
 
+use crate::VoxLeafNode;
+
 /// Suballocating ManagedBuffer.
 /// This is designed specifically for allocating attributes.
 pub struct AttributeAllocator {
@@ -97,18 +99,18 @@ pub struct VoxMaterial(pub AttributeAllocator);
 impl dust_vdb::Attributes for VoxMaterial {
     /// 0 for air, and 1 ..= 255 for the offset into the palette.
     type Value = u8;
-    type Ptr = u32;
-    type Occupancy = dust_vdb::BitMask<64>;
+    type Ptr = VoxLeafNode;
+    type Occupancy = dust_vdb::BitMask<512>;
 
-    fn free_attributes(&mut self, ptr: Self::Ptr, num_attributes: u32) {
-        self.0.free(ptr, num_attributes);
+    fn free_attributes(&mut self, ptr: &Self::Ptr, num_attributes: u32) {
+        self.0.free(ptr.material_ptr, num_attributes);
     }
 
     fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value {
-        self.0.buffer()[*ptr as usize + offset as usize]
+        self.0.buffer()[ptr.material_ptr as usize + offset as usize]
     }
     fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value] {
-        &self.0.buffer()[*ptr as usize..(*ptr as usize + len as usize)]
+        &self.0.buffer()[ptr.material_ptr as usize..(ptr.material_ptr as usize + len as usize)]
     }
 
     fn copy_attribute(
@@ -119,7 +121,7 @@ impl dust_vdb::Attributes for VoxMaterial {
     ) -> Self::Ptr {
         let new_ptr = self.0.allocate(new_mask.count_ones() as u32);
         let mut new_ptr_cur = new_ptr;
-        let mut old_ptr_cur = *ptr;
+        let mut old_ptr_cur = ptr.material_ptr;
         for bit in (original_mask | new_mask).iter_set_bits() {
             if new_mask.get(bit) && original_mask.get(bit) {
                 // copy it over
@@ -132,10 +134,13 @@ impl dust_vdb::Attributes for VoxMaterial {
                 old_ptr_cur += 1;
             }
         }
-        new_ptr
+        VoxLeafNode {
+            material_ptr: new_ptr,
+            ..*ptr
+        }
     }
 
     fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
-        self.0.buffer_mut()[*ptr as usize + offset as usize] = value;
+        self.0.buffer_mut()[ptr.material_ptr as usize + offset as usize] = value;
     }
 }

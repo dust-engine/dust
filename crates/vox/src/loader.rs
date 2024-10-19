@@ -326,13 +326,17 @@ impl AssetLoader for VoxLoader {
 }
 impl VoxLoader {
     fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial) {
-        let mut tree = crate::Tree::new_with_gpu_mapped_leaves(self.allocator.clone(), model.voxels.len() as u64 * 128); // TODO: 256 is quite arbitrary here. Consider calculating the upperbound more rigorously
+        let mut tree = crate::Tree::new_with_gpu_mapped_leaves(
+            self.allocator.clone(),
+            model.voxels.len() as u64 * 128,
+        ); // TODO: 128 is quite arbitrary here. Consider calculating the upperbound more rigorously
         let mut material = VoxMaterial(
+            // TODO: We can also make the capacity more dynamic and sparse!
             AttributeAllocator::new_with_capacity(
                 self.allocator.clone(),
-                64 * model.voxels.len() as u64,
-                4,
-                64,
+                32*model.voxels.len() as u64,
+                16,
+                512,
             )
             .unwrap(),
         );

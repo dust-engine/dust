@@ -28,7 +28,35 @@ mod loader;
 //mod physics;
 mod resource;
 
-type TreeRoot = hierarchy!(3, 3, 2, u32);
+#[derive(Debug, Clone)]
+pub struct VoxLeafNode {
+    /// Note: we store this value as a vk::AabbPositionsKHR which is less
+    /// efficient than possible. We could get away with storing a u16vec4.
+    /// That helps us to get down the overhead to 12 bytes
+    /// (8 for aabb, 2 for material_ptr, 2 for reserved) instead of 32 bytes.
+    aabb: vk::AabbPositionsKHR,
+    material_ptr: u32,
+    reserved: u32,
+}
+impl Default for VoxLeafNode {
+    fn default() -> Self {
+        Self {
+            aabb: vk::AabbPositionsKHR {
+                min_x: f32::NAN,
+                min_y: f32::NAN,
+                min_z: f32::NAN,
+                max_x: f32::NAN,
+                max_y: f32::NAN,
+                max_z: f32::NAN,
+            },
+            material_ptr: 0,
+            reserved: 0,
+        }
+    }
+}
+/// Leaf node size: 96 bytes
+type TreeRoot = hierarchy!(3, 2, 3, VoxLeafNode);
+
 type Tree = dust_vdb::Tree<TreeRoot>;
 
 pub use attributes::{AttributeAllocator, VoxMaterial};
@@ -43,6 +71,9 @@ pub struct VoxGeometry {
 impl VoxGeometry {
     pub fn from_tree_with_unit_size(tree: Tree, unit_size: f32) -> Self {
         Self { tree, unit_size }
+    }
+    pub fn gpu_mapped_leaves_device_address(&self) -> vk::DeviceAddress {
+        self.tree.gpu_mapped_leaves_device_address()
     }
 }
 impl Deref for VoxGeometry {
@@ -150,7 +181,6 @@ impl Plugin for VoxPlugin {
             TLASBuilderPlugin::<builder::VoxTLASBuilder>::default(),
             SbtPlugin::<builder::VoxSbtBuilder>::default(),
             AssetUploadPlugin::<crate::resource::VoxPaletteGPU>::default(),
-            AssetUploadPlugin::<crate::resource::VoxGeometryGPU>::default(),
         ));
 
         app.enable_feature::<vk::PhysicalDeviceFeatures>(|x| &mut x.shader_int16)
@@ -172,12 +202,13 @@ impl Plugin for VoxPlugin {
 
         app.add_systems(
             PostUpdate,
-            tree_bind_sparse_system.with_option::<RenderSystemPass>(|entry| {
-                let item = entry.or_default();
-                item.is_queue_op = true;
-                item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
-            })
-            .before(dust_pbr::PbrRendererSystemSet),
+            tree_bind_sparse_system
+                .with_option::<RenderSystemPass>(|entry| {
+                    let item = entry.or_default();
+                    item.is_queue_op = true;
+                    item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
+                })
+                .before(dust_pbr::PbrRendererSystemSet),
         );
     }
     fn finish(&self, app: &mut App) {
@@ -266,7 +297,7 @@ pub fn tree_bind_sparse_system(
             )
             .unwrap();
     }
-    
+
     info.signal_semaphore_value += 1;
     info.wait_semaphores.clear();
     info.signal_binary_semaphore = vk::Semaphore::null();

@@ -75,6 +75,11 @@ where
             aabb: AabbU32::default(),
         }
     }
+    pub fn gpu_mapped_leaves_device_address(&self) -> vk::DeviceAddress {
+        let device_address = self.pool[0].device_address();
+        assert_ne!(device_address, 0, "Unable to query device address for GPU mapped leaves");
+        device_address
+    }
     pub unsafe fn alloc_node<CHILD: Node>(&mut self) -> u32 {
         if ROOT::LEVEL <= CHILD::LEVEL {
             panic!("Can not allocate root node");

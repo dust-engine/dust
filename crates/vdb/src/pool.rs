@@ -25,6 +25,7 @@ struct GPUPool {
     allocator: rhyolite::Allocator,
     device_allocations: Vec<Allocation>,
     device_buffer: vk::Buffer,
+    device_address: u64,
     device_buffer_memory_requirements: vk::MemoryRequirements,
     host_allocations: Vec<(vk::Buffer, Allocation)>,
     /// 0..num_chunks_to_bind is bound to memory
@@ -80,10 +81,7 @@ fn bit_width(num: usize) -> u32 {
 /// ```
 impl Pool {
     pub fn new(layout: Layout, chunk_size: usize) -> Self {
-        let num_items_per_chunk = bit_width(chunk_size / layout.pad_to_align().size()) - 1;
-        assert_eq!(chunk_size % layout.pad_to_align().size(), 0, "Gaps in layout for the chosen chunk size");
-        assert_eq!(chunk_size, layout.pad_to_align().size() * (1 << num_items_per_chunk));
-    
+        let num_items_per_chunk = (chunk_size / layout.pad_to_align().size()) as u32;
         Self {
             layout: layout.pad_to_align(),
             head: u32::MAX,
@@ -116,17 +114,30 @@ impl Pool {
         let device_buffer_memory_requirements = unsafe {
             allocator.device().get_buffer_memory_requirements(device_buffer)
         };
+        let device_address = if usage.contains(vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS) {
+            unsafe {
+                allocator.device().get_buffer_device_address(&vk::BufferDeviceAddressInfo {
+                    buffer: device_buffer,
+                    ..Default::default()
+                })
+            }
+        } else {
+            0
+        };
         let mut pool = Self::new(layout, min_chunk_size.max(device_buffer_memory_requirements.alignment as usize));
-        // TODO: ensure that the chunk size plays well with the buffer alignment requirments.
         pool.gpu_pool = Some(GPUPool {
             device_allocations: Vec::new(),
             host_allocations: Vec::new(),
             device_buffer,
+            device_address,
             device_buffer_memory_requirements,
             num_chunks_to_bind: 0,
             allocator,
         });
         Ok(pool)
+    }
+    pub fn device_address(&self) -> vk::DeviceAddress {
+        self.gpu_pool.as_ref().map(|x| x.device_address).unwrap_or(0)
     }
     pub fn count(&self) -> u32 {
         self.count
@@ -143,10 +154,10 @@ impl Pool {
         if self.head == u32::MAX {
             // allocate new
             let top = self.top;
-            let chunk_index = top as usize >> self.num_items_per_chunk;
-            if chunk_index >= self.chunks.len() {
+            let chunk_index = top / self.num_items_per_chunk;
+            if chunk_index as usize >= self.chunks.len() {
                 // allocate new block
-                self.alloc_new_chunk();
+                self.alloc_new_chunk().unwrap();
             }
             self.top += 1;
             top
@@ -237,12 +248,12 @@ impl Pool {
 
     #[inline]
     pub unsafe fn get(&self, ptr: u32) -> *const u8 {
-        let chunk_index = (ptr as usize) >> self.num_items_per_chunk;
-        let item_index = (ptr as usize) & ((1 << self.num_items_per_chunk) - 1);
+        let chunk_index = ptr / self.num_items_per_chunk;
+        let item_index = ptr - chunk_index * self.num_items_per_chunk;
         return self
             .chunks
-            .get_unchecked(chunk_index)
-            .add(item_index * self.layout.size());
+            .get_unchecked(chunk_index as usize)
+            .add(item_index as usize * self.layout.size());
     }
     #[inline]
     pub unsafe fn get_mut(&mut self, ptr: u32) -> *mut u8 {
