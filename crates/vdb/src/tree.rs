@@ -63,7 +63,16 @@ where
             pools[i].write(pool);
         }
         // 64KB GPU pages
-        pools[0].write(Pool::new_gpu_pool(metas[0].layout, 64 * 1024, allocator, max_size, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).unwrap());
+        pools[0].write(
+            Pool::new_gpu_pool(
+                metas[0].layout,
+                64 * 1024,
+                allocator,
+                max_size,
+                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            )
+            .unwrap(),
+        );
 
         let pools: [Pool; ROOT::LEVEL as usize] = unsafe {
             // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504
@@ -77,7 +86,10 @@ where
     }
     pub fn gpu_mapped_leaves_device_address(&self) -> vk::DeviceAddress {
         let device_address = self.pool[0].device_address();
-        assert_ne!(device_address, 0, "Unable to query device address for GPU mapped leaves");
+        assert_ne!(
+            device_address, 0,
+            "Unable to query device address for GPU mapped leaves"
+        );
         device_address
     }
     pub unsafe fn alloc_node<CHILD: Node>(&mut self) -> u32 {
@@ -163,7 +175,20 @@ where
         vec
     }
 
-    pub fn bind_sparse(&mut self) -> (rhyolite::ash::vk::Buffer, impl ExactSizeIterator<Item = rhyolite::ash::vk::SparseMemoryBind> + '_) {
+    pub fn bind_sparse(
+        &mut self,
+    ) -> (
+        rhyolite::ash::vk::Buffer,
+        impl ExactSizeIterator<Item = rhyolite::ash::vk::SparseMemoryBind> + '_,
+    ) {
         self.pool[0].bind_sparse()
+    }
+    pub fn iter_leaf_changes(
+        &self,
+    ) -> impl Iterator<Item = (vk::Buffer, vk::Buffer, Vec<vk::BufferCopy>)> + '_ {
+        self.pool[0].iter_changes()
+    }
+    pub fn clear_changes(&mut self) {
+        self.pool[0].clear_changes()
     }
 }

@@ -81,8 +81,7 @@ where
     }
 }
 
-impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> Node
-    for LeafNode<LOG2, T>
+impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> Node for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {

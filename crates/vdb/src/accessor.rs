@@ -17,6 +17,7 @@ where
     last_coords: UVec3,
     attributes: &'a mut ATTRIBS,
     last_leaf: Option<u32>,
+    last_leaf_coords: UVec3,
 }
 
 #[inline]
@@ -152,8 +153,10 @@ where
                 &leaf_node.get_value(),
                 leaf_node.get_occupancy(), // this original mask is wrong. should be old_attrib_occupancy
                 &ATTRIBS::Occupancy::MAXED,
+                &coords,
             );
             self.last_leaf = Some(self.ptrs[0]);
+            self.last_leaf_coords = coords;
             // if old_attrib_occupancy.count_ones() > 0, free.
             let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones(); // can optimize here
             if old_attrib_occupancy_count > 0 {
@@ -184,6 +187,7 @@ where
                     &old_attrib_ptr,
                     &ATTRIBS::Occupancy::MAXED,
                     prev_access_leaf_node.get_occupancy(),
+                    &self.last_leaf_coords,
                 );
                 self.attributes
                     .free_attributes(old_attrib_ptr, ROOT::LeafType::SIZE as u32);
@@ -227,6 +231,7 @@ pub trait Attributes {
         ptr: &Self::Ptr,
         original_mask: &Self::Occupancy,
         new_mask: &Self::Occupancy,
+        coords: &UVec3,
     ) -> Self::Ptr; // need a value to represent: what are the ones to delete, and what are the ones to add?
 }
 
@@ -270,6 +275,7 @@ where
             last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
             attributes,
             last_leaf: None,
+            last_leaf_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
         }
     }
 }
@@ -317,6 +323,7 @@ mod tests {
             ptr: &Self::Ptr,
             original_mask: &Self::Occupancy,
             new_mask: &Self::Occupancy,
+            _coords: &UVec3,
         ) -> Self::Ptr {
             if original_mask.is_zeroed() {
                 let new = vec![0; new_mask.count_ones() as usize];

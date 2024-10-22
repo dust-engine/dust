@@ -23,10 +23,7 @@ use rhyolite_rtx::{
     BLAS,
 };
 
-use crate::{
-    resource::{VoxPaletteGPU},
-    VoxPalette,
-};
+use crate::{resource::VoxPaletteGPU, VoxPalette};
 use crate::{TreeRoot, VoxGeometry, VoxInstance, VoxMaterial};
 
 /// BLAS builder that builds a BLAS for all entities with `VoxBLASBuilder` and `AssetId<VoxGeometry>` components.

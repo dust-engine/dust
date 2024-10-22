@@ -10,31 +10,20 @@ hitAttributeEXT HitAttribute {
 } hitAttributes;
 
 void main() {
+    imageStore(img_illuminance, ivec2(gl_LaunchIDEXT.xy), vec4(1.0, 1.0, 1.0, 1.0));
+    return;
     Block block = sbt.geometryInfo.blocks[gl_PrimitiveID];
     
     // Calculate nexthit location
     vec3 hitPointObject = gl_HitTEXT * gl_ObjectRayDirectionEXT + gl_ObjectRayOriginEXT;
-    vec3 offsetInBox = vec3(hitAttributes.voxelId >> 4, (hitAttributes.voxelId >> 2) & 3, hitAttributes.voxelId & 3);
+    vec3 offsetInBox = vec3(hitAttributes.voxelId >> 6, (hitAttributes.voxelId >> 3) & 7, hitAttributes.voxelId & 7);
 
-    #ifdef DEBUG_VISUALIZE_SPATIAL_HASH
-    vec3 boxCenterObject = block.position.xyz + vec3(2.0);
-    #else
-    vec3 boxCenterObject = block.position.xyz + offsetInBox + vec3(0.5);
-    #endif
+    vec3 boxCenterObject = (block.min + block.max) / 2.0;
 
     uint8_t palette_index = uint8_t(0);
     
     // Sample the albedo from the voxel
-    #ifdef SHADER_INT_64
-    u32vec2 masked = unpack32(block.mask & ((uint64_t(1) << hitAttributes.voxelId) - 1));
-    uint32_t voxelMemoryOffset = bitCount(masked.x) + bitCount(masked.y);
-    #else
-    u32vec2 masked = u32vec2(
-        hitAttributes.voxelId < 32 ? block.mask1 & ((1 << hitAttributes.voxelId) - 1) : block.mask1,
-        hitAttributes.voxelId >= 32 ? block.mask2 & ((1 << (hitAttributes.voxelId - 32)) - 1) : 0
-    );
-    uint32_t voxelMemoryOffset = uint32_t(bitCount(masked.x) + bitCount(masked.y));
-    #endif
+    uint32_t voxelMemoryOffset = GridCountOnesBefore(block.mask, hitAttributes.voxelId);
 
     palette_index = sbt.materialInfo.materials[block.material_ptr + voxelMemoryOffset];
     u8vec4 color = sbt.paletteInfo.palette[palette_index-1];

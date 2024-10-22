@@ -334,7 +334,7 @@ impl VoxLoader {
             // TODO: We can also make the capacity more dynamic and sparse!
             AttributeAllocator::new_with_capacity(
                 self.allocator.clone(),
-                32*model.voxels.len() as u64,
+                32 * model.voxels.len() as u64,
                 16,
                 512,
             )

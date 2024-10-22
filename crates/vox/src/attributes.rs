@@ -1,5 +1,5 @@
-use bevy::prelude::*;
-use dust_vdb::IsDefault;
+use bevy::{math::Vec3A, prelude::*};
+use dust_vdb::{IsDefault, Node};
 use rhyolite::{
     ash::{
         prelude::VkResult,
@@ -118,6 +118,7 @@ impl dust_vdb::Attributes for VoxMaterial {
         ptr: &Self::Ptr,
         original_mask: &Self::Occupancy,
         new_mask: &Self::Occupancy,
+        coords: &UVec3,
     ) -> Self::Ptr {
         let new_ptr = self.0.allocate(new_mask.count_ones() as u32);
         let mut new_ptr_cur = new_ptr;
@@ -134,9 +135,22 @@ impl dust_vdb::Attributes for VoxMaterial {
                 old_ptr_cur += 1;
             }
         }
+
+        let leaf_extent = <<crate::TreeRoot as Node>::LeafType as Node>::EXTENT;
+        let min = *coords & UVec3::splat(!0b111);
+        let max = min + leaf_extent;
+        let aabb = vk::AabbPositionsKHR {
+            min_x: min.x as f32,
+            min_y: min.y as f32,
+            min_z: min.z as f32,
+            max_x: max.x as f32,
+            max_y: max.y as f32,
+            max_z: max.z as f32,
+        };
         VoxLeafNode {
+            aabb,
             material_ptr: new_ptr,
-            ..*ptr
+            reserved: 0,
         }
     }
 

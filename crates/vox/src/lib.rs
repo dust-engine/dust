@@ -16,11 +16,13 @@ use bevy::{
 use dot_vox::Color;
 use dust_vdb::hierarchy;
 use rhyolite::ash::vk;
+use rhyolite::commands::{SemaphoreSignalCommands, TransferCommands};
 use rhyolite::ecs::{RenderCommands, RenderSystemPass, SubmissionInfo};
 use rhyolite::utils::AssetUploadPlugin;
 use rhyolite::{Device, Queues, RhyoliteApp};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 mod attributes;
 mod builder;
@@ -199,17 +201,27 @@ impl Plugin for VoxPlugin {
         .unwrap();
         app.enable_feature::<vk::PhysicalDeviceShaderFloat16Int8Features>(|x| &mut x.shader_int8)
             .unwrap();
+        app.enable_feature::<vk::PhysicalDeviceScalarBlockLayoutFeatures>(|x| {
+            &mut x.scalar_block_layout
+        })
+        .unwrap();
 
         app.add_systems(
             PostUpdate,
-            tree_bind_sparse_system
-                .with_option::<RenderSystemPass>(|entry| {
-                    let item = entry.or_default();
-                    item.is_queue_op = true;
-                    item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
-                })
-                .before(dust_pbr::PbrRendererSystemSet),
+            (
+                tree_bind_sparse_system
+                    .with_option::<RenderSystemPass>(|entry| {
+                        let item = entry.or_default();
+                        item.is_queue_op = true;
+                        item.required_queue_flags = vk::QueueFlags::SPARSE_BINDING;
+                    })
+                    .before(dust_pbr::PbrRendererSystemSet),
+                tree_copy_system
+                    .after(tree_bind_sparse_system)
+                    .before(dust_pbr::PbrRendererSystemSet),
+            ),
         );
+        app.init_resource::<TreeBindSparseSystemSemaphore>();
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
@@ -228,12 +240,14 @@ impl Plugin for VoxPlugin {
     }
 }
 
+// TODO: This should be generalized in the vdb crate.
 pub fn tree_bind_sparse_system(
     mut asset_events: EventReader<AssetEvent<VoxGeometry>>,
     mut geometries: ResMut<Assets<VoxGeometry>>,
     submission_info: SubmissionInfo,
     queues: Res<Queues>,
     device: Res<Device>,
+    mut semaphore: ResMut<TreeBindSparseSystemSemaphore>,
 ) {
     let mut sparse_memory_binds: Vec<vk::SparseMemoryBind> = Vec::new();
     let mut buffer_binds: Vec<vk::SparseBufferMemoryBindInfo> = Vec::new();
@@ -266,6 +280,8 @@ pub fn tree_bind_sparse_system(
     let queue = queues.get(submission_info.queue);
     let mut info = submission_info.info.lock().unwrap();
     assert!(!info.last_buf_open);
+    semaphore.semaphore = Some(info.signal_semaphore.as_ref().unwrap().clone());
+    semaphore.value = info.signal_semaphore_value;
     let (semaphore_signals, semaphore_signal_values): (Vec<_>, Vec<_>) = info
         .signal_semaphore
         .iter()
@@ -302,6 +318,41 @@ pub fn tree_bind_sparse_system(
     info.wait_semaphores.clear();
     info.signal_binary_semaphore = vk::Semaphore::null();
     info.wait_binary_semaphore = vk::Semaphore::null();
+}
+
+#[derive(Resource, Default)]
+pub struct TreeBindSparseSystemSemaphore {
+    semaphore: Option<Arc<rhyolite::semaphore::TimelineSemaphore>>,
+    value: u64,
+}
+
+pub fn tree_copy_system(
+    mut render_commands: RenderCommands<'t'>,
+    mut asset_events: EventReader<AssetEvent<VoxGeometry>>,
+    mut geometries: ResMut<Assets<VoxGeometry>>,
+    mut semaphore: ResMut<TreeBindSparseSystemSemaphore>,
+) {
+    if let Some(sem) = semaphore.semaphore.take() {
+        render_commands.wait_semaphore(
+            std::borrow::Cow::Owned(sem),
+            semaphore.value,
+            vk::PipelineStageFlags2::TRANSFER,
+        );
+    }
+    // For all changed geometries, copy buffer contents.
+    for event in asset_events.read() {
+        match event {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                let geometry = geometries.get_mut_untracked(*id).unwrap();
+                for (src, dst, regions) in geometry.iter_leaf_changes() {
+                    assert!(!regions.is_empty());
+                    render_commands.copy_buffer(src, dst, &regions);
+                }
+                geometry.clear_changes();
+            }
+            _input => {}
+        }
+    }
 }
 
 fn update_materials_system(

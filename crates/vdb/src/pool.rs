@@ -1,6 +1,20 @@
-use std::{alloc::{alloc, Layout}, marker::PhantomData, mem::MaybeUninit};
+use std::{
+    alloc::{alloc, Layout},
+    collections::BTreeMap,
+    marker::PhantomData,
+    mem::MaybeUninit,
+};
 
-use rhyolite::{ash::{prelude::VkResult, vk}, vk_mem::{Alloc, Allocation, AllocationCreateInfo}, HasDevice, PhysicalDeviceMemoryModel};
+use rhyolite::{
+    ash::{
+        prelude::VkResult,
+        vk::{self, Handle},
+    },
+    vk_mem::{Alloc, Allocation, AllocationCreateInfo},
+    HasDevice, PhysicalDeviceMemoryModel,
+};
+
+use crate::BitMask;
 
 pub struct Pool {
     /// Size of one individual allocation
@@ -31,12 +45,16 @@ struct GPUPool {
     /// 0..num_chunks_to_bind is bound to memory
     /// num_chunks_to_bind.. is not bound
     num_chunks_to_bind: u32,
+    change_tracker: Option<PoolChangeTracker>,
 }
 impl Drop for GPUPool {
     fn drop(&mut self) {
         unsafe {
-            self.allocator.free_memory_pages(&mut self.device_allocations);
-            self.allocator.device().destroy_buffer(self.device_buffer, None);
+            self.allocator
+                .free_memory_pages(&mut self.device_allocations);
+            self.allocator
+                .device()
+                .destroy_buffer(self.device_buffer, None);
 
             for (buffer, mut allocation) in self.host_allocations.drain(..) {
                 self.allocator.unmap_memory(&mut allocation);
@@ -48,15 +66,6 @@ impl Drop for GPUPool {
 
 unsafe impl Send for Pool {}
 unsafe impl Sync for Pool {}
-
-
-fn bit_width(num: usize) -> u32 {
-    if num == 0 {
-        0
-    } else {
-        usize::BITS - num.leading_zeros()
-    }
-}
 
 /// A memory pool for objects of the same layout.
 /// ```
@@ -100,32 +109,62 @@ impl Pool {
         max_size: u64,
         mut usage: vk::BufferUsageFlags,
     ) -> VkResult<Self> {
-        if allocator.device().physical_device().properties().memory_model.storage_buffer_should_use_staging() {
+        if allocator
+            .device()
+            .physical_device()
+            .properties()
+            .memory_model
+            .storage_buffer_should_use_staging()
+        {
             usage |= vk::BufferUsageFlags::TRANSFER_DST;
         }
         let device_buffer = unsafe {
-            allocator.device().create_buffer(&vk::BufferCreateInfo {
-                flags: vk::BufferCreateFlags::SPARSE_RESIDENCY | vk::BufferCreateFlags::SPARSE_BINDING,
-                size: max_size,
-                usage,
-                ..Default::default()
-            }, None)?
+            allocator.device().create_buffer(
+                &vk::BufferCreateInfo {
+                    flags: vk::BufferCreateFlags::SPARSE_RESIDENCY
+                        | vk::BufferCreateFlags::SPARSE_BINDING,
+                    size: max_size,
+                    usage,
+                    ..Default::default()
+                },
+                None,
+            )?
         };
         let device_buffer_memory_requirements = unsafe {
-            allocator.device().get_buffer_memory_requirements(device_buffer)
+            allocator
+                .device()
+                .get_buffer_memory_requirements(device_buffer)
         };
         let device_address = if usage.contains(vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS) {
             unsafe {
-                allocator.device().get_buffer_device_address(&vk::BufferDeviceAddressInfo {
-                    buffer: device_buffer,
-                    ..Default::default()
-                })
+                allocator
+                    .device()
+                    .get_buffer_device_address(&vk::BufferDeviceAddressInfo {
+                        buffer: device_buffer,
+                        ..Default::default()
+                    })
             }
         } else {
             0
         };
-        let mut pool = Self::new(layout, min_chunk_size.max(device_buffer_memory_requirements.alignment as usize));
+        let mut pool = Self::new(
+            layout,
+            min_chunk_size.max(device_buffer_memory_requirements.alignment as usize),
+        );
         pool.gpu_pool = Some(GPUPool {
+            change_tracker: if allocator
+                .device()
+                .physical_device()
+                .properties()
+                .memory_model
+                .storage_buffer_should_use_staging()
+            {
+                Some(PoolChangeTracker {
+                    tree: BTreeMap::new(),
+                })
+            } else {
+                None
+            },
             device_allocations: Vec::new(),
             host_allocations: Vec::new(),
             device_buffer,
@@ -137,7 +176,10 @@ impl Pool {
         Ok(pool)
     }
     pub fn device_address(&self) -> vk::DeviceAddress {
-        self.gpu_pool.as_ref().map(|x| x.device_address).unwrap_or(0)
+        self.gpu_pool
+            .as_ref()
+            .map(|x| x.device_address)
+            .unwrap_or(0)
     }
     pub fn count(&self) -> u32 {
         self.count
@@ -170,9 +212,17 @@ impl Pool {
             return head;
         }
     }
-    unsafe fn alloc_new_chunk(&mut self) -> VkResult<()>{
+    unsafe fn alloc_new_chunk(&mut self) -> VkResult<()> {
         if let Some(gpu_pool) = self.gpu_pool.as_mut() {
-            let ptr = if gpu_pool.allocator.device().physical_device().properties().memory_model.storage_buffer_should_use_staging() {
+            let ptr = if gpu_pool
+                .allocator
+                .device()
+                .physical_device()
+                .properties()
+                .memory_model
+                .storage_buffer_should_use_staging()
+            {
+                assert!(gpu_pool.change_tracker.is_some());
                 let device_allocation = gpu_pool.allocator.allocate_memory(
                     &vk::MemoryRequirements {
                         size: self.chunk_size,
@@ -181,23 +231,29 @@ impl Pool {
                     &AllocationCreateInfo {
                         usage: rhyolite::vk_mem::MemoryUsage::Unknown,
                         required_flags: vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                    ..Default::default()
-                })?;
-                
-                let (host_buffer, mut host_allocation) = gpu_pool.allocator.create_buffer(&vk::BufferCreateInfo {
-                    size: self.chunk_size,
-                    usage: vk::BufferUsageFlags::TRANSFER_SRC,
-                    ..Default::default()
-                }, &AllocationCreateInfo {
-                    flags: rhyolite::vk_mem::AllocationCreateFlags::HOST_ACCESS_RANDOM,
-                    required_flags: vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_CACHED,
-                    ..Default::default()
-                })?;
+                        ..Default::default()
+                    },
+                )?;
+
+                let (host_buffer, mut host_allocation) = gpu_pool.allocator.create_buffer(
+                    &vk::BufferCreateInfo {
+                        size: self.chunk_size,
+                        usage: vk::BufferUsageFlags::TRANSFER_SRC,
+                        ..Default::default()
+                    },
+                    &AllocationCreateInfo {
+                        flags: rhyolite::vk_mem::AllocationCreateFlags::HOST_ACCESS_RANDOM,
+                        required_flags: vk::MemoryPropertyFlags::HOST_VISIBLE
+                            | vk::MemoryPropertyFlags::HOST_CACHED,
+                        ..Default::default()
+                    },
+                )?;
                 let ptr = gpu_pool.allocator.map_memory(&mut host_allocation)?;
                 gpu_pool.device_allocations.push(device_allocation);
-                gpu_pool.host_allocations.push((host_buffer, host_allocation));
+                gpu_pool
+                    .host_allocations
+                    .push((host_buffer, host_allocation));
                 ptr
-
             } else {
                 let mut allocation = gpu_pool.allocator.allocate_memory(
                     &vk::MemoryRequirements {
@@ -207,10 +263,12 @@ impl Pool {
                     &AllocationCreateInfo {
                         usage: rhyolite::vk_mem::MemoryUsage::Unknown,
                         flags: rhyolite::vk_mem::AllocationCreateFlags::HOST_ACCESS_RANDOM,
-                        required_flags: vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_CACHED,
+                        required_flags: vk::MemoryPropertyFlags::HOST_VISIBLE
+                            | vk::MemoryPropertyFlags::HOST_CACHED,
                         preferred_flags: vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                    ..Default::default()
-                })?;
+                        ..Default::default()
+                    },
+                )?;
                 let ptr = gpu_pool.allocator.map_memory(&mut allocation)?;
                 gpu_pool.device_allocations.push(allocation);
                 ptr
@@ -219,7 +277,8 @@ impl Pool {
             self.chunks.push(ptr);
             gpu_pool.num_chunks_to_bind += 1;
         } else {
-            let layout = Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
+            let layout =
+                Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
             let block = std::alloc::alloc_zeroed(layout);
             self.chunks.push(block);
         }
@@ -257,6 +316,11 @@ impl Pool {
     }
     #[inline]
     pub unsafe fn get_mut(&mut self, ptr: u32) -> *mut u8 {
+        if let Some(gpu_pool) = &mut self.gpu_pool {
+            if let Some(change_tracker) = &mut gpu_pool.change_tracker {
+                change_tracker.set(ptr);
+            }
+        }
         let ptr = self.get(ptr);
         ptr as *mut u8
     }
@@ -281,25 +345,121 @@ impl Pool {
         }
     }
 
-    pub(crate) fn bind_sparse(&mut self) -> (vk::Buffer, impl ExactSizeIterator<Item = vk::SparseMemoryBind> + '_) {
-        let num_chunks_to_bind = self.gpu_pool.as_ref().map(|x| x.num_chunks_to_bind).unwrap_or(0);
+    pub(crate) fn bind_sparse(
+        &mut self,
+    ) -> (
+        vk::Buffer,
+        impl ExactSizeIterator<Item = vk::SparseMemoryBind> + '_,
+    ) {
+        let num_chunks_to_bind = self
+            .gpu_pool
+            .as_ref()
+            .map(|x| x.num_chunks_to_bind)
+            .unwrap_or(0);
         let chunk_size = self.chunk_size;
-        let buffer = self.gpu_pool.as_ref().map(|x| x.device_buffer).unwrap_or_default();
-        let (chunk_allocations, allocator) = self.gpu_pool.as_mut().map(|x| (x.device_allocations.as_mut_slice(), Some(&x.allocator))).unwrap_or((&mut [], None));
+        let buffer = self
+            .gpu_pool
+            .as_ref()
+            .map(|x| x.device_buffer)
+            .unwrap_or_default();
+        let (chunk_allocations, allocator) = self
+            .gpu_pool
+            .as_mut()
+            .map(|x| (x.device_allocations.as_mut_slice(), Some(&x.allocator)))
+            .unwrap_or((&mut [], None));
         let num_skips = chunk_allocations.len() - num_chunks_to_bind as usize;
-        let iter = chunk_allocations.iter_mut().enumerate().skip(num_skips).map(move |(i, chunk)| {
-            let allocation = allocator.unwrap().get_allocation_info(chunk);
-            vk::SparseMemoryBind {
-                resource_offset: i as u64 * chunk_size,
-                size: chunk_size,
-                memory: allocation.device_memory,
-                memory_offset: allocation.offset,
-                flags: vk::SparseMemoryBindFlags::empty(),
-            }
+        let iter = chunk_allocations
+            .iter_mut()
+            .enumerate()
+            .skip(num_skips)
+            .map(move |(i, chunk)| {
+                let allocation = allocator.unwrap().get_allocation_info(chunk);
+                vk::SparseMemoryBind {
+                    resource_offset: i as u64 * chunk_size,
+                    size: chunk_size,
+                    memory: allocation.device_memory,
+                    memory_offset: allocation.offset,
+                    flags: vk::SparseMemoryBindFlags::empty(),
+                }
+            });
+        (buffer, iter)
+    }
+
+    pub(crate) fn iter_changes(
+        &self,
+    ) -> impl Iterator<Item = (vk::Buffer, vk::Buffer, Vec<vk::BufferCopy>)> + '_ {
+        let iter = self
+            .gpu_pool
+            .as_ref()
+            .and_then(|x| x.change_tracker.as_ref())
+            .unwrap_or(EMPTY_TRACKER)
+            .iter();
+
+        let mut iter = iter.map(|i| {
+            let chunk_index = i / self.num_items_per_chunk;
+            let item_index = i - chunk_index * self.num_items_per_chunk;
+            let gpu_pool = self.gpu_pool.as_ref().unwrap();
+            let src = gpu_pool.host_allocations[chunk_index as usize].0;
+            let dst = gpu_pool.device_buffer;
+            let region = vk::BufferCopy {
+                src_offset: item_index as u64 * self.layout.size() as u64,
+                dst_offset: i as u64 * self.layout.size() as u64,
+                size: self.layout.size() as u64,
+            };
+            (src, dst, region)
         });
-        (buffer,iter)
+        (0..).scan(
+            (vk::Buffer::null(), vk::Buffer::null(), Vec::new()),
+            move |(current_src, current_dst, current_regions), _| {
+                while let Some((src, dst, region)) = iter.next() {
+                    if current_src.is_null() {
+                        // Initialize
+                        *current_src = src;
+                        *current_dst = dst;
+                        current_regions.push(region);
+                    } else if src != *current_src || dst != *current_dst {
+                        // Reinitialize
+                        let ret = (*current_src, *current_dst, std::mem::take(current_regions));
+                        *current_src = src;
+                        *current_dst = dst;
+                        current_regions.push(region);
+                        return Some(ret);
+                    } else {
+                        let last_region = current_regions.last_mut().unwrap();
+                        if last_region.src_offset + last_region.size == region.src_offset
+                            && last_region.dst_offset + last_region.size == region.dst_offset
+                        {
+                            // Extend
+                            last_region.size += region.size;
+                        } else {
+                            // Append
+                            current_regions.push(region);
+                        }
+                    }
+                }
+                if current_regions.is_empty() {
+                    None
+                } else {
+                    assert!(!current_src.is_null());
+                    assert!(!current_dst.is_null());
+                    Some((*current_src, *current_dst, std::mem::take(current_regions)))
+                }
+            },
+        )
+    }
+    pub(crate) fn clear_changes(&mut self) {
+        if let Some(tracker) = self
+            .gpu_pool
+            .as_mut()
+            .and_then(|x| x.change_tracker.as_mut())
+        {
+            tracker.clear();
+        }
     }
 }
+const EMPTY_TRACKER: &PoolChangeTracker = &PoolChangeTracker {
+    tree: BTreeMap::new(),
+};
 
 pub struct PoolIterator<'a, T> {
     pool: &'a Pool,
@@ -330,12 +490,38 @@ impl Drop for Pool {
         } else {
             // CPU Pool. Drop all chunks using host allocator.
             unsafe {
-                let layout = Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
+                let layout =
+                    Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
                 for chunk in self.chunks.iter() {
                     let chunk = *chunk;
                     std::alloc::dealloc(chunk, layout);
                 }
             }
         }
+    }
+}
+
+#[derive(Default)]
+struct PoolChangeTracker {
+    tree: BTreeMap<u32, BitMask<512>>,
+}
+impl PoolChangeTracker {
+    fn set(&mut self, index: u32) {
+        let chunk_index = index / 512;
+        let bit_index = index - chunk_index * 512;
+        self.tree
+            .entry(chunk_index)
+            .or_default()
+            .set(bit_index as usize, true);
+    }
+    fn iter(&self) -> impl Iterator<Item = u32> + '_ {
+        self.tree.iter().flat_map(|(chunk_index, bitmask)| {
+            bitmask
+                .iter_set_bits()
+                .map(move |bit_index| chunk_index * 512 + bit_index as u32)
+        })
+    }
+    fn clear(&mut self) {
+        self.tree.clear();
     }
 }
