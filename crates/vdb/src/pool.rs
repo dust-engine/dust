@@ -1,6 +1,6 @@
 use std::{alloc::Layout, collections::BTreeMap, marker::PhantomData, mem::MaybeUninit};
 
-use crate::BitMask;
+use bitvec::BitArr;
 
 pub struct Pool {
     /// Size of one individual allocation
@@ -212,7 +212,7 @@ impl Drop for Pool {
 
 #[derive(Default)]
 struct PoolChangeTracker {
-    tree: BTreeMap<u32, BitMask<512>>,
+    tree: BTreeMap<u32, BitArr!(for 512)>,
 }
 impl PoolChangeTracker {
     fn set(&mut self, index: u32) {
@@ -226,7 +226,7 @@ impl PoolChangeTracker {
     fn iter(&self) -> impl Iterator<Item = u32> + '_ {
         self.tree.iter().flat_map(|(chunk_index, bitmask)| {
             bitmask
-                .iter_set_bits()
+                .iter_ones()
                 .map(move |bit_index| chunk_index * 512 + bit_index as u32)
         })
     }

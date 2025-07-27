@@ -1,7 +1,7 @@
 use glam::UVec3;
 use std::mem::MaybeUninit;
 
-use crate::{bitmask::IsBitMask, IsLeaf, Node, NodeMeta, Tree};
+use crate::{Attributes, IsDefault, IsLeaf, Node, NodeMeta, Tree};
 
 pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
@@ -149,13 +149,13 @@ where
             let new_attrib_ptr = self.attributes.copy_attribute(
                 &leaf_node.get_value(),
                 leaf_node.get_occupancy(), // this original mask is wrong. should be old_attrib_occupancy
-                &ATTRIBS::Occupancy::MAXED,
+                &ATTRIBS::MAX_OCCUPANCY,
                 &coords,
             );
             self.last_leaf = Some(self.ptrs[0]);
             self.last_leaf_coords = coords;
             // if old_attrib_occupancy.count_ones() > 0, free.
-            let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones(); // can optimize here
+            let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones() as u32; // can optimize here
             if old_attrib_occupancy_count > 0 {
                 self.attributes
                     .free_attributes(leaf_node.get_value(), old_attrib_occupancy_count);
@@ -178,11 +178,11 @@ where
             let prev_access_leaf_node =
                 unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
             let old_attrib_ptr = prev_access_leaf_node.get_value();
-            if !prev_access_leaf_node.get_occupancy().is_maxed() {
+            if !prev_access_leaf_node.get_occupancy().all() {
                 // fitting attributes by realloc and copy
                 let new_attrib_ptr = self.attributes.copy_attribute(
                     &old_attrib_ptr,
-                    &ATTRIBS::Occupancy::MAXED,
+                    &ATTRIBS::MAX_OCCUPANCY,
                     prev_access_leaf_node.get_occupancy(),
                     &self.last_leaf_coords,
                 );
@@ -198,51 +198,6 @@ where
     }
 }
 
-pub trait Attributes {
-    /// The type of the attribute pointer.
-    /// The attribute pointers are stored on the vdb leaf nodes, one per node.
-    /// This is typically u32.
-    type Ptr;
-    /// The occupancy mask of the attribute pointer.
-    /// If we have 4x4x4 leaf nodes, this would be BitMask<64>.
-    /// If we have 8x8x8 leaf nodes, this would be BitMask<512>.
-    type Occupancy;
-    /// The type of the attribute values. For a MagicaVoxel grid, this would be a u8 palette index.
-    type Value: Default + IsDefault;
-    fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value;
-    fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value];
-    fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value);
-    fn free_attributes(&mut self, ptr: &Self::Ptr, num_attributes: u32);
-
-    /// Allocate a new attribute range using the new mask. Then, copy the attributes from the attribute range
-    /// pointed to by `ptr` to the newly allocated attribute range. Returns the pointer to the new attribute range.
-    ///
-    /// Only attribute values that are set in both the original mask and the new mask will be copied.
-    ///
-    /// The original attribute range will not be freed. It is the responsibility of the caller to free the original attribute range.
-    ///
-    /// Note that the original mask may be zeroed. In this case, `ptr` is meaningless, and the function will allocate
-    /// a new attribute range without performing any copy.
-    fn copy_attribute(
-        &mut self,
-        ptr: &Self::Ptr,
-        original_mask: &Self::Occupancy,
-        new_mask: &Self::Occupancy,
-        coords: &UVec3,
-    ) -> Self::Ptr; // need a value to represent: what are the ones to delete, and what are the ones to add?
-}
-
-pub trait IsDefault {
-    fn is_default(&self) -> bool;
-}
-impl<T> IsDefault for T
-where
-    T: Default + Eq,
-{
-    fn is_default(&self) -> bool {
-        self == &Self::default()
-    }
-}
 
 impl<ROOT: Node> Tree<ROOT>
 where
@@ -280,10 +235,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::marker::PhantomData;
+
+    use bitvec::{array::BitArray, BitArr};
     use glam::UVec3;
 
     use super::{lowest_common_ancestor_level, Attributes};
-    use crate::{hierarchy, BitMask, Node, Tree};
+    use crate::{hierarchy, Node, Tree};
 
     #[derive(Default)]
     struct TestAttributes {
@@ -292,7 +250,11 @@ mod tests {
 
     impl Attributes for TestAttributes {
         type Ptr = u32;
-        type Occupancy = BitMask<64>;
+        type Occupancy = BitArray<[usize; 64 / size_of::<usize>() / 8]>;
+        const MAX_OCCUPANCY: Self::Occupancy = Self::Occupancy {
+            _ord: PhantomData,
+            data: [usize::MAX; 64 / size_of::<usize>() / 8]
+        };
         type Value = u8;
 
         fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value {
@@ -323,7 +285,7 @@ mod tests {
             new_mask: &Self::Occupancy,
             _coords: &UVec3,
         ) -> Self::Ptr {
-            if original_mask.is_zeroed() {
+            if !original_mask.any() {
                 let new = vec![0; new_mask.count_ones() as usize];
                 self.attribute_maps.push(new);
                 println!(
@@ -338,15 +300,15 @@ mod tests {
             let old = &self.attribute_maps[*ptr as usize];
             let mut new_ptr = 0;
             let mut old_ptr = 0;
-            for bit in (original_mask | new_mask).iter_set_bits() {
-                if new_mask.get(bit) && original_mask.get(bit) {
+            for bit in (*original_mask | new_mask).iter_ones() {
+                if *new_mask.get(bit).unwrap() && *original_mask.get(bit).unwrap() {
                     // copy it over
                     new[new_ptr] = old[old_ptr as usize];
                 }
-                if new_mask.get(bit) {
+                if *new_mask.get(bit).unwrap() {
                     new_ptr += 1;
                 }
-                if original_mask.get(bit) {
+                if *original_mask.get(bit).unwrap() {
                     old_ptr += 1;
                 }
             }

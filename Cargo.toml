@@ -9,3 +9,27 @@ members = [
 ]
 
 [dependencies]
+
+
+[patch.crates-io]
+ash = { git = "https://github.com/Neo-Zhixing/ash.git", branch = "meta" }
+bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
+bevy_app = { path = "../bevy/crates/bevy_app" }
+bevy_window = { path = "../bevy/crates/bevy_window" }
+bevy_platform = { path = "../bevy/crates/bevy_platform" }
+bevy_utils = { path = "../bevy/crates/bevy_utils" }
+bevy_transform = { path = "../bevy/crates/bevy_transform" }
+bevy_time = { path = "../bevy/crates/bevy_time" }
+bevy_tasks = { path = "../bevy/crates/bevy_tasks" }
+bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
+bevy_ptr = { path = "../bevy/crates/bevy_ptr" }
+bevy_math = { path = "../bevy/crates/bevy_math" }
+bevy_log = { path = "../bevy/crates/bevy_log" }
+bevy_input = { path = "../bevy/crates/bevy_input" }
+bevy_diagnostic = { path = "../bevy/crates/bevy_diagnostic" }
+bevy_derive = { path = "../bevy/crates/bevy_derive" }
+bevy_winit = { path = "../bevy/crates/bevy_winit" }
+bevy_internal = { path = "../bevy/crates/bevy_internal" }
+bevy_asset = { path = "../bevy/crates/bevy_asset" }
+bevy_scene = { path = "../bevy/crates/bevy_scene" }
+bevy = { path = "../bevy" }

@@ -6,8 +6,8 @@
 #![feature(let_chains)]
 
 mod accessor;
-mod bitmask;
 mod node;
+mod attributes;
 
 //#[cfg(feature = "physics")]
 //mod parry;
@@ -15,12 +15,12 @@ mod pool;
 mod traversal;
 mod tree;
 
-pub use bitmask::BitMask;
 pub use pool::Pool;
 pub use tree::Tree;
 
 pub use accessor::*;
 pub use node::*;
+pub use attributes::{AttributeAllocator, Attributes, IsDefault};
 
 //#[cfg(feature = "physics")]
 //pub use parry::{VdbQueryDispatcher, VdbShape};

@@ -1,11 +1,12 @@
 use super::{size_of_grid, NodeMeta};
-use crate::{bitmask::SetBitIterator, BitMask, ConstUVec3, Node, Pool};
+use crate::{ConstUVec3, Node, Pool};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
     marker::PhantomData,
     mem::{size_of, MaybeUninit},
 };
+use bitvec::{array::BitArray, order::Lsb0, slice::IterOnes};
 
 #[derive(Clone, Copy)]
 pub union InternalNodeEntry {
@@ -25,7 +26,8 @@ where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 0 if that tile is completely air, and 1 otherwise.
-    pub child_mask: BitMask<{ size_of_grid(FANOUT_LOG2) }>,
+    pub child_mask:BitArray<
+        [usize; size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]>,
 
     /// points to self.child_mask.count_ones() LeafNodes or InternalNodes
     pub child_ptrs: [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
@@ -97,7 +99,7 @@ where
             | (internal_offset.z as usize);
         if value {
             // set
-            let has_child = self.child_mask.get(index);
+            let has_child = *self.child_mask.get(index).unwrap();
             if !has_child {
                 unsafe {
                     // ensure have children
@@ -128,13 +130,15 @@ where
         unsafe {
             let node: *mut _ = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
 
+
+
             let internal_offset = coords >> CHILD::EXTENT_LOG2;
             let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
                 | ((internal_offset.y as usize) << FANOUT_LOG2.z)
                 | (internal_offset.z as usize);
             if value {
                 // set
-                let has_child = (&mut *node).child_mask.get(index);
+                let has_child = *(&mut *node).child_mask.get(index).unwrap();
                 if !has_child {
                     // ensure have children
                     let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
@@ -167,7 +171,7 @@ where
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
             | (internal_offset.z as usize);
-        let has_child = self.child_mask.get(index);
+        let has_child = *self.child_mask.get(index).unwrap();
         if !has_child {
             return None;
         }
@@ -199,7 +203,7 @@ where
         InternalNodeIterator {
             pools,
             location_offset: offset,
-            child_mask_iterator: self.child_mask.iter_set_bits(),
+            child_mask_iterator: self.child_mask.iter_ones(),
             child_ptrs: &self.child_ptrs,
             child_iterator: None,
         }
@@ -210,7 +214,7 @@ where
         InternalNodeIterator {
             pools,
             location_offset: offset,
-            child_mask_iterator: node.child_mask.iter_set_bits(),
+            child_mask_iterator: node.child_mask.iter_ones(),
             child_ptrs: &node.child_ptrs,
             child_iterator: None,
         }
@@ -223,7 +227,7 @@ where
         InternalNodeLeafIterator {
             pools,
             location_offset: offset,
-            child_mask_iterator: self.child_mask.iter_set_bits(),
+            child_mask_iterator: self.child_mask.iter_ones(),
             child_ptrs: &self.child_ptrs,
             child_iterator: None,
         }
@@ -235,7 +239,7 @@ where
         InternalNodeLeafIterator {
             pools,
             location_offset: offset,
-            child_mask_iterator: node.child_mask.iter_set_bits(),
+            child_mask_iterator: node.child_mask.iter_ones(),
             child_ptrs: &node.child_ptrs,
             child_iterator: None,
         }
@@ -363,7 +367,7 @@ where
 {
     pools: &'a [Pool],
     location_offset: UVec3,
-    child_mask_iterator: SetBitIterator<std::iter::Cloned<std::slice::Iter<'a, usize>>>,
+    child_mask_iterator: IterOnes<'a, usize, Lsb0>,
     child_iterator: Option<CHILD::Iterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
 }
@@ -409,7 +413,7 @@ where
 {
     pools: &'a [Pool],
     location_offset: UVec3,
-    child_mask_iterator: SetBitIterator<std::iter::Cloned<std::slice::Iter<'a, usize>>>,
+    child_mask_iterator: IterOnes<'a, usize, Lsb0>,
     child_iterator: Option<CHILD::LeafIterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
 }

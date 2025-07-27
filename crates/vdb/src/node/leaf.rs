@@ -1,13 +1,13 @@
 use super::{size_of_grid, NodeMeta};
 use crate::{
-    bitmask::{IsBitMask, SetBitIterator},
-    BitMask, ConstUVec3, Node, Pool,
+    ConstUVec3, Node, Pool,
 };
+use bitvec::{array::BitArray, order::Lsb0, slice::{BitSlice, IterOnes}};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
     iter::Once,
-    mem::{size_of, MaybeUninit},
+    mem::{size_of, MaybeUninit}, ops::{Deref, DerefMut},
 };
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
@@ -20,21 +20,23 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 1 for occupied voxels and 0 for unoccupied voxels
-    pub occupancy: BitMask<{ size_of_grid(LOG2) }>,
+    pub occupancy: BitArray<
+        [usize; size_of_grid(LOG2) / size_of::<usize>() / 8]>,
     /// A pointer to self.occupancy.count_ones() material values
     pub value: T,
 }
 
 pub trait IsLeaf: Node {
     /// Total number of voxels in the leaf node.
-    type Occupancy: IsBitMask;
+    type Occupancy: DerefMut<Target = BitSlice<usize, Lsb0>>;
     type Value: Default + Send + Sync + Clone;
     fn get_occupancy(&self) -> &Self::Occupancy;
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
 
     fn get_occupancy_at(&self, coords: UVec3) -> bool {
-        self.get_occupancy()
+        *self.get_occupancy()
             .get(Self::get_fully_mapped_offset(coords) as usize)
+            .expect("get_occupancy_at: coords out of bounds")
     }
     fn set_occupancy_at(&mut self, coords: UVec3, value: bool) {
         let offset = Self::get_fully_mapped_offset(coords);
@@ -54,11 +56,12 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     type Value = T;
-    type Occupancy = BitMask<{ size_of_grid(LOG2) }>;
+    type Occupancy = BitArray<[usize; size_of_grid(LOG2) /  size_of::<usize>() / 8]>;
     fn get_attribute_offset(&self, coords: UVec3) -> u32 {
         let coords = coords & Self::EXTENT_MASK;
         let voxel_id = (coords.x << (LOG2.y + LOG2.z)) | (coords.y << LOG2.z) | coords.z;
-        let mask: usize = self.occupancy.as_slice()[0];
+        debug_assert!(self.occupancy.as_raw_slice().len() == 1, "Supports up to 64 voxels per leaf node for now");
+        let mask: usize = self.occupancy.as_raw_slice()[0];
         let masked = mask & ((1 << voxel_id) - 1);
         masked.count_ones()
     }
@@ -162,7 +165,7 @@ where
             | (coords.z as usize);
         let (old_leaf_node, old_value): (*mut _, bool) = unsafe {
             let old_leaf_node = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
-            let old_value = old_leaf_node.occupancy.get(index);
+            let old_value = *old_leaf_node.occupancy.get(index).unwrap();
             (old_leaf_node, old_value)
         };
         if cached_path.len() > 0 {
@@ -177,14 +180,14 @@ where
     fn iter<'a>(&'a self, _pool: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
         LeafNodeIterator {
             location_offset: offset,
-            bits_iterator: self.occupancy.iter_set_bits(),
+            bits_iterator: self.occupancy.iter_ones(),
         }
     }
     fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a> {
         let node = unsafe { pools[0].get_item::<Self>(ptr) };
         LeafNodeIterator {
             location_offset: offset,
-            bits_iterator: node.occupancy.iter_set_bits(),
+            bits_iterator: node.occupancy.iter_ones(),
         }
     }
 
@@ -287,7 +290,7 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     location_offset: UVec3,
-    bits_iterator: SetBitIterator<std::iter::Cloned<std::slice::Iter<'a, usize>>>,
+    bits_iterator: IterOnes<'a,usize, Lsb0>,
 }
 impl<'a, const LOG2: ConstUVec3> Iterator for LeafNodeIterator<'a, LOG2>
 where
