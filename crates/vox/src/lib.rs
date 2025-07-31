@@ -12,41 +12,15 @@ use bevy::{
     transform::components::{GlobalTransform, Transform},
 };
 use dot_vox::Color;
-use dust_vdb::{hierarchy};
+use dust_vdb::hierarchy;
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
 mod loader;
 mod material;
 
-pub use material::VoxMaterial;
+pub use material::{VoxLeafNode, VoxMaterial};
 
-#[derive(Debug, Clone)]
-pub struct VoxLeafNode {
-    /// Note: we store this value as a vk::AabbPositionsKHR which is less
-    /// efficient than possible. We could get away with storing a u16vec4.
-    /// That helps us to get down the overhead to 12 bytes
-    /// (8 for aabb, 2 for material_ptr, 2 for reserved) instead of 32 bytes.
-    aabb: vk::AabbPositionsKHR,
-    material_ptr: u32,
-    reserved: u32,
-}
-impl Default for VoxLeafNode {
-    fn default() -> Self {
-        Self {
-            aabb: vk::AabbPositionsKHR {
-                min_x: f32::NAN,
-                min_y: f32::NAN,
-                min_z: f32::NAN,
-                max_x: f32::NAN,
-                max_y: f32::NAN,
-                max_z: f32::NAN,
-            },
-            material_ptr: 0,
-            reserved: 0,
-        }
-    }
-}
 /// Leaf node size: 96 bytes
 type TreeRoot = hierarchy!(3, 2, 3, VoxLeafNode);
 
@@ -73,7 +47,6 @@ impl DerefMut for VoxGeometry {
 
 #[derive(Asset, TypePath)]
 pub struct VoxPalette(Box<[Color; 256]>);
-
 
 impl Deref for VoxPalette {
     type Target = [Color];
@@ -125,7 +98,7 @@ impl MapEntities for VoxInstance {
 impl Default for VoxInstance {
     fn default() -> Self {
         Self {
-            model: Entity::PLACEHOLDER
+            model: Entity::PLACEHOLDER,
         }
     }
 }
@@ -138,10 +111,23 @@ pub struct VoxModel {
     pub palette: Handle<VoxPalette>,
 }
 
-
 #[derive(Bundle, Default)]
 pub struct VoxInstanceBundle {
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub instance: VoxInstance,
+}
+
+pub struct VoxPlugin;
+impl Plugin for VoxPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_asset::<VoxGeometry>()
+            .init_asset::<VoxPalette>()
+            .init_asset::<VoxMaterial>()
+            .register_type::<VoxInstance>()
+            .register_type::<VoxModel>();
+    }
+    fn finish(&self, app: &mut App) {
+        app.init_asset_loader::<VoxLoader>();
+    }
 }

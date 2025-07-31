@@ -9,7 +9,23 @@ members = [
 ]
 
 [dependencies]
+rhyolite = { path = "../rust-playground" }
+rhyolite_bevy = { path = "../rust-playground/crates/bevy" }
+dust_vox = { path = "crates/vox" }
 
+[dependencies.bevy]
+version = "0.16.0-dev"
+default-features = false
+features = [
+    "std",
+    "async_executor",
+    "bevy_winit",
+    "bevy_log",
+    "bevy_window",
+    "bevy_asset",
+    "bevy_scene",
+    "multi_threaded",
+]
 
 [patch.crates-io]
 ash = { git = "https://github.com/Neo-Zhixing/ash.git", branch = "meta" }

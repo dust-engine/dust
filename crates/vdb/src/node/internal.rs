@@ -1,12 +1,12 @@
-use super::{size_of_grid, NodeMeta};
+use super::{NodeMeta, size_of_grid};
 use crate::{ConstUVec3, Node, Pool};
+use bitvec::{array::BitArray, order::Lsb0, slice::IterOnes};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
     marker::PhantomData,
-    mem::{size_of, MaybeUninit},
+    mem::{MaybeUninit, size_of},
 };
-use bitvec::{array::BitArray, order::Lsb0, slice::IterOnes};
 
 #[derive(Clone, Copy)]
 pub union InternalNodeEntry {
@@ -26,8 +26,7 @@ where
     [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 0 if that tile is completely air, and 1 otherwise.
-    pub child_mask:BitArray<
-        [usize; size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]>,
+    pub child_mask: BitArray<[usize; size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]>,
 
     /// points to self.child_mask.count_ones() LeafNodes or InternalNodes
     pub child_ptrs: [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
@@ -129,8 +128,6 @@ where
     ) -> &'a mut Self::LeafType {
         unsafe {
             let node: *mut _ = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
-
-
 
             let internal_offset = coords >> CHILD::EXTENT_LOG2;
             let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))

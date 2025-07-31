@@ -1,6 +1,5 @@
 use glam::UVec3;
 
-
 pub trait IsDefault {
     fn is_default(&self) -> bool;
 }
@@ -48,7 +47,6 @@ pub trait Attributes {
     ) -> Self::Ptr; // need a value to represent: what are the ones to delete, and what are the ones to add?
 }
 
-
 /// Virtual buffer designed specifically for allocating attributes.
 pub struct AttributeAllocator {
     freelists: Box<[Vec<u32>]>,
@@ -63,11 +61,7 @@ impl AttributeAllocator {
         let freelist_index = (size - 1) / self.alignment;
         &mut self.freelists[freelist_index as usize]
     }
-    pub fn new_with_capacity(
-        capacity: u64,
-        alignment: u32,
-        max_allocation: u32,
-    ) -> Self{
+    pub fn new_with_capacity(alignment: u32, max_allocation: u32) -> Self {
         let num_freelists = max_allocation.div_ceil(alignment);
         Self {
             alignment,

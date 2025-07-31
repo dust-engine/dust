@@ -36,13 +36,13 @@ fn lowest_common_ancestor_level(a: UVec3, b: UVec3, mask: UVec3, root_level: u32
 }
 
 impl<
-        'a,
-        ROOT: Node,
-        ATTRIBS: Attributes<
+    'a,
+    ROOT: Node,
+    ATTRIBS: Attributes<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
             Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
-    > Accessor<'a, ROOT, ATTRIBS>
+> Accessor<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
@@ -198,7 +198,6 @@ where
     }
 }
 
-
 impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL as usize + 1]: Sized,
@@ -207,9 +206,9 @@ where
     pub fn accessor_mut<
         'a,
         A: Attributes<
-            Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
-        >,
+                Ptr = <ROOT::LeafType as IsLeaf>::Value,
+                Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            >,
     >(
         &'a mut self,
         attributes: &'a mut A,
@@ -237,11 +236,11 @@ where
 mod tests {
     use std::marker::PhantomData;
 
-    use bitvec::{array::BitArray, BitArr};
+    use bitvec::{BitArr, array::BitArray};
     use glam::UVec3;
 
-    use super::{lowest_common_ancestor_level, Attributes};
-    use crate::{hierarchy, Node, Tree};
+    use super::{Attributes, lowest_common_ancestor_level};
+    use crate::{Node, Tree, hierarchy};
 
     #[derive(Default)]
     struct TestAttributes {
@@ -253,7 +252,7 @@ mod tests {
         type Occupancy = BitArray<[usize; 64 / size_of::<usize>() / 8]>;
         const MAX_OCCUPANCY: Self::Occupancy = Self::Occupancy {
             _ord: PhantomData,
-            data: [usize::MAX; 64 / size_of::<usize>() / 8]
+            data: [usize::MAX; 64 / size_of::<usize>() / 8],
         };
         type Value = u8;
 

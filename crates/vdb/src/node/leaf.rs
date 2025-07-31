@@ -1,13 +1,16 @@
-use super::{size_of_grid, NodeMeta};
-use crate::{
-    ConstUVec3, Node, Pool,
+use super::{NodeMeta, size_of_grid};
+use crate::{ConstUVec3, Node, Pool};
+use bitvec::{
+    array::BitArray,
+    order::Lsb0,
+    slice::{BitSlice, IterOnes},
 };
-use bitvec::{array::BitArray, order::Lsb0, slice::{BitSlice, IterOnes}};
 use glam::UVec3;
 use std::{
     cell::UnsafeCell,
     iter::Once,
-    mem::{size_of, MaybeUninit}, ops::{Deref, DerefMut},
+    mem::{MaybeUninit, size_of},
+    ops::DerefMut,
 };
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
@@ -20,8 +23,7 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 1 for occupied voxels and 0 for unoccupied voxels
-    pub occupancy: BitArray<
-        [usize; size_of_grid(LOG2) / size_of::<usize>() / 8]>,
+    pub occupancy: BitArray<[usize; size_of_grid(LOG2) / size_of::<usize>() / 8]>,
     /// A pointer to self.occupancy.count_ones() material values
     pub value: T,
 }
@@ -34,7 +36,8 @@ pub trait IsLeaf: Node {
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
 
     fn get_occupancy_at(&self, coords: UVec3) -> bool {
-        *self.get_occupancy()
+        *self
+            .get_occupancy()
             .get(Self::get_fully_mapped_offset(coords) as usize)
             .expect("get_occupancy_at: coords out of bounds")
     }
@@ -56,11 +59,14 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     type Value = T;
-    type Occupancy = BitArray<[usize; size_of_grid(LOG2) /  size_of::<usize>() / 8]>;
+    type Occupancy = BitArray<[usize; size_of_grid(LOG2) / size_of::<usize>() / 8]>;
     fn get_attribute_offset(&self, coords: UVec3) -> u32 {
         let coords = coords & Self::EXTENT_MASK;
         let voxel_id = (coords.x << (LOG2.y + LOG2.z)) | (coords.y << LOG2.z) | coords.z;
-        debug_assert!(self.occupancy.as_raw_slice().len() == 1, "Supports up to 64 voxels per leaf node for now");
+        debug_assert!(
+            self.occupancy.as_raw_slice().len() == 1,
+            "Supports up to 64 voxels per leaf node for now"
+        );
         let mask: usize = self.occupancy.as_raw_slice()[0];
         let masked = mask & ((1 << voxel_id) - 1);
         masked.count_ones()
@@ -290,7 +296,7 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     location_offset: UVec3,
-    bits_iterator: IterOnes<'a,usize, Lsb0>,
+    bits_iterator: IterOnes<'a, usize, Lsb0>,
 }
 impl<'a, const LOG2: ConstUVec3> Iterator for LeafNodeIterator<'a, LOG2>
 where

@@ -1,5 +1,5 @@
 [package]
-name = "vox"
+name = "dust_vox"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,3 +11,5 @@ dust-vdb = { path = "../vdb" }
 rayon = "1.10"
 tracing = "0.1"
 rhyolite = { path = "../../../rust-playground", features = ["bevy"] }
+bitvec = "1"
+bytemuck = "1.23"

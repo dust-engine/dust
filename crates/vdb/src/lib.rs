@@ -6,8 +6,8 @@
 #![feature(let_chains)]
 
 mod accessor;
-mod node;
 mod attributes;
+mod node;
 
 //#[cfg(feature = "physics")]
 //mod parry;
@@ -19,8 +19,8 @@ pub use pool::Pool;
 pub use tree::Tree;
 
 pub use accessor::*;
-pub use node::*;
 pub use attributes::{AttributeAllocator, Attributes, IsDefault};
+pub use node::*;
 
 //#[cfg(feature = "physics")]
 //pub use parry::{VdbQueryDispatcher, VdbShape};

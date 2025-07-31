@@ -68,38 +68,44 @@ impl Pool {
         self.count
     }
     pub unsafe fn alloc<T: Default>(&mut self) -> u32 {
-        debug_assert_eq!(Layout::new::<T>(), self.layout);
-        let ptr = self.alloc_uninitialized();
-        let item = self.get_item_mut::<T>(ptr);
-        *item = T::default();
-        ptr
+        unsafe {
+            debug_assert_eq!(Layout::new::<T>(), self.layout);
+            let ptr = self.alloc_uninitialized();
+            let item = self.get_item_mut::<T>(ptr);
+            *item = T::default();
+            ptr
+        }
     }
     pub unsafe fn alloc_uninitialized(&mut self) -> u32 {
-        self.count += 1;
-        if self.head == u32::MAX {
-            // allocate new
-            let top = self.top;
-            let chunk_index = top / self.num_items_per_chunk;
-            if chunk_index as usize >= self.chunks.len() {
-                // allocate new block
-                self.alloc_new_chunk();
+        unsafe {
+            self.count += 1;
+            if self.head == u32::MAX {
+                // allocate new
+                let top = self.top;
+                let chunk_index = top / self.num_items_per_chunk;
+                if chunk_index as usize >= self.chunks.len() {
+                    // allocate new block
+                    self.alloc_new_chunk();
+                }
+                self.top += 1;
+                top
+            } else {
+                // take from freelist
+                let item_location = self.get_mut(self.head);
+                let next_available_location = *(item_location as *const u32);
+                let head = self.head;
+                self.head = next_available_location;
+                return head;
             }
-            self.top += 1;
-            top
-        } else {
-            // take from freelist
-            let item_location = self.get_mut(self.head);
-            let next_available_location = *(item_location as *const u32);
-            let head = self.head;
-            self.head = next_available_location;
-            return head;
         }
     }
     unsafe fn alloc_new_chunk(&mut self) {
-        let layout =
-            Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
-        let block = std::alloc::alloc_zeroed(layout);
-        self.chunks.push(block);
+        unsafe {
+            let layout =
+                Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
+            let block = std::alloc::alloc_zeroed(layout);
+            self.chunks.push(block);
+        }
     }
     pub fn free(&mut self, index: u32) {
         self.count -= 1;
@@ -124,31 +130,39 @@ impl Pool {
 
     #[inline]
     pub unsafe fn get(&self, ptr: u32) -> *const u8 {
-        let chunk_index = ptr / self.num_items_per_chunk;
-        let item_index = ptr - chunk_index * self.num_items_per_chunk;
-        return self
-            .chunks
-            .get_unchecked(chunk_index as usize)
-            .add(item_index as usize * self.layout.size());
+        unsafe {
+            let chunk_index = ptr / self.num_items_per_chunk;
+            let item_index = ptr - chunk_index * self.num_items_per_chunk;
+            return self
+                .chunks
+                .get_unchecked(chunk_index as usize)
+                .add(item_index as usize * self.layout.size());
+        }
     }
     #[inline]
     pub unsafe fn get_mut(&mut self, ptr: u32) -> *mut u8 {
-        if let Some(change_tracker) = &mut self.change_tracker {
-            change_tracker.set(ptr);
+        unsafe {
+            if let Some(change_tracker) = &mut self.change_tracker {
+                change_tracker.set(ptr);
+            }
+            let ptr = self.get(ptr);
+            ptr as *mut u8
         }
-        let ptr = self.get(ptr);
-        ptr as *mut u8
     }
 
     #[inline]
     pub unsafe fn get_item<T>(&self, ptr: u32) -> &T {
-        debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
-        &*(self.get(ptr) as *const T)
+        unsafe {
+            debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
+            &*(self.get(ptr) as *const T)
+        }
     }
     #[inline]
     pub unsafe fn get_item_mut<T>(&mut self, ptr: u32) -> &mut T {
-        debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
-        &mut *(self.get_mut(ptr) as *mut T)
+        unsafe {
+            debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
+            &mut *(self.get_mut(ptr) as *mut T)
+        }
     }
 
     pub fn iter_entries<T>(&self) -> PoolIterator<T> {

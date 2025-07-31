@@ -53,31 +53,37 @@ where
         }
     }
     pub unsafe fn alloc_node<CHILD: Node>(&mut self) -> u32 {
-        if ROOT::LEVEL <= CHILD::LEVEL {
-            panic!("Can not allocate root node");
+        unsafe {
+            if ROOT::LEVEL <= CHILD::LEVEL {
+                panic!("Can not allocate root node");
+            }
+            let pool = &mut self.pool[CHILD::LEVEL as usize];
+            pool.alloc::<CHILD>()
         }
-        let pool = &mut self.pool[CHILD::LEVEL as usize];
-        pool.alloc::<CHILD>()
     }
 
     /// Safety: ptr must point to a valid region of memory in the pool of CHILD.
     #[inline]
     pub unsafe fn get_node<CHILD: Node>(&self, ptr: u32) -> &CHILD {
-        if CHILD::LEVEL == ROOT::LEVEL {
-            // specialization for root
-            return &*(&self.root as *const ROOT as *const CHILD);
+        unsafe {
+            if CHILD::LEVEL == ROOT::LEVEL {
+                // specialization for root
+                return &*(&self.root as *const ROOT as *const CHILD);
+            }
+            &*(self.pool[CHILD::LEVEL as usize].get(ptr) as *const CHILD)
         }
-        &*(self.pool[CHILD::LEVEL as usize].get(ptr) as *const CHILD)
     }
 
     /// Safety: ptr must point to a valid region of memory in the pool of CHILD.
     #[inline]
     pub unsafe fn get_node_mut<CHILD: Node>(&mut self, ptr: u32) -> &mut CHILD {
-        if CHILD::LEVEL == ROOT::LEVEL {
-            // specialization for root
-            return &mut *(&mut self.root as *mut ROOT as *mut CHILD);
+        unsafe {
+            if CHILD::LEVEL == ROOT::LEVEL {
+                // specialization for root
+                return &mut *(&mut self.root as *mut ROOT as *mut CHILD);
+            }
+            &mut *(self.pool[CHILD::LEVEL as usize].get_mut(ptr) as *mut CHILD)
         }
-        &mut *(self.pool[CHILD::LEVEL as usize].get_mut(ptr) as *mut CHILD)
     }
 
     #[inline]

@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::{
-    asset::{AssetLoader, AsyncReadExt}, math::Vec3A, prelude::*
+    asset::{AssetLoader, AsyncReadExt},
+    math::Vec3A,
+    prelude::*,
 };
 use dot_vox::{DotVoxData, Rotation, SceneNode};
-use dust_vdb::AttributeAllocator;
 use rayon::prelude::*;
 use rhyolite::Allocator;
 
@@ -12,7 +13,7 @@ use crate::{Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxM
 
 enum WorldOrParent<'w, 'q> {
     World(&'w mut World),
-    Parent(&'w mut WorldChildBuilder<'q>),
+    Parent(&'w mut ChildSpawner<'q>),
 }
 
 impl<'w, 'q> WorldOrParent<'w, 'q> {
@@ -321,14 +322,7 @@ impl AssetLoader for VoxLoader {
 impl VoxLoader {
     fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial) {
         let mut tree = crate::Tree::new();
-        let mut material = VoxMaterial{
-            // TODO: We can also make the capacity more dynamic and sparse!
-            attribute_allocator: AttributeAllocator::new_with_capacity(
-                32 * model.voxels.len() as u64,
-                16,
-                512,
-            ),
-        };
+        let mut material = VoxMaterial::new(self.allocator.clone());
 
         // Create 256x256x256 grid
         let mut accessor = tree.accessor_mut(&mut material);
@@ -355,7 +349,7 @@ impl VoxLoader {
         }
 
         accessor.end();
-        material.0.buffer_mut().flush(..);
+        // TODO: material.0.buffer_mut().flush(..);
 
         (tree, material)
     }
