@@ -99,6 +99,8 @@ pub trait Node: 'static + Send + Sync + Default + Clone {
     /// This is called when the node was located in a node pool.
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a>;
 
+    fn count_leaves(&self, pools: &[Pool]) -> usize;
+
     fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::LeafType>>]);
 
     #[cfg(feature = "physics")]

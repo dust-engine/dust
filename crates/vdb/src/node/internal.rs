@@ -256,6 +256,19 @@ where
         });
     }
 
+    fn count_leaves(&self, pools: &[Pool]) -> usize {
+        if Self::LEVEL == 1 {
+            // We're one level above leaves.
+            self.child_mask.count_ones()
+        } else {
+            self.child_mask.iter_ones().map(|i| {
+                let child_ptr = unsafe { self.child_ptrs[i].occupied };
+                let child = unsafe { pools[Self::LEVEL - 1].get_item::<CHILD>(child_ptr) };
+                return child.count_leaves(pools);
+            }).sum()
+        }
+    }
+
     /*
     #[cfg(feature = "physics")]
     #[inline]

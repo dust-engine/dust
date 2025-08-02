@@ -86,16 +86,6 @@ where
         }
     }
 
-    #[inline]
-    pub fn set_value(&mut self, coords: UVec3, value: bool) {
-        if value {
-            self.aabb.min = self.aabb.min.min(coords);
-            self.aabb.max = self.aabb.max.max(coords);
-        }
-        let mut _result = false;
-        //self.root.set(&mut self.pool, coords, value, &mut [], &mut _result);
-    }
-
     /// ```
     /// #![feature(generic_const_exprs)]
     /// use dust_vdb::{Tree, hierarchy};
@@ -133,6 +123,10 @@ where
                 let leaf: &'a mut ROOT::LeafType = &mut *leaf.get();
                 (position, leaf)
             })
+    }
+
+    pub fn count_leaves(&self) -> usize {
+        self.root.count_leaves(&self.pool)
     }
 
     pub fn metas() -> [NodeMeta<ROOT::LeafType>; ROOT::LEVEL as usize + 1] {

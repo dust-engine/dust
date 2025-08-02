@@ -222,6 +222,11 @@ where
         });
     }
 
+    fn count_leaves(&self, _pools: &[Pool]) -> usize {
+        debug_assert!(false, "Iteration should've been terminated one level above this");
+        1
+    }
+    
     /*
     #[cfg(feature = "physics")]
     #[inline]
