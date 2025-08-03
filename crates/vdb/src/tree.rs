@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 
 use glam::UVec3;
 
-use crate::{AabbU32, Node, NodeMeta, Pool};
+use crate::{AabbU32, Node, NodeMeta, pool::Pool, pool::PoolStorage};
 
 pub struct Tree<ROOT: Node>
 where
@@ -38,14 +38,32 @@ where
         let metas = Self::metas();
         for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate() {
             // Create CPU pool for levels 1..LEVEL. 1024 internal nodes at each level
-            let pool = Pool::new(meta.layout, meta.layout.pad_to_align().size() * (1 << 10));
+            let pool = Pool::new(meta.layout);
             pools[i].write(pool);
         }
 
-        let pools: [Pool; ROOT::LEVEL as usize] = unsafe {
-            // https://github.com/rust-lang/rust/issues/61956#issuecomment-1075275504
-            (&*(&MaybeUninit::new(pools) as *const _ as *const MaybeUninit<_>)).assume_init_read()
-        };
+        let pools: [Pool; ROOT::LEVEL as usize] = unsafe { MaybeUninit::array_assume_init(pools) };
+        Self {
+            root: ROOT::default(),
+            pool: pools,
+            aabb: AabbU32::default(),
+        }
+    }
+    pub fn new_with_leaf_storage(storage: Box<dyn PoolStorage>) -> Self
+    where
+        ROOT: Node,
+    {
+        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] =
+            [const { MaybeUninit::uninit() }; ROOT::LEVEL as usize];
+        let metas = Self::metas();
+        for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate().skip(1) {
+            // Create CPU pool for levels 1..LEVEL. 1024 internal nodes at each level
+            let pool = Pool::new(meta.layout);
+            pools[i].write(pool);
+        }
+        pools[0].write(Pool::new_with_storage(metas[0].layout, storage));
+
+        let pools: [Pool; ROOT::LEVEL as usize] = unsafe { MaybeUninit::array_assume_init(pools) };
         Self {
             root: ROOT::default(),
             pool: pools,

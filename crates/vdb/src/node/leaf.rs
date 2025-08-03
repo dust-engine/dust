@@ -1,5 +1,5 @@
 use super::{NodeMeta, size_of_grid};
-use crate::{ConstUVec3, Node, Pool};
+use crate::{ConstUVec3, Node, pool::Pool};
 use bitvec::{
     array::BitArray,
     order::Lsb0,
@@ -223,10 +223,13 @@ where
     }
 
     fn count_leaves(&self, _pools: &[Pool]) -> usize {
-        debug_assert!(false, "Iteration should've been terminated one level above this");
+        debug_assert!(
+            false,
+            "Iteration should've been terminated one level above this"
+        );
         1
     }
-    
+
     /*
     #[cfg(feature = "physics")]
     #[inline]

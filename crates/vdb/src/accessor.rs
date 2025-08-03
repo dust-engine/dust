@@ -1,7 +1,7 @@
+use crate::{Attributes, IsDefault, IsLeaf, Node, NodeMeta, Tree};
 use glam::UVec3;
 use std::mem::MaybeUninit;
-
-use crate::{Attributes, IsDefault, IsLeaf, Node, NodeMeta, Tree};
+use std::ops::Deref;
 
 pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
@@ -178,7 +178,7 @@ where
             let prev_access_leaf_node =
                 unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
             let old_attrib_ptr = prev_access_leaf_node.get_value();
-            if !prev_access_leaf_node.get_occupancy().all() {
+            if !prev_access_leaf_node.get_occupancy().deref().all() {
                 // fitting attributes by realloc and copy
                 let new_attrib_ptr = self.attributes.copy_attribute(
                     &old_attrib_ptr,

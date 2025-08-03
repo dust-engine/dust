@@ -11,5 +11,7 @@ dust-vdb = { path = "../vdb" }
 rayon = "1.10"
 tracing = "0.1"
 rhyolite = { path = "../../../rust-playground", features = ["bevy"] }
+rhyolite_bevy = { path = "../../../rust-playground/crates/bevy" }
 bitvec = "1"
 bytemuck = "1.23"
+smallvec = "1.15"

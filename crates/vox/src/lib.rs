@@ -16,6 +16,7 @@ use dust_vdb::hierarchy;
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
+mod geometry;
 mod loader;
 mod material;
 
@@ -28,22 +29,7 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 
 pub use loader::*;
 
-#[derive(Asset, TypePath)]
-pub struct VoxGeometry {
-    tree: Tree,
-    unit_size: f32,
-}
-impl Deref for VoxGeometry {
-    type Target = Tree;
-    fn deref(&self) -> &Self::Target {
-        &self.tree
-    }
-}
-impl DerefMut for VoxGeometry {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.tree
-    }
-}
+pub use geometry::VoxGeometry;
 
 #[derive(Asset, TypePath)]
 pub struct VoxPalette(Box<[Color; 256]>);

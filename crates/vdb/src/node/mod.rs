@@ -11,10 +11,10 @@ pub use internal::*;
 pub use leaf::*;
 //pub use root::*;
 
-use crate::{ConstUVec3, Pool};
+use crate::{ConstUVec3, pool::Pool};
 
 pub struct NodeMeta<V> {
-    pub(crate) layout: Layout,
+    pub layout: Layout,
     pub(crate) getter: for<'a> fn(
         pools: &'a [Pool],
         coords: UVec3,

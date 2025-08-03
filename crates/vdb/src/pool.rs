@@ -1,6 +1,33 @@
-use std::{alloc::Layout, collections::BTreeMap, marker::PhantomData, mem::MaybeUninit};
+use std::{alloc::Layout, marker::PhantomData, mem::MaybeUninit};
 
-use bitvec::BitArr;
+pub trait PoolStorage: Send + Sync {
+    fn resize(&mut self, size: usize) -> *mut u8;
+}
+
+pub struct DefaultPoolStorage {
+    size: usize,
+    align: usize,
+    buffer: *mut u8,
+}
+unsafe impl Send for DefaultPoolStorage {}
+unsafe impl Sync for DefaultPoolStorage {}
+impl PoolStorage for DefaultPoolStorage {
+    fn resize(&mut self, size: usize) -> *mut u8 {
+        unsafe {
+            let ptr = std::alloc::alloc(Layout::from_size_align_unchecked(size, self.align));
+            if !self.buffer.is_null() {
+                std::ptr::copy_nonoverlapping(self.buffer, ptr, self.size.min(size));
+                std::alloc::dealloc(
+                    self.buffer,
+                    Layout::from_size_align_unchecked(self.size, self.align),
+                );
+            }
+            self.size = size;
+            self.buffer = ptr;
+            ptr
+        }
+    }
+}
 
 pub struct Pool {
     /// Size of one individual allocation
@@ -10,15 +37,17 @@ pub struct Pool {
 
     /// Top of free items.
     top: u32,
-    /// Number of items to request when we run out of space.
-    /// When running out of space, request chunk_size bytes.
-    chunk_size: u64,
-    /// Log2 of number of items in a chunk
-    num_items_per_chunk: u32,
-    chunks: Vec<*mut u8>,
 
+    /// Number of allocated items
     count: u32,
-    change_tracker: Option<PoolChangeTracker>,
+
+    /// Capacity of the underlying storage
+    capacity: u32,
+
+    /// Reference into the underlying storage buffer
+    ptr: *mut u8,
+
+    storage: Box<dyn PoolStorage>,
 }
 
 unsafe impl Send for Pool {}
@@ -46,22 +75,30 @@ unsafe impl Sync for Pool {}
 /// }
 /// ```
 impl Pool {
-    pub fn new(layout: Layout, chunk_size: usize) -> Self {
-        let num_items_per_chunk = (chunk_size / layout.pad_to_align().size()) as u32;
+    pub fn new(layout: Layout) -> Self {
         Self {
             layout: layout.pad_to_align(),
             head: u32::MAX,
             top: 0,
-            chunk_size: chunk_size as u64,
-            chunks: Vec::new(),
             count: 0,
-            num_items_per_chunk,
-            change_tracker: None,
+            capacity: 0,
+            ptr: std::ptr::null_mut(),
+            storage: Box::new(DefaultPoolStorage {
+                size: 0,
+                align: layout.align(),
+                buffer: std::ptr::null_mut(),
+            }),
         }
     }
-    pub fn enable_change_tracking(&mut self) {
-        if self.change_tracker.is_none() {
-            self.change_tracker = Some(PoolChangeTracker::default());
+    pub fn new_with_storage(layout: Layout, storage: Box<dyn PoolStorage>) -> Self {
+        Self {
+            layout: layout.pad_to_align(),
+            head: u32::MAX,
+            top: 0,
+            count: 0,
+            capacity: 0,
+            ptr: std::ptr::null_mut(),
+            storage,
         }
     }
     pub fn count(&self) -> u32 {
@@ -82,10 +119,12 @@ impl Pool {
             if self.head == u32::MAX {
                 // allocate new
                 let top = self.top;
-                let chunk_index = top / self.num_items_per_chunk;
-                if chunk_index as usize >= self.chunks.len() {
-                    // allocate new block
-                    self.alloc_new_chunk();
+                if self.count > self.capacity {
+                    let new_capacity = (self.capacity * 2).max(16);
+                    self.ptr = self
+                        .storage
+                        .resize(self.layout.repeat(new_capacity as usize).unwrap().0.size());
+                    self.capacity = new_capacity;
                 }
                 self.top += 1;
                 top
@@ -97,14 +136,6 @@ impl Pool {
                 self.head = next_available_location;
                 return head;
             }
-        }
-    }
-    unsafe fn alloc_new_chunk(&mut self) {
-        unsafe {
-            let layout =
-                Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
-            let block = std::alloc::alloc_zeroed(layout);
-            self.chunks.push(block);
         }
     }
     pub fn free(&mut self, index: u32) {
@@ -124,30 +155,13 @@ impl Pool {
         }
     }
 
-    pub fn num_chunks(&self) -> usize {
-        self.chunks.len()
-    }
-
     #[inline]
     pub unsafe fn get(&self, ptr: u32) -> *const u8 {
-        unsafe {
-            let chunk_index = ptr / self.num_items_per_chunk;
-            let item_index = ptr - chunk_index * self.num_items_per_chunk;
-            return self
-                .chunks
-                .get_unchecked(chunk_index as usize)
-                .add(item_index as usize * self.layout.size());
-        }
+        unsafe { self.ptr.byte_add(self.layout.size() * ptr as usize) }
     }
     #[inline]
     pub unsafe fn get_mut(&mut self, ptr: u32) -> *mut u8 {
-        unsafe {
-            if let Some(change_tracker) = &mut self.change_tracker {
-                change_tracker.set(ptr);
-            }
-            let ptr = self.get(ptr);
-            ptr as *mut u8
-        }
+        unsafe { self.ptr.byte_add(self.layout.size() * ptr as usize) }
     }
 
     #[inline]
@@ -173,20 +187,6 @@ impl Pool {
             _marker: PhantomData,
         }
     }
-    pub(crate) fn iter_changes(&self) -> impl Iterator<Item = u32> + use<'_> {
-        const EMPTY_TRACKER: &PoolChangeTracker = &PoolChangeTracker {
-            tree: BTreeMap::new(),
-        };
-
-        let iter = self.change_tracker.as_ref().unwrap_or(EMPTY_TRACKER).iter();
-
-        iter
-    }
-    pub(crate) fn clear_changes(&mut self) {
-        if let Some(tracker) = self.change_tracker.as_mut() {
-            tracker.clear();
-        }
-    }
 }
 
 pub struct PoolIterator<'a, T> {
@@ -208,43 +208,5 @@ impl<'a, T: 'a> Iterator for PoolIterator<'a, T> {
         };
         self.cur += 1;
         Some(item)
-    }
-}
-
-impl Drop for Pool {
-    fn drop(&mut self) {
-        unsafe {
-            let layout =
-                Layout::from_size_align(self.chunk_size as usize, self.layout.align()).unwrap();
-            for chunk in self.chunks.iter() {
-                let chunk = *chunk;
-                std::alloc::dealloc(chunk, layout);
-            }
-        }
-    }
-}
-
-#[derive(Default)]
-struct PoolChangeTracker {
-    tree: BTreeMap<u32, BitArr!(for 512)>,
-}
-impl PoolChangeTracker {
-    fn set(&mut self, index: u32) {
-        let chunk_index = index / 512;
-        let bit_index = index - chunk_index * 512;
-        self.tree
-            .entry(chunk_index)
-            .or_default()
-            .set(bit_index as usize, true);
-    }
-    fn iter(&self) -> impl Iterator<Item = u32> + '_ {
-        self.tree.iter().flat_map(|(chunk_index, bitmask)| {
-            bitmask
-                .iter_ones()
-                .map(move |bit_index| chunk_index * 512 + bit_index as u32)
-        })
-    }
-    fn clear(&mut self) {
-        self.tree.clear();
     }
 }

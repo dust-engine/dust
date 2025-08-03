@@ -73,6 +73,7 @@ impl AttributeAllocator {
     }
     pub fn allocate(&mut self, size: u32) -> u32 {
         assert!(size <= self.max_allocation);
+        assert!(size > 0);
         let increment = size.next_multiple_of(self.alignment);
         self.wasted_bytes += increment - size;
         if let Some(indice) = self.freelist_for_size(size).pop() {

@@ -1,5 +1,5 @@
 use super::{NodeMeta, size_of_grid};
-use crate::{ConstUVec3, Node, Pool};
+use crate::{ConstUVec3, Node, pool::Pool};
 use bitvec::{array::BitArray, order::Lsb0, slice::IterOnes};
 use glam::UVec3;
 use std::{
@@ -261,11 +261,14 @@ where
             // We're one level above leaves.
             self.child_mask.count_ones()
         } else {
-            self.child_mask.iter_ones().map(|i| {
-                let child_ptr = unsafe { self.child_ptrs[i].occupied };
-                let child = unsafe { pools[Self::LEVEL - 1].get_item::<CHILD>(child_ptr) };
-                return child.count_leaves(pools);
-            }).sum()
+            self.child_mask
+                .iter_ones()
+                .map(|i| {
+                    let child_ptr = unsafe { self.child_ptrs[i].occupied };
+                    let child = unsafe { pools[Self::LEVEL - 1].get_item::<CHILD>(child_ptr) };
+                    return child.count_leaves(pools);
+                })
+                .sum()
         }
     }
 

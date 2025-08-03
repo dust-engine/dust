@@ -9,7 +9,10 @@ use dot_vox::{DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
 use rhyolite::Allocator;
 
-use crate::{Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxPalette};
+use crate::{
+    Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxPalette,
+    geometry::VoxGeometryLeafStorage,
+};
 
 enum WorldOrParent<'w, 'q> {
     World(&'w mut World),
@@ -285,7 +288,7 @@ impl AssetLoader for VoxLoader {
                         .map(|(model_id, (tree, material))| {
                             let geometry = load_context.add_labeled_asset(
                                 format!("Geometry{}", model_id),
-                                VoxGeometry { tree, unit_size },
+                                VoxGeometry::new(tree, unit_size),
                             );
                             let material = load_context
                                 .add_labeled_asset(format!("Material{}", model_id), material);
@@ -321,7 +324,10 @@ impl AssetLoader for VoxLoader {
 }
 impl VoxLoader {
     fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial) {
-        let mut tree = crate::Tree::new();
+        let mut tree = crate::Tree::new_with_leaf_storage(Box::new(VoxGeometryLeafStorage::new(
+            self.allocator.clone(),
+            crate::Tree::metas()[0].layout.align(),
+        )));
         let mut material = VoxMaterial::new(self.allocator.clone());
 
         // Create 256x256x256 grid

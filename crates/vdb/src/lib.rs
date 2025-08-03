@@ -11,11 +11,10 @@ mod node;
 
 //#[cfg(feature = "physics")]
 //mod parry;
-mod pool;
+pub mod pool;
 mod traversal;
 mod tree;
 
-pub use pool::Pool;
 pub use tree::Tree;
 
 pub use accessor::*;

@@ -1407,6 +1407,8 @@ dependencies = [
  "dust-vdb",
  "rayon",
  "rhyolite",
+ "rhyolite_bevy",
+ "smallvec",
  "thiserror 1.0.69",
  "tracing",
 ]
@@ -2829,6 +2831,7 @@ dependencies = [
  "rhyolite",
  "ron",
  "serde",
+ "smallvec",
  "thiserror 2.0.12",
  "tracing",
 ]
