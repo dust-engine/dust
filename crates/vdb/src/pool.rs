@@ -1,6 +1,6 @@
-use std::{alloc::Layout, marker::PhantomData, mem::MaybeUninit};
+use std::{alloc::Layout, any::Any, marker::PhantomData, mem::MaybeUninit};
 
-pub trait PoolStorage: Send + Sync {
+pub trait PoolStorage: Send + Sync + Any {
     fn resize(&mut self, size: usize) -> *mut u8;
 }
 
@@ -104,6 +104,13 @@ impl Pool {
     pub fn count(&self) -> u32 {
         self.count
     }
+    pub fn storage(&self) -> &dyn PoolStorage {
+        &*self.storage
+    }
+    
+    pub fn storage_mut(&mut self) -> &mut dyn PoolStorage {
+        &mut *self.storage
+    }
     pub unsafe fn alloc<T: Default>(&mut self) -> u32 {
         unsafe {
             debug_assert_eq!(Layout::new::<T>(), self.layout);
@@ -179,34 +186,8 @@ impl Pool {
         }
     }
 
-    pub fn iter_entries<T>(&self) -> PoolIterator<T> {
-        debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
-        PoolIterator {
-            pool: self,
-            cur: 0,
-            _marker: PhantomData,
-        }
-    }
-}
-
-pub struct PoolIterator<'a, T> {
-    pool: &'a Pool,
-    cur: u32,
-    _marker: PhantomData<T>,
-}
-
-impl<'a, T: 'a> Iterator for PoolIterator<'a, T> {
-    type Item = &'a MaybeUninit<T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur >= self.pool.top {
-            return None;
-        }
-        let item: &'a MaybeUninit<T> = unsafe {
-            let item = self.pool.get(self.cur);
-            std::mem::transmute(item)
-        };
-        self.cur += 1;
-        Some(item)
+    /// Total number of elements that are either occupied, or are marked invalid
+    pub fn used_capacity(&self) -> u32 {
+        self.top
     }
 }

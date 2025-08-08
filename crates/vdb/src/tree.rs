@@ -70,6 +70,9 @@ where
             aabb: AabbU32::default(),
         }
     }
+    pub fn pools(&self) -> &[Pool] {
+        &self.pool
+    }
     pub unsafe fn alloc_node<CHILD: Node>(&mut self) -> u32 {
         unsafe {
             if ROOT::LEVEL <= CHILD::LEVEL {

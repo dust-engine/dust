@@ -1,7 +1,10 @@
-use crate::Tree;
-use bevy::prelude::*;
+use std::{any::Any, sync::Arc};
+
+use crate::{Tree, VoxLeafNode, VoxModel};
+use bevy::{ecs::system::lifetimeless::{SRes, SResMut}, prelude::*};
 use dust_vdb::pool::PoolStorage;
-use rhyolite::{Allocator, ash::vk, buffer::ManagedBuffer};
+use rhyolite::{ash::vk, buffer::{Buffer, ManagedBuffer, Uploader}, command::CommandEncoder, utils::AsVkHandle, Allocator};
+use smallvec::SmallVec;
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
@@ -31,7 +34,8 @@ impl PoolStorage for VoxGeometryLeafStorage {
             self.allocator.clone(),
             size as u64,
             self.alignment as u64,
-            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS |
+            vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
         )
         .unwrap();
         unsafe {
@@ -56,12 +60,7 @@ impl VoxGeometry {
         Self { tree, unit_size }
     }
 }
-
-/*
-
-pub struct BlasBuilder {
-
-}
+pub struct BlasBuilder;
 
 
 impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
@@ -71,46 +70,37 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
 
     type Params = (
         SRes<Assets<VoxGeometry>>,
-        SResMut<Uploader>
+        SResMut<Uploader>,
+        SRes<Allocator>
     );
 
-    type BufferType;
+    type BufferType = Buffer;
 
-    type BufferContainerType;
+    type BufferContainerType = Arc<Buffer>;
 
-    fn geometries(
-        (geometries, uploader): &mut bevy::ecs::system::SystemParamItem<Self::Params>,
+    fn geometries<'w, 's, 't, 'b>(
+        (geometries, uploader, allocator): &mut bevy::ecs::system::SystemParamItem<'w, 's, Self::Params>,
         model: &VoxModel,
-    ) -> impl Future<Output = SmallVec<[rhyolite_bevy::rtx::blas::BLASBuildGeometry<Self::BufferContainerType>; 1]>> + use<> {
+        recorder: &mut CommandEncoder<'b>,
+    ) -> impl Future<Output = SmallVec<[rhyolite_bevy::rtx::blas::BLASBuildGeometry<Self::BufferContainerType>; 1]>> + use<'w, 's, 't, 'b> {
         let geometry = geometries.get(&model.geometry).unwrap();
 
-        let num_leaves = geometry.count_leaves();
+        let primitive_count = geometry.tree.pools()[0].used_capacity();
+        let leaf_storage: &dyn Any = geometry.tree.pools()[0].storage();
+        let leaf_storage = leaf_storage.downcast_ref::<VoxGeometryLeafStorage>().unwrap();
 
+        let device_buffer = leaf_storage.buffer.as_ref().map(|x| x.device_buffer().clone());
 
-        let leaf_extent_int = <<TreeRoot as Node>::LeafType as Node>::EXTENT;
-        let leaf_extent: Vec3A = leaf_extent_int.as_vec3a();
-        let leaf_extent: Vec3A = geometry.unit_size * leaf_extent;
-
-
-        uploader.allocate_buffer((num_leaves * size_of::<vk::AabbPositionsKHR>()) as u64, 4, |buf | {
-            assert_eq!(buf.len(), num_leaves * size_of::<vk::AabbPositionsKHR>());
-            let buf = unsafe { std::slice::from_raw_parts_mut(buf.as_ptr() as *mut vk::AabbPositionsKHR, num_leaves)};
-            for ((position, _), target) in geometry.iter_leaf().zip(buf.iter_mut()) {
-                let position = position.as_vec3a();
-                let max_position = leaf_extent + position;
-                *target = vk::AabbPositionsKHR {
-                    min_x: position.x,
-                    min_y: position.y,
-                    min_z: position.z,
-                    max_x: max_position.x,
-                    max_y: max_position.y,
-                    max_z: max_position.z,
-                };
-            }
-        });
-        rhyolite_bevy::rtx::blas::BLASBuildGeometry::Aabbs {
-            buffer: (), stride: (), flags: (), primitive_count: ()
+        async move {
+            let Some(device_buffer) = device_buffer else {
+                return SmallVec::new();
+            };
+            [rhyolite_bevy::rtx::blas::BLASBuildGeometry::Aabbs {
+                buffer: device_buffer,
+                stride: size_of::<VoxLeafNode>() as u64,
+                flags: vk::GeometryFlagsKHR::OPAQUE,
+                primitive_count
+            }].into()
         }
     }
 }
-    */

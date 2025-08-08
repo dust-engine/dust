@@ -112,6 +112,8 @@ impl Plugin for VoxPlugin {
             .init_asset::<VoxMaterial>()
             .register_type::<VoxInstance>()
             .register_type::<VoxModel>();
+
+        app.add_plugins(rhyolite_bevy::rtx::blas::BLASBuilderPlugin::<geometry::BlasBuilder>::default());
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
