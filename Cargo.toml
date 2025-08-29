@@ -14,7 +14,7 @@ rhyolite_bevy = { path = "../rust-playground/crates/bevy" }
 dust_vox = { path = "crates/vox" }
 
 [dependencies.bevy]
-version = "0.16.0-dev"
+version = "0.17.0-dev"
 default-features = false
 features = [
     "std",
@@ -24,6 +24,7 @@ features = [
     "bevy_window",
     "bevy_asset",
     "bevy_scene",
+    "reflect_auto_register",
     "multi_threaded",
 ]
 
@@ -49,3 +50,6 @@ bevy_internal = { path = "../bevy/crates/bevy_internal" }
 bevy_asset = { path = "../bevy/crates/bevy_asset" }
 bevy_scene = { path = "../bevy/crates/bevy_scene" }
 bevy = { path = "../bevy" }
+
+[patch."https://github.com/ash-rs/ash.git"]
+ash = { git = "https://github.com/Neo-Zhixing/ash", branch = "meta" }

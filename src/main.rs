@@ -38,27 +38,21 @@ fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetSe
 }
 
 fn clear(
-    mut image: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
+    mut swapchain_images: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
     mut state: RenderSetSharedStateWrapper,
 ) {
-    let Ok(mut image) = image.single_mut() else {
+    let Ok(mut swapchain_image) = swapchain_images.single_mut() else {
         return;
     };
-    let image = image.write(
-        vk::PipelineStageFlags2::CLEAR,
-        vk::AccessFlags2::TRANSFER_WRITE,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-    );
     state.record(|encoder| {
-        let mut image = image.map(|x| encoder.lock(&x, vk::PipelineStageFlags2::CLEAR));
-        let image = encoder.use_image_resource(
-            &mut image,
+        let image = encoder.lock(swapchain_image.inner.as_ref().unwrap(), vk::PipelineStageFlags2::BLIT);
+
+        encoder.use_image_resource(
+            image,
+            &mut swapchain_image.state,
             Access::CLEAR,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            0..1,
-            0..1,
-            false,
-        );
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL, 0..1, 0..1, true);
+
         encoder.emit_barriers();
         encoder.clear_color_image(
             image,

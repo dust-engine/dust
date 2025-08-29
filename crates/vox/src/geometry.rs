@@ -3,7 +3,7 @@ use std::{any::Any, sync::Arc};
 use crate::{Tree, VoxLeafNode, VoxModel};
 use bevy::{ecs::system::lifetimeless::{SRes, SResMut}, prelude::*};
 use dust_vdb::pool::PoolStorage;
-use rhyolite::{ash::vk, buffer::{Buffer, ManagedBuffer, Uploader}, command::CommandEncoder, utils::AsVkHandle, Allocator};
+use rhyolite::{ash::vk, buffer::{Buffer, ManagedBuffer}, command::CommandEncoder, utils::AsVkHandle, Allocator};
 use smallvec::SmallVec;
 
 #[derive(Asset, TypePath)]
@@ -70,7 +70,6 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
 
     type Params = (
         SRes<Assets<VoxGeometry>>,
-        SResMut<Uploader>,
         SRes<Allocator>
     );
 
@@ -78,11 +77,11 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
 
     type BufferContainerType = Arc<Buffer>;
 
-    fn geometries<'w, 's, 't, 'b>(
-        (geometries, uploader, allocator): &mut bevy::ecs::system::SystemParamItem<'w, 's, Self::Params>,
+    fn geometries<'w, 's, 't, 't2, 'b>(
+        (geometries, allocator): &mut bevy::ecs::system::SystemParamItem<'w, 's, Self::Params>,
         model: &VoxModel,
         recorder: &mut CommandEncoder<'b>,
-    ) -> impl Future<Output = SmallVec<[rhyolite_bevy::rtx::blas::BLASBuildGeometry<Self::BufferContainerType>; 1]>> + use<'w, 's, 't, 'b> {
+    ) -> impl Future<Output = SmallVec<[rhyolite_bevy::rtx::blas::BLASBuildGeometry<Self::BufferContainerType>; 1]>> + use<'w, 's, 't, 't2, 'b> {
         let geometry = geometries.get(&model.geometry).unwrap();
 
         let primitive_count = geometry.tree.pools()[0].used_capacity();

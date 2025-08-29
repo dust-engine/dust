@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.16.0-dev", default-features = false, features = ["bevy_asset", "bevy_scene", "bevy_color"] }
+bevy = { version = "0.17.0-dev", default-features = false, features = ["bevy_asset", "bevy_scene", "bevy_color"] }
 dot_vox = "5.1"
 thiserror = "1"
 dust-vdb = { path = "../vdb" }
