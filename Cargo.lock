@@ -2858,6 +2858,7 @@ dependencies = [
  "bevy_ptr",
  "bevy_reflect",
  "bevy_tasks",
+ "bevy_transform",
  "bevy_window",
  "bevy_winit",
  "either",

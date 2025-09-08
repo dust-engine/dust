@@ -1,8 +1,9 @@
 #![feature(impl_trait_in_fn_trait_return)]
 
 use bevy::prelude::*;
-use rhyolite::{ash::vk, tracking::Access};
-use rhyolite_bevy::{DefaultRenderSet, RenderSetSharedStateWrapper, swapchain::SwapchainImage};
+use dust_vox::{VoxInstance, VoxInstanceBundle, VoxModel};
+use rhyolite::{Allocator, ash::vk, tracking::Access};
+use rhyolite_bevy::{DefaultRenderSet, RenderSetSharedStateWrapper, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
 fn main() {
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::DefaultPlugins)
@@ -28,13 +29,40 @@ fn main() {
         });
 
     app.add_systems(Startup, startup_system);
+    app.add_systems(PostUpdate, registering_instances);
     app.add_systems(PostUpdate, clear.in_set(DefaultRenderSet));
+
+    // Build a TLAS over everything.
+    app.add_plugins(rhyolite_bevy::rtx::tlas::TLASBuilderPlugin::<()>::default());
     app.run();
 }
 
-fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetServer>) {
+fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetServer>, allocator: Res<Allocator>,
+mut geometries: ResMut<Assets<dust_vox::VoxGeometry>>,
+mut materials: ResMut<Assets<dust_vox::VoxMaterial>>,
+mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
+) {
     let scene: Handle<Scene> = asset_server.load("castle.vox");
     commands.spawn(SceneRoot(scene));
+    return;
+
+    
+    let mut geometry = dust_vox::VoxGeometry::new(allocator.clone(), 1.0);
+    let mut material = dust_vox::VoxMaterial::new(allocator.clone());
+    let mut accessor = geometry.tree.accessor_mut(&mut material);
+    accessor.set(UVec3::new(8, 9, 10), 123);
+    accessor.end();
+
+    let model = commands.spawn(VoxModel {
+        geometry: geometries.add(geometry),
+        material: materials.add(material),
+        palette: palettes.add(dust_vox::VoxPalette::colorful()),
+    }).id();
+    commands.spawn(VoxInstanceBundle {
+        transform: Default::default(),
+        global_transform: Default::default(),
+        instance: VoxInstance { model },
+    });
 }
 
 fn clear(
@@ -61,4 +89,13 @@ fn clear(
             },
         );
     });
+}
+
+fn registering_instances(
+    query: Query<(Entity, &VoxInstance), Without<TLASInstance<()>>>,
+    mut commands: Commands
+) {
+    for (entity, instance) in query.iter() {
+        commands.entity(entity).insert(TLASInstance::<()>::new(instance.model));
+    }
 }

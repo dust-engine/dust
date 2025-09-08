@@ -13,6 +13,7 @@ use bevy::{
 };
 use dot_vox::Color;
 use dust_vdb::hierarchy;
+use rhyolite_bevy::RhyoliteApp;
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
@@ -23,7 +24,7 @@ mod material;
 pub use material::{VoxLeafNode, VoxMaterial};
 
 /// Leaf node size: 96 bytes
-type TreeRoot = hierarchy!(3, 2, 3, VoxLeafNode);
+type TreeRoot = hierarchy!(3, 3, 2, VoxLeafNode);
 
 type Tree = dust_vdb::Tree<TreeRoot>;
 
@@ -113,7 +114,15 @@ impl Plugin for VoxPlugin {
             .register_type::<VoxInstance>()
             .register_type::<VoxModel>();
 
+        // Build a BLAS for all entities with VoxModel and without the BLAS component.
         app.add_plugins(rhyolite_bevy::rtx::blas::BLASBuilderPlugin::<geometry::BlasBuilder>::default());
+
+        use bevy::asset::embedded_asset;
+        embedded_asset!(app, "shaders/blas_builder_copy_coords.spv");
+        embedded_asset!(app, "shaders/blas_builder_copy_coords.comp.pipeline.ron");
+        
+        app.add_device_extension::<rhyolite::ash::khr::push_descriptor::Meta>()
+            .unwrap();
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();

@@ -11,27 +11,15 @@ use rhyolite::{
 
 #[derive(Debug, Clone)]
 pub struct VoxLeafNode {
-    /// Note: we store this value as a vk::AabbPositionsKHR which is less
-    /// efficient than possible. We could get away with storing a u16vec4.
-    /// That helps us to get down the overhead to 12 bytes
-    /// (8 for aabb, 2 for material_ptr, 2 for reserved) instead of 32 bytes.
-    aabb: vk::AabbPositionsKHR,
+    /// 10 bits for X, Y, Z.
+    coords: u32,
     material_ptr: u32,
-    reserved: u32,
 }
 impl Default for VoxLeafNode {
     fn default() -> Self {
         Self {
-            aabb: vk::AabbPositionsKHR {
-                min_x: f32::NAN,
-                min_y: f32::NAN,
-                min_z: f32::NAN,
-                max_x: f32::NAN,
-                max_y: f32::NAN,
-                max_z: f32::NAN,
-            },
-            material_ptr: 0,
-            reserved: 0,
+            coords: u32::MAX,
+            material_ptr: u32::MAX,
         }
     }
 }
@@ -39,7 +27,7 @@ impl Default for VoxLeafNode {
 #[derive(Asset, TypePath)]
 pub struct VoxMaterial {
     pub attribute_allocator: AttributeAllocator,
-    buffer: ManagedBuffer,
+    buffer: ManagedBuffer, // Wait so this actually do need to be a managedbuffer.
 }
 impl VoxMaterial {
     pub fn new(allocator: Allocator) -> Self {
@@ -76,10 +64,10 @@ impl dust_vdb::Attributes for VoxMaterial {
     /// 0 for air, and 1 ..= 255 for the offset into the palette.
     type Value = u8;
     type Ptr = VoxLeafNode;
-    type Occupancy = BitArr!(for 512);
+    type Occupancy = BitArr!(for 64);
 
     const MAX_OCCUPANCY: Self::Occupancy = BitArray {
-        data: [usize::MAX; 8],
+        data: [usize::MAX; 1],
         _ord: PhantomData,
     };
 
@@ -108,38 +96,35 @@ impl dust_vdb::Attributes for VoxMaterial {
             .attribute_allocator
             .allocate(new_mask.count_ones() as u32);
         self.reserve(new_ptr as u64 + new_mask.count_ones() as u64);
-        let mut new_ptr_cur = new_ptr;
-        let mut old_ptr_cur = ptr.material_ptr;
 
-        let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
-        for bit in (*original_mask | new_mask).iter_ones() {
-            if *new_mask.get(bit).unwrap() && *original_mask.get(bit).unwrap() {
-                // copy it over
-                slice[new_ptr_cur as usize] = slice[old_ptr_cur as usize];
-            }
-            if *new_mask.get(bit).unwrap() {
-                new_ptr_cur += 1;
-            }
-            if *original_mask.get(bit).unwrap() {
-                old_ptr_cur += 1;
+        
+        if ptr.coords == u32::MAX {
+            debug_assert!(original_mask.not_any());
+            
+            let mut new_ptr_cur = new_ptr;
+            let mut old_ptr_cur = ptr.material_ptr;
+
+            let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
+            for bit in (*original_mask | new_mask).iter_ones() {
+                if *new_mask.get(bit).unwrap() && *original_mask.get(bit).unwrap() {
+                    // copy it over
+                    slice[new_ptr_cur as usize] = slice[old_ptr_cur as usize];
+                }
+                if *new_mask.get(bit).unwrap() {
+                    new_ptr_cur += 1;
+                }
+                if *original_mask.get(bit).unwrap() {
+                    old_ptr_cur += 1;
+                }
             }
         }
+        
 
-        let leaf_extent = <<crate::TreeRoot as Node>::LeafType as Node>::EXTENT;
-        let min = *coords & UVec3::splat(!0b111);
-        let max = min + leaf_extent;
-        let aabb = vk::AabbPositionsKHR {
-            min_x: min.x as f32,
-            min_y: min.y as f32,
-            min_z: min.z as f32,
-            max_x: max.x as f32,
-            max_y: max.y as f32,
-            max_z: max.z as f32,
-        };
+        let block_coords: UVec3 = coords >> 2;
+        let packed_coords = (block_coords.x << 20) | (block_coords.y << 10) | (block_coords.z);
         VoxLeafNode {
-            aabb,
+            coords: packed_coords,
             material_ptr: new_ptr,
-            reserved: 0,
         }
     }
 

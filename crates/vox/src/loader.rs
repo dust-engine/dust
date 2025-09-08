@@ -277,7 +277,7 @@ impl AssetLoader for VoxLoader {
                 let handles = models
                     .par_iter()
                     .map(|(model_id, model)| {
-                        let (tree, attribute_allocator) = self.model_to_tree(model);
+                        let (tree, attribute_allocator) = self.model_to_tree(model, unit_size);
                         (*model_id, (tree, attribute_allocator))
                     })
                     .collect_vec_list();
@@ -288,7 +288,7 @@ impl AssetLoader for VoxLoader {
                         .map(|(model_id, (tree, material))| {
                             let geometry = load_context.add_labeled_asset(
                                 format!("Geometry{}", model_id),
-                                VoxGeometry::new(tree, unit_size),
+                                tree,
                             );
                             let material = load_context
                                 .add_labeled_asset(format!("Material{}", model_id), material);
@@ -323,15 +323,12 @@ impl AssetLoader for VoxLoader {
     }
 }
 impl VoxLoader {
-    fn model_to_tree(&self, model: &dot_vox::Model) -> (Tree, VoxMaterial) {
-        let mut tree = crate::Tree::new_with_leaf_storage(Box::new(VoxGeometryLeafStorage::new(
-            self.allocator.clone(),
-            crate::Tree::metas()[0].layout.align(),
-        )));
+    fn model_to_tree(&self, model: &dot_vox::Model, unit_size: f32) -> (VoxGeometry, VoxMaterial) {
+        let mut geometry = VoxGeometry::new(self.allocator.clone(), unit_size);
         let mut material = VoxMaterial::new(self.allocator.clone());
 
         // Create 256x256x256 grid
-        let mut accessor = tree.accessor_mut(&mut material);
+        let mut accessor = geometry.tree.accessor_mut(&mut material);
         let size_y = model.size.y;
 
         let mut min = UVec3::MAX;
@@ -357,6 +354,6 @@ impl VoxLoader {
         accessor.end();
         // TODO: material.0.buffer_mut().flush(..);
 
-        (tree, material)
+        (geometry, material)
     }
 }

@@ -1,0 +1,29 @@
+ComputePipeline(
+    shader: (
+            path: "embedded://dust_vox/shaders/blas_builder_copy_coords.spv",
+            entry_point: "main",
+        ),
+    layout: Inline(
+        PipelineLayout(
+            sets: [
+                Inline(
+                    DescriptorSetLayout(
+                        push_descriptor: true,
+                        bindings: [
+                            Binding(
+                                binding: 0,
+                                ty: StorageBuffer,
+                                stages: [Compute]
+                            ),
+                            Binding(
+                                binding: 1,
+                                ty: StorageBuffer,
+                                stages: [Compute]
+                            )
+                        ]
+                    )
+                )
+            ],
+        )
+    ),
+)

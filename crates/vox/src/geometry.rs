@@ -3,18 +3,20 @@ use std::{any::Any, sync::Arc};
 use crate::{Tree, VoxLeafNode, VoxModel};
 use bevy::{ecs::system::lifetimeless::{SRes, SResMut}, prelude::*};
 use dust_vdb::pool::PoolStorage;
-use rhyolite::{ash::vk, buffer::{Buffer, ManagedBuffer}, command::CommandEncoder, utils::AsVkHandle, Allocator};
+use rhyolite::{Allocator, HasDevice, ash::vk, buffer::{Buffer, BufferLike, RingBufferSuballocation}, command::CommandEncoder, utils::AsVkHandle};
+use rhyolite_bevy::{shader::ComputePipeline, staging::DeviceLocalRingBuffer};
 use smallvec::SmallVec;
 
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
-    tree: Tree,
+    pub tree: Tree,
     pub unit_size: f32,
 }
 
 pub struct VoxGeometryLeafStorage {
     allocator: Allocator,
-    buffer: Option<ManagedBuffer>,
+    // A host-cached buffer that is preferably device-visible.
+    buffer: Option<Arc<Buffer>>,
     alignment: usize,
     size: usize,
 }
@@ -30,7 +32,7 @@ impl VoxGeometryLeafStorage {
 }
 impl PoolStorage for VoxGeometryLeafStorage {
     fn resize(&mut self, size: usize) -> *mut u8 {
-        let mut new_buffer = ManagedBuffer::new(
+        let mut new_buffer = Buffer::new_dynamic(
             self.allocator.clone(),
             size as u64,
             self.alignment as u64,
@@ -49,19 +51,35 @@ impl PoolStorage for VoxGeometryLeafStorage {
         }
 
         let ptr = new_buffer.as_mut_ptr();
-        self.buffer = Some(new_buffer);
+        assert!(!ptr.is_null());
+        self.buffer = Some(Arc::new(new_buffer));
         self.size = size;
         ptr
     }
 }
 
 impl VoxGeometry {
-    pub fn new(tree: Tree, unit_size: f32) -> Self {
+    pub fn new(allocator: Allocator, unit_size: f32) -> Self {
+        let tree = crate::Tree::new_with_leaf_storage(Box::new(VoxGeometryLeafStorage::new(
+            allocator,
+            crate::Tree::metas()[0].layout.align(),
+        )));
+
         Self { tree, unit_size }
     }
 }
-pub struct BlasBuilder;
 
+#[derive(Resource)]
+pub struct BlasBuilder {
+    copy_coords_pipeline: Handle<ComputePipeline>
+}
+impl FromWorld for BlasBuilder {
+    fn from_world(world: &mut World) -> Self {
+        BlasBuilder {
+            copy_coords_pipeline: world.load_asset("embedded://dust_vox/shaders/blas_builder_copy_coords.comp.pipeline.ron")
+        }
+    }
+}
 
 impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
     type QueryData = &'static VoxModel;
@@ -70,33 +88,63 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
 
     type Params = (
         SRes<Assets<VoxGeometry>>,
-        SRes<Allocator>
+        SResMut<DeviceLocalRingBuffer>,
+        SRes<Assets<ComputePipeline>>
     );
 
-    type BufferType = Buffer;
+    type BufferType = RingBufferSuballocation;
 
-    type BufferContainerType = Arc<Buffer>;
-
-    fn geometries<'w, 's, 't, 't2, 'b>(
-        (geometries, allocator): &mut bevy::ecs::system::SystemParamItem<'w, 's, Self::Params>,
+    fn geometries<'w, 's, 't, 't2, 'b, 'bb>(
+        &mut self,
+        (geometries, device_local_ring_buffer, compute_pipelines): &mut bevy::ecs::system::SystemParamItem<'w, 's, Self::Params>,
         model: &VoxModel,
-        recorder: &mut CommandEncoder<'b>,
-    ) -> impl Future<Output = SmallVec<[rhyolite_bevy::rtx::blas::BLASBuildGeometry<Self::BufferContainerType>; 1]>> + use<'w, 's, 't, 't2, 'b> {
+        recorder: &'bb mut CommandEncoder<'b>,
+    ) -> impl Future<Output = SmallVec<[rhyolite_bevy::rtx::blas::BLASBuildGeometry<'b, RingBufferSuballocation>; 1]>> + use<'w, 's, 't, 't2, 'b, 'bb> {
+        let copy_coords_pipeline = compute_pipelines.get(&self.copy_coords_pipeline).unwrap().clone();
         let geometry = geometries.get(&model.geometry).unwrap();
 
         let primitive_count = geometry.tree.pools()[0].used_capacity();
         let leaf_storage: &dyn Any = geometry.tree.pools()[0].storage();
         let leaf_storage = leaf_storage.downcast_ref::<VoxGeometryLeafStorage>().unwrap();
 
-        let device_buffer = leaf_storage.buffer.as_ref().map(|x| x.device_buffer().clone());
+        // TODO: This buffer may not be device-local. Test perf when everything was pre-copied to device.
+        let device_buffer = leaf_storage.buffer.as_ref().map(Arc::clone);
+        let coords_buffer = if device_buffer.is_some() {
+            
+            // TODO: query the alignment using minStorageBufferOffsetAlignment.
+            Some(device_local_ring_buffer.allocate_buffer(primitive_count as u64 * size_of::<vk::AabbPositionsKHR>() as u64, 16))
+        } else {
+            None
+        };
 
         async move {
             let Some(device_buffer) = device_buffer else {
                 return SmallVec::new();
             };
+            let device_buffer = recorder.retain(device_buffer);
+            let coords_buffer = recorder.retain(Box::new(coords_buffer.unwrap()));
+            let copy_coords_pipeline = recorder.retain(copy_coords_pipeline.into_inner());
+            recorder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, copy_coords_pipeline);
+            recorder.push_descriptor_set(vk::PipelineBindPoint::COMPUTE, copy_coords_pipeline.layout(), 0, &[
+                vk::WriteDescriptorSet {
+                    dst_binding: 0,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: device_buffer.vk_handle(),
+                    offset: device_buffer.offset(),
+                    range: device_buffer.size(),
+                },vk::DescriptorBufferInfo {
+                    buffer: coords_buffer.vk_handle(),
+                    offset: coords_buffer.offset(),
+                    range: coords_buffer.size(),
+                }])
+            ]);
+            recorder.dispatch(UVec3 { x: primitive_count.div_ceil(32), y: 1, z: 1 });
             [rhyolite_bevy::rtx::blas::BLASBuildGeometry::Aabbs {
-                buffer: device_buffer,
-                stride: size_of::<VoxLeafNode>() as u64,
+                buffer: coords_buffer,
+                stride: size_of::<vk::AabbPositionsKHR>() as u64,
                 flags: vk::GeometryFlagsKHR::OPAQUE,
                 primitive_count
             }].into()

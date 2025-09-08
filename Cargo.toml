@@ -24,6 +24,7 @@ features = [
     "bevy_window",
     "bevy_asset",
     "bevy_scene",
+    "debug",
     "reflect_auto_register",
     "multi_threaded",
 ]

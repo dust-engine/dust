@@ -282,17 +282,18 @@ mod tests {
             ptr: &Self::Ptr,
             original_mask: &Self::Occupancy,
             new_mask: &Self::Occupancy,
-            _coords: &UVec3,
+            coords: &UVec3,
         ) -> Self::Ptr {
             if !original_mask.any() {
                 let new = vec![0; new_mask.count_ones() as usize];
-                self.attribute_maps.push(new);
                 println!(
-                    "copy_attribute from null to {}: {} -> {}",
+                    "copy_attribute at {:?} from null to {}: {} -> {}",
+                 coords,
                     self.attribute_maps.len(),
                     original_mask.count_ones(),
                     new_mask.count_ones()
                 );
+                self.attribute_maps.push(new);
                 return self.attribute_maps.len() as u32 - 1;
             }
             let mut new = vec![0; new_mask.count_ones() as usize];
@@ -312,7 +313,8 @@ mod tests {
                 }
             }
             println!(
-                "copy_attribute from {} to {}: {} -> {}",
+                "copy_attribute at {:?} from {} to {}: {} -> {}",
+                coords,
                 ptr,
                 self.attribute_maps.len(),
                 original_mask.count_ones(),
@@ -354,17 +356,17 @@ mod tests {
         let mut attributes = TestAttributes::default();
         let mut accessor = tree.accessor_mut(&mut attributes);
 
-        accessor.set(UVec3::new(0, 0, 0), 12);
+        accessor.set(UVec3::new(0, 0, 3), 12);
         // Allocates full map for additional attributes
         assert_eq!(accessor.attributes.attribute_maps[0].len(), 64);
-        assert_eq!(accessor.get(UVec3::new(0, 0, 0)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(0, 1, 5)), None);
 
         accessor.set(UVec3::new(0, 1, 0), 13);
         // Subsequent ops in the same leaf node should not allocate
         assert_eq!(accessor.attributes.attribute_maps[0].len(), 64);
         assert_eq!(accessor.attributes.attribute_maps.len(), 1);
-        assert_eq!(accessor.get(UVec3::new(0, 0, 0)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
         assert_eq!(accessor.get(UVec3::new(0, 1, 2)), None);
 
@@ -392,7 +394,7 @@ mod tests {
         assert_eq!(accessor.attributes.attribute_maps.len(), 6);
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(18));
         assert_eq!(accessor.get(UVec3::new(0, 1, 2)), Some(16));
-        assert_eq!(accessor.get(UVec3::new(0, 0, 0)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
 
         accessor.end();
