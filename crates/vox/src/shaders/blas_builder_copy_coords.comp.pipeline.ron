@@ -24,6 +24,9 @@ ComputePipeline(
                     )
                 )
             ],
+            push_constants: {
+                Compute: (0, 4)
+            }
         )
     ),
 )

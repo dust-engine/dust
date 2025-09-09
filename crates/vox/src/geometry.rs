@@ -10,6 +10,8 @@ use smallvec::SmallVec;
 #[derive(Asset, TypePath)]
 pub struct VoxGeometry {
     pub tree: Tree,
+
+    /// Model space size of each voxel
     pub unit_size: f32,
 }
 
@@ -117,6 +119,9 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
             None
         };
 
+        // Calculate the size of each leaf node AABB primitive.
+        let unit_size = geometry.unit_size * 4.0;
+
         async move {
             let Some(device_buffer) = device_buffer else {
                 return SmallVec::new();
@@ -141,6 +146,9 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
                     range: coords_buffer.size(),
                 }])
             ]);
+            recorder.push_constants(copy_coords_pipeline.layout(), vk::ShaderStageFlags::COMPUTE, 0, unsafe {
+                std::slice::from_raw_parts(&unit_size as *const f32 as *const u8, std::mem::size_of_val(&unit_size))
+            });
             recorder.dispatch(UVec3 { x: primitive_count.div_ceil(32), y: 1, z: 1 });
             [rhyolite_bevy::rtx::blas::BLASBuildGeometry::Aabbs {
                 buffer: coords_buffer,

@@ -1447,6 +1447,7 @@ dependencies = [
  "rayon",
  "rhyolite",
  "rhyolite_bevy",
+ "serde",
  "smallvec",
  "thiserror 1.0.69",
  "tracing",

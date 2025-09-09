@@ -19,6 +19,7 @@ struct VkAabbPositionsKHR
 [shader("compute")]
 [numthreads(32)]
 void main(
+    uniform float unit_size,
     uint threadID : SV_DispatchThreadID,
     StructuredBuffer<VdbLeaf> src,
     RWStructuredBuffer<VkAabbPositionsKHR> dst
@@ -41,12 +42,12 @@ void main(
             coords
         ) & ((1 << 10) - 1);
         
-        aabbPositions.minX = actualCoords.x;
-        aabbPositions.minY = actualCoords.y;
-        aabbPositions.minZ = actualCoords.z;
-        aabbPositions.maxX = actualCoords.x + 1;
-        aabbPositions.maxY = actualCoords.y + 1;
-        aabbPositions.maxZ = actualCoords.z + 1;
+        aabbPositions.minX = actualCoords.x * unit_size;
+        aabbPositions.minY = actualCoords.y * unit_size;
+        aabbPositions.minZ = actualCoords.z * unit_size;
+        aabbPositions.maxX = aabbPositions.minX + unit_size;
+        aabbPositions.maxY = aabbPositions.minY + unit_size;
+        aabbPositions.maxZ = aabbPositions.minZ + unit_size;
     }
     dst[threadID] = aabbPositions;
 }

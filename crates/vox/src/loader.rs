@@ -8,6 +8,7 @@ use bevy::{
 use dot_vox::{DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
 use rhyolite::Allocator;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxPalette,
@@ -206,14 +207,26 @@ impl FromWorld for VoxLoader {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VoxLoaderSettings {
+    pub unit_size: f32,
+}
+impl Default for VoxLoaderSettings {
+    fn default() -> Self {
+        Self {
+            unit_size: 0.25
+        }
+    }
+}
+
 impl AssetLoader for VoxLoader {
     type Asset = Scene;
-    type Settings = ();
+    type Settings = VoxLoaderSettings;
     type Error = VoxLoadingError;
     fn load(
         &self,
         reader: &mut dyn bevy::asset::io::Reader,
-        _settings: &Self::Settings,
+        settings: &Self::Settings,
         load_context: &mut bevy::asset::LoadContext,
     ) -> impl bevy::tasks::ConditionalSendFuture<Output = Result<Scene, VoxLoadingError>> {
         async {
@@ -224,11 +237,9 @@ impl AssetLoader for VoxLoader {
                 .map_err(|reason| VoxLoadingError::ParseError(reason))?;
             tracing::info!("Vox file deserialized: {} models", file.models.len());
 
-            let unit_size: f32 = 1.0;
-
             let mut world = World::default();
             let mut traverser = SceneGraphTraverser {
-                unit_size,
+                unit_size: settings.unit_size,
                 scene: &file,
                 models: BTreeSet::new(),
                 instances: Vec::new(),
@@ -277,7 +288,7 @@ impl AssetLoader for VoxLoader {
                 let handles = models
                     .par_iter()
                     .map(|(model_id, model)| {
-                        let (tree, attribute_allocator) = self.model_to_tree(model, unit_size);
+                        let (tree, attribute_allocator) = self.model_to_tree(model, settings.unit_size);
                         (*model_id, (tree, attribute_allocator))
                     })
                     .collect_vec_list();
