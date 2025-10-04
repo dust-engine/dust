@@ -12,6 +12,7 @@ members = [
 rhyolite = { path = "../rust-playground" }
 rhyolite_bevy = { path = "../rust-playground/crates/bevy" }
 dust_vox = { path = "crates/vox" }
+dust_pbr = { path = "crates/pbr" }
 
 [dependencies.bevy]
 version = "0.17.0-dev"

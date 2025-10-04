@@ -13,7 +13,8 @@ fn main() {
         .add_plugins(rhyolite_bevy::swapchain::SwapchainPlugin);
 
     // Dust plugins
-    app.add_plugins(dust_vox::VoxPlugin);
+    app.add_plugins(dust_pbr::PbrRenderPlugin)
+        .add_plugins(dust_vox::VoxPlugin);
 
     let primary_window = app
         .world_mut()
@@ -57,6 +58,7 @@ mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
         geometry: geometries.add(geometry),
         material: materials.add(material),
         palette: palettes.add(dust_vox::VoxPalette::colorful()),
+        sbt_index: u32::MAX,
     }).id();
     commands.spawn(VoxInstanceBundle {
         transform: Default::default(),

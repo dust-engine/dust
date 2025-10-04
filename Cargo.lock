@@ -1420,6 +1420,7 @@ name = "dust"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "dust_pbr",
  "dust_vox",
  "rhyolite",
  "rhyolite_bevy",
@@ -1436,6 +1437,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dust_pbr"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rhyolite",
+ "rhyolite_bevy",
+]
+
+[[package]]
 name = "dust_vox"
 version = "0.1.0"
 dependencies = [
@@ -1444,6 +1454,7 @@ dependencies = [
  "bytemuck",
  "dot_vox",
  "dust-vdb",
+ "dust_pbr",
  "rayon",
  "rhyolite",
  "rhyolite_bevy",

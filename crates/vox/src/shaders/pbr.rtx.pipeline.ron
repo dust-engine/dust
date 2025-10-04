@@ -1,0 +1,26 @@
+RayTracingPipeline (
+    stages: [
+        HitGroup (
+            ty: Aabbs,
+            closest_hit: (
+                path: "embedded://dust_vox/shaders/pbr.spv",
+                entry_point: "closestHitShader",
+            ),
+            intersection: (
+                path: "embedded://dust_vox/shaders/pbr.spv",
+                entry_point: "intersectionShader",
+            ),
+        ),
+    ],
+ 
+    layout: Inline(
+        PipelineLayout(
+            push_constants: {
+                Compute: (0, 4)
+            }
+        )
+    ),
+
+    max_ray_payload_size: 4,
+    max_hit_attribute_size: 4,
+)

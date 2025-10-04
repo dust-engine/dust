@@ -12,8 +12,12 @@ use bevy::{
     transform::components::{GlobalTransform, Transform},
 };
 use dot_vox::Color;
+use dust_pbr::PbrRenderState;
 use dust_vdb::hierarchy;
+use rhyolite::ash::vk;
 use rhyolite_bevy::RhyoliteApp;
+use rhyolite_bevy::rtx::RtxPipelineManager;
+use rhyolite_bevy::shader::{RayTracingPipelineLibrary};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
@@ -96,6 +100,7 @@ pub struct VoxModel {
     pub geometry: Handle<VoxGeometry>,
     pub material: Handle<VoxMaterial>,
     pub palette: Handle<VoxPalette>,
+    pub sbt_index: u32,
 }
 
 #[derive(Bundle, Default)]
@@ -121,10 +126,61 @@ impl Plugin for VoxPlugin {
         embedded_asset!(app, "shaders/blas_builder_copy_coords.spv");
         embedded_asset!(app, "shaders/blas_builder_copy_coords.comp.pipeline.ron");
         
+        embedded_asset!(app, "shaders/pbr.spv");
+        embedded_asset!(app, "shaders/pbr.rtx.pipeline.ron");
+        
         app.add_device_extension::<rhyolite::ash::khr::push_descriptor::Meta>()
             .unwrap();
+        app.add_device_extension::<rhyolite::ash::khr::acceleration_structure::Meta>()
+            .unwrap();
+        app.add_device_extension::<rhyolite::ash::khr::ray_tracing_pipeline::Meta>()
+            .unwrap();
+        app.add_device_extension::<rhyolite::ash::khr::pipeline_library::Meta>()
+            .unwrap();
+         app.enable_feature(
+            |rtx_features: &mut vk::PhysicalDeviceAccelerationStructureFeaturesKHR| {
+                &mut rtx_features.acceleration_structure
+            },
+        )
+        .unwrap();
+        app.enable_feature(|rtx_features: &mut vk::PhysicalDeviceRayTracingPipelineFeaturesKHR| &mut rtx_features.ray_tracing_pipeline).unwrap();
+
+        app.add_systems(Startup, setup.after(dust_pbr::setup));
+
+        app.add_systems(PostUpdate, write_sbt_entries.after(dust_pbr::create_sbt));
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
+    }
+}
+
+#[derive(Resource)]
+pub struct VoxRenderState {
+    pipeline: Handle<RayTracingPipelineLibrary>,
+    hitgroup_index: u32,
+}
+
+
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut pipeline_manager: ResMut<RtxPipelineManager>, pbr_render_state: Res<PbrRenderState>) {
+    let hitgroup_library: Handle<RayTracingPipelineLibrary> = asset_server.load("embedded://dust_vox/shaders/pbr.rtx.pipeline.ron");
+    let hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(pbr_render_state.pipeline.id(), hitgroup_library.clone());
+    commands.insert_resource(VoxRenderState {
+        pipeline: hitgroup_library,
+        hitgroup_index,
+    });
+}
+
+fn write_sbt_entries(mut query: Query<&mut VoxModel>, mut pbr_render_state: ResMut<PbrRenderState>, vox_render_state: Res<VoxRenderState>) {
+    let Some(sbt) = 
+        pbr_render_state.sbt.as_mut() else {
+            for mut model in query {
+                model.sbt_index = u32::MAX;
+            }
+            return;
+        };
+    for mut model in query {
+        model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, |param| {
+
+        });
     }
 }

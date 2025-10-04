@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet}};
 
 use bevy::{
     asset::{AssetLoader, AsyncReadExt},
@@ -307,6 +307,7 @@ impl AssetLoader for VoxLoader {
                                 geometry,
                                 material,
                                 palette: palette_handle.clone(),
+                                sbt_index: u32::MAX
                             };
                             bundle
                         });
