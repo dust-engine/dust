@@ -147,7 +147,7 @@ impl Plugin for VoxPlugin {
 
         app.add_systems(Startup, setup.after(dust_pbr::setup));
 
-        app.add_systems(PostUpdate, write_sbt_entries.after(dust_pbr::create_sbt));
+        app.add_systems(PostUpdate, write_sbt_entries.in_set(dust_pbr::PbrRenderSet));
     }
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
@@ -163,7 +163,7 @@ pub struct VoxRenderState {
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut pipeline_manager: ResMut<RtxPipelineManager>, pbr_render_state: Res<PbrRenderState>) {
     let hitgroup_library: Handle<RayTracingPipelineLibrary> = asset_server.load("embedded://dust_vox/shaders/pbr.rtx.pipeline.ron");
-    let hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(pbr_render_state.pipeline.id(), hitgroup_library.clone());
+    let hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
     commands.insert_resource(VoxRenderState {
         pipeline: hitgroup_library,
         hitgroup_index,

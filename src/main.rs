@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use dust_vox::{VoxInstance, VoxInstanceBundle, VoxModel};
-use rhyolite::{Allocator, ash::vk, tracking::Access};
+use rhyolite::{Allocator, ash::vk, swapchain::HDRMode, tracking::Access};
 use rhyolite_bevy::{DefaultRenderSet, RenderSetSharedStateWrapper, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
 fn main() {
     let mut app = bevy::app::App::new();
@@ -25,16 +25,14 @@ fn main() {
     app.world_mut()
         .entity_mut(primary_window)
         .insert(rhyolite_bevy::swapchain::SwapchainConfig {
-            image_usage: vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            hdr: HDRMode::On,
             ..Default::default()
         });
 
     app.add_systems(Startup, startup_system);
     app.add_systems(PostUpdate, registering_instances);
-    app.add_systems(PostUpdate, clear.in_set(DefaultRenderSet));
 
-    // Build a TLAS over everything.
-    app.add_plugins(rhyolite_bevy::rtx::tlas::TLASBuilderPlugin::<()>::default());
     app.run();
 }
 
@@ -67,31 +65,6 @@ mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
     });
 }
 
-fn clear(
-    mut swapchain_images: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
-    mut state: RenderSetSharedStateWrapper,
-) {
-    let Ok(mut swapchain_image) = swapchain_images.single_mut() else {
-        return;
-    };
-    state.record(|encoder| {
-        let image = encoder.lock(swapchain_image.inner.as_ref().unwrap(), vk::PipelineStageFlags2::BLIT);
-
-        encoder.use_image_resource(
-            image,
-            &mut swapchain_image.state,
-            Access::CLEAR,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL, 0..1, 0..1, true);
-
-        encoder.emit_barriers();
-        encoder.clear_color_image(
-            image,
-            &vk::ClearColorValue {
-                float32: [0.0, 0.0, 1.0, 0.0],
-            },
-        );
-    });
-}
 
 fn registering_instances(
     query: Query<(Entity, &VoxInstance), Without<TLASInstance<()>>>,

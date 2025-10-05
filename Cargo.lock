@@ -1443,6 +1443,7 @@ dependencies = [
  "bevy",
  "rhyolite",
  "rhyolite_bevy",
+ "tracing",
 ]
 
 [[package]]

@@ -7,3 +7,4 @@ edition = "2024"
 bevy = { version = "0.17.0-dev", default-features = false, features = ["bevy_asset", "bevy_scene", "bevy_color"] }
 rhyolite = { path = "../../../rust-playground", features = ["bevy"] }
 rhyolite_bevy = { path = "../../../rust-playground/crates/bevy" }
+tracing = "0.1"
