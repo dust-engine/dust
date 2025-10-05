@@ -1441,6 +1441,7 @@ name = "dust_pbr"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bytemuck",
  "rhyolite",
  "rhyolite_bevy",
  "tracing",

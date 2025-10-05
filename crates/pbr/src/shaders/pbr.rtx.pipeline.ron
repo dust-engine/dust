@@ -16,30 +16,5 @@ RayTracingPipeline(
     max_ray_payload_size: 4,
     max_hit_attribute_size: 4,
 
-    layout: Inline(
-        PipelineLayout(
-            sets: [
-                Inline(
-                    DescriptorSetLayout(
-                        push_descriptor: true,
-                        bindings: [
-                            Binding(
-                                binding: 0,
-                                ty: AccelerationStructure,
-                                stages: [RayGen]
-                            ),
-                            Binding(
-                                binding: 1,
-                                ty: StorageImage,
-                                stages: [Miss, ClosestHit, RayGen]
-                            )
-                        ]
-                    )
-                )
-            ],
-            push_constants: {
-                Compute: (0, 4)
-            }
-        )
-    ),
+    layout: Path("embedded://dust_pbr/shaders/pbr.playout.ron"),
 )

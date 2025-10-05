@@ -13,14 +13,7 @@ RayTracingPipeline (
         ),
     ],
  
-    layout: Inline(
-        PipelineLayout(
-            push_constants: {
-                Compute: (0, 4)
-            }
-        )
-    ),
-
+    layout: Path("embedded://dust_pbr/shaders/pbr.playout.ron"),
     max_ray_payload_size: 4,
     max_hit_attribute_size: 4,
 )

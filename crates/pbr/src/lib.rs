@@ -1,3 +1,5 @@
+pub mod camera;
+
 use std::{
     alloc::Layout,
     collections::{BTreeMap, BTreeSet},
@@ -6,13 +8,28 @@ use std::{
 };
 
 use bevy::prelude::*;
-use rhyolite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, image::ImageLike, shader::ShaderBindingTable, tracking::Access, utils::AsVkHandle};
+use bytemuck::{Pod, Zeroable};
+use rhyolite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, shader::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
 use rhyolite_bevy::{
     DefaultRenderSet, RenderSetSharedStateWrapper,
     rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
     shader::RayTracingPipelineLibrary,
-    staging::Uploader, swapchain::SwapchainImage,
+    staging::{UniformRingBuffer, Uploader}, swapchain::SwapchainImage,
 };
+
+use crate::camera::Camera;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Uniforms {
+    /// row-major affine transformation matrix.
+    model: vk::TransformMatrixKHR,
+    tan_half_fov: f32,
+    far: f32,
+    near: f32,
+}
+unsafe impl Pod for Uniforms{}
+unsafe impl Zeroable for Uniforms{}
 
 pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
@@ -20,6 +37,7 @@ impl Plugin for PbrRenderPlugin {
         use bevy::asset::embedded_asset;
         embedded_asset!(app, "shaders/pbr.spv");
         embedded_asset!(app, "shaders/pbr.rtx.pipeline.ron");
+        embedded_asset!(app, "shaders/pbr.playout.ron");
 
         app.add_systems(Startup, setup);
         app.add_systems(PostUpdate, (
@@ -47,9 +65,10 @@ fn render(
     tlas: Res<TLAS>,
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: Uploader,
-    mut swapchain_images: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
+    mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
+    mut swapchain_images: Query<(&mut SwapchainImage, &Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
 ) {
-    let Ok(mut swapchain_image) = swapchain_images.single_mut() else {
+    let Ok((mut swapchain_image, camera, transform)) = swapchain_images.single_mut() else {
         tracing::warn!("Frame not rendered; missing swapchain image");
         return;
     };
@@ -67,12 +86,22 @@ fn render(
     };
     sbt.push_raygen(0, |_|{});
     sbt.push_miss(0, |_| {});
+    let uniform = Uniforms {
+        far: camera.depth.end,
+        near: camera.depth.start,
+        model: glam_to_vk_transform(transform.affine()),
+        tan_half_fov: camera.tan_half_fov()
+    };
     ctx.record(move |encoder| {
         let sbt_buffer = uploader.create_preinitialized_buffer_retained(
             encoder,
             sbt.layout(),
             |slice| slice.copy_from_slice(sbt.buffer()),
         );
+
+
+        let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
+
         let pipeline = encoder.retain(pipeline);
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
@@ -111,7 +140,19 @@ fn render(
                         image_view: target_image.linear_view().vk_handle(),
                         ..Default::default()
                     }
-                ])
+                ]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 2,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    ..Default::default()
+                }.buffer_info(&[
+                    vk::DescriptorBufferInfo {
+                        buffer: uniform.vk_handle(),
+                        offset: uniform.offset(),
+                        range: uniform.size(),
+                    }
+                ]),
             ]
         );
         encoder.trace_rays(sbt, 0, sbt_buffer, target_image.extent());

@@ -1,16 +1,21 @@
 #![feature(impl_trait_in_fn_trait_return)]
 
+mod flycam;
+
 use bevy::prelude::*;
 use dust_vox::{VoxInstance, VoxInstanceBundle, VoxModel};
 use rhyolite::{Allocator, ash::vk, swapchain::HDRMode, tracking::Access};
 use rhyolite_bevy::{DefaultRenderSet, RenderSetSharedStateWrapper, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
+
+use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::DefaultPlugins)
         .add_plugins(rhyolite_bevy::SurfacePlugin::default())
         .add_plugins(rhyolite_bevy::DebugUtilsPlugin::default())
         .add_plugins(rhyolite_bevy::RhyolitePlugin::default())
-        .add_plugins(rhyolite_bevy::swapchain::SwapchainPlugin);
+        .add_plugins(rhyolite_bevy::swapchain::SwapchainPlugin)
+        .add_plugins(FlyCameraPlugin);
 
     // Dust plugins
     app.add_plugins(dust_pbr::PbrRenderPlugin)
@@ -28,7 +33,13 @@ fn main() {
             image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
             hdr: HDRMode::On,
             ..Default::default()
-        });
+        })
+        .insert((
+            dust_pbr::camera::Camera::default(),
+            GlobalTransform::default(),
+            Transform::from_translation(Vec3::new(122.0, 300.61, 54.45)),
+            FlyCamera::default()
+        ));
 
     app.add_systems(Startup, startup_system);
     app.add_systems(PostUpdate, registering_instances);

@@ -8,3 +8,4 @@ bevy = { version = "0.17.0-dev", default-features = false, features = ["bevy_ass
 rhyolite = { path = "../../../rust-playground", features = ["bevy"] }
 rhyolite_bevy = { path = "../../../rust-playground/crates/bevy" }
 tracing = "0.1"
+bytemuck = "1.23"
