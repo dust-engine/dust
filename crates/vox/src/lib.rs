@@ -17,6 +17,7 @@ use dust_vdb::hierarchy;
 use rhyolite::ash::vk;
 use rhyolite_bevy::RhyoliteApp;
 use rhyolite_bevy::rtx::RtxPipelineManager;
+use rhyolite_bevy::rtx::tlas::TLASInstance;
 use rhyolite_bevy::shader::{RayTracingPipelineLibrary};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
@@ -75,24 +76,9 @@ impl VoxPalette {
 }
 
 /// Marker component for Vox instances
-#[derive(Component, Reflect)]
-#[reflect(Component, MapEntities)]
-pub struct VoxInstance {
-    pub model: Entity,
-}
-impl MapEntities for VoxInstance {
-    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
-        self.model = entity_mapper.get_mapped(self.model);
-    }
-}
-
-impl Default for VoxInstance {
-    fn default() -> Self {
-        Self {
-            model: Entity::PLACEHOLDER,
-        }
-    }
-}
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub struct VoxInstance;
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -108,6 +94,7 @@ pub struct VoxInstanceBundle {
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub instance: VoxInstance,
+    pub tlas_instance: TLASInstance<()>
 }
 
 pub struct VoxPlugin;
@@ -170,17 +157,29 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut pipeline_ma
     });
 }
 
-fn write_sbt_entries(mut query: Query<&mut VoxModel>, mut pbr_render_state: ResMut<PbrRenderState>, vox_render_state: Res<VoxRenderState>) {
+fn write_sbt_entries(mut models: Query<&mut VoxModel>, mut instances: Query<(Entity, &mut TLASInstance<()>), With<VoxInstance>>, mut pbr_render_state: ResMut<PbrRenderState>, vox_render_state: Res<VoxRenderState>) {
     let Some(sbt) = 
         pbr_render_state.sbt.as_mut() else {
-            for mut model in query {
+            for mut model in models.iter_mut() {
                 model.sbt_index = u32::MAX;
             }
+            for (_, mut instance) in instances.iter_mut() {
+                instance.disabled = true;
+            }
+            tracing::warn!("Missing SBT");
             return;
         };
-    for mut model in query {
+    for mut model in models.iter_mut() {
         model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, |param| {
 
         });
+    }
+    for (entity, mut instance) in instances.iter_mut() {
+        let Ok(model) = models.get(instance.blas) else {
+            tracing::warn!("Missing model {:?} for instance {:?}", instance.blas, entity);
+            continue;
+        };
+        instance.set_sbt_offset(0);
+        instance.disabled = false;
     }
 }

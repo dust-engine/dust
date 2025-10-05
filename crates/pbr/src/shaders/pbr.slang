@@ -26,8 +26,7 @@ float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<fl
 
 [shader("raygeneration")]
 void rayGenShader() {
-    outputTexture[DispatchRaysIndex().xy] = float4(0.5, 100.0, 1.0, 1.0);
-
+    outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.5, 1.0);
     RayDesc ray;
     ray.Direction = cameraDir(
         DispatchRaysIndex().xy,
@@ -48,5 +47,5 @@ void rayGenShader() {
 
 [shader("miss")]
 void missShader() {
-    outputTexture[DispatchRaysIndex().xy] = float4(0.5, 0.0, 1000.0, 1.0);
+    outputTexture[DispatchRaysIndex().xy] = float4(0.5, 0.0, 0.0, 1.0);
 }

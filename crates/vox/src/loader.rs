@@ -8,6 +8,7 @@ use bevy::{
 use dot_vox::{DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
 use rhyolite::Allocator;
+use rhyolite_bevy::rtx::tlas::TLASInstance;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -62,9 +63,8 @@ impl<'a> SceneGraphTraverser<'a> {
                 .spawn(VoxInstanceBundle {
                     transform: Transform::default(),
                     global_transform: GlobalTransform::default(),
-                    instance: VoxInstance {
-                        model: Entity::PLACEHOLDER,
-                    },
+                    instance: VoxInstance,
+                    tlas_instance: TLASInstance::new(Entity::PLACEHOLDER)
                 })
                 .id();
             self.instances.push((0, entity));
@@ -214,7 +214,7 @@ pub struct VoxLoaderSettings {
 impl Default for VoxLoaderSettings {
     fn default() -> Self {
         Self {
-            unit_size: 0.25
+            unit_size: 1.0
         }
     }
 }
@@ -321,7 +321,7 @@ impl AssetLoader for VoxLoader {
                     let model_entity = model_handles.get(&model_id).unwrap();
 
                     let mut entity = world.entity_mut(entity_id);
-                    entity.get_mut::<VoxInstance>().as_mut().unwrap().model = *model_entity;
+                    entity.get_mut::<TLASInstance<()>>().as_mut().unwrap().blas = *model_entity;
                 });
             let scene = bevy::scene::Scene::new(world);
 

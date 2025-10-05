@@ -42,7 +42,6 @@ fn main() {
         ));
 
     app.add_systems(Startup, startup_system);
-    app.add_systems(PostUpdate, registering_instances);
 
     app.run();
 }
@@ -55,7 +54,7 @@ mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
     let scene: Handle<Scene> = asset_server.load("castle.vox");
     commands.spawn(SceneRoot(scene));
     return;
-
+    /*
     
     let mut geometry = dust_vox::VoxGeometry::new(allocator.clone(), 1.0);
     let mut material = dust_vox::VoxMaterial::new(allocator.clone());
@@ -74,14 +73,5 @@ mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
         global_transform: Default::default(),
         instance: VoxInstance { model },
     });
-}
-
-
-fn registering_instances(
-    query: Query<(Entity, &VoxInstance), Without<TLASInstance<()>>>,
-    mut commands: Commands
-) {
-    for (entity, instance) in query.iter() {
-        commands.entity(entity).insert(TLASInstance::<()>::new(instance.model));
-    }
+    */
 }
