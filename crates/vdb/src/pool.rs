@@ -2,6 +2,7 @@ use std::{alloc::Layout, any::Any, marker::PhantomData, mem::MaybeUninit};
 
 pub trait PoolStorage: Send + Sync + Any {
     fn resize(&mut self, size: usize) -> *mut u8;
+    fn device_address(&self) -> u64;
 }
 
 pub struct DefaultPoolStorage {
@@ -12,6 +13,9 @@ pub struct DefaultPoolStorage {
 unsafe impl Send for DefaultPoolStorage {}
 unsafe impl Sync for DefaultPoolStorage {}
 impl PoolStorage for DefaultPoolStorage {
+    fn device_address(&self) -> u64 {
+        0
+    }
     fn resize(&mut self, size: usize) -> *mut u8 {
         unsafe {
             let ptr = std::alloc::alloc(Layout::from_size_align_unchecked(size, self.align));

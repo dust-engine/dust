@@ -7,7 +7,7 @@ use bevy::{
 };
 use dot_vox::{DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
-use rhyolite::Allocator;
+use rhyolite::{Allocator, ash::vk, buffer::ManagedBuffer};
 use rhyolite_bevy::rtx::tlas::TLASInstance;
 use serde::{Deserialize, Serialize};
 
@@ -194,6 +194,8 @@ pub enum VoxLoadingError {
     ParseError(&'static str),
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("vulkan error: {0}")]
+    VulkanError(#[from] vk::Result),
 }
 
 pub struct VoxLoader {
@@ -266,7 +268,9 @@ impl AssetLoader for VoxLoader {
                 VoxPalette(unsafe {
                     let arr = std::mem::take(&mut file.palette).into_boxed_slice();
                     assert_eq!(arr.len(), 256);
-                    Box::from_raw(Box::into_raw(arr) as *mut [_; 256])
+                    let mut buffer = ManagedBuffer::new(self.allocator.clone(), 256 * 4, 4, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).map_err(VoxLoadingError::VulkanError)?;
+                    buffer.as_slice_mut().copy_from_slice(std::slice::from_raw_parts::<u8>(arr.as_ptr() as *const u8, 256 * 4));
+                    buffer
                 }),
             );
 

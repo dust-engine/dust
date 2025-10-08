@@ -3,7 +3,7 @@ use std::{any::Any, sync::Arc};
 use crate::{Tree, VoxLeafNode, VoxModel};
 use bevy::{ecs::system::lifetimeless::{SRes, SResMut}, prelude::*};
 use dust_vdb::pool::PoolStorage;
-use rhyolite::{Allocator, HasDevice, ash::vk, buffer::{Buffer, BufferLike, RingBufferSuballocation}, command::CommandEncoder, utils::AsVkHandle};
+use rhyolite::{Allocator, HasDevice, ash::vk, buffer::{Buffer, BufferLike, RingBufferSuballocation}, command::CommandEncoder, debug::DebugObject, utils::AsVkHandle};
 use rhyolite_bevy::{shader::ComputePipeline, staging::DeviceLocalRingBuffer};
 use smallvec::SmallVec;
 
@@ -18,6 +18,7 @@ pub struct VoxGeometry {
 pub struct VoxGeometryLeafStorage {
     allocator: Allocator,
     // A host-cached buffer that is preferably device-visible.
+    // TODO: make this a managed buffer.
     buffer: Option<Arc<Buffer>>,
     alignment: usize,
     size: usize,
@@ -33,6 +34,13 @@ impl VoxGeometryLeafStorage {
     }
 }
 impl PoolStorage for VoxGeometryLeafStorage {
+    fn device_address(&self) -> u64 {
+        if let Some(buffer) = self.buffer.as_ref() {
+            buffer.device_address()
+        } else {
+            0
+        }
+    }
     fn resize(&mut self, size: usize) -> *mut u8 {
         let mut new_buffer = Buffer::new_dynamic(
             self.allocator.clone(),
@@ -41,7 +49,8 @@ impl PoolStorage for VoxGeometryLeafStorage {
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS |
             vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
         )
-        .unwrap();
+        .unwrap()
+        .with_name(c"VoxGeometryLeafStorage");
         unsafe {
             if let Some(old_buffer) = self.buffer.take() {
                 std::ptr::copy_nonoverlapping(

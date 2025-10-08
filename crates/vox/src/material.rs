@@ -27,7 +27,7 @@ impl Default for VoxLeafNode {
 #[derive(Asset, TypePath)]
 pub struct VoxMaterial {
     pub attribute_allocator: AttributeAllocator,
-    buffer: ManagedBuffer, // Wait so this actually do need to be a managedbuffer.
+    pub buffer: ManagedBuffer, // Wait so this actually do need to be a managedbuffer.
 }
 impl VoxMaterial {
     pub fn new(allocator: Allocator) -> Self {
@@ -35,7 +35,7 @@ impl VoxMaterial {
             allocator,
             16 * 1024, // 16 KB to start,
             4,
-            vk::BufferUsageFlags::STORAGE_BUFFER,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
         )
         .unwrap();
         Self {
@@ -50,7 +50,7 @@ impl VoxMaterial {
                 self.buffer.allocator().clone(),
                 size.next_power_of_two(),
                 4,
-                vk::BufferUsageFlags::STORAGE_BUFFER,
+                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             )
             .unwrap();
             new_buffer.as_slice_mut()[0..self.buffer.size() as usize]
@@ -61,7 +61,7 @@ impl VoxMaterial {
 }
 
 impl dust_vdb::Attributes for VoxMaterial {
-    /// 0 for air, and 1 ..= 255 for the offset into the palette.
+    /// 0 .. 255 for the offset into the palette.
     type Value = u8;
     type Ptr = VoxLeafNode;
     type Occupancy = BitArr!(for 64);
@@ -96,29 +96,23 @@ impl dust_vdb::Attributes for VoxMaterial {
             .attribute_allocator
             .allocate(new_mask.count_ones() as u32);
         self.reserve(new_ptr as u64 + new_mask.count_ones() as u64);
-
-        
-        if ptr.coords == u32::MAX {
-            debug_assert!(original_mask.not_any());
             
-            let mut new_ptr_cur = new_ptr;
-            let mut old_ptr_cur = ptr.material_ptr;
+        let mut new_ptr_cur = new_ptr;
+        let mut old_ptr_cur = ptr.material_ptr;
 
-            let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
-            for bit in (*original_mask | new_mask).iter_ones() {
-                if *new_mask.get(bit).unwrap() && *original_mask.get(bit).unwrap() {
-                    // copy it over
-                    slice[new_ptr_cur as usize] = slice[old_ptr_cur as usize];
-                }
-                if *new_mask.get(bit).unwrap() {
-                    new_ptr_cur += 1;
-                }
-                if *original_mask.get(bit).unwrap() {
-                    old_ptr_cur += 1;
-                }
+        let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
+        for bit in (*original_mask | new_mask).iter_ones() {
+            if *new_mask.get(bit).unwrap() && *original_mask.get(bit).unwrap() {
+                // copy it over
+                slice[new_ptr_cur as usize] = slice[old_ptr_cur as usize];
+            }
+            if *new_mask.get(bit).unwrap() {
+                new_ptr_cur += 1;
+            }
+            if *original_mask.get(bit).unwrap() {
+                old_ptr_cur += 1;
             }
         }
-        
 
         let block_coords: UVec3 = coords >> 2;
         let packed_coords = (block_coords.x << 20) | (block_coords.y << 10) | (block_coords.z);
@@ -130,6 +124,6 @@ impl dust_vdb::Attributes for VoxMaterial {
 
     fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
         let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
-        slice[ptr.material_ptr as usize + offset as usize] = value;
+        slice[ptr.material_ptr as usize + offset as usize] = value - 1;
     }
 }

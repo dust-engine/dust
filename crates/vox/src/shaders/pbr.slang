@@ -1,44 +1,179 @@
 
 [[vk::binding(1)]] uniform RWTexture2D outputTexture;
 
-cbuffer PaletteBuffer
+struct Block
 {
-    // The palette, using float4 for R, G, B, A
-    static const float4 ColorPalette[10] =
-        {
-            // 0: Deep Red
-            float4(0.85, 0.15, 0.25, 1.0),
-            // 1: Bright Orange
-            float4(1.00, 0.60, 0.00, 1.0),
-            // 2: Golden Yellow
-            float4(0.95, 0.90, 0.40, 1.0),
-            // 3: Vivid Green
-            float4(0.20, 0.75, 0.20, 1.0),
-            // 4: Cyan/Aqua
-            float4(0.10, 0.85, 0.85, 1.0),
-            // 5: Royal Blue
-            float4(0.20, 0.20, 0.80, 1.0),
-            // 6: Deep Violet
-            float4(0.55, 0.20, 0.80, 1.0),
-            // 7: Hot Pink
-            float4(0.95, 0.25, 0.65, 1.0),
-            // 8: Light Gray
-            float4(0.70, 0.70, 0.70, 1.0),
-            // 9: Dark Brown
-            float4(0.35, 0.25, 0.15, 1.0)
-        };
+    uint64_t mask;
+    private uint32_t coords_packed;
+    uint32_t material_ptr;
+
+    property float3 coords {
+        get {
+            static const uint32_t mask = ((1 << 10) - 1);
+            uint32_t3 min;
+            min.x = coords_packed >> 20;
+            min.y = (coords_packed >> 10) & mask;
+            min.z = coords_packed & mask;
+            return min << 2;
+        }
+    }
 };
+
+
+struct VoxModelParams {
+    Block* geometry_info;
+    uint8_t* material_info;
+    uint8_t4* palette_info;
+
+    Block getCurrentPrimitive() {
+        return geometry_info[PrimitiveIndex()];
+    }
+
+    float4 getColorForVoxel(uint8_t voxelId) {
+        Block currentPrimitive = getCurrentPrimitive();
+        float3 offsetInBox = float3(voxelId >> 4, (voxelId >> 2) & 0b11, voxelId & 0b11);
+
+        uint64_t masked = currentPrimitive.mask & ((uint64_t(1) << voxelId) - 1);
+        uint32_t voxelMemoryOffset = countbits(masked);
+        uint8_t paletteIndex = material_info[voxelMemoryOffset + currentPrimitive.material_ptr];
+        uint8_t4 color = palette_info[paletteIndex];
+        return color / 255.0;
+    }
+}
 
 [shader("closesthit")]
 void closestHitShader(
+    uniform VoxModelParams params,
+    in uint8_t voxelId,
 ) {
-    outputTexture[DispatchRaysIndex().xy] = ColorPalette[PrimitiveIndex() % 10];
+    float4 color = params.getColorForVoxel(voxelId);
+    outputTexture[DispatchRaysIndex().xy] = float4(color.xyz * 0.5, 1.0);
 }
 
+float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {
+    float3 tMin = (box_min - origin) / dir;
+    float3 tMax = (box_max - origin) / dir;
+    float3 t1 = min(tMin, tMax);
+    float3 t2 = max(tMin, tMax);
+    float t_min = max(max(t1.x, t1.y), t1.z);
+    float t_max = min(min(t2.x, t2.y), t2.z);
+    return float2(t_min, t_max);
+}
 
+uint8_t encode_index(uint8_t3 position) {
+    return (position.x << 4) | (position.y << 2) | position.z;
+}
+
+/**
+  Intersects ray with a unix box with 4x4x4 voxels. A branchless implementation of
+  Amanatides, John & Woo, Andrew. (1987). A Fast Voxel Traversal Algorithm for Ray Tracing. Proceedings of EuroGraphics. 87.
+
+  @param(origin): The origin of the ray.
+  @param(dir):    The direction of the ray. Does not have to be normalized.
+  @param(grid):   The occupancy of the 64 voxels encoded in z-curve order.
+*/
+void dda(float3 origin, float3 dir, uint64_t grid, float scale) {
+    // Init phase
+
+    // The initialization phase begins by identifying the voxel in which the ray origin is found. If the ray
+    // origin is outside the grid, we find the point in which the ray enters the grid and take the adjacent voxel.
+    // The integer variables `position` are initialized to the starting voxel coordinates.
+
+    // We assume that the AABB box is located in 0-1. We extend that to 0-4 so we match our DDAed unit box of 4x4x4.
+    float2 initialIntersectionT = intersectAABB(origin, dir, float3(0.0, 0.0, 0.0), float3(4.0, 4.0, 4.0));
+    if (initialIntersectionT.x >= initialIntersectionT.y) {
+        // No intersection
+        return;
+    }
+    if (initialIntersectionT.y <= 0.0) {
+        return;
+    }
+
+    #ifdef VISUALIZE_BIG_BLOCKS
+    if (initialIntersectionT.x >= initialIntersectionT.y) {
+        // No intersection
+        return;
+    }
+    if (initialIntersectionT.y <= 0.0) {
+        return;
+    }
+    if (grid != 0) {
+        ReportHit(initialIntersectionT.x, 0, 0xF);
+    }
+    #endif
+
+    float hitDistance = max(initialIntersectionT.x, RayTMin());
+    float3 initialIntersectionPoint = origin + dir * hitDistance;
+
+    int8_t3 position = int8_t3(clamp(int3(floor(initialIntersectionPoint)), 0, 3));
+
+// In  addition, the variables stepX and stepY are initialized to either 1 or -1 indicating whether X and Y
+// are incremented or decremented as theray crosses voxel boundaries (this is determined by the sign of the
+// x and y components of v)
+#define STEP sign(dir)
+
+    // Next, we determine the value of t at which the ray crosses the first vertical voxel boundary and
+    // store it in variable tMaxX. We perform a similar computation in y and store the result in tMaxY. The
+    // minimum of these two values will indicate how much we can travel along the ray and still remain in the
+    // current voxel.
+
+    // Neo's note: Define our ray as v = origin + t * dir, so t = (v - origin) / dir = v / dir - origin / dir.
+    // We assign t_coef = 1 / dir and t_bias = origin / dir such that t(v) = v * t_coef - t_bias.
+    float3 t_coef = 1.0 / dir;
+    float3 t_bias = t_coef * origin;
+
+    float3 tMax = (float3(position) + max(STEP, 0.0)) * t_coef - t_bias;
+
+    // Finally, we compute tDeltaX and tDeltaY. TDeltaX indicates how far along the ray we must move
+    // (in units of t) for the horizontal component of such a movement to equal the width of a voxel. Similarly,
+    // we store in tDeltaY the amount of movement along the ray which has a vertical component equal to the
+    // height of a voxel.
+    float3 tDelta = float3(1.0, 1.0, 1.0) * t_coef * STEP;
+
+    // Intersection phase
+    uint8_t hit = encode_index(position);
+
+    while ((grid & (uint64_t(1) << hit)) == 0) {
+        float3 compResult = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
+        int8_t3 positionDelta = int8_t3(STEP * compResult); // Either +1 or -1 or 0 on each digit.
+        position += positionDelta;
+
+        hitDistance = min(min(tMax.x, tMax.y), tMax.z);
+        if (hitDistance + 0.001 >= initialIntersectionT.y) {
+            return;
+        }
+        tMax += tDelta * compResult;
+
+        hit = encode_index(position);
+    };
+
+    float realT = hitDistance / scale;
+
+    // Usually one would expect the `hitAttributeEXT` value in the closest hit shader to be the one set
+    // during the intersection shader invocation of the closest hit point. This is the case on NVIDIA GPUs.
+    // However, on my AMD GPU (6600XT), the `hitAttributeEXT` value seems to reflect the value set during
+    // the most recent intersection shader invocation instead.
+    // Meaning that if additional intersection tests were performed after the closest hit, wrong values
+    // would be reflected in the closest hit shader.
+    // Here, for NVIDIA GPUs we always set the voxelId. On AMD GPUs we manually make the comparison with gl_RayTmaxEXT.
+    
+    //if (realT <= gl_RayTmaxEXT) {
+    //    hitAttributes.voxelId = hit;
+    //}
+
+    ReportHit(realT, 0, hit);
+}
 
 [shader("intersection")]
-void intersectionShader()
-{
-    ReportHit(12.0, 0, 0);
+void intersectionShader(
+    uniform VoxModelParams params,
+) {
+    Block block = params.getCurrentPrimitive();
+
+    dda(
+        ObjectRayOrigin() - block.coords, // origin
+        ObjectRayDirection(),    // dir
+        block.mask,
+        1.0
+    );
 }
