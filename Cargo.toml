@@ -31,7 +31,7 @@ features = [
 ]
 
 [patch.crates-io]
-ash = { git = "https://github.com/Neo-Zhixing/ash.git", branch = "meta" }
+ash = { git = "https://github.com/PixelDust22/ash.git", branch = "meta" }
 bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
 bevy_app = { path = "../bevy/crates/bevy_app" }
 bevy_window = { path = "../bevy/crates/bevy_window" }
@@ -54,7 +54,7 @@ bevy_scene = { path = "../bevy/crates/bevy_scene" }
 bevy = { path = "../bevy" }
 
 [patch."https://github.com/ash-rs/ash.git"]
-ash = { git = "https://github.com/Neo-Zhixing/ash", branch = "meta" }
+ash = { git = "https://github.com/PixelDust22/ash", branch = "meta" }
 
 [profile.dev.package.dust-vdb]
 opt-level = 3

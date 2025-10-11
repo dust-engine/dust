@@ -153,7 +153,7 @@ checksum = "175571dd1d178ced59193a6fc02dde1b972eb0bc56c892cde9beeceac5bf0f6b"
 [[package]]
 name = "ash"
 version = "0.38.0+1.3.296"
-source = "git+https://github.com/Neo-Zhixing/ash.git?branch=meta#87fc015ace4190b4c0069be8efc7e4ed363401b2"
+source = "git+https://github.com/PixelDust22/ash.git?branch=meta#87fc015ace4190b4c0069be8efc7e4ed363401b2"
 dependencies = [
  "libloading",
 ]
