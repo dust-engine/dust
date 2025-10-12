@@ -32,25 +32,25 @@ features = [
 
 [patch.crates-io]
 ash = { git = "https://github.com/PixelDust22/ash.git", branch = "meta" }
-bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
-bevy_app = { path = "../bevy/crates/bevy_app" }
-bevy_window = { path = "../bevy/crates/bevy_window" }
-bevy_platform = { path = "../bevy/crates/bevy_platform" }
-bevy_utils = { path = "../bevy/crates/bevy_utils" }
-bevy_transform = { path = "../bevy/crates/bevy_transform" }
-bevy_time = { path = "../bevy/crates/bevy_time" }
-bevy_tasks = { path = "../bevy/crates/bevy_tasks" }
-bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
-bevy_ptr = { path = "../bevy/crates/bevy_ptr" }
-bevy_math = { path = "../bevy/crates/bevy_math" }
-bevy_log = { path = "../bevy/crates/bevy_log" }
-bevy_input = { path = "../bevy/crates/bevy_input" }
-bevy_diagnostic = { path = "../bevy/crates/bevy_diagnostic" }
-bevy_derive = { path = "../bevy/crates/bevy_derive" }
-bevy_winit = { path = "../bevy/crates/bevy_winit" }
-bevy_internal = { path = "../bevy/crates/bevy_internal" }
-bevy_asset = { path = "../bevy/crates/bevy_asset" }
-bevy_scene = { path = "../bevy/crates/bevy_scene" }
+bevy_ecs = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_app = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_window = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_platform = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_utils = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_transform = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_time = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_tasks = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_reflect = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_ptr = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_math = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_log = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_input = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_diagnostic = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_derive = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_winit = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_internal = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_asset = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
+bevy_scene = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.2"  }
 bevy = { path = "../bevy" }
 
 [patch."https://github.com/ash-rs/ash.git"]

@@ -9,7 +9,7 @@ use std::{
 
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
-use rhyolite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, shader::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
+use rhyolite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, rtx::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
 use rhyolite_bevy::{
     DefaultRenderSet, RenderSetSharedStateWrapper,
     rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
