@@ -9,12 +9,12 @@ use std::{
 
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
-use rhyolite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, shader::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
-use rhyolite_bevy::{
+use rhyolite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, rtx::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
+use bevy_rhyolite::{
     DefaultRenderSet, RenderSetSharedStateWrapper,
     rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
     shader::RayTracingPipelineLibrary,
-    staging::{UniformRingBuffer, Uploader}, swapchain::SwapchainImage,
+    staging::{UniformRingBuffer, BufferInitializer}, swapchain::SwapchainImage,
 };
 
 use crate::camera::Camera;
@@ -44,14 +44,14 @@ impl Plugin for PbrRenderPlugin {
             create_sbt.before(PbrRenderSet),
             render.in_set(DefaultRenderSet)
             .after(PbrRenderSet)
-            .after(rhyolite_bevy::rtx::tlas::tlas_build_system::<()>)
-            .after(rhyolite_bevy::rtx::build_rtx_pipeline_system)
+            .after(bevy_rhyolite::rtx::tlas::tlas_build_system::<()>)
+            .after(bevy_rhyolite::rtx::build_rtx_pipeline_system)
             .after(create_sbt)
         ));
-        app.add_plugins(rhyolite_bevy::rtx::RtxPipelinePlugin);
+        app.add_plugins(bevy_rhyolite::rtx::RtxPipelinePlugin);
         
         // Build a TLAS over everything.
-        app.add_plugins(rhyolite_bevy::rtx::tlas::TLASBuilderPlugin::<()>::default());
+        app.add_plugins(bevy_rhyolite::rtx::tlas::TLASBuilderPlugin::<()>::default());
     }
 }
 
@@ -64,7 +64,7 @@ fn render(
     mut state: ResMut<PbrRenderState>,
     tlas: Res<TLAS>,
     pipelines: Res<Assets<RayTracingPipeline>>,
-    mut uploader: Uploader,
+    mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     mut swapchain_images: Query<(&mut SwapchainImage, &Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
 ) {
@@ -107,7 +107,7 @@ fn render(
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
         let tlas = encoder.retain(Box::new(tlas));
-        let target_image = encoder.lock(swapchain_image.inner.as_ref().unwrap(), vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        let target_image = encoder.lock(swapchain_image.current_image().as_ref().unwrap(), vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         encoder.use_image_resource(
             target_image,

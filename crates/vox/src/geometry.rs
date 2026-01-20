@@ -4,7 +4,7 @@ use crate::{Tree, VoxLeafNode, VoxModel};
 use bevy::{ecs::system::lifetimeless::{SRes, SResMut}, prelude::*};
 use dust_vdb::pool::PoolStorage;
 use rhyolite::{Allocator, HasDevice, ash::vk, buffer::{Buffer, BufferLike, RingBufferSuballocation}, command::CommandEncoder, debug::DebugObject, utils::AsVkHandle};
-use rhyolite_bevy::{shader::ComputePipeline, staging::DeviceLocalRingBuffer};
+use bevy_rhyolite::{shader::ComputePipeline, staging::DeviceLocalRingBuffer};
 use smallvec::SmallVec;
 
 #[derive(Asset, TypePath)]
@@ -92,7 +92,7 @@ impl FromWorld for BlasBuilder {
     }
 }
 
-impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
+impl bevy_rhyolite::rtx::blas::BLASBuilder for BlasBuilder {
     type QueryData = &'static VoxModel;
 
     type QueryFilter = ();
@@ -110,7 +110,7 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
         (geometries, device_local_ring_buffer, compute_pipelines): &mut bevy::ecs::system::SystemParamItem<'w, 's, Self::Params>,
         model: &VoxModel,
         recorder: &'bb mut CommandEncoder<'b>,
-    ) -> impl Future<Output = SmallVec<[rhyolite_bevy::rtx::blas::BLASBuildGeometry<'b, RingBufferSuballocation>; 1]>> + use<'w, 's, 't, 't2, 'b, 'bb> {
+    ) -> impl Future<Output = SmallVec<[bevy_rhyolite::rtx::blas::BLASBuildGeometry<'b, RingBufferSuballocation>; 1]>> + use<'w, 's, 't, 't2, 'b, 'bb> {
         let copy_coords_pipeline = compute_pipelines.get(&self.copy_coords_pipeline).unwrap().clone();
         let geometry = geometries.get(&model.geometry).unwrap();
 
@@ -136,7 +136,7 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
                 return SmallVec::new();
             };
             let device_buffer = recorder.retain(device_buffer);
-            let coords_buffer = recorder.retain(Box::new(coords_buffer.unwrap()));
+            let coords_buffer = recorder.retain(coords_buffer.unwrap());
             let copy_coords_pipeline = recorder.retain(copy_coords_pipeline.into_inner());
             recorder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, copy_coords_pipeline);
             recorder.push_descriptor_set(vk::PipelineBindPoint::COMPUTE, copy_coords_pipeline.layout(), 0, &[
@@ -159,7 +159,7 @@ impl rhyolite_bevy::rtx::blas::BLASBuilder for BlasBuilder {
                 std::slice::from_raw_parts(&unit_size as *const f32 as *const u8, std::mem::size_of_val(&unit_size))
             });
             recorder.dispatch(UVec3 { x: primitive_count.div_ceil(32), y: 1, z: 1 });
-            [rhyolite_bevy::rtx::blas::BLASBuildGeometry::Aabbs {
+            [bevy_rhyolite::rtx::blas::BLASBuildGeometry::Aabbs {
                 buffer: coords_buffer,
                 stride: size_of::<vk::AabbPositionsKHR>() as u64,
                 flags: vk::GeometryFlagsKHR::OPAQUE,

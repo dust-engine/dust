@@ -19,10 +19,10 @@ use dust_vdb::hierarchy;
 use rhyolite::Device;
 use rhyolite::ash::{VkResult, vk};
 use rhyolite::buffer::{Buffer, BufferLike, ManagedBuffer};
-use rhyolite_bevy::{AsyncTransferSet, RenderSetSharedStateWrapper, RhyoliteApp};
-use rhyolite_bevy::rtx::RtxPipelineManager;
-use rhyolite_bevy::rtx::tlas::TLASInstance;
-use rhyolite_bevy::shader::{RayTracingPipelineLibrary};
+use bevy_rhyolite::{DefaultTransferSet, RenderSetSharedStateWrapper, RhyoliteApp};
+use bevy_rhyolite::rtx::RtxPipelineManager;
+use bevy_rhyolite::rtx::tlas::TLASInstance;
+use bevy_rhyolite::shader::{RayTracingPipelineLibrary};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
@@ -109,7 +109,7 @@ impl Plugin for VoxPlugin {
             .register_type::<VoxModel>();
 
         // Build a BLAS for all entities with VoxModel and without the BLAS component.
-        app.add_plugins(rhyolite_bevy::rtx::blas::BLASBuilderPlugin::<geometry::BlasBuilder>::default());
+        app.add_plugins(bevy_rhyolite::rtx::blas::BLASBuilderPlugin::<geometry::BlasBuilder>::default());
 
         use bevy::asset::embedded_asset;
         embedded_asset!(app, "shaders/blas_builder_copy_coords.spv");
@@ -151,7 +151,7 @@ impl Plugin for VoxPlugin {
             .properties()
             .device_type
             != vk::PhysicalDeviceType::INTEGRATED_GPU {
-                app.add_systems(PostUpdate, sync_buffers_system.in_set(AsyncTransferSet));
+                app.add_systems(PostUpdate, sync_buffers_system.in_set(DefaultTransferSet));
             }
     }
 }

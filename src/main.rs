@@ -5,16 +5,16 @@ mod flycam;
 use bevy::prelude::*;
 use dust_vox::{VoxInstance, VoxInstanceBundle, VoxModel};
 use rhyolite::{Allocator, ash::vk, swapchain::HDRMode, tracking::Access};
-use rhyolite_bevy::{DefaultRenderSet, RenderSetSharedStateWrapper, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
+use bevy_rhyolite::{DefaultRenderSet, RenderSetSharedStateWrapper, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::DefaultPlugins)
-        .add_plugins(rhyolite_bevy::SurfacePlugin::default())
-        .add_plugins(rhyolite_bevy::DebugUtilsPlugin::default())
-        .add_plugins(rhyolite_bevy::RhyolitePlugin::default())
-        .add_plugins(rhyolite_bevy::swapchain::SwapchainPlugin)
+        .add_plugins(bevy_rhyolite::SurfacePlugin::default())
+        .add_plugins(bevy_rhyolite::DebugUtilsPlugin::default())
+        .add_plugins(bevy_rhyolite::RhyolitePlugin::default())
+        .add_plugins(bevy_rhyolite::swapchain::SwapchainPlugin)
         .add_plugins(FlyCameraPlugin);
 
     // Dust plugins
@@ -29,7 +29,7 @@ fn main() {
         .unwrap();
     app.world_mut()
         .entity_mut(primary_window)
-        .insert(rhyolite_bevy::swapchain::SwapchainConfig {
+        .insert(bevy_rhyolite::swapchain::SwapchainConfig {
             image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
             hdr: HDRMode::On,
             ..Default::default()
