@@ -23,7 +23,7 @@ struct Block
 struct VoxModelParams {
     Block* geometry_info;
     uint8_t* material_info;
-    uint8_t4* palette_info;
+    uint32_t* palette_info;
 
     Block getCurrentPrimitive() {
         return geometry_info[PrimitiveIndex()];
@@ -36,8 +36,10 @@ struct VoxModelParams {
         uint64_t masked = currentPrimitive.mask & ((uint64_t(1) << voxelId) - 1);
         uint32_t voxelMemoryOffset = countbits(masked);
         uint8_t paletteIndex = material_info[voxelMemoryOffset + currentPrimitive.material_ptr];
-        uint8_t4 color = palette_info[paletteIndex];
-        return color / 255.0;
+
+        // min(x, 255) is a NVIDIA workaround.
+        uint8_t4 palette_color = bit_cast<uint8_t4>(palette_info[min(paletteIndex, 255)]);
+        return float4(palette_color) / 255.0;
     }
 }
 

@@ -7,8 +7,8 @@ use bevy::{
 };
 use dot_vox::{DotVoxData, Rotation, SceneNode};
 use rayon::prelude::*;
-use rhyolite::{Allocator, ash::vk, buffer::ManagedBuffer};
-use bevy_rhyolite::rtx::tlas::TLASInstance;
+use pumicite::{Allocator, ash::vk, buffer::ManagedBuffer};
+use bevy_pumicite::rtx::tlas::TLASInstance;
 use serde::{Deserialize, Serialize};
 
 use crate::{

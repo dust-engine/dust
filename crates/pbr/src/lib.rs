@@ -9,9 +9,9 @@ use std::{
 
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
-use rhyolite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, rtx::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
-use bevy_rhyolite::{
-    DefaultRenderSet, RenderSetSharedStateWrapper,
+use pumicite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, rtx::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
+use bevy_pumicite::{
+    DefaultRenderSet, RenderState,
     rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
     shader::RayTracingPipelineLibrary,
     staging::{UniformRingBuffer, BufferInitializer}, swapchain::SwapchainImage,
@@ -44,14 +44,14 @@ impl Plugin for PbrRenderPlugin {
             create_sbt.before(PbrRenderSet),
             render.in_set(DefaultRenderSet)
             .after(PbrRenderSet)
-            .after(bevy_rhyolite::rtx::tlas::tlas_build_system::<()>)
-            .after(bevy_rhyolite::rtx::build_rtx_pipeline_system)
+            .after(bevy_pumicite::rtx::tlas::tlas_build_system::<()>)
+            .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
             .after(create_sbt)
         ));
-        app.add_plugins(bevy_rhyolite::rtx::RtxPipelinePlugin);
+        app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
         
         // Build a TLAS over everything.
-        app.add_plugins(bevy_rhyolite::rtx::tlas::TLASBuilderPlugin::<()>::default());
+        app.add_plugins(bevy_pumicite::rtx::tlas::TLASBuilderPlugin::<()>::default());
     }
 }
 
@@ -60,7 +60,7 @@ impl Plugin for PbrRenderPlugin {
 pub struct PbrRenderSet;
 
 fn render(
-    mut ctx: RenderSetSharedStateWrapper,
+    mut ctx: RenderState,
     mut state: ResMut<PbrRenderState>,
     tlas: Res<TLAS>,
     pipelines: Res<Assets<RayTracingPipeline>>,

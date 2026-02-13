@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use bevy::{asset::Asset, math::UVec3, reflect::TypePath};
 use bitvec::{BitArr, array::BitArray};
 use dust_vdb::{AttributeAllocator, Node};
-use rhyolite::{
+use pumicite::{
     Allocator,
     ash::vk,
     buffer::{BufferLike, ManagedBuffer},

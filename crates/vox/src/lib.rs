@@ -16,13 +16,13 @@ use bytemuck::{Pod, Zeroable};
 use dot_vox::Color;
 use dust_pbr::PbrRenderState;
 use dust_vdb::hierarchy;
-use rhyolite::Device;
-use rhyolite::ash::{VkResult, vk};
-use rhyolite::buffer::{Buffer, BufferLike, ManagedBuffer};
-use bevy_rhyolite::{DefaultTransferSet, RenderSetSharedStateWrapper, RhyoliteApp};
-use bevy_rhyolite::rtx::RtxPipelineManager;
-use bevy_rhyolite::rtx::tlas::TLASInstance;
-use bevy_rhyolite::shader::{RayTracingPipelineLibrary};
+use pumicite::Device;
+use pumicite::ash::{VkResult, vk};
+use pumicite::buffer::{Buffer, BufferLike, ManagedBuffer};
+use bevy_pumicite::{DefaultTransferSet, RenderState, PumiciteApp};
+use bevy_pumicite::rtx::RtxPipelineManager;
+use bevy_pumicite::rtx::tlas::TLASInstance;
+use bevy_pumicite::shader::{RayTracingPipelineLibrary};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
@@ -56,7 +56,7 @@ impl DerefMut for VoxPalette {
     }
 }
 impl VoxPalette {
-    pub fn colorful(allocator: rhyolite::Allocator) -> VkResult<Self> {
+    pub fn colorful(allocator: pumicite::Allocator) -> VkResult<Self> {
         use bevy::color::{Hsva, Srgba};
         let mut hue = 0.0;
         let saturation = 0.8;
@@ -109,7 +109,7 @@ impl Plugin for VoxPlugin {
             .register_type::<VoxModel>();
 
         // Build a BLAS for all entities with VoxModel and without the BLAS component.
-        app.add_plugins(bevy_rhyolite::rtx::blas::BLASBuilderPlugin::<geometry::BlasBuilder>::default());
+        app.add_plugins(bevy_pumicite::rtx::blas::BLASBuilderPlugin::<geometry::BlasBuilder>::default());
 
         use bevy::asset::embedded_asset;
         embedded_asset!(app, "shaders/blas_builder_copy_coords.spv");
@@ -118,13 +118,13 @@ impl Plugin for VoxPlugin {
         embedded_asset!(app, "shaders/pbr.spv");
         embedded_asset!(app, "shaders/pbr.rtx.pipeline.ron");
         
-        app.add_device_extension::<rhyolite::ash::khr::push_descriptor::Meta>()
+        app.add_device_extension::<pumicite::ash::khr::push_descriptor::Meta>()
             .unwrap();
-        app.add_device_extension::<rhyolite::ash::khr::acceleration_structure::Meta>()
+        app.add_device_extension::<pumicite::ash::khr::acceleration_structure::Meta>()
             .unwrap();
-        app.add_device_extension::<rhyolite::ash::khr::ray_tracing_pipeline::Meta>()
+        app.add_device_extension::<pumicite::ash::khr::ray_tracing_pipeline::Meta>()
             .unwrap();
-        app.add_device_extension::<rhyolite::ash::khr::pipeline_library::Meta>()
+        app.add_device_extension::<pumicite::ash::khr::pipeline_library::Meta>()
             .unwrap();
          app.enable_feature(
             |rtx_features: &mut vk::PhysicalDeviceAccelerationStructureFeaturesKHR| {
@@ -136,7 +136,7 @@ impl Plugin for VoxPlugin {
 
         app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int64).unwrap();
         app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int16).unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDeviceVulkan12Features| &mut features.shader_int8).unwrap();
+        app.enable_feature(|features: &mut vk::PhysicalDeviceFloat16Int8FeaturesKHR| &mut features.shader_int8).unwrap();
 
         app.add_systems(Startup, setup.after(dust_pbr::setup));
 
@@ -239,7 +239,7 @@ fn write_sbt_entries(
 }
 
 fn sync_buffers_system(
-    mut ctx: RenderSetSharedStateWrapper,
+    mut ctx: RenderState,
     mut material_events: EventReader<AssetEvent<VoxMaterial>>,
     mut palette_events: EventReader<AssetEvent<VoxPalette>>,
 

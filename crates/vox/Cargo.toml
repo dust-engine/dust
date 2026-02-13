@@ -10,8 +10,8 @@ thiserror = "1"
 dust-vdb = { path = "../vdb" }
 rayon = "1.10"
 tracing = "0.1"
-rhyolite = { path = "../../../rust-playground", features = ["bevy"] }
-bevy_rhyolite = { path = "../../../rust-playground/crates/bevy" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
 dust_pbr = { path = "../pbr" }
 bitvec = "1"
 bytemuck = "1.23"
