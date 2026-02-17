@@ -124,6 +124,7 @@ impl Plugin for VoxPlugin {
             .unwrap();
         app.add_device_extension::<pumicite::ash::khr::ray_tracing_pipeline::Meta>()
             .unwrap();
+        app.add_device_extension::<pumicite::ash::khr::ray_tracing_maintenance1::Meta>().ok();
         app.add_device_extension::<pumicite::ash::khr::pipeline_library::Meta>()
             .unwrap();
          app.enable_feature(

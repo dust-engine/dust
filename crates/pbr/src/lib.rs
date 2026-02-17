@@ -114,6 +114,10 @@ fn render(
             &mut swapchain_image.state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL, 0..1, 0..1, true);
+        encoder.memory_barrier(Access::COPY_WRITE, Access {
+            stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            access: vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+        });
 
         encoder.emit_barriers();
 

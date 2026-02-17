@@ -24,6 +24,6 @@ PipelineLayout(
         )
     ],
     push_constants: {
-        Compute: (0, 4)
+        RayGen: (0, 4)
     }
 )

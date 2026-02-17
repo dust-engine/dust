@@ -148,11 +148,11 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
                 .buffer_info(&[vk::DescriptorBufferInfo {
                     buffer: device_buffer.vk_handle(),
                     offset: device_buffer.offset(),
-                    range: device_buffer.size(),
+                    range: device_buffer.size().min(primitive_count as u64 * 4*4),
                 },vk::DescriptorBufferInfo {
                     buffer: coords_buffer.vk_handle(),
                     offset: coords_buffer.offset(),
-                    range: coords_buffer.size(),
+                    range: coords_buffer.size().min(primitive_count as u64 * 6*4),
                 }])
             ]);
             recorder.push_constants(copy_coords_pipeline.layout(), vk::ShaderStageFlags::COMPUTE, 0, unsafe {

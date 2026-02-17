@@ -25,6 +25,10 @@ void main(
     RWStructuredBuffer<VkAabbPositionsKHR> dst
 )
 {
+    if (threadID >= src.getCount()) {
+        return;
+    }
+
     uint coords = src[threadID].coords;
 
     VkAabbPositionsKHR aabbPositions;
