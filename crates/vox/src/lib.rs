@@ -120,24 +120,10 @@ impl Plugin for VoxPlugin {
         
         app.add_device_extension::<pumicite::ash::khr::push_descriptor::Meta>()
             .unwrap();
-        app.add_device_extension::<pumicite::ash::khr::acceleration_structure::Meta>()
-            .unwrap();
-        app.add_device_extension::<pumicite::ash::khr::ray_tracing_pipeline::Meta>()
-            .unwrap();
-        app.add_device_extension::<pumicite::ash::khr::ray_tracing_maintenance1::Meta>().ok();
-        app.add_device_extension::<pumicite::ash::khr::pipeline_library::Meta>()
-            .unwrap();
-         app.enable_feature(
-            |rtx_features: &mut vk::PhysicalDeviceAccelerationStructureFeaturesKHR| {
-                &mut rtx_features.acceleration_structure
-            },
-        )
-        .unwrap();
-        app.enable_feature(|rtx_features: &mut vk::PhysicalDeviceRayTracingPipelineFeaturesKHR| &mut rtx_features.ray_tracing_pipeline).unwrap();
-
         app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int64).unwrap();
         app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int16).unwrap();
         app.enable_feature(|features: &mut vk::PhysicalDeviceFloat16Int8FeaturesKHR| &mut features.shader_int8).unwrap();
+        app.enable_feature(|features: &mut vk::PhysicalDevice8BitStorageFeatures| &mut features.storage_buffer8_bit_access).unwrap();
 
         app.add_systems(Startup, setup.after(dust_pbr::setup));
 
