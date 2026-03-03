@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod sky;
 
 use std::{
     alloc::Layout,
@@ -11,11 +12,9 @@ use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 use pumicite::{HasDevice, ash::vk::{self, TaggedStructure}, bevy::PipelineCache, buffer::BufferLike, image::ImageLike, rtx::ShaderBindingTable, tracking::Access, utils::{AsVkHandle, glam_to_vk_transform}};
 use bevy_pumicite::{
-    DefaultRenderSet, RenderState,
-    rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
-    shader::RayTracingPipelineLibrary,
-    staging::{UniformRingBuffer, BufferInitializer}, swapchain::SwapchainImage,
+    DefaultRenderSet, PumiciteApp, SubmissionState, rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS}, shader::RayTracingPipelineLibrary, staging::{BufferInitializer, UniformRingBuffer}, swapchain::SwapchainImage
 };
+use pumicite_egui::EguiRenderSet;
 
 use crate::camera::Camera;
 
@@ -46,12 +45,20 @@ impl Plugin for PbrRenderPlugin {
             .after(PbrRenderSet)
             .after(bevy_pumicite::rtx::tlas::tlas_build_system::<()>)
             .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
+            .before(OccludingRenderPass)
             .after(create_sbt)
         ));
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
+
+        app.add_render_set(OccludingRenderPass, start_occluding_render_pass);
+        app.configure_sets(PostUpdate, OccludingRenderPass.in_set(DefaultRenderSet));
+        app.configure_sets(PostUpdate, EguiRenderSet.in_set(OccludingRenderPass));
+
         
         // Build a TLAS over everything.
         app.add_plugins(bevy_pumicite::rtx::tlas::TLASBuilderPlugin::<()>::default());
+
+        app.add_plugins(sky::SkyPlugin);
     }
 }
 
@@ -60,7 +67,7 @@ impl Plugin for PbrRenderPlugin {
 pub struct PbrRenderSet;
 
 fn render(
-    mut ctx: RenderState,
+    mut ctx: SubmissionState,
     mut state: ResMut<PbrRenderState>,
     tlas: Res<TLAS>,
     pipelines: Res<Assets<RayTracingPipeline>>,
@@ -189,4 +196,52 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
         return;
     };
     state.sbt = Some(pipeline.create_sbt(state.sbt.take()));
+}
+
+#[derive(Default, SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
+pub struct OccludingRenderPass;
+
+
+/// For egui, you are always responsible for setting up the render pass. This
+/// is so that egui can piggy-back on an already existing render pass and doesn't
+/// have to start a new one - important for mobile performance.
+fn start_occluding_render_pass(
+    mut ctx: SubmissionState,
+    mut swapchain_image: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
+) {
+    let Ok(mut swapchain_image) = swapchain_image.single_mut() else {
+        return;
+    };
+    ctx.record(|encoder| {
+        let Some(current_swapchain_image) = swapchain_image.current_image() else {
+            return;
+        };
+        let current_swapchain_image = encoder.lock(
+            current_swapchain_image,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        );
+
+        encoder.use_image_resource(
+            current_swapchain_image,
+            &mut swapchain_image.state,
+            Access::COLOR_ATTACHMENT_WRITE,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.emit_barriers();
+        encoder
+            .begin_rendering()
+            .color_attachment(0, |mut builder| {
+                builder
+                    .clear(Vec4::new(0.0, 0.0, 0.0, 1.0))
+                    .image_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
+                    .store(true)
+                    .view(current_swapchain_image.linear_view());
+                // Use linear view for egui. egui does all the interpolation in srgb space.
+            })
+            .render_area(IVec2::ZERO, current_swapchain_image.extent().xy())
+            .begin();
+    });
 }

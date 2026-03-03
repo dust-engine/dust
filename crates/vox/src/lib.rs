@@ -19,7 +19,7 @@ use dust_vdb::hierarchy;
 use pumicite::Device;
 use pumicite::ash::{VkResult, vk};
 use pumicite::buffer::{Buffer, BufferLike, ManagedBuffer};
-use bevy_pumicite::{DefaultTransferSet, RenderState, PumiciteApp};
+use bevy_pumicite::{DefaultTransferSet, SubmissionState, PumiciteApp};
 use bevy_pumicite::rtx::RtxPipelineManager;
 use bevy_pumicite::rtx::tlas::TLASInstance;
 use bevy_pumicite::shader::{RayTracingPipelineLibrary};
@@ -226,7 +226,7 @@ fn write_sbt_entries(
 }
 
 fn sync_buffers_system(
-    mut ctx: RenderState,
+    mut ctx: SubmissionState,
     mut material_events: EventReader<AssetEvent<VoxMaterial>>,
     mut palette_events: EventReader<AssetEvent<VoxPalette>>,
 

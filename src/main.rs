@@ -5,7 +5,7 @@ mod flycam;
 use bevy::prelude::*;
 use dust_vox::{VoxInstance, VoxInstanceBundle, VoxModel};
 use pumicite::{Allocator, ash::vk, swapchain::HDRMode, tracking::Access};
-use bevy_pumicite::{DefaultRenderSet, RenderState, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
+use bevy_pumicite::{DefaultRenderSet, SubmissionState, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {

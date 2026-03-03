@@ -4,7 +4,7 @@ use crate::{Tree, VoxLeafNode, VoxModel};
 use bevy::{ecs::system::lifetimeless::{SRes, SResMut}, prelude::*};
 use dust_vdb::pool::PoolStorage;
 use pumicite::{Allocator, HasDevice, ash::vk, buffer::{Buffer, BufferLike, RingBufferSuballocation}, command::CommandEncoder, debug::DebugObject, utils::AsVkHandle};
-use bevy_pumicite::{shader::ComputePipeline, staging::DeviceLocalRingBuffer};
+use bevy_pumicite::{shader::compute::ComputePipeline, staging::DeviceLocalRingBuffer};
 use smallvec::SmallVec;
 
 #[derive(Asset, TypePath)]
