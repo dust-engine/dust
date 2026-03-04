@@ -26,7 +26,13 @@ float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<fl
 
 [shader("raygeneration")]
 void rayGenShader() {
-    outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.5, 1.0);
+    // outputTexture currently stores occluding shapes.
+    float4 originalColor = outputTexture[DispatchRaysIndex().xy];
+    if (originalColor.a == 1.0) {
+        // Solid color. Skip.
+        return;
+    }
+    // Transparent color. Proceed.
     RayDesc ray;
     ray.Direction = cameraDir(
         DispatchRaysIndex().xy,

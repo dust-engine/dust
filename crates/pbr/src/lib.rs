@@ -45,7 +45,7 @@ impl Plugin for PbrRenderPlugin {
             .after(PbrRenderSet)
             .after(bevy_pumicite::rtx::tlas::tlas_build_system::<()>)
             .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
-            .before(OccludingRenderPass)
+            .after(OccludingRenderPass)
             .after(create_sbt)
         ));
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
@@ -235,7 +235,7 @@ fn start_occluding_render_pass(
             .begin_rendering()
             .color_attachment(0, |mut builder| {
                 builder
-                    .clear(Vec4::new(0.0, 0.0, 0.0, 1.0))
+                    .clear(Vec4::new(0.0, 0.0, 0.0, 0.0))
                     .image_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
                     .store(true)
                     .view(current_swapchain_image.linear_view());
