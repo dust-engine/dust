@@ -1,0 +1,34 @@
+ComputePipeline(
+    shader: (
+        path: "shaders/sky_atmosphere/transmittance_lut.spv",
+        entry_point: "main",
+    ),
+    layout: Inline(
+        PipelineLayout(
+            sets: [
+                Inline(
+                    DescriptorSetLayout(
+                        bindings: [
+                            (
+                                binding: 0,
+                                ty: UniformBuffer,
+                                count: 1,
+                                stages: [Compute],
+                                push_descriptor: true,
+                            ),
+                            (
+                                binding: 1,
+                                ty: StorageImage,
+                                count: 1,
+                                stages: [Compute],
+                                push_descriptor: true,
+                            ),
+                        ],
+                        push_descriptor: true,
+                    )
+                )
+            ]
+        )
+    ),
+    disable_optimization: false,
+)

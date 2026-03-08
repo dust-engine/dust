@@ -96,7 +96,7 @@ impl dust_vdb::Attributes for VoxMaterial {
             .attribute_allocator
             .allocate(new_mask.count_ones() as u32);
         self.reserve(new_ptr as u64 + new_mask.count_ones() as u64);
-            
+
         let mut new_ptr_cur = new_ptr;
         let mut old_ptr_cur = ptr.material_ptr;
 

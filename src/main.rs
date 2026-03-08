@@ -3,9 +3,13 @@
 mod flycam;
 
 use bevy::prelude::*;
+use bevy_pumicite::{
+    DefaultRenderSet, SubmissionState,
+    rtx::tlas::{TLASBuilderSet, TLASInstance},
+    swapchain::SwapchainImage,
+};
 use dust_vox::{VoxInstance, VoxInstanceBundle, VoxModel};
 use pumicite::{Allocator, ash::vk, swapchain::HDRMode, tracking::Access};
-use bevy_pumicite::{DefaultRenderSet, SubmissionState, rtx::tlas::{TLASBuilderSet, TLASInstance}, swapchain::SwapchainImage};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {
@@ -38,7 +42,7 @@ fn main() {
             dust_pbr::camera::Camera::default(),
             GlobalTransform::default(),
             Transform::from_translation(Vec3::new(122.0, 300.61, 54.45)),
-            FlyCamera::default()
+            FlyCamera::default(),
         ));
 
     app.add_systems(Startup, startup_system);
@@ -46,16 +50,19 @@ fn main() {
     app.run();
 }
 
-fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetServer>, allocator: Res<Allocator>,
-mut geometries: ResMut<Assets<dust_vox::VoxGeometry>>,
-mut materials: ResMut<Assets<dust_vox::VoxMaterial>>,
-mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
+fn startup_system(
+    mut commands: Commands,
+    asset_server: Res<bevy::asset::AssetServer>,
+    allocator: Res<Allocator>,
+    mut geometries: ResMut<Assets<dust_vox::VoxGeometry>>,
+    mut materials: ResMut<Assets<dust_vox::VoxMaterial>>,
+    mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
 ) {
     let scene: Handle<Scene> = asset_server.load("castle.vox");
     commands.spawn(SceneRoot(scene));
     return;
     /*
-    
+
     let mut geometry = dust_vox::VoxGeometry::new(allocator.clone(), 1.0);
     let mut material = dust_vox::VoxMaterial::new(allocator.clone());
     let mut accessor = geometry.tree.accessor_mut(&mut material);

@@ -111,7 +111,7 @@ impl Pool {
     pub fn storage(&self) -> &dyn PoolStorage {
         &*self.storage
     }
-    
+
     pub fn storage_mut(&mut self) -> &mut dyn PoolStorage {
         &mut *self.storage
     }

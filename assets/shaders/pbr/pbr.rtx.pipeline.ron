@@ -2,13 +2,13 @@ RayTracingPipeline(
     stages: [
         RayGen (
             shader: (
-                path: "embedded://dust_pbr/shaders/pbr.spv",
+                path: "shaders/pbr/pbr.spv",
                 entry_point: "rayGenShader"
             )
         ),
         Miss (
             shader: (
-                path: "embedded://dust_pbr/shaders/pbr.spv",
+                path: "shaders/pbr/pbr.spv",
                 entry_point: "missShader",
             )
         ),
@@ -16,5 +16,5 @@ RayTracingPipeline(
     max_ray_payload_size: 4,
     max_hit_attribute_size: 4,
 
-    layout: Path("embedded://dust_pbr/shaders/pbr.playout.ron"),
+    layout: Path("shaders/pbr/pbr.playout.ron"),
 )

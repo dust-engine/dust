@@ -12,6 +12,10 @@ use bevy::{
     reflect::TypePath,
     transform::components::{GlobalTransform, Transform},
 };
+use bevy_pumicite::rtx::RtxPipelineManager;
+use bevy_pumicite::rtx::tlas::TLASInstance;
+use bevy_pumicite::shader::RayTracingPipelineLibrary;
+use bevy_pumicite::{DefaultTransferSet, PumiciteApp, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dot_vox::Color;
 use dust_pbr::PbrRenderState;
@@ -19,10 +23,6 @@ use dust_vdb::hierarchy;
 use pumicite::Device;
 use pumicite::ash::{VkResult, vk};
 use pumicite::buffer::{Buffer, BufferLike, ManagedBuffer};
-use bevy_pumicite::{DefaultTransferSet, SubmissionState, PumiciteApp};
-use bevy_pumicite::rtx::RtxPipelineManager;
-use bevy_pumicite::rtx::tlas::TLASInstance;
-use bevy_pumicite::shader::{RayTracingPipelineLibrary};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
@@ -71,8 +71,15 @@ impl VoxPalette {
             hue += 360.0 / 255.0;
         }
 
-        let mut buffer = ManagedBuffer::new(allocator, 256 * 4, 4, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS)?;
-        buffer.as_slice_mut().copy_from_slice(bytemuck::cast_slice(&*arr));
+        let mut buffer = ManagedBuffer::new(
+            allocator,
+            256 * 4,
+            4,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+        )?;
+        buffer
+            .as_slice_mut()
+            .copy_from_slice(bytemuck::cast_slice(&*arr));
         Ok(Self(buffer))
     }
 }
@@ -96,7 +103,7 @@ pub struct VoxInstanceBundle {
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub instance: VoxInstance,
-    pub tlas_instance: TLASInstance<()>
+    pub tlas_instance: TLASInstance<()>,
 }
 
 pub struct VoxPlugin;
@@ -109,21 +116,24 @@ impl Plugin for VoxPlugin {
             .register_type::<VoxModel>();
 
         // Build a BLAS for all entities with VoxModel and without the BLAS component.
-        app.add_plugins(bevy_pumicite::rtx::blas::BLASBuilderPlugin::<geometry::BlasBuilder>::default());
+        app.add_plugins(bevy_pumicite::rtx::blas::BLASBuilderPlugin::<
+            geometry::BlasBuilder,
+        >::default());
 
-        use bevy::asset::embedded_asset;
-        embedded_asset!(app, "shaders/blas_builder_copy_coords.spv");
-        embedded_asset!(app, "shaders/blas_builder_copy_coords.comp.pipeline.ron");
-        
-        embedded_asset!(app, "shaders/pbr.spv");
-        embedded_asset!(app, "shaders/pbr.rtx.pipeline.ron");
-        
         app.add_device_extension::<pumicite::ash::khr::push_descriptor::Meta>()
             .unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int64).unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int16).unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDeviceFloat16Int8FeaturesKHR| &mut features.shader_int8).unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDevice8BitStorageFeatures| &mut features.storage_buffer8_bit_access).unwrap();
+        app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int64)
+            .unwrap();
+        app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int16)
+            .unwrap();
+        app.enable_feature(|features: &mut vk::PhysicalDeviceFloat16Int8FeaturesKHR| {
+            &mut features.shader_int8
+        })
+        .unwrap();
+        app.enable_feature(|features: &mut vk::PhysicalDevice8BitStorageFeatures| {
+            &mut features.storage_buffer8_bit_access
+        })
+        .unwrap();
 
         app.add_systems(Startup, setup.after(dust_pbr::setup));
 
@@ -132,14 +142,16 @@ impl Plugin for VoxPlugin {
     fn finish(&self, app: &mut App) {
         app.init_asset_loader::<VoxLoader>();
 
-        
-        if app.world().resource::<Device>()
+        if app
+            .world()
+            .resource::<Device>()
             .physical_device()
             .properties()
             .device_type
-            != vk::PhysicalDeviceType::INTEGRATED_GPU {
-                app.add_systems(PostUpdate, sync_buffers_system.in_set(DefaultTransferSet));
-            }
+            != vk::PhysicalDeviceType::INTEGRATED_GPU
+        {
+            app.add_systems(PostUpdate, sync_buffers_system.in_set(DefaultTransferSet));
+        }
     }
 }
 
@@ -149,10 +161,16 @@ pub struct VoxRenderState {
     hitgroup_index: u32,
 }
 
-
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut pipeline_manager: ResMut<RtxPipelineManager>, pbr_render_state: Res<PbrRenderState>) {
-    let hitgroup_library: Handle<RayTracingPipelineLibrary> = asset_server.load("embedded://dust_vox/shaders/pbr.rtx.pipeline.ron");
-    let hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut pipeline_manager: ResMut<RtxPipelineManager>,
+    pbr_render_state: Res<PbrRenderState>,
+) {
+    let hitgroup_library: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("shaders/vox/pbr.rtx.pipeline.ron");
+    let hitgroup_index = pipeline_manager
+        .add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
     commands.insert_resource(VoxRenderState {
         pipeline: hitgroup_library,
         hitgroup_index,
@@ -177,17 +195,16 @@ fn write_sbt_entries(
     material_assets: Res<Assets<VoxMaterial>>,
     palette_assets: Res<Assets<VoxPalette>>,
 ) {
-    let Some(sbt) = 
-        pbr_render_state.sbt.as_mut() else {
-            for mut model in models.iter_mut() {
-                model.sbt_index = u32::MAX;
-            }
-            for (_, mut instance) in instances.iter_mut() {
-                instance.disabled = true;
-            }
-            tracing::warn!("Missing SBT");
-            return;
-        };
+    let Some(sbt) = pbr_render_state.sbt.as_mut() else {
+        for mut model in models.iter_mut() {
+            model.sbt_index = u32::MAX;
+        }
+        for (_, mut instance) in instances.iter_mut() {
+            instance.disabled = true;
+        }
+        tracing::warn!("Missing SBT");
+        return;
+    };
     for mut model in models.iter_mut() {
         model.sbt_index = u32::MAX;
         let Some(geometry) = geometry_assets.get(&model.geometry) else {
@@ -205,7 +222,7 @@ fn write_sbt_entries(
         let params = VoxModelParams {
             geometry_info: geometry.tree.pools()[0].storage().device_address(),
             material_info: material.buffer.device_address(),
-            palette: palette.0.device_address()
+            palette: palette.0.device_address(),
         };
         model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, |param_dst| {
             param_dst.copy_from_slice(bytemuck::bytes_of(&params));
@@ -214,7 +231,11 @@ fn write_sbt_entries(
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;
         let Ok(model) = models.get(instance.blas) else {
-            tracing::warn!("Missing model {:?} for instance {:?}", instance.blas, entity);
+            tracing::warn!(
+                "Missing model {:?} for instance {:?}",
+                instance.blas,
+                entity
+            );
             continue;
         };
         if model.sbt_index == u32::MAX {
@@ -231,7 +252,7 @@ fn sync_buffers_system(
     mut palette_events: EventReader<AssetEvent<VoxPalette>>,
 
     materials: Res<Assets<VoxMaterial>>,
-    palettes: Res<Assets<VoxPalette>>
+    palettes: Res<Assets<VoxPalette>>,
 ) {
     ctx.record(|encoder| {
         for event in material_events.read() {
@@ -240,7 +261,7 @@ fn sync_buffers_system(
                     let material = materials.get(*id).unwrap();
                     material.buffer.flush(encoder);
                 }
-                _ => ()
+                _ => (),
             }
         }
         for event in palette_events.read() {
@@ -249,7 +270,7 @@ fn sync_buffers_system(
                     let palette = palettes.get(*id).unwrap();
                     palette.0.flush(encoder);
                 }
-                _ => ()
+                _ => (),
             }
         }
     });

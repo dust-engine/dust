@@ -1,0 +1,60 @@
+GraphicsPipeline(
+    shaders: {
+        Vertex: (
+            path: "shaders/sky_atmosphere/sky_render.spv",
+            entry_point: "vertexMain",
+        ),
+        Fragment: (
+            path: "shaders/sky_atmosphere/sky_render.spv",
+            entry_point: "fragmentMain",
+        ),
+    },
+    layout: Inline(
+        PipelineLayout(
+            sets: [
+                Inline(
+                    DescriptorSetLayout(
+                        bindings: [
+                            (
+                                binding: 0,
+                                ty: UniformBuffer,
+                                count: 1,
+                                stages: [Vertex, Fragment],
+                                push_descriptor: true,
+                            ),
+                            (
+                                binding: 1,
+                                ty: SampledImage,
+                                count: 1,
+                                stages: [Fragment],
+                                push_descriptor: true,
+                            ),
+                            (
+                                binding: 2,
+                                ty: SampledImage,
+                                count: 1,
+                                stages: [Fragment],
+                                push_descriptor: true,
+                            ),
+                            (
+                                binding: 3,
+                                ty: Sampler,
+                                count: 1,
+                                stages: [Fragment],
+                                push_descriptor: true,
+                            ),
+                        ],
+                        push_descriptor: true,
+                    )
+                )
+            ]
+        )
+    ),
+    vertex_bindings: {},
+    attachments: [
+        (
+            blend_enable: false,
+            format: B8G8R8A8_SRGB,
+        )
+    ]
+)

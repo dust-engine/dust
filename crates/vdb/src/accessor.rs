@@ -288,7 +288,7 @@ mod tests {
                 let new = vec![0; new_mask.count_ones() as usize];
                 println!(
                     "copy_attribute at {:?} from null to {}: {} -> {}",
-                 coords,
+                    coords,
                     self.attribute_maps.len(),
                     original_mask.count_ones(),
                     new_mask.count_ones()

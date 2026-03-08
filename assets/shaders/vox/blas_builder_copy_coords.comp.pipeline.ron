@@ -1,6 +1,6 @@
 ComputePipeline(
     shader: (
-            path: "embedded://dust_vox/shaders/blas_builder_copy_coords.spv",
+            path: "shaders/vox/blas_builder_copy_coords.spv",
             entry_point: "main",
         ),
     layout: Inline(

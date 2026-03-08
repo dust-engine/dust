@@ -1,14 +1,14 @@
-use std::{collections::{BTreeMap, BTreeSet}};
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::{
     asset::{AssetLoader, AsyncReadExt},
     math::Vec3A,
     prelude::*,
 };
-use dot_vox::{DotVoxData, Rotation, SceneNode};
-use rayon::prelude::*;
-use pumicite::{Allocator, ash::vk, buffer::ManagedBuffer};
 use bevy_pumicite::rtx::tlas::TLASInstance;
+use dot_vox::{DotVoxData, Rotation, SceneNode};
+use pumicite::{Allocator, ash::vk, buffer::ManagedBuffer};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -64,7 +64,7 @@ impl<'a> SceneGraphTraverser<'a> {
                     transform: Transform::default(),
                     global_transform: GlobalTransform::default(),
                     instance: VoxInstance,
-                    tlas_instance: TLASInstance::new(Entity::PLACEHOLDER)
+                    tlas_instance: TLASInstance::new(Entity::PLACEHOLDER),
                 })
                 .id();
             self.instances.push((0, entity));
@@ -215,9 +215,7 @@ pub struct VoxLoaderSettings {
 }
 impl Default for VoxLoaderSettings {
     fn default() -> Self {
-        Self {
-            unit_size: 1.0
-        }
+        Self { unit_size: 1.0 }
     }
 }
 
@@ -268,8 +266,20 @@ impl AssetLoader for VoxLoader {
                 VoxPalette(unsafe {
                     let arr = std::mem::take(&mut file.palette).into_boxed_slice();
                     assert_eq!(arr.len(), 256);
-                    let mut buffer = ManagedBuffer::new(self.allocator.clone(), 256 * 4, 4, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS).map_err(VoxLoadingError::VulkanError)?;
-                    buffer.as_slice_mut().copy_from_slice(std::slice::from_raw_parts::<u8>(arr.as_ptr() as *const u8, 256 * 4));
+                    let mut buffer = ManagedBuffer::new(
+                        self.allocator.clone(),
+                        256 * 4,
+                        4,
+                        vk::BufferUsageFlags::STORAGE_BUFFER
+                            | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    )
+                    .map_err(VoxLoadingError::VulkanError)?;
+                    buffer
+                        .as_slice_mut()
+                        .copy_from_slice(std::slice::from_raw_parts::<u8>(
+                            arr.as_ptr() as *const u8,
+                            256 * 4,
+                        ));
                     buffer
                 }),
             );
@@ -292,7 +302,8 @@ impl AssetLoader for VoxLoader {
                 let handles = models
                     .par_iter()
                     .map(|(model_id, model)| {
-                        let (tree, attribute_allocator) = self.model_to_tree(model, settings.unit_size);
+                        let (tree, attribute_allocator) =
+                            self.model_to_tree(model, settings.unit_size);
                         (*model_id, (tree, attribute_allocator))
                     })
                     .collect_vec_list();
@@ -301,17 +312,15 @@ impl AssetLoader for VoxLoader {
                         .into_iter()
                         .flat_map(|a| a)
                         .map(|(model_id, (tree, material))| {
-                            let geometry = load_context.add_labeled_asset(
-                                format!("Geometry{}", model_id),
-                                tree,
-                            );
+                            let geometry = load_context
+                                .add_labeled_asset(format!("Geometry{}", model_id), tree);
                             let material = load_context
                                 .add_labeled_asset(format!("Material{}", model_id), material);
                             let bundle = VoxModel {
                                 geometry,
                                 material,
                                 palette: palette_handle.clone(),
-                                sbt_index: u32::MAX
+                                sbt_index: u32::MAX,
                             };
                             bundle
                         });

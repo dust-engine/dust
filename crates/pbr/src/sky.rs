@@ -35,24 +35,23 @@ pub struct SkyPlugin;
 
 impl Plugin for SkyPlugin {
     fn build(&self, app: &mut App) {
-        
         // Enable required extensions
         app.add_device_extension::<ash::khr::push_descriptor::Meta>()
             .unwrap();
         app.add_device_extension::<ash::khr::dynamic_rendering::Meta>()
             .unwrap();
-        app.enable_feature::<vk::PhysicalDeviceDynamicRenderingFeatures>(|x| &mut x.dynamic_rendering)
-            .unwrap();
+        app.enable_feature::<vk::PhysicalDeviceDynamicRenderingFeatures>(|x| {
+            &mut x.dynamic_rendering
+        })
+        .unwrap();
         app.enable_feature::<vk::PhysicalDeviceShaderDrawParameterFeatures>(|x| {
             &mut x.shader_draw_parameters
         })
         .unwrap();
 
-    
         // Add egui plugin
         app.add_plugins(pumicite_egui::EguiPlugin::<With<PrimaryWindow>>::default());
 
-        
         // Systems
         app.add_systems(Startup, setup);
         app.add_systems(EguiPrimaryContextPass, egui_ui);
@@ -234,10 +233,12 @@ struct AtmosphereLUTs {
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<Allocator>) {
     // Load pipelines
     commands.insert_resource(Pipelines {
-        transmittance_lut: asset_server.load("sky_atmosphere/transmittance_lut.comp.pipeline.ron"),
-        multi_scattering: asset_server.load("sky_atmosphere/multi_scattering.comp.pipeline.ron"),
-        sky_view_lut: asset_server.load("sky_atmosphere/sky_view_lut.comp.pipeline.ron"),
-        sky_render: asset_server.load("sky_atmosphere/sky_render.gfx.pipeline.ron"),
+        transmittance_lut: asset_server
+            .load("shaders/sky_atmosphere/transmittance_lut.comp.pipeline.ron"),
+        multi_scattering: asset_server
+            .load("shaders/sky_atmosphere/multi_scattering.comp.pipeline.ron"),
+        sky_view_lut: asset_server.load("shaders/sky_atmosphere/sky_view_lut.comp.pipeline.ron"),
+        sky_render: asset_server.load("shaders/sky_atmosphere/sky_render.gfx.pipeline.ron"),
     });
 
     // Create LUT images
@@ -334,7 +335,7 @@ fn egui_ui(mut contexts: EguiContexts, mut atmosphere: ResMut<AtmosphereState>) 
                 atmosphere.needs_lut_update = true;
             }
             ui.add(egui::Slider::new(&mut atmosphere.sun_azimuth, -3.14..=3.14).text("Azimuth"));
-            
+
             atmosphere.params.sun_direction = [
                 atmosphere.sun_azimuth.cos() * atmosphere.sun_elevation.cos(),
                 atmosphere.sun_elevation.sin(),
@@ -412,46 +413,6 @@ fn egui_ui(mut contexts: EguiContexts, mut atmosphere: ResMut<AtmosphereState>) 
         });
 }
 
-fn start_main_render_pass(
-    mut ctx: SubmissionState,
-    mut swapchain_image: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
-) {
-    let Ok(mut swapchain_image) = swapchain_image.single_mut() else {
-        return;
-    };
-    ctx.record(|encoder| {
-        let Some(current_swapchain_image) = swapchain_image.current_image() else {
-            return;
-        };
-        let current_swapchain_image = encoder.lock(
-            current_swapchain_image,
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-        );
-
-        encoder.use_image_resource(
-            current_swapchain_image,
-            &mut swapchain_image.state,
-            Access::COLOR_ATTACHMENT_WRITE,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            0..1,
-            0..1,
-            false,
-        );
-        encoder.emit_barriers();
-        encoder
-            .begin_rendering()
-            .color_attachment(0, |mut builder| {
-                builder
-                    .clear(Vec4::new(0.0, 0.0, 0.0, 1.0))
-                    .image_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
-                    .store(true)
-                    .view(current_swapchain_image.srgb_view().unwrap());
-            })
-            .render_area(IVec2::ZERO, current_swapchain_image.extent().xy())
-            .begin();
-    });
-}
-
 fn prepare_atmosphere_uniform(
     mut ring_buffer: ResMut<UniformRingBuffer>,
     mut atmosphere: ResMut<AtmosphereState>,
@@ -485,7 +446,7 @@ fn compute_luts(
         return;
     };
 
-    atmosphere.needs_lut_update = false;
+    //atmosphere.needs_lut_update = false;
     let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
 
     state.record(|encoder| {

@@ -1,0 +1,48 @@
+ComputePipeline(
+    shader: (
+        path: "shaders/sky_atmosphere/multi_scattering.spv",
+        entry_point: "main",
+    ),
+    layout: Inline(
+        PipelineLayout(
+            sets: [
+                Inline(
+                    DescriptorSetLayout(
+                        bindings: [
+                            (
+                                binding: 0,
+                                ty: UniformBuffer,
+                                count: 1,
+                                stages: [Compute],
+                                push_descriptor: true,
+                            ),
+                            (
+                                binding: 1,
+                                ty: SampledImage,
+                                count: 1,
+                                stages: [Compute],
+                                push_descriptor: true,
+                            ),
+                            (
+                                binding: 2,
+                                ty: Sampler,
+                                count: 1,
+                                stages: [Compute],
+                                push_descriptor: true,
+                            ),
+                            (
+                                binding: 3,
+                                ty: StorageImage,
+                                count: 1,
+                                stages: [Compute],
+                                push_descriptor: true,
+                            ),
+                        ],
+                        push_descriptor: true,
+                    )
+                )
+            ]
+        )
+    ),
+    disable_optimization: false,
+)

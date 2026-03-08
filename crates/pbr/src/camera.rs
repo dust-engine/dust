@@ -47,7 +47,7 @@ pub struct Camera {
     pub sensor_width: f32,
 
     /// The focal length of the camera in meters.
-    pub focal_length: f32, 
+    pub focal_length: f32,
 }
 impl Camera {
     pub fn fov(&self) -> f32 {
@@ -65,9 +65,7 @@ impl Default for Camera {
             depth: 0.1..10000.0,
             exposure: 14.0,
             sensor_width: 0.036,
-            focal_length: 0.035
+            focal_length: 0.035,
         }
     }
 }
-
-
