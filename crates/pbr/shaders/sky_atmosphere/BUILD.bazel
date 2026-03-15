@@ -1,0 +1,35 @@
+load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["atmosphere_common.slang"])
+
+slang_shader(
+    name = "transmittance_lut",
+    srcs = ["transmittance_lut.slang"],
+    hdrs = ["atmosphere_common.slang"],
+    out = "transmittance_lut.spv",
+    profile = "cs_6_0",
+    target = "spirv",
+    opts = ["-O3"],
+)
+
+slang_shader(
+    name = "multi_scattering",
+    srcs = ["multi_scattering.slang"],
+    hdrs = ["atmosphere_common.slang"],
+    out = "multi_scattering.spv",
+    profile = "cs_6_0",
+    target = "spirv",
+    opts = ["-O3"],
+)
+
+slang_shader(
+    name = "sky_view_lut",
+    srcs = ["sky_view_lut.slang"],
+    hdrs = ["atmosphere_common.slang"],
+    out = "sky_view_lut.spv",
+    profile = "cs_6_0",
+    target = "spirv",
+    opts = ["-O3"],
+)

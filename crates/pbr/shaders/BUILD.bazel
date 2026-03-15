@@ -1,0 +1,25 @@
+load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
+
+package(default_visibility = ["//visibility:public"])
+
+slang_shader(
+    name = "pbr",
+    srcs = ["pbr.slang"],
+    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang"],
+    out = "pbr.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
+slang_shader(
+    name = "tonemap",
+    srcs = ["tonemap.slang"],
+    out = "tonemap.spv",
+    profile = "cs_6_0",
+    target = "spirv",
+    opts = ["-O3"],
+)

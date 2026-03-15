@@ -2,7 +2,13 @@ bazel_dep(name = "rules_vulkan", version = "0.7.0")
 
 vulkan_sdk = use_extension("@rules_vulkan//vulkan:extensions.bzl", "vulkan_sdk")
 
-vulkan_sdk.toolchain(version = "1.4.341.1")
-use_repo(vulkan_sdk, "vulkan_sdk_1.4.341.1")
+vulkan_sdk.toolchain(version = "1.4.341.0")
+use_repo(vulkan_sdk, "vulkan_sdk_1.4.341.0")
 
-register_toolchains("@vulkan_sdk_1.4.341.1//:all")
+register_toolchains("@vulkan_sdk_1.4.341.0//:all")
+
+git_override(
+    module_name = "rules_vulkan",
+    remote = "https://github.com/mxpv/rules_vulkan.git",
+    commit = "49d307d8a0411e288560194645558098b96da842",
+)

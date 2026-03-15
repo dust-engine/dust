@@ -1,4 +1,4 @@
-#include "../sky_atmosphere/atmosphere_common.slang"
+#include "./sky_atmosphere/atmosphere_common.slang"
 
 uniform RaytracingAccelerationStructure sceneBVH;
 uniform RWTexture2D outputTexture;
