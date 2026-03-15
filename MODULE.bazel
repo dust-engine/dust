@@ -1,0 +1,8 @@
+bazel_dep(name = "rules_vulkan", version = "0.7.0")
+
+vulkan_sdk = use_extension("@rules_vulkan//vulkan:extensions.bzl", "vulkan_sdk")
+
+vulkan_sdk.toolchain(version = "1.4.341.1")
+use_repo(vulkan_sdk, "vulkan_sdk_1.4.341.1")
+
+register_toolchains("@vulkan_sdk_1.4.341.1//:all")

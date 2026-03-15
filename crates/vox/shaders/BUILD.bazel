@@ -1,0 +1,27 @@
+load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
+
+package(default_visibility = ["//visibility:public"])
+
+slang_shader(
+    name = "blas_builder_copy_coords",
+    srcs = ["blas_builder_copy_coords.slang"],
+    out = "blas_builder_copy_coords.spv",
+    profile = "cs_6_0",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
+slang_shader(
+    name = "pbr",
+    srcs = ["pbr.slang"],
+    out = "pbr.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
