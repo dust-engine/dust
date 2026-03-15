@@ -9,7 +9,7 @@ use bevy_pumicite::{
     swapchain::SwapchainImage,
 };
 use dust_vox::{VoxInstance, VoxInstanceBundle, VoxModel};
-use pumicite::{Allocator, ash::vk, swapchain::HDRMode, tracking::Access};
+use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode, tracking::Access};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {
@@ -35,7 +35,7 @@ fn main() {
         .entity_mut(primary_window)
         .insert(bevy_pumicite::swapchain::SwapchainConfig {
             image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            hdr: HDRMode::On,
+            color_mode: SwapchainColorMode::ScRgbLinear,
             ..Default::default()
         })
         .insert((

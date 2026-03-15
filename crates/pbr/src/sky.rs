@@ -10,6 +10,8 @@
 //! - Interactive camera and sun controls
 //! - egui parameter tweaking
 
+use std::ffi::CStr;
+
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
@@ -60,21 +62,23 @@ impl Plugin for SkyPlugin {
             (
                 prepare_atmosphere_uniform,
                 compute_luts,
-                //render_skyview_lut,
+                render_skyview_lut,
                 //prepare_render_sky,
                 //start_main_render_pass,
                 //render_sky,
             )
                 .chain()
-                .in_set(DefaultRenderSet)
-                .before(EguiRenderSet),
+                .in_set(SkyRenderSet),
         );
     }
 }
 
+#[derive(SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+pub struct SkyRenderSet;
+
 // Atmosphere parameters - must match shader struct layout exactly
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod, Debug)]
 struct AtmosphereParams {
     // Planet geometry (km)
     bottom_radius: f32,
@@ -174,27 +178,42 @@ impl AtmosphereParams {
             solar_irradiance: [1.0, 1.0, 1.0],
             _pad3: 0.0,
 
-            camera_position: [0.0, 0.0, 0.001], // Just above ground
+            camera_position: [0.0, 0.5, -0.3363016], // Just above ground
             _pad4: 0.0,
 
-            inv_view_proj_mat: Mat4::IDENTITY.to_cols_array_2d(),
-            inv_proj_mat: Mat4::IDENTITY.to_cols_array_2d(),
-            inv_view_mat: Mat4::IDENTITY.to_cols_array_2d(),
+            inv_view_proj_mat: [
+                [0.0, -0.0, 1.0264004, -0.0],
+                [-0.0, 0.5773502, -0.0, 0.0],
+                [0.0, 499.99994, -336.30154, 999.9999],
+                [0.99999994, 0.0, -0.0, 0.0],
+            ],
+            inv_proj_mat: [
+                [1.0264004, -0.0, 0.0, -0.0],
+                [-0.0, 0.5773502, -0.0, 0.0],
+                [0.0, -0.0, 0.0, 999.9999],
+                [-0.0, 0.0, -0.99999994, 0.0],
+            ],
+            inv_view_mat: [
+                [0.0, -0.0, 1.0, -0.0],
+                [-0.0, 1.0, -0.0, 0.0],
+                [-1.0, -0.0, 0.0, -0.0],
+                [-0.0, 0.5, -0.3363016, 1.0],
+            ],
 
-            resolution: [1920.0, 1080.0],
+            resolution: [2560.0, 1440.0],
             _pad5: [0.0; 2],
         }
     }
 }
 
 #[derive(Resource)]
-struct AtmosphereState {
+pub struct AtmosphereState {
     params: AtmosphereParams,
     sun_elevation: f32, // radians
     sun_azimuth: f32,   // radians
     needs_lut_update: bool,
 
-    uniform_buffer: Option<RingBufferSuballocation>,
+    pub uniform_buffer: Option<RingBufferSuballocation>,
 }
 
 impl Default for AtmosphereState {
@@ -217,17 +236,17 @@ struct Pipelines {
     sky_render: Handle<GraphicsPipeline>,
 }
 
-struct LutImage {
-    view: GPUMutex<FullImageView<Image>>,
-    state: ResourceState,
+pub struct LutImage {
+    pub view: GPUMutex<FullImageView<Image>>,
+    pub state: ResourceState,
 }
 
 #[derive(Resource)]
-struct AtmosphereLUTs {
-    transmittance: LutImage,
+pub struct AtmosphereLUTs {
+    pub transmittance: LutImage,
     multi_scattering: LutImage,
-    sky_view: LutImage,
-    sampler: Sampler,
+    pub sky_view: LutImage,
+    pub sampler: Sampler,
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<Allocator>) {
@@ -247,18 +266,24 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
         TRANSMITTANCE_WIDTH,
         TRANSMITTANCE_HEIGHT,
         vk::Format::R16G16B16A16_SFLOAT,
+        c"Atmospheric Transmittance",
+        c"Atmospheric Transmittance View",
     );
     let multi_scattering = create_lut_image(
         &allocator,
         MULTI_SCATTERING_RES,
         MULTI_SCATTERING_RES,
         vk::Format::R16G16B16A16_SFLOAT,
+        c"Atmospheric Multi-Scattering",
+        c"Atmospheric Multi-Scattering View",
     );
     let sky_view = create_lut_image(
         &allocator,
         SKY_VIEW_WIDTH,
         SKY_VIEW_HEIGHT,
-        vk::Format::R16G16B16A16_SFLOAT,
+        vk::Format::B10G11R11_UFLOAT_PACK32,
+        c"Atmospheric Sky-View",
+        c"Atmospheric Sky-View View",
     );
 
     // Create sampler
@@ -291,6 +316,8 @@ fn create_lut_image(
     width: u32,
     height: u32,
     format: vk::Format,
+    name_image: &CStr,
+    name_view: &CStr,
 ) -> LutImage {
     let image = Image::new_private(
         allocator.clone(),
@@ -311,9 +338,10 @@ fn create_lut_image(
             ..Default::default()
         },
     )
-    .unwrap();
+    .unwrap()
+    .with_name(name_image);
 
-    let view = GPUMutex::new(image.create_full_view().unwrap());
+    let view = GPUMutex::new(image.create_full_view().unwrap().with_name(name_view));
 
     LutImage {
         view,

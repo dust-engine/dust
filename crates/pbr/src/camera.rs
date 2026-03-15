@@ -63,7 +63,9 @@ impl Default for Camera {
         Self {
             viewport: None,
             depth: 0.1..10000.0,
-            exposure: 14.0,
+            // Linear multiplier matching previous hardcoded shader value.
+            // TODO: convert to EV100 when physical camera model is wired up.
+            exposure: 10.0,
             sensor_width: 0.036,
             focal_length: 0.035,
         }

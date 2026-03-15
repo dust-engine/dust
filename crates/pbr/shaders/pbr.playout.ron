@@ -19,6 +19,31 @@ PipelineLayout(
                         ty: UniformBuffer,
                         stages: [Miss, ClosestHit, RayGen]
                     ),
+                    Binding(
+                        binding: 3,
+                        ty: UniformBuffer,
+                        stages: [Miss]
+                    ),
+                    Binding(
+                        binding: 4,
+                        ty: SampledImage,
+                        stages: [Miss]
+                    ),
+                    Binding(
+                        binding: 5,
+                        ty: SampledImage,
+                        stages: [Miss]
+                    ),
+                    Binding(
+                        binding: 6,
+                        ty: Sampler,
+                        stages: [Miss]
+                    ),
+                    Binding(
+                        binding: 7,
+                        ty: StorageImage,
+                        stages: [RayGen]
+                    ),
                 ]
             )
         )

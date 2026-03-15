@@ -73,13 +73,20 @@ struct VoxModelParams {
     }
 }
 
+float SRGBToLinear(float color) {
+    return color < 0.04045 ? color / 12.92 : pow(abs(color + 0.055) / 1.055, 2.4);
+}
+
 [shader("closesthit")]
 void closestHitShader(
     uniform VoxModelParams params,
     in uint8_t voxelId,
 ) {
     float4 color = params.getColorForVoxel(voxelId);
-    outputTexture[DispatchRaysIndex().xy] = float4(color.xyz * 0.5, 1.0);
+    color.x = SRGBToLinear(color.x);
+    color.y = SRGBToLinear(color.y);
+    color.z = SRGBToLinear(color.z); // TODO: Use texel buffers for this.
+    outputTexture[DispatchRaysIndex().xy] = float4(color.xyz, 1.0);
 }
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {

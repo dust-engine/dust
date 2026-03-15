@@ -53,8 +53,16 @@ bevy_asset = { git = "https://github.com/dust-engine/bevy", branch = "release-0.
 bevy_scene = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.3"  }
 bevy = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.3"  }
 
+[patch."https://github.com/dust-engine/pumicite.git"]
+pumicite = { path = "../pumicite" }
+bevy_pumicite = { path = "../pumicite/crates/bevy" }
+pumicite_egui = { path = "../pumicite/crates/egui" }
+
 [patch."https://github.com/ash-rs/ash.git"]
 ash = { git = "https://github.com/0xbeefd1ed/ash", branch = "meta" }
+
+[profile.release]
+debug = true
 
 [profile.dev.package.dust-vdb]
 opt-level = 3

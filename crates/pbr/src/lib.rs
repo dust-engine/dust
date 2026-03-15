@@ -1,12 +1,7 @@
 pub mod camera;
 pub mod sky;
 
-use std::{
-    alloc::Layout,
-    collections::{BTreeMap, BTreeSet},
-    ops::Deref,
-    sync::Arc,
-};
+use std::ops::Deref;
 
 use bevy::prelude::*;
 use bevy_pumicite::{
@@ -14,22 +9,29 @@ use bevy_pumicite::{
     rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
     shader::RayTracingPipelineLibrary,
     staging::{BufferInitializer, UniformRingBuffer},
-    swapchain::SwapchainImage,
+    swapchain::{SwapchainImage, SwapchainSet},
 };
 use bytemuck::{Pod, Zeroable};
 use pumicite::{
-    HasDevice,
+    Allocator, HasDevice,
+    debug::DebugObject,
     ash::vk::{self, TaggedStructure},
     bevy::PipelineCache,
     buffer::BufferLike,
-    image::ImageLike,
+    image::{FullImageView, Image, ImageExt, ImageLike},
     rtx::ShaderBindingTable,
-    tracking::Access,
+    sync::GPUMutex,
+    tracking::{Access, ResourceState},
     utils::{AsVkHandle, glam_to_vk_transform},
 };
 use pumicite_egui::EguiRenderSet;
 
-use crate::camera::Camera;
+use bevy_pumicite::prelude::ComputePipeline;
+
+use crate::{
+    camera::Camera,
+    sky::{AtmosphereLUTs, AtmosphereState, SkyRenderSet},
+};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -51,6 +53,7 @@ impl Plugin for PbrRenderPlugin {
             PostUpdate,
             (
                 create_sbt.before(PbrRenderSet),
+                ensure_hdr_target.in_set(SwapchainSet).before(render),
                 render
                     .in_set(DefaultRenderSet)
                     .after(PbrRenderSet)
@@ -58,6 +61,9 @@ impl Plugin for PbrRenderPlugin {
                     .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
                     .after(OccludingRenderPass)
                     .after(create_sbt),
+                tonemap_pass
+                    .in_set(DefaultRenderSet)
+                    .after(render),
             ),
         );
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
@@ -70,6 +76,10 @@ impl Plugin for PbrRenderPlugin {
         app.add_plugins(bevy_pumicite::rtx::tlas::TLASBuilderPlugin::<()>::default());
 
         app.add_plugins(sky::SkyPlugin);
+        app.configure_sets(
+            PostUpdate,
+            SkyRenderSet.in_set(DefaultRenderSet).before(render),
+        );
     }
 }
 
@@ -88,6 +98,9 @@ fn render(
         (&mut SwapchainImage, &Camera, &GlobalTransform),
         With<bevy::window::PrimaryWindow>,
     >,
+    atmosphere: Res<AtmosphereState>,
+    mut luts: ResMut<AtmosphereLUTs>,
+    mut hdr_target: Option<ResMut<HdrRenderTarget>>,
 ) {
     let Ok((mut swapchain_image, camera, transform)) = swapchain_images.single_mut() else {
         tracing::warn!("Frame not rendered; missing swapchain image");
@@ -105,6 +118,10 @@ fn render(
         tracing::warn!("Frame not rendered; missing TLAS");
         return;
     };
+    let Some(hdr) = hdr_target.as_mut() else {
+        tracing::warn!("Frame not rendered; missing HDR target");
+        return;
+    };
     sbt.push_raygen(0, |_| {});
     sbt.push_miss(0, |_| {});
     let uniform = Uniforms {
@@ -113,6 +130,7 @@ fn render(
         model: glam_to_vk_transform(transform.affine()),
         tan_half_fov: camera.tan_half_fov(),
     };
+    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
@@ -120,25 +138,74 @@ fn render(
             });
 
         let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
+        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer);
 
         let pipeline = encoder.retain(pipeline);
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
-        let tlas = encoder.retain(Box::new(tlas));
-        let target_image = encoder.lock(
+        // HDR intermediary at binding 1
+        let hdr_image = encoder.lock(
+            &hdr.view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+
+        // Swapchain at binding 7 (read-only for occlusion alpha check)
+        let swapchain_target = encoder.lock(
             swapchain_image.current_image().as_ref().unwrap(),
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
 
+        // Lock sky atmosphere LUTs for reading in the miss shader
+        let transmittance_view = encoder.lock(
+            &luts.transmittance.view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sky_view = encoder.lock(
+            &luts.sky_view.view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+
+        // HDR target: write (discard previous contents)
         encoder.use_image_resource(
-            target_image,
-            &mut swapchain_image.state,
+            hdr_image.image(),
+            &mut hdr.state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
             0..1,
             0..1,
             true,
+        );
+        // Swapchain: read-only for occlusion check (preserve egui content)
+        encoder.use_image_resource(
+            swapchain_target,
+            &mut swapchain_image.state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            transmittance_view.image(),
+            &mut luts.transmittance.state,
+            Access::RTX_READ,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            sky_view.image(),
+            &mut luts.sky_view.state,
+            Access::RTX_READ,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            0..1,
+            0..1,
+            false,
         );
         encoder.memory_barrier(
             Access::COPY_WRITE,
@@ -149,6 +216,21 @@ fn render(
         );
 
         encoder.emit_barriers();
+
+        let transmittance_image_info = vk::DescriptorImageInfo {
+            image_view: transmittance_view.vk_handle(),
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            sampler: vk::Sampler::null(),
+        };
+        let sky_view_image_info = vk::DescriptorImageInfo {
+            image_view: sky_view.vk_handle(),
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            sampler: vk::Sampler::null(),
+        };
+        let sampler_info = vk::DescriptorImageInfo {
+            sampler: luts.sampler.vk_handle(),
+            ..Default::default()
+        };
 
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
@@ -165,6 +247,7 @@ fn render(
                     &mut vk::WriteDescriptorSetAccelerationStructureKHR::default()
                         .acceleration_structures(&[tlas.vk_handle()]),
                 ),
+                // Binding 1: HDR intermediary (write)
                 vk::WriteDescriptorSet {
                     dst_binding: 1,
                     descriptor_count: 1,
@@ -173,7 +256,7 @@ fn render(
                 }
                 .image_info(&[vk::DescriptorImageInfo {
                     image_layout: vk::ImageLayout::GENERAL,
-                    image_view: target_image.linear_view().vk_handle(),
+                    image_view: hdr_image.vk_handle(),
                     ..Default::default()
                 }]),
                 vk::WriteDescriptorSet {
@@ -187,15 +270,67 @@ fn render(
                     offset: uniform.offset(),
                     range: uniform.size(),
                 }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 3,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: atmo_buffer.vk_handle(),
+                    offset: atmo_buffer.offset(),
+                    range: atmo_buffer.size(),
+                }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 4,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    p_image_info: &transmittance_image_info,
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 5,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    p_image_info: &sky_view_image_info,
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 6,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLER,
+                    p_image_info: &sampler_info,
+                    ..Default::default()
+                },
+                // Binding 7: Swapchain (read-only for occlusion)
+                vk::WriteDescriptorSet {
+                    dst_binding: 7,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: swapchain_target.linear_view().vk_handle(),
+                    ..Default::default()
+                }]),
             ],
         );
-        encoder.trace_rays(sbt, 0, sbt_buffer, target_image.extent());
+        encoder.trace_rays(sbt, 0, sbt_buffer, hdr_image.image().extent());
     });
+}
+
+#[derive(Resource)]
+pub struct HdrRenderTarget {
+    pub view: GPUMutex<FullImageView<Image>>,
+    pub state: ResourceState,
+    pub extent: UVec2,
 }
 
 #[derive(Resource)]
 pub struct PbrRenderState {
     pub pipeline: Handle<RayTracingPipeline>,
+    pub tonemap_pipeline: Handle<ComputePipeline>,
     pub sbt: Option<ShaderBindingTable>,
 }
 
@@ -207,8 +342,12 @@ pub fn setup(
     let base_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("shaders/pbr/pbr.rtx.pipeline.ron");
 
+    let tonemap_pipeline: Handle<ComputePipeline> =
+        asset_server.load("shaders/pbr/tonemap.comp.pipeline.ron");
+
     commands.insert_resource(PbrRenderState {
         pipeline: pipeline_manager.add_pipeline(base_library),
+        tonemap_pipeline,
         sbt: None,
     });
 }
@@ -219,6 +358,171 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
         return;
     };
     state.sbt = Some(pipeline.create_sbt(state.sbt.take()));
+}
+
+fn ensure_hdr_target(
+    mut commands: Commands,
+    hdr_target: Option<Res<HdrRenderTarget>>,
+    allocator: Res<Allocator>,
+    swapchain_images: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
+) {
+    let Ok(swapchain_image) = swapchain_images.single() else {
+        return;
+    };
+    let Some(current) = swapchain_image.current_image() else {
+        return;
+    };
+    let extent = UVec2::new(current.extent().x, current.extent().y);
+
+    if let Some(hdr) = hdr_target.as_ref() {
+        if hdr.extent == extent {
+            return;
+        }
+    }
+
+    let image = Image::new_private(
+        allocator.clone(),
+        &vk::ImageCreateInfo {
+            image_type: vk::ImageType::TYPE_2D,
+            format: vk::Format::R16G16B16A16_SFLOAT,
+            extent: vk::Extent3D {
+                width: extent.x,
+                height: extent.y,
+                depth: 1,
+            },
+            mip_levels: 1,
+            array_layers: 1,
+            samples: vk::SampleCountFlags::TYPE_1,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
+            initial_layout: vk::ImageLayout::UNDEFINED,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .with_name(c"HDR Render Target");
+
+    let view = GPUMutex::new(
+        image
+            .create_full_view()
+            .unwrap()
+            .with_name(c"HDR Render Target View"),
+    );
+    println!("Created HDR Render target view");
+
+    commands.insert_resource(HdrRenderTarget {
+        view,
+        state: Default::default(),
+        extent,
+    });
+}
+
+fn tonemap_pass(
+    mut ctx: SubmissionState,
+    state: Res<PbrRenderState>,
+    compute_pipelines: Res<Assets<ComputePipeline>>,
+    mut swapchain_images: Query<
+        (&mut SwapchainImage, &Camera),
+        With<bevy::window::PrimaryWindow>,
+    >,
+    mut hdr_target: Option<ResMut<HdrRenderTarget>>,
+) {
+    let Ok((mut swapchain_image, camera)) = swapchain_images.single_mut() else {
+        return;
+    };
+    let Some(pipeline) = compute_pipelines.get(&state.tonemap_pipeline) else {
+        return;
+    };
+    let Some(hdr) = hdr_target.as_mut() else {
+        return;
+    };
+    let exposure = camera.exposure;
+    let pipeline = pipeline.clone().into_inner();
+
+    ctx.record(move |encoder| {
+        let hdr_image = encoder.lock(
+            &hdr.view,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+        let swapchain_target = encoder.lock(
+            swapchain_image.current_image().as_ref().unwrap(),
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+
+        // HDR intermediary: read
+        encoder.use_image_resource(
+            hdr_image.image(),
+            &mut hdr.state,
+            Access::COMPUTE_READ,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Swapchain: write (preserve egui pixels — not discarded)
+        encoder.use_image_resource(
+            swapchain_target,
+            &mut swapchain_image.state,
+            Access::COMPUTE_WRITE,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.emit_barriers();
+
+        let pipeline = encoder.retain(pipeline);
+        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+
+        encoder.push_descriptor_set(
+            vk::PipelineBindPoint::COMPUTE,
+            pipeline.layout(),
+            0,
+            &[
+                vk::WriteDescriptorSet {
+                    dst_binding: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: hdr_image.vk_handle(),
+                    ..Default::default()
+                }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 1,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: swapchain_target.linear_view().vk_handle(),
+                    ..Default::default()
+                }]),
+            ],
+        );
+
+        encoder.push_constants(
+            pipeline.layout(),
+            vk::ShaderStageFlags::COMPUTE,
+            0,
+            unsafe {
+                std::slice::from_raw_parts(
+                    &exposure as *const f32 as *const u8,
+                    std::mem::size_of_val(&exposure),
+                )
+            },
+        );
+
+        let extent = hdr_image.image().extent();
+        encoder.dispatch(UVec3::new(
+            extent.x.div_ceil(8),
+            extent.y.div_ceil(8),
+            1,
+        ));
+    });
 }
 
 #[derive(Default, SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
