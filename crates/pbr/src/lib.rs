@@ -14,10 +14,10 @@ use bevy_pumicite::{
 use bytemuck::{Pod, Zeroable};
 use pumicite::{
     Allocator, HasDevice,
-    debug::DebugObject,
     ash::vk::{self, TaggedStructure},
     bevy::PipelineCache,
     buffer::BufferLike,
+    debug::DebugObject,
     image::{FullImageView, Image, ImageExt, ImageLike},
     rtx::ShaderBindingTable,
     sync::GPUMutex,
@@ -61,9 +61,7 @@ impl Plugin for PbrRenderPlugin {
                     .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
                     .after(OccludingRenderPass)
                     .after(create_sbt),
-                tonemap_pass
-                    .in_set(DefaultRenderSet)
-                    .after(render),
+                tonemap_pass.in_set(DefaultRenderSet).after(render),
             ),
         );
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
@@ -78,7 +76,9 @@ impl Plugin for PbrRenderPlugin {
         app.add_plugins(sky::SkyPlugin);
         app.configure_sets(
             PostUpdate,
-            SkyAtmosphereLUTRenderSet.in_set(DefaultRenderSet).before(render),
+            SkyAtmosphereLUTRenderSet
+                .in_set(DefaultRenderSet)
+                .before(render),
         );
     }
 }
@@ -145,8 +145,15 @@ fn render(
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
         // HDR intermediary at binding 1
-        let hdr_image = encoder.lock(
-            &hdr.view,
+        let hdr_image = encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+
+        // G-buffer textures at bindings 8, 9
+        let albedo_image = encoder.lock(
+            &hdr.albedo_view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let normal_image = encoder.lock(
+            &hdr.normal_view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
 
@@ -170,6 +177,26 @@ fn render(
         encoder.use_image_resource(
             hdr_image.image(),
             &mut hdr.state,
+            Access::RTX_WRITE,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            true,
+        );
+        // Albedo G-buffer: write (discard previous contents)
+        encoder.use_image_resource(
+            albedo_image.image(),
+            &mut hdr.albedo_state,
+            Access::RTX_WRITE,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            true,
+        );
+        // Normal G-buffer: write (discard previous contents)
+        encoder.use_image_resource(
+            normal_image.image(),
+            &mut hdr.normal_state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
             0..1,
@@ -314,6 +341,30 @@ fn render(
                     image_view: swapchain_target.linear_view().vk_handle(),
                     ..Default::default()
                 }]),
+                // Binding 8: Albedo G-buffer (write)
+                vk::WriteDescriptorSet {
+                    dst_binding: 8,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: albedo_image.vk_handle(),
+                    ..Default::default()
+                }]),
+                // Binding 9: Normal G-buffer (write)
+                vk::WriteDescriptorSet {
+                    dst_binding: 9,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: normal_image.vk_handle(),
+                    ..Default::default()
+                }]),
             ],
         );
         encoder.trace_rays(sbt, 0, sbt_buffer, hdr_image.image().extent());
@@ -324,6 +375,10 @@ fn render(
 pub struct HdrRenderTarget {
     pub view: GPUMutex<FullImageView<Image>>,
     pub state: ResourceState,
+    pub albedo_view: GPUMutex<FullImageView<Image>>,
+    pub albedo_state: ResourceState,
+    pub normal_view: GPUMutex<FullImageView<Image>>,
+    pub normal_state: ResourceState,
     pub extent: UVec2,
 }
 
@@ -380,39 +435,71 @@ fn ensure_hdr_target(
         }
     }
 
-    let image = Image::new_private(
-        allocator.clone(),
-        &vk::ImageCreateInfo {
-            image_type: vk::ImageType::TYPE_2D,
-            format: vk::Format::R16G16B16A16_SFLOAT,
-            extent: vk::Extent3D {
-                width: extent.x,
-                height: extent.y,
-                depth: 1,
-            },
-            mip_levels: 1,
-            array_layers: 1,
-            samples: vk::SampleCountFlags::TYPE_1,
-            tiling: vk::ImageTiling::OPTIMAL,
-            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            ..Default::default()
+    let create_info = vk::ImageCreateInfo {
+        image_type: vk::ImageType::TYPE_2D,
+        extent: vk::Extent3D {
+            width: extent.x,
+            height: extent.y,
+            depth: 1,
         },
-    )
-    .unwrap()
-    .with_name(c"HDR Render Target");
-
+        mip_levels: 1,
+        array_layers: 1,
+        samples: vk::SampleCountFlags::TYPE_1,
+        tiling: vk::ImageTiling::OPTIMAL,
+        usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
+        initial_layout: vk::ImageLayout::UNDEFINED,
+        ..Default::default()
+    };
     let view = GPUMutex::new(
-        image
-            .create_full_view()
-            .unwrap()
-            .with_name(c"HDR Render Target View"),
+        Image::new_private(
+            allocator.clone(),
+            &vk::ImageCreateInfo {
+                format: vk::Format::R16G16B16A16_SFLOAT,
+                ..create_info
+            },
+        )
+        .unwrap()
+        .with_name(c"HDR Render Target")
+        .create_full_view()
+        .unwrap()
+        .with_name(c"HDR Render Target View"),
     );
-    println!("Created HDR Render target view");
+    let albedo_view = GPUMutex::new(
+        Image::new_private(
+            allocator.clone(),
+            &vk::ImageCreateInfo {
+                format: vk::Format::R16G16B16A16_SFLOAT,
+                ..create_info
+            },
+        )
+        .unwrap()
+        .with_name(c"G-Buffer Albedo Image")
+        .create_full_view()
+        .unwrap()
+        .with_name(c"G-Buffer Albedo Image View"),
+    );
+    let normal_view = GPUMutex::new(
+        Image::new_private(
+            allocator.clone(),
+            &vk::ImageCreateInfo {
+                format: vk::Format::R16G16B16A16_SFLOAT,
+                ..create_info
+            },
+        )
+        .unwrap()
+        .with_name(c"G-Buffer Normal Image")
+        .create_full_view()
+        .unwrap()
+        .with_name(c"G-Buffer Normal Image View"),
+    );
 
     commands.insert_resource(HdrRenderTarget {
         view,
         state: Default::default(),
+        albedo_view,
+        albedo_state: Default::default(),
+        normal_view,
+        normal_state: Default::default(),
         extent,
     });
 }
@@ -421,10 +508,7 @@ fn tonemap_pass(
     mut ctx: SubmissionState,
     state: Res<PbrRenderState>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
-    mut swapchain_images: Query<
-        (&mut SwapchainImage, &Camera),
-        With<bevy::window::PrimaryWindow>,
-    >,
+    mut swapchain_images: Query<(&mut SwapchainImage, &Camera), With<bevy::window::PrimaryWindow>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
 ) {
     let Ok((mut swapchain_image, camera)) = swapchain_images.single_mut() else {
@@ -440,10 +524,7 @@ fn tonemap_pass(
     let pipeline = pipeline.clone().into_inner();
 
     ctx.record(move |encoder| {
-        let hdr_image = encoder.lock(
-            &hdr.view,
-            vk::PipelineStageFlags2::COMPUTE_SHADER,
-        );
+        let hdr_image = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
         let swapchain_target = encoder.lock(
             swapchain_image.current_image().as_ref().unwrap(),
             vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -517,11 +598,7 @@ fn tonemap_pass(
         );
 
         let extent = hdr_image.image().extent();
-        encoder.dispatch(UVec3::new(
-            extent.x.div_ceil(8),
-            extent.y.div_ceil(8),
-            1,
-        ));
+        encoder.dispatch(UVec3::new(extent.x.div_ceil(8), extent.y.div_ceil(8), 1));
     });
 }
 

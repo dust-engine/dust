@@ -1,6 +1,6 @@
-use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
-use bevy::asset::io::AssetSource;
 use atomicow::CowArc;
+use bevy::asset::io::AssetSource;
+use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
 use std::path::{Path, PathBuf};
 
 /// An [`AssetReader`] that resolves Bazel label paths against `bazel-bin/`.
@@ -97,5 +97,6 @@ impl AssetReader for BazelAssetReader {
 /// app.register_asset_source("bazel", bazel_asset_source(workspace_root));
 /// ```
 pub fn bazel_asset_source(workspace_root: PathBuf) -> bevy::asset::io::AssetSourceBuilder {
-    AssetSource::build().with_reader(move || Box::new(BazelAssetReader::new(workspace_root.clone())))
+    AssetSource::build()
+        .with_reader(move || Box::new(BazelAssetReader::new(workspace_root.clone())))
 }

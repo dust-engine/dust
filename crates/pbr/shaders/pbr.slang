@@ -4,6 +4,9 @@ uniform RaytracingAccelerationStructure sceneBVH;
 uniform RWTexture2D outputTexture;
 ConstantBuffer<Uniforms> uniforms;
 
+[[vk::binding(8, 0)]] uniform RWTexture2D<float4> albedoTexture;
+[[vk::binding(9, 0)]] uniform RWTexture2D<float4> normalTexture;
+
 // Sky atmosphere bindings
 [[vk::binding(3, 0)]] ConstantBuffer<AtmosphereParams> atmosphereParams;
 [[vk::binding(4, 0)]] Texture2D<float4> transmittanceLUT;
@@ -40,6 +43,8 @@ void rayGenShader() {
     if (originalColor.a == 1.0) {
         // Solid UI pixel. Write transparent to HDR so tonemap skips it.
         outputTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+        albedoTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+        normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         return;
     }
     RayDesc ray;
@@ -153,4 +158,6 @@ void missShader() {
 
     // Write linear HDR (tonemapping happens in dedicated compute pass)
     outputTexture[DispatchRaysIndex().xy] = float4(finalColor, 1.0);
+    albedoTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+    normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
 }

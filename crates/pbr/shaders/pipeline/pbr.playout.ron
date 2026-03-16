@@ -44,6 +44,16 @@ PipelineLayout(
                         ty: StorageImage,
                         stages: [RayGen]
                     ),
+                    Binding(
+                        binding: 8,
+                        ty: StorageImage,
+                        stages: [RayGen, Miss, ClosestHit]
+                    ),
+                    Binding(
+                        binding: 9,
+                        ty: StorageImage,
+                        stages: [RayGen, Miss, ClosestHit]
+                    ),
                 ]
             )
         )

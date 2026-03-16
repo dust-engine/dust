@@ -59,11 +59,7 @@ impl Plugin for SkyPlugin {
         app.add_systems(EguiPrimaryContextPass, egui_ui);
         app.add_systems(
             PostUpdate,
-            (
-                prepare_atmosphere_uniform,
-                compute_luts,
-                render_skyview_lut,
-            )
+            (prepare_atmosphere_uniform, compute_luts, render_skyview_lut)
                 .chain()
                 .in_set(SkyAtmosphereLUTRenderSet),
         );

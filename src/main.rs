@@ -26,10 +26,7 @@ fn main() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| std::env::current_dir().unwrap())
         });
-    app.register_asset_source(
-        "bazel",
-        bazel_asset::bazel_asset_source(workspace_root),
-    );
+    app.register_asset_source("bazel", bazel_asset::bazel_asset_source(workspace_root));
 
     app.add_plugins(bevy::DefaultPlugins)
         .add_plugins(bevy_pumicite::SurfacePlugin::default())

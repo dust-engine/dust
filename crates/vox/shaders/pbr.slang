@@ -1,5 +1,7 @@
 
 [[vk::binding(1)]] uniform RWTexture2D outputTexture;
+[[vk::binding(8)]] uniform RWTexture2D<float4> albedoTexture;
+[[vk::binding(9)]] uniform RWTexture2D<float4> normalTexture;
 
 struct Block
 {
@@ -82,11 +84,39 @@ void closestHitShader(
     uniform VoxModelParams params,
     in uint8_t voxelId,
 ) {
-    float4 color = params.getColorForVoxel(voxelId);
+    float4 color = params.getColorForVoxel(voxelId); // Colors sampled from the palette are sRGB
+    albedoTexture[DispatchRaysIndex().xy] = float4(color.xyz, 1.0); //Directly write sRGB.
+
+
     color.x = SRGBToLinear(color.x);
     color.y = SRGBToLinear(color.y);
     color.z = SRGBToLinear(color.z); // TODO: Use texel buffers for this.
     outputTexture[DispatchRaysIndex().xy] = float4(color.xyz, 1.0);
+
+    // Compute face normal from voxel hit
+    Block block = params.getCurrentPrimitive();
+    float3 voxelPos = float3(voxelId >> 4, (voxelId >> 2) & 0x3, voxelId & 0x3);
+    float3 hitPoint = ObjectRayOrigin() + ObjectRayDirection() * RayTCurrent();
+    float3 hitLocal = hitPoint - block.coords - voxelPos; // [0,1]^3 within the voxel
+
+    float3 d0 = abs(hitLocal);
+    float3 d1 = abs(hitLocal - 1.0);
+    float3 minD = min(d0, d1);
+    float3 normalSign = select(d0 < d1, float3(-1.0), float3(1.0));
+
+    float3 normal;
+    if (minD.x < minD.y && minD.x < minD.z) {
+        normal = float3(normalSign.x, 0, 0);
+    } else if (minD.y < minD.z) {
+        normal = float3(0, normalSign.y, 0);
+    } else {
+        normal = float3(0, 0, normalSign.z);
+    }
+
+    // Transform to world space
+    float3x4 o2w = ObjectToWorld3x4();
+    float3 worldNormal = normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), normal));
+    normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, 1.0);
 }
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {
