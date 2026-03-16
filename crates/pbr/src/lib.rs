@@ -30,7 +30,7 @@ use bevy_pumicite::prelude::ComputePipeline;
 
 use crate::{
     camera::Camera,
-    sky::{AtmosphereLUTs, AtmosphereState, SkyRenderSet},
+    sky::{AtmosphereLUTs, AtmosphereState, SkyAtmosphereLUTRenderSet},
 };
 
 #[repr(C)]
@@ -78,7 +78,7 @@ impl Plugin for PbrRenderPlugin {
         app.add_plugins(sky::SkyPlugin);
         app.configure_sets(
             PostUpdate,
-            SkyRenderSet.in_set(DefaultRenderSet).before(render),
+            SkyAtmosphereLUTRenderSet.in_set(DefaultRenderSet).before(render),
         );
     }
 }
@@ -340,10 +340,10 @@ pub fn setup(
     mut pipeline_manager: ResMut<RtxPipelineManager>,
 ) {
     let base_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("shaders/pbr/pbr.rtx.pipeline.ron");
+        asset_server.load("bazel://crates/pbr/shaders:pbr.rtx.pipeline.ron");
 
     let tonemap_pipeline: Handle<ComputePipeline> =
-        asset_server.load("shaders/pbr/tonemap.comp.pipeline.ron");
+        asset_server.load("bazel://crates/pbr/shaders:tonemap.comp.pipeline.ron");
 
     commands.insert_resource(PbrRenderState {
         pipeline: pipeline_manager.add_pipeline(base_library),

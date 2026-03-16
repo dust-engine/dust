@@ -1,6 +1,6 @@
 ComputePipeline(
     shader: (
-        path: "shaders/pbr/tonemap.spv",
+        path: "bazel://crates/pbr/shaders:tonemap.spv",
         entry_point: "main",
     ),
     layout: Inline(

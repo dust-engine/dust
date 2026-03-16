@@ -168,7 +168,7 @@ fn setup(
     pbr_render_state: Res<PbrRenderState>,
 ) {
     let hitgroup_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("shaders/vox/pbr.rtx.pipeline.ron");
+        asset_server.load("bazel://crates/vox/shaders:pbr.rtx.pipeline.ron");
     let hitgroup_index = pipeline_manager
         .add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
     commands.insert_resource(VoxRenderState {

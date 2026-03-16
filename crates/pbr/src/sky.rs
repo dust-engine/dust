@@ -63,18 +63,15 @@ impl Plugin for SkyPlugin {
                 prepare_atmosphere_uniform,
                 compute_luts,
                 render_skyview_lut,
-                //prepare_render_sky,
-                //start_main_render_pass,
-                //render_sky,
             )
                 .chain()
-                .in_set(SkyRenderSet),
+                .in_set(SkyAtmosphereLUTRenderSet),
         );
     }
 }
 
 #[derive(SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
-pub struct SkyRenderSet;
+pub struct SkyAtmosphereLUTRenderSet;
 
 // Atmosphere parameters - must match shader struct layout exactly
 #[repr(C)]
@@ -233,7 +230,6 @@ struct Pipelines {
     transmittance_lut: Handle<ComputePipeline>,
     multi_scattering: Handle<ComputePipeline>,
     sky_view_lut: Handle<ComputePipeline>,
-    sky_render: Handle<GraphicsPipeline>,
 }
 
 pub struct LutImage {
@@ -253,11 +249,11 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
     // Load pipelines
     commands.insert_resource(Pipelines {
         transmittance_lut: asset_server
-            .load("shaders/sky_atmosphere/transmittance_lut.comp.pipeline.ron"),
+            .load("bazel://crates/pbr/shaders/sky_atmosphere:transmittance_lut.comp.pipeline.ron"),
         multi_scattering: asset_server
-            .load("shaders/sky_atmosphere/multi_scattering.comp.pipeline.ron"),
-        sky_view_lut: asset_server.load("shaders/sky_atmosphere/sky_view_lut.comp.pipeline.ron"),
-        sky_render: asset_server.load("shaders/sky_atmosphere/sky_render.gfx.pipeline.ron"),
+            .load("bazel://crates/pbr/shaders/sky_atmosphere:multi_scattering.comp.pipeline.ron"),
+        sky_view_lut: asset_server
+            .load("bazel://crates/pbr/shaders/sky_atmosphere:sky_view_lut.comp.pipeline.ron"),
     });
 
     // Create LUT images
@@ -457,7 +453,7 @@ fn prepare_atmosphere_uniform(
 }
 
 fn compute_luts(
-    mut atmosphere: ResMut<AtmosphereState>,
+    atmosphere: Res<AtmosphereState>,
     mut luts: ResMut<AtmosphereLUTs>,
     pipelines: Res<Pipelines>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
@@ -770,143 +766,6 @@ fn render_skyview_lut(
                 SKY_VIEW_HEIGHT.div_ceil(8),
                 1,
             ));
-        }
-    });
-}
-
-fn prepare_render_sky(mut luts: ResMut<AtmosphereLUTs>, mut state: SubmissionState) {
-    state.record(|encoder| {
-        let transmittance_view = encoder.lock(
-            &luts.transmittance.view,
-            vk::PipelineStageFlags2::FRAGMENT_SHADER,
-        );
-        let sky_view = encoder.lock(
-            &luts.sky_view.view,
-            vk::PipelineStageFlags2::FRAGMENT_SHADER,
-        );
-
-        encoder.use_image_resource(
-            transmittance_view.image(),
-            &mut luts.transmittance.state,
-            Access::FRAGMENT_SAMPLED_READ,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            0..1,
-            0..1,
-            false,
-        );
-        encoder.use_image_resource(
-            sky_view.image(),
-            &mut luts.sky_view.state,
-            Access::FRAGMENT_SAMPLED_READ,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            0..1,
-            0..1,
-            false,
-        );
-        encoder.emit_barriers();
-    });
-}
-
-fn render_sky(
-    atmosphere: Res<AtmosphereState>,
-    pipelines: Res<Pipelines>,
-    graphics_pipelines: Res<Assets<GraphicsPipeline>>,
-    mut state: SubmissionState,
-    luts: Res<AtmosphereLUTs>,
-) {
-    let Some(sky_render_pipeline) = graphics_pipelines.get(&pipelines.sky_render) else {
-        return;
-    };
-
-    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
-
-    state.render(|mut pass| {
-        // Final sky render
-        {
-            let buffer = pass.retain(atmosphere_uniform_buffer);
-            let extent = pass.render_area().extent;
-
-            let pipeline = pass.retain(sky_render_pipeline.clone().into_inner());
-            pass.bind_pipeline(&pipeline);
-
-            pass.set_viewport(
-                0,
-                &[vk::Viewport {
-                    x: 0.0,
-                    y: extent.height as f32,
-                    width: extent.width as f32,
-                    height: -(extent.height as f32),
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                }],
-            );
-            pass.set_scissor(0, &[pass.render_area()]);
-
-            let transmittance_view = pass.lock(
-                &luts.transmittance.view,
-                vk::PipelineStageFlags2::FRAGMENT_SHADER,
-            );
-            let sky_view = pass.lock(
-                &luts.sky_view.view,
-                vk::PipelineStageFlags2::FRAGMENT_SHADER,
-            );
-
-            let transmittance_image_info = vk::DescriptorImageInfo {
-                image_view: transmittance_view.vk_handle(),
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                sampler: vk::Sampler::null(),
-            };
-            let sky_view_image_info = vk::DescriptorImageInfo {
-                image_view: sky_view.vk_handle(),
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                sampler: vk::Sampler::null(),
-            };
-            let sampler_info = vk::DescriptorImageInfo {
-                sampler: luts.sampler.vk_handle(),
-                ..Default::default()
-            };
-
-            pass.push_descriptor_set(
-                pipeline.layout(),
-                0,
-                &[
-                    vk::WriteDescriptorSet {
-                        dst_binding: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: &vk::DescriptorBufferInfo {
-                            buffer: buffer.vk_handle(),
-                            offset: buffer.offset(),
-                            range: buffer.size(),
-                        },
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 1,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                        p_image_info: &transmittance_image_info,
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 2,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                        p_image_info: &sky_view_image_info,
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 3,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLER,
-                        p_image_info: &sampler_info,
-                        ..Default::default()
-                    },
-                ],
-            );
-
-            // Draw full-screen triangle
-            pass.draw(0..3, 0..1);
         }
     });
 }

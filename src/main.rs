@@ -1,5 +1,6 @@
 #![feature(impl_trait_in_fn_trait_return)]
 
+mod bazel_asset;
 mod flycam;
 
 use bevy::prelude::*;
@@ -14,6 +15,22 @@ use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode, tracking::Acce
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {
     let mut app = bevy::app::App::new();
+
+    // Register bazel asset source before DefaultPlugins.
+    // Resolves "bazel://..." paths against bazel-bin/ (build outputs)
+    // with fallback to the workspace root (source files).
+    let workspace_root = std::env::var("BUILD_WORKSPACE_DIRECTORY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("CARGO_MANIFEST_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::env::current_dir().unwrap())
+        });
+    app.register_asset_source(
+        "bazel",
+        bazel_asset::bazel_asset_source(workspace_root),
+    );
+
     app.add_plugins(bevy::DefaultPlugins)
         .add_plugins(bevy_pumicite::SurfacePlugin::default())
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())

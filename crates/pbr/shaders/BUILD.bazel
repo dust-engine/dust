@@ -23,3 +23,15 @@ slang_shader(
     target = "spirv",
     opts = ["-O3"],
 )
+
+[genrule(
+    name = ron.replace(".", "_"),
+    srcs = ["pipeline/" + ron],
+    outs = [ron],
+    cmd = "cp $< $@",
+    cmd_bat = "copy /Y $< $@",
+) for ron in [
+    "pbr.rtx.pipeline.ron",
+    "pbr.playout.ron",
+    "tonemap.comp.pipeline.ron",
+]]

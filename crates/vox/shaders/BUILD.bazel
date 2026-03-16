@@ -25,3 +25,14 @@ slang_shader(
         "-matrix-layout-row-major",
     ],
 )
+
+[genrule(
+    name = ron.replace(".", "_"),
+    srcs = ["pipeline/" + ron],
+    outs = [ron],
+    cmd = "cp $< $@",
+    cmd_bat = "copy /Y $< $@",
+) for ron in [
+    "pbr.rtx.pipeline.ron",
+    "blas_builder_copy_coords.comp.pipeline.ron",
+]]
