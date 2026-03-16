@@ -26,6 +26,18 @@ slang_shader(
     ],
 )
 
+slang_shader(
+    name = "shadow",
+    srcs = ["shadow.slang"],
+    out = "shadow.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
 [genrule(
     name = ron.replace(".", "_"),
     srcs = ["pipeline/" + ron],
@@ -34,5 +46,6 @@ slang_shader(
     cmd_bat = "copy /Y $< $@",
 ) for ron in [
     "pbr.rtx.pipeline.ron",
+    "shadow.rtx.pipeline.ron",
     "blas_builder_copy_coords.comp.pipeline.ron",
 ]]

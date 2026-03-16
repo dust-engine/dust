@@ -18,7 +18,7 @@ use pumicite::{
     bevy::PipelineCache,
     buffer::BufferLike,
     debug::DebugObject,
-    image::{FullImageView, Image, ImageExt, ImageLike},
+    image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView},
     rtx::ShaderBindingTable,
     sync::GPUMutex,
     tracking::{Access, ResourceState},
@@ -61,7 +61,15 @@ impl Plugin for PbrRenderPlugin {
                     .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
                     .after(OccludingRenderPass)
                     .after(create_sbt),
-                tonemap_pass.in_set(DefaultRenderSet).after(render),
+                shadow_pass
+                    .in_set(DefaultRenderSet)
+                    .after(PbrRenderSet)
+                    .after(render)
+                    .after(create_sbt),
+                tonemap_pass
+                    .in_set(DefaultRenderSet)
+                    .after(render)
+                    .after(shadow_pass),
             ),
         );
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
@@ -147,13 +155,17 @@ fn render(
         // HDR intermediary at binding 1
         let hdr_image = encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
-        // G-buffer textures at bindings 8, 9
+        // G-buffer textures at bindings 8, 9, 10
         let albedo_image = encoder.lock(
             &hdr.albedo_view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         let normal_image = encoder.lock(
             &hdr.normal_view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let depth_image = encoder.lock(
+            &hdr.depth_view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
 
@@ -197,6 +209,16 @@ fn render(
         encoder.use_image_resource(
             normal_image.image(),
             &mut hdr.normal_state,
+            Access::RTX_WRITE,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            true,
+        );
+        // Depth G-buffer: write (discard previous contents)
+        encoder.use_image_resource(
+            depth_image.image(),
+            &mut hdr.depth_state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
             0..1,
@@ -341,7 +363,7 @@ fn render(
                     image_view: swapchain_target.linear_view().vk_handle(),
                     ..Default::default()
                 }]),
-                // Binding 8: Albedo G-buffer (write)
+                // Binding 8: Albedo G-buffer (write, linear/UNORM view)
                 vk::WriteDescriptorSet {
                     dst_binding: 8,
                     descriptor_count: 1,
@@ -350,7 +372,7 @@ fn render(
                 }
                 .image_info(&[vk::DescriptorImageInfo {
                     image_layout: vk::ImageLayout::GENERAL,
-                    image_view: albedo_image.vk_handle(),
+                    image_view: albedo_image.linear_view().vk_handle(),
                     ..Default::default()
                 }]),
                 // Binding 9: Normal G-buffer (write)
@@ -365,6 +387,18 @@ fn render(
                     image_view: normal_image.vk_handle(),
                     ..Default::default()
                 }]),
+                // Binding 10: Depth G-buffer (write)
+                vk::WriteDescriptorSet {
+                    dst_binding: 10,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: depth_image.vk_handle(),
+                    ..Default::default()
+                }]),
             ],
         );
         encoder.trace_rays(sbt, 0, sbt_buffer, hdr_image.image().extent());
@@ -375,18 +409,22 @@ fn render(
 pub struct HdrRenderTarget {
     pub view: GPUMutex<FullImageView<Image>>,
     pub state: ResourceState,
-    pub albedo_view: GPUMutex<FullImageView<Image>>,
+    pub albedo_view: GPUMutex<SrgbImageView<Image>>,
     pub albedo_state: ResourceState,
     pub normal_view: GPUMutex<FullImageView<Image>>,
     pub normal_state: ResourceState,
+    pub depth_view: GPUMutex<FullImageView<Image>>,
+    pub depth_state: ResourceState,
     pub extent: UVec2,
 }
 
 #[derive(Resource)]
 pub struct PbrRenderState {
     pub pipeline: Handle<RayTracingPipeline>,
+    pub shadow_pipeline: Handle<RayTracingPipeline>,
     pub tonemap_pipeline: Handle<ComputePipeline>,
     pub sbt: Option<ShaderBindingTable>,
+    pub shadow_sbt: Option<ShaderBindingTable>,
 }
 
 pub fn setup(
@@ -396,23 +434,32 @@ pub fn setup(
 ) {
     let base_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://crates/pbr/shaders:pbr.rtx.pipeline.ron");
+    let shadow_base_library: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://crates/pbr/shaders:shadow.rtx.pipeline.ron");
 
     let tonemap_pipeline: Handle<ComputePipeline> =
         asset_server.load("bazel://crates/pbr/shaders:tonemap.comp.pipeline.ron");
 
     commands.insert_resource(PbrRenderState {
         pipeline: pipeline_manager.add_pipeline(base_library),
+        shadow_pipeline: pipeline_manager.add_pipeline(shadow_base_library),
         tonemap_pipeline,
         sbt: None,
+        shadow_sbt: None,
     });
 }
 
 pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTracingPipeline>>) {
-    let Some(pipeline) = pipelines.get(&state.pipeline) else {
+    if let Some(pipeline) = pipelines.get(&state.pipeline) {
+        state.sbt = Some(pipeline.create_sbt(state.sbt.take()));
+    } else {
         state.sbt = None;
-        return;
-    };
-    state.sbt = Some(pipeline.create_sbt(state.sbt.take()));
+    }
+    if let Some(pipeline) = pipelines.get(&state.shadow_pipeline) {
+        state.shadow_sbt = Some(pipeline.create_sbt(state.shadow_sbt.take()));
+    } else {
+        state.shadow_sbt = None;
+    }
 }
 
 fn ensure_hdr_target(
@@ -468,15 +515,19 @@ fn ensure_hdr_target(
         Image::new_private(
             allocator.clone(),
             &vk::ImageCreateInfo {
-                format: vk::Format::R16G16B16A16_SFLOAT,
+                flags: vk::ImageCreateFlags::MUTABLE_FORMAT,
+                format: vk::Format::R8G8B8A8_UNORM,
                 ..create_info
-            },
+            }
+            .push(
+                &mut vk::ImageFormatListCreateInfo::default()
+                    .view_formats(&[vk::Format::R8G8B8A8_SRGB, vk::Format::R8G8B8A8_UNORM]),
+            ),
         )
         .unwrap()
         .with_name(c"G-Buffer Albedo Image")
-        .create_full_view()
-        .unwrap()
-        .with_name(c"G-Buffer Albedo Image View"),
+        .create_srgb_view(vk::ImageUsageFlags::STORAGE, vk::ImageUsageFlags::SAMPLED)
+        .unwrap(),
     );
     let normal_view = GPUMutex::new(
         Image::new_private(
@@ -492,6 +543,20 @@ fn ensure_hdr_target(
         .unwrap()
         .with_name(c"G-Buffer Normal Image View"),
     );
+    let depth_view = GPUMutex::new(
+        Image::new_private(
+            allocator.clone(),
+            &vk::ImageCreateInfo {
+                format: vk::Format::R32_SFLOAT,
+                ..create_info
+            },
+        )
+        .unwrap()
+        .with_name(c"G-Buffer Depth")
+        .create_full_view()
+        .unwrap()
+        .with_name(c"G-Buffer Depth View"),
+    );
 
     commands.insert_resource(HdrRenderTarget {
         view,
@@ -500,7 +565,244 @@ fn ensure_hdr_target(
         albedo_state: Default::default(),
         normal_view,
         normal_state: Default::default(),
+        depth_view,
+        depth_state: Default::default(),
         extent,
+    });
+}
+
+fn shadow_pass(
+    mut ctx: SubmissionState,
+    mut state: ResMut<PbrRenderState>,
+    tlas: Res<TLAS>,
+    pipelines: Res<Assets<RayTracingPipeline>>,
+    mut uploader: BufferInitializer,
+    mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
+    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    atmosphere: Res<AtmosphereState>,
+    mut luts: ResMut<AtmosphereLUTs>,
+    mut hdr_target: Option<ResMut<HdrRenderTarget>>,
+) {
+    let Ok((camera, transform)) = swapchain_images.single() else {
+        return;
+    };
+    let Some(pipeline) = pipelines
+        .get(&state.shadow_pipeline)
+        .map(|x| x.deref().clone())
+    else {
+        return;
+    };
+    let Some(shadow_sbt) = state.shadow_sbt.as_mut() else {
+        return;
+    };
+    let Some(tlas) = tlas.get() else {
+        return;
+    };
+    let Some(hdr) = hdr_target.as_mut() else {
+        return;
+    };
+    shadow_sbt.push_raygen(0, |_| {});
+    shadow_sbt.push_miss(0, |_| {});
+    let uniform = Uniforms {
+        far: camera.depth.end,
+        near: camera.depth.start,
+        model: glam_to_vk_transform(transform.affine()),
+        tan_half_fov: camera.tan_half_fov(),
+    };
+    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
+    ctx.record(move |encoder| {
+        let sbt_buffer =
+            uploader.create_preinitialized_buffer_retained(encoder, shadow_sbt.layout(), |slice| {
+                slice.copy_from_slice(shadow_sbt.buffer())
+            });
+
+        let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
+        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer);
+
+        let pipeline = encoder.retain(pipeline);
+        let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
+
+        // HDR output at binding 1 (read-write: miss shader adds sun contribution)
+        let hdr_image = encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        // Albedo at binding 8 (read)
+        let albedo_image = encoder.lock(
+            &hdr.albedo_view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        // Normal G-buffer at binding 9 (read)
+        let normal_image = encoder.lock(
+            &hdr.normal_view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        // Depth G-buffer at binding 10 (read)
+        let depth_image = encoder.lock(
+            &hdr.depth_view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+
+        // HDR: read-write (miss shader reads current value and adds sun contribution)
+        encoder.use_image_resource(
+            hdr_image.image(),
+            &mut hdr.state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ
+                    | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Albedo: sampled read through sRGB view (written by primary pass)
+        encoder.use_image_resource(
+            albedo_image.image(),
+            &mut hdr.albedo_state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_SAMPLED_READ,
+            },
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Normal: read (written by primary pass)
+        encoder.use_image_resource(
+            normal_image.image(),
+            &mut hdr.normal_state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Depth: read (written by primary pass)
+        encoder.use_image_resource(
+            depth_image.image(),
+            &mut hdr.depth_state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.memory_barrier(
+            Access::COPY_WRITE,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_BINDING_TABLE_READ_KHR,
+            },
+        );
+
+        encoder.emit_barriers();
+
+        encoder.push_descriptor_set(
+            vk::PipelineBindPoint::RAY_TRACING_KHR,
+            pipeline.layout(),
+            0,
+            &[
+                vk::WriteDescriptorSet {
+                    dst_binding: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
+                    ..Default::default()
+                }
+                .push(
+                    &mut vk::WriteDescriptorSetAccelerationStructureKHR::default()
+                        .acceleration_structures(&[tlas.vk_handle()]),
+                ),
+                // Binding 1: HDR output (read-write)
+                vk::WriteDescriptorSet {
+                    dst_binding: 1,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: hdr_image.vk_handle(),
+                    ..Default::default()
+                }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 2,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: uniform.vk_handle(),
+                    offset: uniform.offset(),
+                    range: uniform.size(),
+                }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 3,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: atmo_buffer.vk_handle(),
+                    offset: atmo_buffer.offset(),
+                    range: atmo_buffer.size(),
+                }]),
+                // Binding 6: Sampler (for albedo sRGB sampling)
+                vk::WriteDescriptorSet {
+                    dst_binding: 6,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLER,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    sampler: luts.sampler.vk_handle(),
+                    ..Default::default()
+                }]),
+                // Binding 9: Normal G-buffer (read)
+                vk::WriteDescriptorSet {
+                    dst_binding: 9,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: normal_image.vk_handle(),
+                    ..Default::default()
+                }]),
+                // Binding 10: Depth G-buffer (read)
+                vk::WriteDescriptorSet {
+                    dst_binding: 10,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: depth_image.vk_handle(),
+                    ..Default::default()
+                }]),
+                // Binding 11: Albedo sRGB view (sampled read — hardware sRGB-to-linear)
+                vk::WriteDescriptorSet {
+                    dst_binding: 11,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    image_view: albedo_image.srgb_view().vk_handle(),
+                    ..Default::default()
+                }]),
+            ],
+        );
+        encoder.trace_rays(shadow_sbt, 0, sbt_buffer, normal_image.image().extent());
     });
 }
 

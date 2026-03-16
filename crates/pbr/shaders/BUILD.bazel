@@ -16,6 +16,19 @@ slang_shader(
 )
 
 slang_shader(
+    name = "shadow",
+    srcs = ["shadow.slang"],
+    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang"],
+    out = "shadow.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
+slang_shader(
     name = "tonemap",
     srcs = ["tonemap.slang"],
     out = "tonemap.spv",
@@ -33,5 +46,6 @@ slang_shader(
 ) for ron in [
     "pbr.rtx.pipeline.ron",
     "pbr.playout.ron",
+    "shadow.rtx.pipeline.ron",
     "tonemap.comp.pipeline.ron",
 ]]

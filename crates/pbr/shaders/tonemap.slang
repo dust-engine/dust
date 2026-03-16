@@ -20,9 +20,7 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID,
 
     float4 hdr = hdrInput[coord];
     if (hdr.a > 0) {
-        //float3 color = acesToneMap(hdr.rgb * exposure);
-        // Gamma correction (assuming sRGB output)
-        ldrOutput[coord] = float4(hdr.rgb, 1.0);
+        float3 color = acesToneMap(hdr.rgb * exposure);
+        ldrOutput[coord] = float4(color, 1.0);
     }
-    // else: preserve existing egui content on swapchain
 }

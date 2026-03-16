@@ -1,0 +1,20 @@
+RayTracingPipeline(
+    stages: [
+        RayGen (
+            shader: (
+                path: "bazel://crates/pbr/shaders:shadow.spv",
+                entry_point: "shadowRayGenShader"
+            )
+        ),
+        Miss (
+            shader: (
+                path: "bazel://crates/pbr/shaders:shadow.spv",
+                entry_point: "shadowMissShader",
+            )
+        ),
+    ],
+    max_ray_payload_size: 4,
+    max_hit_attribute_size: 4,
+
+    layout: Path("bazel://crates/pbr/shaders:pbr.playout.ron"),
+)

@@ -159,6 +159,8 @@ impl Plugin for VoxPlugin {
 pub struct VoxRenderState {
     pipeline: Handle<RayTracingPipelineLibrary>,
     hitgroup_index: u32,
+    shadow_pipeline: Handle<RayTracingPipelineLibrary>,
+    shadow_hitgroup_index: u32,
 }
 
 fn setup(
@@ -171,9 +173,19 @@ fn setup(
         asset_server.load("bazel://crates/vox/shaders:pbr.rtx.pipeline.ron");
     let hitgroup_index = pipeline_manager
         .add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
+
+    let shadow_hitgroup_library: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://crates/vox/shaders:shadow.rtx.pipeline.ron");
+    let shadow_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
+        &pbr_render_state.shadow_pipeline,
+        shadow_hitgroup_library.clone(),
+    );
+
     commands.insert_resource(VoxRenderState {
         pipeline: hitgroup_library,
         hitgroup_index,
+        shadow_pipeline: shadow_hitgroup_library,
+        shadow_hitgroup_index,
     });
 }
 
@@ -188,14 +200,16 @@ struct VoxModelParams {
 fn write_sbt_entries(
     mut models: Query<&mut VoxModel>,
     mut instances: Query<(Entity, &mut TLASInstance<()>), With<VoxInstance>>,
-    mut pbr_render_state: ResMut<PbrRenderState>,
+    mut pbr_state: ResMut<PbrRenderState>,
     vox_render_state: Res<VoxRenderState>,
 
     geometry_assets: Res<Assets<VoxGeometry>>,
     material_assets: Res<Assets<VoxMaterial>>,
     palette_assets: Res<Assets<VoxPalette>>,
 ) {
-    let Some(sbt) = pbr_render_state.sbt.as_mut() else {
+    let pbr_state = &mut *pbr_state;
+    let (Some(sbt), Some(shadow_sbt)) = (pbr_state.sbt.as_mut(), pbr_state.shadow_sbt.as_mut())
+    else {
         for mut model in models.iter_mut() {
             model.sbt_index = u32::MAX;
         }
@@ -227,6 +241,12 @@ fn write_sbt_entries(
         model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, |param_dst| {
             param_dst.copy_from_slice(bytemuck::bytes_of(&params));
         });
+        // Push same geometry to shadow SBT (same order ensures matching sbt_offsets)
+        let shadow_sbt_index =
+            shadow_sbt.push_hitgroup(vox_render_state.shadow_hitgroup_index, |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            });
+        assert_eq!(shadow_sbt_index, model.sbt_index);
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;

@@ -6,6 +6,7 @@ ConstantBuffer<Uniforms> uniforms;
 
 [[vk::binding(8, 0)]] uniform RWTexture2D<float4> albedoTexture;
 [[vk::binding(9, 0)]] uniform RWTexture2D<float4> normalTexture;
+[[vk::binding(10, 0)]] uniform RWTexture2D<float> depthTexture;
 
 // Sky atmosphere bindings
 [[vk::binding(3, 0)]] ConstantBuffer<AtmosphereParams> atmosphereParams;
@@ -39,12 +40,14 @@ float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<fl
 [shader("raygeneration")]
 void rayGenShader() {
     // Check swapchain for egui occlusion
+    outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 1.0);
     float4 originalColor = occlusionTexture[DispatchRaysIndex().xy];
     if (originalColor.a == 1.0) {
         // Solid UI pixel. Write transparent to HDR so tonemap skips it.
         outputTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         albedoTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+        depthTexture[DispatchRaysIndex().xy] = 0.0;
         return;
     }
     RayDesc ray;
@@ -160,4 +163,5 @@ void missShader() {
     outputTexture[DispatchRaysIndex().xy] = float4(finalColor, 1.0);
     albedoTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+    depthTexture[DispatchRaysIndex().xy] = 0.0;
 }

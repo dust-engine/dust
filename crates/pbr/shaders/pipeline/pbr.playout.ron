@@ -22,7 +22,7 @@ PipelineLayout(
                     Binding(
                         binding: 3,
                         ty: UniformBuffer,
-                        stages: [Miss]
+                        stages: [RayGen, Miss]
                     ),
                     Binding(
                         binding: 4,
@@ -37,22 +37,32 @@ PipelineLayout(
                     Binding(
                         binding: 6,
                         ty: Sampler,
-                        stages: [Miss]
+                        stages: [Miss, RayGen]
                     ),
                     Binding(
                         binding: 7,
                         ty: StorageImage,
                         stages: [RayGen]
                     ),
-                    Binding(
+                    Binding( // Albedo
                         binding: 8,
                         ty: StorageImage,
                         stages: [RayGen, Miss, ClosestHit]
                     ),
-                    Binding(
+                    Binding( // Normal
                         binding: 9,
                         ty: StorageImage,
                         stages: [RayGen, Miss, ClosestHit]
+                    ),
+                    Binding( // Depth
+                        binding: 10,
+                        ty: StorageImage,
+                        stages: [RayGen, Miss, ClosestHit]
+                    ),
+                    Binding( // Albedo sRGB (sampled read in shadow pass)
+                        binding: 11,
+                        ty: SampledImage,
+                        stages: [Miss, RayGen]
                     ),
                 ]
             )
