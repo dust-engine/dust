@@ -48,9 +48,9 @@ rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(edition = "2024")
 
 crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
-crate.spec(package = "pumicite_slang", git = "https://github.com/dust-engine/pumicite.git", rev = "4e30ec8b9c4243a12c3ae716d2dffb6c721c6230")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "07fbd6dba5dd1786c06db81ab361a8c2cf8dc953")
 crate.annotation(
-    crate = "pumicite_slang",
+    crate = "pumicite_cli",
     gen_all_binaries = True,
 )
 crate.annotation(

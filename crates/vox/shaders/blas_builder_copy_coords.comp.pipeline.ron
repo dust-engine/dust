@@ -1,0 +1,7 @@
+ComputePipeline(
+    shader: (
+            path: "bazel://crates/vox/shaders:blas_builder_copy_coords.spv",
+            entry_point: "main",
+        ),
+    layout: Path("bazel://crates/vox/shaders:blas_builder_copy_coords.playout.bin"),
+)

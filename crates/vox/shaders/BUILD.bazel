@@ -1,5 +1,5 @@
 load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
-load("//third_party:slang_playout.bzl", "slang_playout")
+load("//third_party:slang_playout.bzl", "slang_playout", "ron2bin")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -19,6 +19,15 @@ slang_playout(
     name = "blas_builder_copy_coords_playout",
     srcs = ["blas_builder_copy_coords.slang"],
     out = "blas_builder_copy_coords.playout.bin",
+    set_attrs = [
+        "0:push_descriptor"
+    ]
+)
+ron2bin(
+    name = "blas_builder_copy_coords_comp_pipeline",
+    src = "blas_builder_copy_coords.comp.pipeline.ron",
+    out = "blas_builder_copy_coords.comp.pipeline.bin",
+    type = "compute-pipeline"
 )
 
 slang_shader(
@@ -32,6 +41,13 @@ slang_shader(
         "-matrix-layout-row-major",
     ],
 )
+ron2bin(
+    name = "pbr_rtx_pipeline",
+    src = "pbr.rtx.pipeline.ron",
+    out = "pbr.rtx.pipeline.bin",
+    type = "raytracing-pipeline"
+)
+
 
 slang_shader(
     name = "shadow",
@@ -44,15 +60,9 @@ slang_shader(
         "-matrix-layout-row-major",
     ],
 )
-
-[genrule(
-    name = ron.replace(".", "_"),
-    srcs = ["pipeline/" + ron],
-    outs = [ron],
-    cmd = "cp $< $@",
-    cmd_bat = "copy /Y $< $@",
-) for ron in [
-    "pbr.rtx.pipeline.ron",
-    "shadow.rtx.pipeline.ron",
-    "blas_builder_copy_coords.comp.pipeline.ron",
-]]
+ron2bin(
+    name = "shadow_rtx_pipeline",
+    src = "shadow.rtx.pipeline.ron",
+    out = "shadow.rtx.pipeline.bin",
+    type = "raytracing-pipeline"
+)

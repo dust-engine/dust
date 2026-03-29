@@ -1,4 +1,5 @@
 load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
+load("//third_party:slang_playout.bzl", "ron2bin")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -37,15 +38,30 @@ slang_shader(
     opts = ["-O3"],
 )
 
-[genrule(
-    name = ron.replace(".", "_"),
-    srcs = ["pipeline/" + ron],
-    outs = [ron],
-    cmd = "cp $< $@",
-    cmd_bat = "copy /Y $< $@",
-) for ron in [
-    "pbr.rtx.pipeline.ron",
-    "pbr.playout.ron",
-    "shadow.rtx.pipeline.ron",
-    "tonemap.comp.pipeline.ron",
-]]
+ron2bin(
+    name = "pbr_rtx_pipeline",
+    src = "pipeline/pbr.rtx.pipeline.ron",
+    out = "pbr.rtx.pipeline.bin",
+    type = "raytracing-pipeline",
+)
+
+ron2bin(
+    name = "pbr_playout",
+    src = "pipeline/pbr.playout.ron",
+    out = "pbr.playout.bin",
+    type = "pipeline-layout",
+)
+
+ron2bin(
+    name = "shadow_rtx_pipeline",
+    src = "pipeline/shadow.rtx.pipeline.ron",
+    out = "shadow.rtx.pipeline.bin",
+    type = "raytracing-pipeline",
+)
+
+ron2bin(
+    name = "tonemap_comp_pipeline",
+    src = "pipeline/tonemap.comp.pipeline.ron",
+    out = "tonemap.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
