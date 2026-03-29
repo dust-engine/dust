@@ -893,6 +893,7 @@ dependencies = [
  "image",
  "ktx2",
  "pumicite",
+ "pumicite_types",
  "raw-window-handle",
  "ron 0.12.0",
  "serde",
@@ -3376,6 +3377,7 @@ dependencies = [
  "log",
  "pin-project-lite",
  "portable-atomic",
+ "pumicite_types",
  "raw-window-handle",
  "raw-window-metal",
  "serde",
@@ -3398,6 +3400,15 @@ dependencies = [
  "glam",
  "pumicite",
  "tracing",
+]
+
+[[package]]
+name = "pumicite_types"
+version = "0.1.0"
+dependencies = [
+ "ash",
+ "glam",
+ "serde",
 ]
 
 [[package]]

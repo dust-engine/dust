@@ -1,3 +1,13 @@
+module(
+    name = "dust",
+    version = "0.1.0",
+)
+
+# -----------------------------------------------------------------------------
+# Vulkan SDK
+# -----------------------------------------------------------------------------
+
+bazel_dep(name = "rules_cc", version = "0.2.17")
 bazel_dep(name = "rules_vulkan", version = "0.7.0")
 
 vulkan_sdk = use_extension("@rules_vulkan//vulkan:extensions.bzl", "vulkan_sdk")
@@ -12,3 +22,42 @@ git_override(
     remote = "https://github.com/mxpv/rules_vulkan.git",
     commit = "49d307d8a0411e288560194645558098b96da842",
 )
+
+# -----------------------------------------------------------------------------
+# shader-slang Rust bindings (external git repo with custom BUILD overlay)
+# -----------------------------------------------------------------------------
+
+new_git_repository = use_repo_rule(
+    "@bazel_tools//tools/build_defs/repo:git.bzl",
+    "new_git_repository",
+)
+
+new_git_repository(
+    name = "slang_rs",
+    remote = "https://github.com/FloatyMonkey/slang-rs.git",
+    commit = "4af0e9db151b9b8f52fa53390f13f3377e8e7df2",
+    build_file = "//third_party:slang_rs.BUILD.bazel",
+)
+
+# -----------------------------------------------------------------------------
+# Rust assetbuild dependency
+# -----------------------------------------------------------------------------
+
+bazel_dep(name = "rules_rust", version = "0.69.0")
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(edition = "2024")
+
+crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
+crate.spec(package = "pumicite_slang", git = "https://github.com/dust-engine/pumicite.git", rev = "4e30ec8b9c4243a12c3ae716d2dffb6c721c6230")
+crate.annotation(
+    crate = "pumicite_slang",
+    gen_all_binaries = True,
+)
+crate.annotation(
+    crate = "shader-slang-sys",
+    gen_build_script = "off",
+    deps = ["@@//third_party:slang"],
+)
+
+crate.from_specs()
+use_repo(crate, "crates")

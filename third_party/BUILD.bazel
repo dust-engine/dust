@@ -1,0 +1,9 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_import(
+    name = "slang",
+    interface_library = "@vulkan_sdk_1.4.341.0//:sdk/Lib/slang.lib",
+    shared_library = "@vulkan_sdk_1.4.341.0//:sdk/Bin/slang.dll",
+)
