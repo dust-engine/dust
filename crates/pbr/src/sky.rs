@@ -245,11 +245,11 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
     // Load pipelines
     commands.insert_resource(Pipelines {
         transmittance_lut: asset_server
-            .load("bazel://crates/pbr/shaders/sky_atmosphere:transmittance_lut.comp.pipeline.ron"),
+            .load("bazel://crates/pbr/shaders/sky_atmosphere:transmittance_lut.comp.pipeline.bin"),
         multi_scattering: asset_server
-            .load("bazel://crates/pbr/shaders/sky_atmosphere:multi_scattering.comp.pipeline.ron"),
+            .load("bazel://crates/pbr/shaders/sky_atmosphere:multi_scattering.comp.pipeline.bin"),
         sky_view_lut: asset_server
-            .load("bazel://crates/pbr/shaders/sky_atmosphere:sky_view_lut.comp.pipeline.ron"),
+            .load("bazel://crates/pbr/shaders/sky_atmosphere:sky_view_lut.comp.pipeline.bin"),
     });
 
     // Create LUT images

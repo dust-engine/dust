@@ -170,12 +170,12 @@ fn setup(
     pbr_render_state: Res<PbrRenderState>,
 ) {
     let hitgroup_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("bazel://crates/vox/shaders:pbr.rtx.pipeline.ron");
+        asset_server.load("bazel://crates/vox/shaders:pbr.rtx.pipeline.bin");
     let hitgroup_index = pipeline_manager
         .add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
 
     let shadow_hitgroup_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("bazel://crates/vox/shaders:shadow.rtx.pipeline.ron");
+        asset_server.load("bazel://crates/vox/shaders:shadow.rtx.pipeline.bin");
     let shadow_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
         &pbr_render_state.shadow_pipeline,
         shadow_hitgroup_library.clone(),

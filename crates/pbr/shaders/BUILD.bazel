@@ -1,5 +1,5 @@
 load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
-load("//third_party:slang_playout.bzl", "ron2bin")
+load("//third_party:pumicite_cli.bzl", "ron2bin")
 
 package(default_visibility = ["//visibility:public"])
 
