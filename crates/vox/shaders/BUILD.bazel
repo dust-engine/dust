@@ -33,6 +33,7 @@ ron2bin(
 slang_shader(
     name = "pbr",
     srcs = ["pbr.slang"],
+    hdrs = ["//crates/pbr/shaders:layout.slang"],
     out = "pbr.spv",
     profile = "lib_6_3",
     target = "spirv",

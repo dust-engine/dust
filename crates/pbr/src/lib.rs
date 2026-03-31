@@ -266,21 +266,6 @@ fn render(
 
         encoder.emit_barriers();
 
-        let transmittance_image_info = vk::DescriptorImageInfo {
-            image_view: transmittance_view.vk_handle(),
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            sampler: vk::Sampler::null(),
-        };
-        let sky_view_image_info = vk::DescriptorImageInfo {
-            image_view: sky_view.vk_handle(),
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            sampler: vk::Sampler::null(),
-        };
-        let sampler_info = vk::DescriptorImageInfo {
-            sampler: luts.sampler.vk_handle(),
-            ..Default::default()
-        };
-
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
@@ -296,20 +281,8 @@ fn render(
                     &mut vk::WriteDescriptorSetAccelerationStructureKHR::default()
                         .acceleration_structures(&[tlas.vk_handle()]),
                 ),
-                // Binding 1: HDR intermediary (write)
                 vk::WriteDescriptorSet {
                     dst_binding: 1,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: hdr_image.vk_handle(),
-                    ..Default::default()
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 2,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                     ..Default::default()
@@ -319,38 +292,61 @@ fn render(
                     offset: uniform.offset(),
                     range: uniform.size(),
                 }]),
+                // Binding 2: HDR output texture (write)
+                vk::WriteDescriptorSet {
+                    dst_binding: 2,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: hdr_image.vk_handle(),
+                    ..Default::default()
+                }]),
+
+                
+                // Binding 3: Albedo G-buffer (write, linear/UNORM view)
                 vk::WriteDescriptorSet {
                     dst_binding: 3,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                     ..Default::default()
                 }
-                .buffer_info(&[vk::DescriptorBufferInfo {
-                    buffer: atmo_buffer.vk_handle(),
-                    offset: atmo_buffer.offset(),
-                    range: atmo_buffer.size(),
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 4,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    p_image_info: &transmittance_image_info,
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: albedo_image.linear_view().vk_handle(),
                     ..Default::default()
-                },
+                }]),
+                // Binding 4: Albedo G-buffer (write, srgb view)
+                // Omitted
+                
+                // Binding 5: Normal G-buffer (write)
                 vk::WriteDescriptorSet {
                     dst_binding: 5,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    p_image_info: &sky_view_image_info,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                     ..Default::default()
-                },
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: normal_image.vk_handle(),
+                    ..Default::default()
+                }]),
+
+                // Binding 6: Depth G-buffer (write)
                 vk::WriteDescriptorSet {
                     dst_binding: 6,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLER,
-                    p_image_info: &sampler_info,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                     ..Default::default()
-                },
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: depth_image.vk_handle(),
+                    ..Default::default()
+                }]),
+
                 // Binding 7: Swapchain (read-only for occlusion)
                 vk::WriteDescriptorSet {
                     dst_binding: 7,
@@ -363,42 +359,49 @@ fn render(
                     image_view: swapchain_target.linear_view().vk_handle(),
                     ..Default::default()
                 }]),
-                // Binding 8: Albedo G-buffer (write, linear/UNORM view)
                 vk::WriteDescriptorSet {
                     dst_binding: 8,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                     ..Default::default()
                 }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: albedo_image.linear_view().vk_handle(),
-                    ..Default::default()
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: atmo_buffer.vk_handle(),
+                    offset: atmo_buffer.offset(),
+                    range: atmo_buffer.size(),
                 }]),
-                // Binding 9: Normal G-buffer (write)
                 vk::WriteDescriptorSet {
                     dst_binding: 9,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        image_view: transmittance_view.vk_handle(),
+                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        sampler: vk::Sampler::null(),
+                    },
                     ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: normal_image.vk_handle(),
-                    ..Default::default()
-                }]),
-                // Binding 10: Depth G-buffer (write)
+                },
                 vk::WriteDescriptorSet {
                     dst_binding: 10,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        image_view: sky_view.vk_handle(),
+                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        sampler: vk::Sampler::null(),
+                    },
                     ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: depth_image.vk_handle(),
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 11,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLER,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        sampler: luts.sampler.vk_handle(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                }]),
+                },
             ],
         );
         encoder.trace_rays(sbt, 0, sbt_buffer, hdr_image.image().extent());
@@ -694,6 +697,34 @@ fn shadow_pass(
             0..1,
             false,
         );
+        // Lock sky atmosphere LUTs for reading in the miss shader
+        let transmittance_view = encoder.lock(
+            &luts.transmittance.view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sky_view = encoder.lock(
+            &luts.sky_view.view,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+
+        encoder.use_image_resource(
+            transmittance_view.image(),
+            &mut luts.transmittance.state,
+            Access::RTX_READ,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            sky_view.image(),
+            &mut luts.sky_view.state,
+            Access::RTX_READ,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            0..1,
+            0..1,
+            false,
+        );
         encoder.memory_barrier(
             Access::COPY_WRITE,
             Access {
@@ -719,20 +750,8 @@ fn shadow_pass(
                     &mut vk::WriteDescriptorSetAccelerationStructureKHR::default()
                         .acceleration_structures(&[tlas.vk_handle()]),
                 ),
-                // Binding 1: HDR output (read-write)
                 vk::WriteDescriptorSet {
                     dst_binding: 1,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: hdr_image.vk_handle(),
-                    ..Default::default()
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 2,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                     ..Default::default()
@@ -742,31 +761,38 @@ fn shadow_pass(
                     offset: uniform.offset(),
                     range: uniform.size(),
                 }]),
+                // Binding 2: HDR output texture (write)
                 vk::WriteDescriptorSet {
-                    dst_binding: 3,
+                    dst_binding: 2,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    ..Default::default()
-                }
-                .buffer_info(&[vk::DescriptorBufferInfo {
-                    buffer: atmo_buffer.vk_handle(),
-                    offset: atmo_buffer.offset(),
-                    range: atmo_buffer.size(),
-                }]),
-                // Binding 6: Sampler (for albedo sRGB sampling)
-                vk::WriteDescriptorSet {
-                    dst_binding: 6,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLER,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                     ..Default::default()
                 }
                 .image_info(&[vk::DescriptorImageInfo {
-                    sampler: luts.sampler.vk_handle(),
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: hdr_image.vk_handle(),
                     ..Default::default()
                 }]),
-                // Binding 9: Normal G-buffer (read)
+
+                
+                // Binding 3: Albedo G-buffer (write, linear/UNORM view)
+                // Omitted
+                // Binding 4: Albedo G-buffer (write, srgb view)
                 vk::WriteDescriptorSet {
-                    dst_binding: 9,
+                    dst_binding: 4,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    image_layout: vk::ImageLayout::GENERAL,
+                    image_view: albedo_image.srgb_view().vk_handle(),
+                    ..Default::default()
+                }]),
+                
+                // Binding 5: Normal G-buffer (write)
+                vk::WriteDescriptorSet {
+                    dst_binding: 5,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                     ..Default::default()
@@ -776,9 +802,10 @@ fn shadow_pass(
                     image_view: normal_image.vk_handle(),
                     ..Default::default()
                 }]),
-                // Binding 10: Depth G-buffer (read)
+
+                // Binding 6: Depth G-buffer (write)
                 vk::WriteDescriptorSet {
-                    dst_binding: 10,
+                    dst_binding: 6,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                     ..Default::default()
@@ -788,18 +815,50 @@ fn shadow_pass(
                     image_view: depth_image.vk_handle(),
                     ..Default::default()
                 }]),
-                // Binding 11: Albedo sRGB view (sampled read — hardware sRGB-to-linear)
+                
+                vk::WriteDescriptorSet {
+                    dst_binding: 8,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: atmo_buffer.vk_handle(),
+                    offset: atmo_buffer.offset(),
+                    range: atmo_buffer.size(),
+                }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 9,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        image_view: transmittance_view.vk_handle(),
+                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        sampler: vk::Sampler::null(),
+                    },
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 10,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        image_view: sky_view.vk_handle(),
+                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        sampler: vk::Sampler::null(),
+                    },
+                    ..Default::default()
+                },
                 vk::WriteDescriptorSet {
                     dst_binding: 11,
                     descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    descriptor_type: vk::DescriptorType::SAMPLER,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        sampler: luts.sampler.vk_handle(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    image_view: albedo_image.srgb_view().vk_handle(),
-                    ..Default::default()
-                }]),
+                },
             ],
         );
         encoder.trace_rays(shadow_sbt, 0, sbt_buffer, normal_image.image().extent());

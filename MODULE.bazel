@@ -20,7 +20,7 @@ register_toolchains("@vulkan_sdk_1.4.341.0//:all")
 git_override(
     module_name = "rules_vulkan",
     remote = "https://github.com/mxpv/rules_vulkan.git",
-    commit = "49d307d8a0411e288560194645558098b96da842",
+    commit = "61b6df146c85641a6a23afc78d42d37409cade71",
 )
 
 # -----------------------------------------------------------------------------

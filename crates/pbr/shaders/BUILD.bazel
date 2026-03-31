@@ -6,7 +6,7 @@ package(default_visibility = ["//visibility:public"])
 slang_shader(
     name = "pbr",
     srcs = ["pbr.slang"],
-    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang"],
+    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang", "layout.slang"],
     out = "pbr.spv",
     profile = "lib_6_3",
     target = "spirv",
@@ -19,7 +19,7 @@ slang_shader(
 slang_shader(
     name = "shadow",
     srcs = ["shadow.slang"],
-    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang"],
+    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang", "layout.slang"],
     out = "shadow.spv",
     profile = "lib_6_3",
     target = "spirv",
@@ -40,28 +40,28 @@ slang_shader(
 
 ron2bin(
     name = "pbr_rtx_pipeline",
-    src = "pipeline/pbr.rtx.pipeline.ron",
+    src = "pbr.rtx.pipeline.ron",
     out = "pbr.rtx.pipeline.bin",
     type = "raytracing-pipeline",
 )
 
 ron2bin(
     name = "pbr_playout",
-    src = "pipeline/pbr.playout.ron",
+    src = "pbr.playout.ron",
     out = "pbr.playout.bin",
     type = "pipeline-layout",
 )
 
 ron2bin(
     name = "shadow_rtx_pipeline",
-    src = "pipeline/shadow.rtx.pipeline.ron",
+    src = "shadow.rtx.pipeline.ron",
     out = "shadow.rtx.pipeline.bin",
     type = "raytracing-pipeline",
 )
 
 ron2bin(
     name = "tonemap_comp_pipeline",
-    src = "pipeline/tonemap.comp.pipeline.ron",
+    src = "tonemap.comp.pipeline.ron",
     out = "tonemap.comp.pipeline.bin",
     type = "compute-pipeline",
 )

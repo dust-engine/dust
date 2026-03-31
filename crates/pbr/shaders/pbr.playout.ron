@@ -9,64 +9,64 @@ PipelineLayout(
                         ty: AccelerationStructure,
                         stages: [RayGen]
                     ),
-                    Binding(
+                    Binding( // Camera Uniforms
                         binding: 1,
-                        ty: StorageImage,
+                        ty: UniformBuffer,
                         stages: [Miss, ClosestHit, RayGen]
                     ),
-                    Binding(
+                    Binding( // Output texture
                         binding: 2,
-                        ty: UniformBuffer,
-                        stages: [Miss, ClosestHit, RayGen]
-                    ),
-                    Binding(
-                        binding: 3,
-                        ty: UniformBuffer,
-                        stages: [RayGen, Miss]
-                    ),
-                    Binding(
-                        binding: 4,
-                        ty: SampledImage,
-                        stages: [Miss]
-                    ),
-                    Binding(
-                        binding: 5,
-                        ty: SampledImage,
-                        stages: [Miss]
-                    ),
-                    Binding(
-                        binding: 6,
-                        ty: Sampler,
-                        stages: [Miss, RayGen]
-                    ),
-                    Binding(
-                        binding: 7,
                         ty: StorageImage,
-                        stages: [RayGen]
+                        stages: [Miss, ClosestHit, RayGen]
                     ),
                     Binding( // Albedo
-                        binding: 8,
-                        ty: StorageImage,
-                        stages: [RayGen, Miss, ClosestHit]
-                    ),
-                    Binding( // Normal
-                        binding: 9,
-                        ty: StorageImage,
-                        stages: [RayGen, Miss, ClosestHit]
-                    ),
-                    Binding( // Depth
-                        binding: 10,
+                        binding: 3,
                         ty: StorageImage,
                         stages: [RayGen, Miss, ClosestHit]
                     ),
                     Binding( // Albedo sRGB (sampled read in shadow pass)
-                        binding: 11,
+                        binding: 4,
                         ty: SampledImage,
+                        stages: [Miss, RayGen]
+                    ),
+                    Binding( // Normal
+                        binding: 5,
+                        ty: StorageImage,
+                        stages: [RayGen, Miss, ClosestHit]
+                    ),
+                    Binding( // Depth
+                        binding: 6,
+                        ty: StorageImage,
+                        stages: [RayGen, Miss, ClosestHit]
+                    ),
+                    Binding( // Occlusion
+                        binding: 7,
+                        ty: StorageImage,
+                        stages: [RayGen]
+                    ),
+                    Binding( // Atmosphere Uniform
+                        binding: 8,
+                        ty: UniformBuffer,
+                        stages: [RayGen, Miss]
+                    ),
+                    Binding( // Transmittance
+                        binding: 9,
+                        ty: SampledImage,
+                        stages: [Miss]
+                    ),
+                    Binding( // SkyView
+                        binding: 10,
+                        ty: SampledImage,
+                        stages: [Miss]
+                    ),
+                    Binding( // Linear Sampler
+                        binding: 11,
+                        ty: Sampler,
                         stages: [Miss, RayGen]
                     ),
                 ]
             )
-        )
+        ),
     ],
     push_constants: {
         RayGen: (0, 4)
