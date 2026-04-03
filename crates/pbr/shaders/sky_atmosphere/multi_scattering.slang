@@ -3,24 +3,11 @@
 // Uses shared memory reduction to integrate over the sphere
 // Output: 32x32 R16G16B16A16_SFLOAT texture
 
-#include "atmosphere_common.slang"
-
-[[vk::binding(0, 0)]] ConstantBuffer<AtmosphereParams> params;
-[[vk::binding(1, 0)]] Texture2D<float4> transmittanceLUT;
-[[vk::binding(2, 0)]] SamplerState linearSampler;
-[format("rgba16f")]
-[[vk::binding(3, 0)]] RWTexture2D<float4> multiScatteringLUT;
+import sky_atmosphere;
 
 // Shared memory for parallel reduction
 groupshared float3 sharedMultiScatAs1[64];
 groupshared float3 sharedL[64];
-
-// Sample transmittance from LUT
-float3 sampleTransmittance(AtmosphereParams atm, float viewHeight, float viewZenithCosAngle) {
-    float2 uv;
-    transmittanceParamsToUv(atm, viewHeight, viewZenithCosAngle, uv);
-    return transmittanceLUT.SampleLevel(linearSampler, uv, 0).rgb;
-}
 
 // Single scattering result for multi-scattering computation
 struct SingleScatteringResult {
@@ -34,7 +21,9 @@ SingleScatteringResult integrateScatteredLuminance(
     float3 worldDir,
     float3 sunDir,
     AtmosphereParams atm,
-    bool ground
+    bool ground,
+    Texture2D<float4> transmittanceLUT,
+    SamplerState linearSampler
 ) {
     SingleScatteringResult result;
     result.L = float3(0.0, 0.0, 0.0);
@@ -82,7 +71,7 @@ SingleScatteringResult integrateScatteredLuminance(
         float pHeight = length(P);
         float3 upVector = P / pHeight;
         float sunZenithCosAngle = dot(sunDir, upVector);
-        float3 transmittanceToSun = sampleTransmittance(atm, pHeight, sunZenithCosAngle);
+        float3 transmittanceToSun = sampleTransmittance(atm, pHeight, sunZenithCosAngle, transmittanceLUT, linearSampler);
 
         // Earth shadow
         float3 earthCenter = earthO + PLANET_RADIUS_OFFSET * upVector;
@@ -111,7 +100,7 @@ SingleScatteringResult integrateScatteredLuminance(
         float pHeight = length(P);
         float3 upVector = P / pHeight;
         float sunZenithCosAngle = dot(sunDir, upVector);
-        float3 transmittanceToSun = sampleTransmittance(atm, pHeight, sunZenithCosAngle);
+        float3 transmittanceToSun = sampleTransmittance(atm, pHeight, sunZenithCosAngle, transmittanceLUT, linearSampler);
 
         float NdotL = saturate(dot(upVector, sunDir));
         result.L += transmittanceToSun * throughput * NdotL * atm.ground_albedo / PI;
@@ -120,8 +109,16 @@ SingleScatteringResult integrateScatteredLuminance(
     return result;
 }
 
+[shader("compute")]
 [numthreads(1, 1, 64)]
-void main(uint3 threadId : SV_DispatchThreadID) {
+void main(
+    uint3 threadId : SV_DispatchThreadID,
+    uniform ConstantBuffer<AtmosphereParams> params,
+    uniform Texture2D<float4> transmittanceLUT,
+    uniform SamplerState linearSampler,
+    [format("rgba16f")]
+    uniform RWTexture2D<float4> multiScatteringLUT
+) {
     float2 pixPos = float2(threadId.xy) + 0.5;
     float2 uv = pixPos / float(MULTI_SCATTERING_RES);
 
@@ -158,7 +155,7 @@ void main(uint3 threadId : SV_DispatchThreadID) {
 
     // Integrate scattering for this direction
     SingleScatteringResult result = integrateScatteredLuminance(
-        worldPos, worldDir, sunDir, params, true);
+        worldPos, worldDir, sunDir, params, true, transmittanceLUT, linearSampler);
 
     float sphereSolidAngle = 4.0 * PI;
     sharedMultiScatAs1[threadId.z] = result.multiScatAs1 * sphereSolidAngle / (SQRT_SAMPLE_COUNT * SQRT_SAMPLE_COUNT);

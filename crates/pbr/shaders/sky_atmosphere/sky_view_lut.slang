@@ -3,24 +3,10 @@
 // Parameterized by view zenith angle and light-view angle
 // Output: 192x108 R16G16B16A16_SFLOAT texture
 
-#include "atmosphere_common.slang"
-
-[[vk::binding(0, 0)]] ConstantBuffer<AtmosphereParams> params;
-[[vk::binding(1, 0)]] Texture2D<float4> transmittanceLUT;
-[[vk::binding(2, 0)]] Texture2D<float4> multiScatteringLUT;
-[[vk::binding(3, 0)]] SamplerState linearSampler;
-[format("rgba16f")]
-[[vk::binding(4, 0)]] RWTexture2D<float4> skyViewLUT;
-
-// Sample transmittance from LUT
-float3 sampleTransmittance(AtmosphereParams atm, float viewHeight, float viewZenithCosAngle) {
-    float2 uv;
-    transmittanceParamsToUv(atm, viewHeight, viewZenithCosAngle, uv);
-    return transmittanceLUT.SampleLevel(linearSampler, uv, 0).rgb;
-}
+import sky_atmosphere;
 
 // Sample multi-scattering from LUT
-float3 sampleMultiScattering(AtmosphereParams atm, float3 worldPos, float viewZenithCosAngle) {
+float3 sampleMultiScattering(AtmosphereParams atm, float3 worldPos, float viewZenithCosAngle, Texture2D<float4> multiScatteringLUT, SamplerState linearSampler) {
     float2 uv = saturate(float2(
         viewZenithCosAngle * 0.5 + 0.5,
         (length(worldPos) - atm.bottom_radius) / (atm.top_radius - atm.bottom_radius)
@@ -35,7 +21,10 @@ float3 integrateScatteredLuminance(
     float3 worldPos,
     float3 worldDir,
     float3 sunDir,
-    AtmosphereParams atm
+    AtmosphereParams atm,
+    Texture2D<float4> transmittanceLUT,
+    Texture2D<float4> multiScatteringLUT,
+    SamplerState linearSampler
 ) {
     // Ray-atmosphere intersection
     float3 earthO = float3(0.0, 0.0, 0.0);
@@ -89,7 +78,7 @@ float3 integrateScatteredLuminance(
         float pHeight = length(P);
         float3 upVector = P / pHeight;
         float sunZenithCosAngle = dot(sunDir, upVector);
-        float3 transmittanceToSun = sampleTransmittance(atm, pHeight, sunZenithCosAngle);
+        float3 transmittanceToSun = sampleTransmittance(atm, pHeight, sunZenithCosAngle, transmittanceLUT, linearSampler);
 
         // Earth shadow
         float3 earthCenter = earthO + PLANET_RADIUS_OFFSET * upVector;
@@ -101,7 +90,7 @@ float3 integrateScatteredLuminance(
                                        medium.scattering_ray * rayleighPhaseValue;
 
         // Multi-scattering contribution
-        float3 multiScatteredLuminance = sampleMultiScattering(atm, P, sunZenithCosAngle);
+        float3 multiScatteredLuminance = sampleMultiScattering(atm, P, sunZenithCosAngle, multiScatteringLUT, linearSampler);
 
         // Total in-scattered light
         float3 S = atm.solar_irradiance * (earthShadow * transmittanceToSun * phaseTimesScattering +
@@ -116,8 +105,17 @@ float3 integrateScatteredLuminance(
     return L;
 }
 
+[shader("compute")]
 [numthreads(8, 8, 1)]
-void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
+void main(
+    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uniform ConstantBuffer<AtmosphereParams> params,
+    uniform Texture2D<float4> transmittanceLUT,
+    uniform Texture2D<float4> multiScatteringLUT,
+    uniform SamplerState linearSampler,
+    [format("rgba16f")]
+    uniform RWTexture2D<float4> skyViewLUT
+) {
     int2 coord = int2(dispatchThreadID.xy);
 
     if (coord.x >= SKY_VIEW_WIDTH || coord.y >= SKY_VIEW_HEIGHT) {
@@ -155,7 +153,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
         return;
     }
 
-    float3 L = integrateScatteredLuminance(worldPos, worldDir, sunDir, params);
+    float3 L = integrateScatteredLuminance(worldPos, worldDir, sunDir, params, transmittanceLUT, multiScatteringLUT, linearSampler);
 
     skyViewLUT[coord] = float4(L, 1.0);
 }

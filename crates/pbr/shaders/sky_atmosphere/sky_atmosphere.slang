@@ -1,88 +1,90 @@
+module sky_atmosphere;
+
 // Sky Atmosphere Common - Shared structures and functions
 // Based on "A Scalable and Production Ready Sky and Atmosphere Rendering Technique" (EGSR 2020)
 
-static const float PI = 3.14159265358979323846;
-static const float PLANET_RADIUS_OFFSET = 0.01;
+public static const float PI = 3.14159265358979323846;
+public static const float PLANET_RADIUS_OFFSET = 0.01;
 
 // LUT dimensions
-static const int TRANSMITTANCE_WIDTH = 256;
-static const int TRANSMITTANCE_HEIGHT = 64;
-static const int MULTI_SCATTERING_RES = 32;
-static const int SKY_VIEW_WIDTH = 192;
-static const int SKY_VIEW_HEIGHT = 108;
+public static const int TRANSMITTANCE_WIDTH = 256;
+public static const int TRANSMITTANCE_HEIGHT = 64;
+public static const int MULTI_SCATTERING_RES = 32;
+public static const int SKY_VIEW_WIDTH = 192;
+public static const int SKY_VIEW_HEIGHT = 108;
 
 // Atmosphere parameters - matches Rust struct layout
-struct AtmosphereParams {
+public struct AtmosphereParams {
     // Planet geometry (km)
-    float bottom_radius;        // 6360.0 for Earth
-    float top_radius;           // 6460.0 for Earth (100km atmosphere)
-    float2 _pad0;
+    public float bottom_radius;        // 6360.0 for Earth
+    public float top_radius;           // 6460.0 for Earth (100km atmosphere)
+    public float2 _pad0;
 
     // Rayleigh scattering (air molecules)
-    float3 rayleigh_scattering;
-    float rayleigh_density_exp_scale;  // -1/8 for Earth
+    public float3 rayleigh_scattering;
+    public float rayleigh_density_exp_scale;  // -1/8 for Earth
 
     // Mie scattering (aerosols)
-    float3 mie_scattering;
-    float mie_density_exp_scale;       // -1/1.2 for Earth
+    public float3 mie_scattering;
+    public float mie_density_exp_scale;       // -1/1.2 for Earth
 
-    float3 mie_extinction;
-    float mie_phase_g;                 // 0.8 for Earth
+    public float3 mie_extinction;
+    public float mie_phase_g;                 // 0.8 for Earth
 
-    float3 mie_absorption;
-    float _pad1;
+    public float3 mie_absorption;
+    public float _pad1;
 
     // Ozone absorption layer
-    float3 absorption_extinction;
-    float absorption_density_0_layer_width;
+    public float3 absorption_extinction;
+    public float absorption_density_0_layer_width;
 
-    float absorption_density_0_constant_term;
-    float absorption_density_0_linear_term;
-    float absorption_density_1_constant_term;
-    float absorption_density_1_linear_term;
+    public float absorption_density_0_constant_term;
+    public float absorption_density_0_linear_term;
+    public float absorption_density_1_constant_term;
+    public float absorption_density_1_linear_term;
 
     // Ground
-    float3 ground_albedo;
-    float _pad2;
+    public float3 ground_albedo;
+    public float _pad2;
 
     // Sun
-    float3 sun_direction;
-    float sun_angular_radius;
+    public float3 sun_direction;
+    public float sun_angular_radius;
 
-    float3 solar_irradiance;
-    float _pad3;
+    public float3 solar_irradiance;
+    public float _pad3;
 
     // Camera
-    float3 camera_position;
-    float _pad4;
+    public float3 camera_position;
+    public float _pad4;
 
     // View matrices (column_major to match glam/Bevy layout)
-    column_major float4x4 inv_view_proj_mat;
-    column_major float4x4 inv_proj_mat;
-    column_major float4x4 inv_view_mat;
+    public column_major float4x4 inv_view_proj_mat;
+    public column_major float4x4 inv_proj_mat;
+    public column_major float4x4 inv_view_mat;
 
     // Resolution
-    float2 resolution;
-    float2 _pad5;
+    public float2 resolution;
+    public float2 _pad5;
 };
 
 // Medium sample at a point in the atmosphere
-struct MediumSample {
-    float3 scattering;      // Total scattering
-    float3 absorption;      // Total absorption
-    float3 extinction;      // scattering + absorption
+public struct MediumSample {
+    public float3 scattering; // Total scattering
+    public float3 absorption; // Total absorption
+    public float3 extinction;      // scattering + absorption
 
-    float3 scattering_mie;
-    float3 scattering_ray;
+    public float3 scattering_mie;
+    public float3 scattering_ray;
 
-    float3 extinction_mie;
-    float3 extinction_ray;
-    float3 extinction_ozo;
+    public float3 extinction_mie;
+    public float3 extinction_ray;
+    public float3 extinction_ozo;
 };
 
 // Ray-sphere intersection
 // Returns distance to nearest intersection, or -1 if no intersection
-float raySphereIntersectNearest(float3 r0, float3 rd, float3 s0, float sR) {
+public float raySphereIntersectNearest(float3 r0, float3 rd, float3 s0, float sR) {
     float a = dot(rd, rd);
     float3 s0_r0 = r0 - s0;
     float b = 2.0 * dot(rd, s0_r0);
@@ -111,29 +113,29 @@ float raySphereIntersectNearest(float3 r0, float3 rd, float3 s0, float sR) {
 // Phase functions
 
 // Rayleigh phase function
-float rayleighPhase(float cosTheta) {
+public float rayleighPhase(float cosTheta) {
     float factor = 3.0 / (16.0 * PI);
     return factor * (1.0 + cosTheta * cosTheta);
 }
 
 // Cornette-Shanks Mie phase function (better than Henyey-Greenstein)
-float cornetteShanksMiePhase(float g, float cosTheta) {
+public float cornetteShanksMiePhase(float g, float cosTheta) {
     float k = 3.0 / (8.0 * PI) * (1.0 - g * g) / (2.0 + g * g);
     return k * (1.0 + cosTheta * cosTheta) / pow(1.0 + g * g - 2.0 * g * -cosTheta, 1.5);
 }
 
 // Henyey-Greenstein phase function
-float hgPhase(float g, float cosTheta) {
+public float hgPhase(float g, float cosTheta) {
     return cornetteShanksMiePhase(g, cosTheta);
 }
 
 // Uniform phase function
-float uniformPhase() {
+public float uniformPhase() {
     return 1.0 / (4.0 * PI);
 }
 
 // Sample the atmosphere medium properties at a given world position
-MediumSample sampleMedium(float3 worldPos, AtmosphereParams atm) {
+public MediumSample sampleMedium(float3 worldPos, AtmosphereParams atm) {
     float viewHeight = length(worldPos) - atm.bottom_radius;
 
     // Density at current height
@@ -165,7 +167,7 @@ MediumSample sampleMedium(float3 worldPos, AtmosphereParams atm) {
 // LUT parameterization functions
 
 // Convert physical parameters to transmittance LUT UV
-void transmittanceParamsToUv(AtmosphereParams atm, float viewHeight, float viewZenithCosAngle, out float2 uv) {
+public void transmittanceParamsToUv(AtmosphereParams atm, float viewHeight, float viewZenithCosAngle, out float2 uv) {
     float H = sqrt(max(0.0, atm.top_radius * atm.top_radius - atm.bottom_radius * atm.bottom_radius));
     float rho = sqrt(max(0.0, viewHeight * viewHeight - atm.bottom_radius * atm.bottom_radius));
 
@@ -181,7 +183,7 @@ void transmittanceParamsToUv(AtmosphereParams atm, float viewHeight, float viewZ
 }
 
 // Convert transmittance LUT UV to physical parameters
-void uvToTransmittanceParams(AtmosphereParams atm, out float viewHeight, out float viewZenithCosAngle, float2 uv) {
+public void uvToTransmittanceParams(AtmosphereParams atm, out float viewHeight, out float viewZenithCosAngle, float2 uv) {
     float x_mu = uv.x;
     float x_r = uv.y;
 
@@ -199,15 +201,15 @@ void uvToTransmittanceParams(AtmosphereParams atm, out float viewHeight, out flo
 // Sky view LUT parameterization
 // Non-linear mapping to allocate more precision near the horizon
 
-float fromUnitToSubUvs(float u, float resolution) {
+public float fromUnitToSubUvs(float u, float resolution) {
     return (u + 0.5 / resolution) * (resolution / (resolution + 1.0));
 }
 
-float fromSubUvsToUnit(float u, float resolution) {
+public float fromSubUvsToUnit(float u, float resolution) {
     return (u - 0.5 / resolution) * (resolution / (resolution - 1.0));
 }
 
-void uvToSkyViewParams(AtmosphereParams atm, out float viewZenithCosAngle, out float lightViewCosAngle, float viewHeight, float2 uv) {
+public void uvToSkyViewParams(AtmosphereParams atm, out float viewZenithCosAngle, out float lightViewCosAngle, float viewHeight, float2 uv) {
     uv = float2(fromSubUvsToUnit(uv.x, float(SKY_VIEW_WIDTH)), fromSubUvsToUnit(uv.y, float(SKY_VIEW_HEIGHT)));
 
     float Vhorizon = sqrt(viewHeight * viewHeight - atm.bottom_radius * atm.bottom_radius);
@@ -232,7 +234,7 @@ void uvToSkyViewParams(AtmosphereParams atm, out float viewZenithCosAngle, out f
     lightViewCosAngle = -(lightCoord * 2.0 - 1.0);
 }
 
-void skyViewParamsToUv(AtmosphereParams atm, bool intersectGround, float viewZenithCosAngle, float lightViewCosAngle, float viewHeight, out float2 uv) {
+public void skyViewParamsToUv(AtmosphereParams atm, bool intersectGround, float viewZenithCosAngle, float lightViewCosAngle, float viewHeight, out float2 uv) {
     float Vhorizon = sqrt(viewHeight * viewHeight - atm.bottom_radius * atm.bottom_radius);
     float CosBeta = Vhorizon / viewHeight;
     float Beta = acos(CosBeta);
@@ -258,7 +260,7 @@ void skyViewParamsToUv(AtmosphereParams atm, bool intersectGround, float viewZen
 }
 
 // Move ray origin to top of atmosphere if outside
-bool moveToTopAtmosphere(inout float3 worldPos, float3 worldDir, float topRadius) {
+public bool moveToTopAtmosphere(inout float3 worldPos, float3 worldDir, float topRadius) {
     float viewHeight = length(worldPos);
     if (viewHeight > topRadius) {
         float tTop = raySphereIntersectNearest(worldPos, worldDir, float3(0.0, 0.0, 0.0), topRadius);
@@ -273,8 +275,15 @@ bool moveToTopAtmosphere(inout float3 worldPos, float3 worldDir, float topRadius
     return true;
 }
 
+// Sample transmittance from LUT
+public float3 sampleTransmittance(AtmosphereParams atm, float viewHeight, float viewZenithCosAngle, Texture2D<float4> transmittanceLUT, SamplerState linearSampler) {
+    float2 uv;
+    transmittanceParamsToUv(atm, viewHeight, viewZenithCosAngle, uv);
+    return transmittanceLUT.SampleLevel(linearSampler, uv, 0).rgb;
+}
+
 // Get sun luminance if looking directly at sun
-float3 getSunLuminance(float3 worldPos, float3 worldDir, float3 sunDir, float sunAngularRadius, float bottomRadius) {
+public float3 getSunLuminance(float3 worldPos, float3 worldDir, float3 sunDir, float sunAngularRadius, float bottomRadius) {
     if (dot(worldDir, sunDir) > cos(sunAngularRadius)) {
         float t = raySphereIntersectNearest(worldPos, worldDir, float3(0.0, 0.0, 0.0), bottomRadius);
         if (t < 0.0) { // No intersection with ground

@@ -31,9 +31,12 @@ ron2bin(
 )
 
 slang_shader(
-    name = "pbr",
-    srcs = ["pbr.slang"],
-    hdrs = ["//crates/pbr/shaders:layout.slang"],
+    name = "vox_pbr",
+    srcs = ["vox_pbr.slang"],
+    hdrs = [
+        "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+    ],
     out = "pbr.spv",
     profile = "lib_6_3",
     target = "spirv",
@@ -43,17 +46,17 @@ slang_shader(
     ],
 )
 ron2bin(
-    name = "pbr_rtx_pipeline",
-    src = "pbr.rtx.pipeline.ron",
-    out = "pbr.rtx.pipeline.bin",
+    name = "vox_pbr_rtx_pipeline_library",
+    src = "vox_pbr.rtx.pipeline.ron",
+    out = "vox_pbr.rtx.pipeline.bin",
     type = "raytracing-pipeline"
 )
 
 
 slang_shader(
-    name = "shadow",
-    srcs = ["shadow.slang"],
-    out = "shadow.spv",
+    name = "vox_shadow",
+    srcs = ["vox_shadow.slang"],
+    out = "vox_shadow.spv",
     profile = "lib_6_3",
     target = "spirv",
     opts = [
@@ -62,8 +65,8 @@ slang_shader(
     ],
 )
 ron2bin(
-    name = "shadow_rtx_pipeline",
-    src = "shadow.rtx.pipeline.ron",
-    out = "shadow.rtx.pipeline.bin",
+    name = "vox_pbr_shadow_pipeline_library",
+    src = "vox_shadow.rtx.pipeline.ron",
+    out = "vox_shadow.rtx.pipeline.bin",
     type = "raytracing-pipeline"
 )

@@ -4,9 +4,22 @@ load("//third_party:pumicite_cli.bzl", "ron2bin")
 package(default_visibility = ["//visibility:public"])
 
 slang_shader(
+    name = "pbr_module",
+    srcs = ["pbr_common.slang"],
+    out = "pbr.slang-module",
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module"
+    ],
+    opts = ["-emit-ir"]
+)
+
+slang_shader(
     name = "pbr",
     srcs = ["pbr.slang"],
-    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang", "layout.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:pbr_module",
+    ],
     out = "pbr.spv",
     profile = "lib_6_3",
     target = "spirv",
@@ -19,7 +32,10 @@ slang_shader(
 slang_shader(
     name = "shadow",
     srcs = ["shadow.slang"],
-    hdrs = ["//crates/pbr/shaders/sky_atmosphere:atmosphere_common.slang", "layout.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:pbr_module",
+    ],
     out = "shadow.spv",
     profile = "lib_6_3",
     target = "spirv",

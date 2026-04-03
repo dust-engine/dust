@@ -1,4 +1,6 @@
-#include "layout.slang"
+import pbr_common;
+import sky_atmosphere;
+
 struct [raypayload] ShadowPayload {
     float shadow : read(caller) : write(caller, miss);
 }
@@ -13,7 +15,7 @@ float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<fl
 }
 
 [shader("raygeneration")]
-void shadowRayGenShader(ParameterBlock<PbrPipelineParams> params) {
+void shadowRayGenShader() {
     uint2 pixel = DispatchRaysIndex().xy;
 
     float depth = params.gbuffer.depthTexture[pixel];
@@ -52,7 +54,7 @@ void shadowRayGenShader(ParameterBlock<PbrPipelineParams> params) {
 }
 
 [shader("miss")]
-void shadowMissShader(ParameterBlock<PbrPipelineParams> params) {
+void shadowMissShader() {
     // Shadow ray missed — no blocker between surface and sun.
     // Compute direct sunlight contribution and add to render target.
     uint2 pixel = DispatchRaysIndex().xy;

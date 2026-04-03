@@ -3,12 +3,19 @@ load("//third_party:pumicite_cli.bzl", "ron2bin")
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["atmosphere_common.slang"])
+slang_shader(
+    name = "sky_atmosphere_module",
+    srcs = ["sky_atmosphere.slang"],
+    out = "sky_atmosphere.slang-module",
+    opts = ["-emit-ir"]
+)
 
 slang_shader(
     name = "transmittance_lut",
     srcs = ["transmittance_lut.slang"],
-    hdrs = ["atmosphere_common.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module"
+    ],
     out = "transmittance_lut.spv",
     profile = "cs_6_0",
     target = "spirv",
@@ -18,17 +25,21 @@ slang_shader(
 slang_shader(
     name = "multi_scattering",
     srcs = ["multi_scattering.slang"],
-    hdrs = ["atmosphere_common.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module"
+    ],
     out = "multi_scattering.spv",
     profile = "cs_6_0",
     target = "spirv",
-    opts = ["-O3"],
+    opts = ["-O3",],
 )
 
 slang_shader(
     name = "sky_view_lut",
     srcs = ["sky_view_lut.slang"],
-    hdrs = ["atmosphere_common.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module"
+    ],
     out = "sky_view_lut.spv",
     profile = "cs_6_0",
     target = "spirv",
@@ -37,21 +48,21 @@ slang_shader(
 
 ron2bin(
     name = "transmittance_lut_comp_pipeline",
-    src = "pipeline/transmittance_lut.comp.pipeline.ron",
+    src = "transmittance_lut.comp.pipeline.ron",
     out = "transmittance_lut.comp.pipeline.bin",
     type = "compute-pipeline",
 )
 
 ron2bin(
     name = "multi_scattering_comp_pipeline",
-    src = "pipeline/multi_scattering.comp.pipeline.ron",
+    src = "multi_scattering.comp.pipeline.ron",
     out = "multi_scattering.comp.pipeline.bin",
     type = "compute-pipeline",
 )
 
 ron2bin(
     name = "sky_view_lut_comp_pipeline",
-    src = "pipeline/sky_view_lut.comp.pipeline.ron",
+    src = "sky_view_lut.comp.pipeline.ron",
     out = "sky_view_lut.comp.pipeline.bin",
     type = "compute-pipeline",
 )

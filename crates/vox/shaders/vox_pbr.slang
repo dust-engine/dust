@@ -1,4 +1,4 @@
-#include <layout.slang>
+import pbr;
 
 struct Block
 {
@@ -78,15 +78,14 @@ float SRGBToLinear(float color) {
 
 [shader("closesthit")]
 void closestHitShader(
-    ParameterBlock<PbrPipelineParams> pipeline,
-    uniform VoxModelParams params,
+    uniform VoxModelParams model,
     in uint8_t voxelId,
 ) {
-    float4 color = params.getColorForVoxel(voxelId);                                // Colors sampled from the palette are sRGB
-    pipeline.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(color.xyz, 1.0); //Directly write sRGB.
+    float4 color = model.getColorForVoxel(voxelId);                                // Colors sampled from the palette are sRGB
+    params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(color.xyz, 1.0); //Directly write sRGB.
 
     // Compute face normal from voxel hit
-    Block block = params.getCurrentPrimitive();
+    Block block = model.getCurrentPrimitive();
     float3 voxelPos = float3(voxelId >> 4, (voxelId >> 2) & 0x3, voxelId & 0x3);
     float3 hitPoint = ObjectRayOrigin() + ObjectRayDirection() * RayTCurrent();
     float3 hitLocal = hitPoint - block.coords - voxelPos; // [0,1]^3 within the voxel
@@ -108,9 +107,9 @@ void closestHitShader(
     // Transform to world space
     float3x4 o2w = ObjectToWorld3x4();
     float3 worldNormal = normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), normal));
-    pipeline.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, 1.0);
+    params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, 1.0);
 
-    pipeline.gbuffer.depthTexture[DispatchRaysIndex().xy] = RayTCurrent();
+    params.gbuffer.depthTexture[DispatchRaysIndex().xy] = RayTCurrent();
 }
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {

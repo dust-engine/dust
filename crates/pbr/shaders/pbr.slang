@@ -1,4 +1,5 @@
-#include "layout.slang"
+import pbr_common;
+import sky_atmosphere;
 
 struct [raypayload] RayPayload {
     float color : read(caller) : write(caller, closesthit, miss);
@@ -15,7 +16,7 @@ float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<fl
 }
 
 [shader("raygeneration")]
-void rayGenShader(ParameterBlock<PbrPipelineParams> params) {
+void rayGenShader() {
     // Check swapchain for egui occlusion
     float4 originalColor = params.gbuffer.occlusionTexture[DispatchRaysIndex().xy];
     if (originalColor.a == 1.0) {
@@ -53,7 +54,7 @@ float3 sampleTransmittance(SkyAtmosphereParams atm, float viewHeight, float view
 }
 
 [shader("miss")]
-void missShader(ParameterBlock<PbrPipelineParams> params) {
+void missShader() {
     float3 worldDir = normalize(WorldRayDirection());
 
     // Camera in atmosphere space (planet center at origin)

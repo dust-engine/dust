@@ -3,18 +3,18 @@ RayTracingPipeline (
         HitGroup (
             ty: Aabbs,
             closest_hit: (
-                path: "bazel://crates/vox/shaders:pbr.spv",
+                path: "bazel://crates/vox/shaders:vox_pbr.spv",
                 entry_point: "closestHitShader",
             ),
             intersection: (
-                path: "bazel://crates/vox/shaders:pbr.spv",
+                path: "bazel://crates/vox/shaders:vox_pbr.spv",
                 entry_point: "intersectionShader",
             ),
             param_size: 24
         ),
     ],
 
-    layout: Path("bazel://crates/pbr/shaders:pbr.playout.bin"),
+    layout: Path("bazel://crates/pbr/shaders:vox_pbr.playout.bin"),
     max_ray_payload_size: 4,
     max_hit_attribute_size: 4,
 )

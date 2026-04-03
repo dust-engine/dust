@@ -2,11 +2,7 @@
 // Computes optical depth (transmittance) from any point to the top of the atmosphere
 // Output: 256x64 R16G16B16A16_SFLOAT texture
 
-#include "atmosphere_common.slang"
-
-[[vk::binding(0, 0)]] ConstantBuffer<AtmosphereParams> params;
-[format("rgba16f")]
-[[vk::binding(1, 0)]] RWTexture2D<float4> transmittanceLUT;
+import sky_atmosphere;
 
 // Integrate optical depth along a ray from worldPos in worldDir direction
 float3 integrateOpticalDepth(float3 worldPos, float3 worldDir, AtmosphereParams atm) {
@@ -44,8 +40,14 @@ float3 integrateOpticalDepth(float3 worldPos, float3 worldDir, AtmosphereParams 
     return opticalDepth;
 }
 
+[shader("compute")]
 [numthreads(8, 8, 1)]
-void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
+void main(
+    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uniform ConstantBuffer<AtmosphereParams> params,
+    [format("rgba16f")]
+    uniform RWTexture2D<float4> transmittanceLUT
+) {
     int2 coord = int2(dispatchThreadID.xy);
 
     if (coord.x >= TRANSMITTANCE_WIDTH || coord.y >= TRANSMITTANCE_HEIGHT) {
