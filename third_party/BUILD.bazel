@@ -1,9 +1,33 @@
 load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
 cc_import(
+    name = "slang_windows",
+    interface_library = "@vulkan_sdk_1.4.341.1//:sdk/Lib/slang.lib",
+    shared_library = "@vulkan_sdk_1.4.341.1//:sdk/Bin/slang.dll",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_import(
+    name = "slang_macos",
+    shared_library = "@vulkan_sdk_1.4.341.1//:sdk/lib/libslang-compiler.dylib",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+cc_import(
+    name = "slang_linux",
+    shared_library = "@vulkan_sdk_1.4.341.1//:sdk/lib/libslang.so",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+cc_library(
     name = "slang",
-    interface_library = "@vulkan_sdk_1.4.341.0//:sdk/Lib/slang.lib",
-    shared_library = "@vulkan_sdk_1.4.341.0//:sdk/Bin/slang.dll",
+    deps = select({
+        "@platforms//os:windows": [":slang_windows"],
+        "@platforms//os:macos": [":slang_macos"],
+        "@platforms//os:linux": [":slang_linux"],
+        "//conditions:default": [],
+    }),
 )

@@ -1,4 +1,4 @@
-import pbr;
+import pbr_common;
 
 struct Block
 {

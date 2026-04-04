@@ -6,7 +6,7 @@ package(default_visibility = ["//visibility:public"])
 slang_shader(
     name = "pbr_module",
     srcs = ["pbr_common.slang"],
-    out = "pbr.slang-module",
+    out = "pbr_common.slang-module",
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module"
     ],

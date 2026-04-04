@@ -53,7 +53,7 @@ def _slang_playout_impl(ctx):
         args.add("--set-attr", set_attr)
 
     ctx.actions.run(
-        inputs = ctx.files.srcs,
+        inputs = ctx.files.srcs + ctx.files.hdrs,
         outputs = [out],
         arguments = [args],
         executable = ctx.executable._tool,
