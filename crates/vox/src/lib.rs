@@ -170,12 +170,12 @@ fn setup(
     pbr_render_state: Res<PbrRenderState>,
 ) {
     let hitgroup_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("bazel://crates/vox/shaders:pbr.rtx.pipeline.bin");
+        asset_server.load("bazel://crates/vox/shaders:vox_pbr.rtx.pipeline.bin");
     let hitgroup_index = pipeline_manager
         .add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
 
     let shadow_hitgroup_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("bazel://crates/vox/shaders:shadow.rtx.pipeline.bin");
+        asset_server.load("bazel://crates/vox/shaders:vox_shadow.rtx.pipeline.bin");
     let shadow_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
         &pbr_render_state.shadow_pipeline,
         shadow_hitgroup_library.clone(),
@@ -268,8 +268,8 @@ fn write_sbt_entries(
 
 fn sync_buffers_system(
     mut ctx: SubmissionState,
-    mut material_events: EventReader<AssetEvent<VoxMaterial>>,
-    mut palette_events: EventReader<AssetEvent<VoxPalette>>,
+    mut material_events: MessageReader<AssetEvent<VoxMaterial>>,
+    mut palette_events: MessageReader<AssetEvent<VoxPalette>>,
 
     materials: Res<Assets<VoxMaterial>>,
     palettes: Res<Assets<VoxPalette>>,

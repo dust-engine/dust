@@ -3,53 +3,6 @@ ComputePipeline(
         path: "bazel://crates/pbr/shaders/sky_atmosphere:sky_view_lut.spv",
         entry_point: "main",
     ),
-    layout: Inline(
-        PipelineLayout(
-            sets: [
-                Inline(
-                    DescriptorSetLayout(
-                        bindings: [
-                            (
-                                binding: 0,
-                                ty: UniformBuffer,
-                                count: 1,
-                                stages: [Compute],
-                                push_descriptor: true,
-                            ),
-                            (
-                                binding: 1,
-                                ty: SampledImage,
-                                count: 1,
-                                stages: [Compute],
-                                push_descriptor: true,
-                            ),
-                            (
-                                binding: 2,
-                                ty: SampledImage,
-                                count: 1,
-                                stages: [Compute],
-                                push_descriptor: true,
-                            ),
-                            (
-                                binding: 3,
-                                ty: Sampler,
-                                count: 1,
-                                stages: [Compute],
-                                push_descriptor: true,
-                            ),
-                            (
-                                binding: 4,
-                                ty: StorageImage,
-                                count: 1,
-                                stages: [Compute],
-                                push_descriptor: true,
-                            ),
-                        ],
-                        push_descriptor: true,
-                    )
-                )
-            ]
-        )
-    ),
+    layout: Path("bazel://crates//pbr/shaders/sky_atmosphere:sky_view_lut.playout.bin"),
     disable_optimization: false,
 )

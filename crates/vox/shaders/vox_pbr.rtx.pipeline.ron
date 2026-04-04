@@ -14,7 +14,7 @@ RayTracingPipeline (
         ),
     ],
 
-    layout: Path("bazel://crates/pbr/shaders:vox_pbr.playout.bin"),
+    layout: Path("bazel://crates/pbr/shaders:pbr.playout.bin"),
     max_ray_payload_size: 4,
     max_hit_attribute_size: 4,
 )

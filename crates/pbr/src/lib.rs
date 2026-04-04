@@ -1,6 +1,11 @@
 pub mod camera;
 pub mod sky;
 
+include!(concat!(
+    env!("BAZEL_BIN"),
+    "/crates/pbr/shaders/pbr_module_layout.rs"
+));
+
 use std::ops::Deref;
 
 use bevy::prelude::*;
@@ -270,139 +275,19 @@ fn render(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
             0,
-            &[
-                vk::WriteDescriptorSet {
-                    dst_binding: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                    ..Default::default()
-                }
-                .push(
-                    &mut vk::WriteDescriptorSetAccelerationStructureKHR::default()
-                        .acceleration_structures(&[tlas.vk_handle()]),
-                ),
-                vk::WriteDescriptorSet {
-                    dst_binding: 1,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    ..Default::default()
-                }
-                .buffer_info(&[vk::DescriptorBufferInfo {
-                    buffer: uniform.vk_handle(),
-                    offset: uniform.offset(),
-                    range: uniform.size(),
-                }]),
-                // Binding 2: HDR output texture (write)
-                vk::WriteDescriptorSet {
-                    dst_binding: 2,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: hdr_image.vk_handle(),
-                    ..Default::default()
-                }]),
-
-                
-                // Binding 3: Albedo G-buffer (write, linear/UNORM view)
-                vk::WriteDescriptorSet {
-                    dst_binding: 3,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: albedo_image.linear_view().vk_handle(),
-                    ..Default::default()
-                }]),
-                // Binding 4: Albedo G-buffer (write, srgb view)
-                // Omitted
-                
-                // Binding 5: Normal G-buffer (write)
-                vk::WriteDescriptorSet {
-                    dst_binding: 5,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: normal_image.vk_handle(),
-                    ..Default::default()
-                }]),
-
-                // Binding 6: Depth G-buffer (write)
-                vk::WriteDescriptorSet {
-                    dst_binding: 6,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: depth_image.vk_handle(),
-                    ..Default::default()
-                }]),
-
-                // Binding 7: Swapchain (read-only for occlusion)
-                vk::WriteDescriptorSet {
-                    dst_binding: 7,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: swapchain_target.linear_view().vk_handle(),
-                    ..Default::default()
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 8,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    ..Default::default()
-                }
-                .buffer_info(&[vk::DescriptorBufferInfo {
-                    buffer: atmo_buffer.vk_handle(),
-                    offset: atmo_buffer.offset(),
-                    range: atmo_buffer.size(),
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 9,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        image_view: transmittance_view.vk_handle(),
-                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        sampler: vk::Sampler::null(),
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 10,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        image_view: sky_view.vk_handle(),
-                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        sampler: vk::Sampler::null(),
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 11,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLER,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        sampler: luts.sampler.vk_handle(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            ],
+            PbrPipelineParams::new()
+                .scene_bvh(tlas)
+                .uniforms(uniform)
+                .output_texture(hdr_image)
+                .gbuffer_albedo_linear(&albedo_image.linear_view())
+                .gbuffer_albedo_srgb(&albedo_image.srgb_view())
+                .gbuffer_normal_texture(normal_image)
+                .gbuffer_depth_texture(depth_image)
+                .sky_atmosphere_params(atmo_buffer)
+                .sky_transmittance_lut(transmittance_view)
+                .sky_sky_view_lut(sky_view)
+                .sky_linear_sampler(&luts.sampler)
+                .as_slice(),
         );
         encoder.trace_rays(sbt, 0, sbt_buffer, hdr_image.image().extent());
     });
@@ -773,8 +658,6 @@ fn shadow_pass(
                     image_view: hdr_image.vk_handle(),
                     ..Default::default()
                 }]),
-
-                
                 // Binding 3: Albedo G-buffer (write, linear/UNORM view)
                 // Omitted
                 // Binding 4: Albedo G-buffer (write, srgb view)
@@ -789,7 +672,6 @@ fn shadow_pass(
                     image_view: albedo_image.srgb_view().vk_handle(),
                     ..Default::default()
                 }]),
-                
                 // Binding 5: Normal G-buffer (write)
                 vk::WriteDescriptorSet {
                     dst_binding: 5,
@@ -802,7 +684,6 @@ fn shadow_pass(
                     image_view: normal_image.vk_handle(),
                     ..Default::default()
                 }]),
-
                 // Binding 6: Depth G-buffer (write)
                 vk::WriteDescriptorSet {
                     dst_binding: 6,
@@ -815,7 +696,6 @@ fn shadow_pass(
                     image_view: depth_image.vk_handle(),
                     ..Default::default()
                 }]),
-                
                 vk::WriteDescriptorSet {
                     dst_binding: 8,
                     descriptor_count: 1,

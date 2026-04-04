@@ -1,5 +1,5 @@
 load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
-load("//third_party:pumicite_cli.bzl", "ron2bin")
+load("//third_party:pumicite_cli.bzl", "ron2bin", "slang_playout")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -21,6 +21,14 @@ slang_shader(
     target = "spirv",
     opts = ["-O3"],
 )
+slang_playout(
+    name = "transmittance_lut_layout",
+    srcs = ["transmittance_lut.slang"],
+    out = "transmittance_lut.playout.bin",
+    set_attrs = [
+        "0:push_descriptor"
+    ]
+)
 
 slang_shader(
     name = "multi_scattering",
@@ -33,6 +41,14 @@ slang_shader(
     target = "spirv",
     opts = ["-O3",],
 )
+slang_playout(
+    name = "multi_scattering_layout",
+    srcs = ["multi_scattering.slang"],
+    out = "multi_scattering.playout.bin",
+    set_attrs = [
+        "0:push_descriptor"
+    ]
+)
 
 slang_shader(
     name = "sky_view_lut",
@@ -44,6 +60,14 @@ slang_shader(
     profile = "cs_6_0",
     target = "spirv",
     opts = ["-O3"],
+)
+slang_playout(
+    name = "sky_view_lut_layout",
+    srcs = ["sky_view_lut.slang"],
+    out = "sky_view_lut.playout.bin",
+    set_attrs = [
+        "0:push_descriptor"
+    ]
 )
 
 ron2bin(

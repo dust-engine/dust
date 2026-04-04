@@ -37,7 +37,7 @@ slang_shader(
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
     ],
-    out = "pbr.spv",
+    out = "vox_pbr.spv",
     profile = "lib_6_3",
     target = "spirv",
     opts = [

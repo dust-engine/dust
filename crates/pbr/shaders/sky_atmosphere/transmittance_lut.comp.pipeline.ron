@@ -3,32 +3,6 @@ ComputePipeline(
         path: "bazel://crates/pbr/shaders/sky_atmosphere:transmittance_lut.spv",
         entry_point: "main",
     ),
-    layout: Inline(
-        PipelineLayout(
-            sets: [
-                Inline(
-                    DescriptorSetLayout(
-                        bindings: [
-                            (
-                                binding: 0,
-                                ty: UniformBuffer,
-                                count: 1,
-                                stages: [Compute],
-                                push_descriptor: true,
-                            ),
-                            (
-                                binding: 1,
-                                ty: StorageImage,
-                                count: 1,
-                                stages: [Compute],
-                                push_descriptor: true,
-                            ),
-                        ],
-                        push_descriptor: true,
-                    )
-                )
-            ]
-        )
-    ),
+    layout: Path("bazel://crates//pbr/shaders/sky_atmosphere:transmittance_lut.playout.bin"),
     disable_optimization: false,
 )

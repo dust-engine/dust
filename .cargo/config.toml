@@ -1,0 +1,2 @@
+[env]
+BAZEL_BIN = { value = "./bazel-bin", relative = true }

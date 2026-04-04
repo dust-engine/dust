@@ -17,10 +17,9 @@ use_repo(vulkan_sdk, "vulkan_sdk_1.4.341.0")
 
 register_toolchains("@vulkan_sdk_1.4.341.0//:all")
 
-git_override(
+local_path_override(
     module_name = "rules_vulkan",
-    remote = "https://github.com/mxpv/rules_vulkan.git",
-    commit = "61b6df146c85641a6a23afc78d42d37409cade71",
+    path = "../rules_vulkan",
 )
 
 # -----------------------------------------------------------------------------
@@ -48,7 +47,7 @@ rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(edition = "2024")
 
 crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "e24dc2de233e1f038a99217d20f22f12a5612878")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "a335838a002d3a1787eb4877be2b7993b314701e")
 crate.annotation(
     crate = "pumicite_cli",
     gen_all_binaries = True,

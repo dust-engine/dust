@@ -1,5 +1,5 @@
 load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
-load("//third_party:pumicite_cli.bzl", "ron2bin")
+load("//third_party:pumicite_cli.bzl", "ron2bin", "slang_playout")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -11,6 +11,16 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module"
     ],
     opts = ["-emit-ir"]
+)
+
+slang_playout(
+    name = "pbr_module_layout_macro",
+    srcs = ["pbr_common.slang"],
+    out = "pbr_module_layout.rs",
+    format = "codegen",
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module"
+    ],
 )
 
 slang_shader(
