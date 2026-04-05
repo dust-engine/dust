@@ -9,8 +9,8 @@ members = [
 ]
 
 [dependencies]
-pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "44b34ee80d6c03e6534d2a0e7389bbabb88040ad" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "44b34ee80d6c03e6534d2a0e7389bbabb88040ad" }
 dust_vox = { path = "crates/vox" }
 dust_pbr = { path = "crates/pbr" }
 atomicow = "1"
@@ -54,11 +54,6 @@ bevy_internal = { git = "https://github.com/dust-engine/bevy", branch = "release
 bevy_asset = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.3"  }
 bevy_scene = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.3"  }
 bevy = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.3"  }
-
-[patch."https://github.com/dust-engine/pumicite.git"]
-pumicite = { path = "../pumicite" }
-bevy_pumicite = { path = "../pumicite/crates/bevy" }
-pumicite_egui = { path = "../pumicite/crates/egui" }
 
 [patch."https://github.com/ash-rs/ash.git"]
 ash = { git = "https://github.com/0xbeefd1ed/ash", branch = "meta" }

@@ -884,6 +884,7 @@ source = "git+https://github.com/dust-engine/bevy?branch=release-0.17.3#1e34adbd
 [[package]]
 name = "bevy_pumicite"
 version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad#44b34ee80d6c03e6534d2a0e7389bbabb88040ad"
 dependencies = [
  "async-lock",
  "bevy_app",
@@ -902,8 +903,40 @@ dependencies = [
  "image",
  "ktx2",
  "postcard",
- "pumicite",
- "pumicite_types",
+ "pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad)",
+ "pumicite_types 0.1.0 (git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad)",
+ "raw-window-handle",
+ "ron 0.12.0",
+ "serde",
+ "smallvec",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "bevy_pumicite"
+version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite.git#44b34ee80d6c03e6534d2a0e7389bbabb88040ad"
+dependencies = [
+ "async-lock",
+ "bevy_app",
+ "bevy_asset",
+ "bevy_ecs",
+ "bevy_internal",
+ "bevy_ptr",
+ "bevy_reflect",
+ "bevy_tasks",
+ "bevy_transform",
+ "bevy_window",
+ "bevy_winit",
+ "byteorder",
+ "ddsfile",
+ "glam",
+ "image",
+ "ktx2",
+ "postcard",
+ "pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
+ "pumicite_types 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "raw-window-handle",
  "ron 0.12.0",
  "serde",
@@ -1765,11 +1798,11 @@ version = "0.1.0"
 dependencies = [
  "atomicow",
  "bevy",
- "bevy_pumicite",
+ "bevy_pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad)",
  "dust_pbr",
  "dust_vox",
  "futures-lite",
- "pumicite",
+ "pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad)",
 ]
 
 [[package]]
@@ -1787,10 +1820,10 @@ name = "dust_pbr"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_pumicite",
+ "bevy_pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "bytemuck",
  "glam",
- "pumicite",
+ "pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "pumicite_egui",
  "tracing",
 ]
@@ -1800,13 +1833,13 @@ name = "dust_vox"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_pumicite",
+ "bevy_pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "bitvec",
  "bytemuck",
  "dot_vox",
  "dust-vdb",
  "dust_pbr",
- "pumicite",
+ "pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "rayon",
  "serde",
  "smallvec",
@@ -3417,6 +3450,7 @@ checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
 [[package]]
 name = "pumicite"
 version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad#44b34ee80d6c03e6534d2a0e7389bbabb88040ad"
 dependencies = [
  "ash",
  "bevy_asset",
@@ -3430,7 +3464,33 @@ dependencies = [
  "log",
  "pin-project-lite",
  "portable-atomic",
- "pumicite_types",
+ "pumicite_types 0.1.0 (git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad)",
+ "raw-window-handle",
+ "raw-window-metal",
+ "serde",
+ "smallvec",
+ "tracing",
+ "vk-mem",
+]
+
+[[package]]
+name = "pumicite"
+version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite.git#44b34ee80d6c03e6534d2a0e7389bbabb88040ad"
+dependencies = [
+ "ash",
+ "bevy_asset",
+ "bevy_ecs",
+ "bevy_reflect",
+ "bitvec",
+ "blocking",
+ "crossbeam-channel",
+ "event-listener",
+ "glam",
+ "log",
+ "pin-project-lite",
+ "portable-atomic",
+ "pumicite_types 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "raw-window-handle",
  "raw-window-metal",
  "serde",
@@ -3442,22 +3502,34 @@ dependencies = [
 [[package]]
 name = "pumicite_egui"
 version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite.git#44b34ee80d6c03e6534d2a0e7389bbabb88040ad"
 dependencies = [
  "bevy_app",
  "bevy_asset",
  "bevy_ecs",
  "bevy_egui",
- "bevy_pumicite",
+ "bevy_pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "bevy_window",
  "bytemuck",
  "glam",
- "pumicite",
+ "pumicite 0.1.0 (git+https://github.com/dust-engine/pumicite.git)",
  "tracing",
 ]
 
 [[package]]
 name = "pumicite_types"
 version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=44b34ee80d6c03e6534d2a0e7389bbabb88040ad#44b34ee80d6c03e6534d2a0e7389bbabb88040ad"
+dependencies = [
+ "ash",
+ "glam",
+ "serde",
+]
+
+[[package]]
+name = "pumicite_types"
+version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite.git#44b34ee80d6c03e6534d2a0e7389bbabb88040ad"
 dependencies = [
  "ash",
  "glam",
