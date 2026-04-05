@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.17.0-dev", default-features = false, features = ["bevy_asset", "bevy_scene", "bevy_color"] }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git" }
+bevy.workspace = true
+pumicite.workspace = true
+bevy_pumicite.workspace = true
+pumicite_egui.workspace = true
 tracing = "0.1"
 bytemuck = "1.23"
 glam = "0.30"

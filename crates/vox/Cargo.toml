@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.17.0-dev", default-features = false, features = ["bevy_asset", "bevy_scene", "bevy_color"] }
+dust_vdb.workspace = true
+dust_pbr.workspace = true
+pumicite.workspace = true
+bevy_pumicite.workspace = true
+bevy.workspace = true
 dot_vox = "5.1"
 thiserror = "1"
-dust-vdb = { path = "../vdb" }
 rayon = "1.10"
 tracing = "0.1"
-pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git" }
-dust_pbr = { path = "../pbr" }
 bitvec = "1"
 bytemuck = "1.23"
 smallvec = "1.15"

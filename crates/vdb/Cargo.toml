@@ -1,5 +1,5 @@
 [package]
-name = "dust-vdb"
+name = "dust_vdb"
 version = "0.1.0"
 edition = "2024"
 
