@@ -1,0 +1,24 @@
+load("@crates//:defs.bzl", "all_crate_deps", "aliases")
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
+
+rust_library(
+    name = "dust_pbr",
+    crate_name = "dust_pbr",
+    crate_root = "src/lib.rs",
+    srcs = glob(["src/**/*.rs"]),
+    compile_data = [
+        "//crates/pbr/shaders:pbr_module_layout_macro",
+    ],
+    edition = "2024",
+    aliases = aliases(),
+    deps = all_crate_deps(normal = True),
+    rustc_env_files = [":cargo_toml_env_vars"],
+)

@@ -121,7 +121,7 @@ slang_playout = rule(
                   'Example: ["0:push_descriptor", "1:update_after_bind_pool,descriptor_buffer"]',
         ),
         "_tool": attr.label(
-            default = "@crates//:pumicite_cli__pumicite_cli",
+            default = "@bindeps//:pumicite_cli__pumicite_cli",
             executable = True,
             cfg = "exec",
         ),
@@ -171,7 +171,7 @@ ron2bin = rule(
                   "graphics-pipeline, ray-tracing-pipeline",
         ),
         "_tool": attr.label(
-            default = "@crates//:pumicite_cli__pumicite_cli",
+            default = "@bindeps//:pumicite_cli__pumicite_cli",
             executable = True,
             cfg = "exec",
         ),

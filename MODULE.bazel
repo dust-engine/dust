@@ -23,6 +23,12 @@ local_path_override(
     path = "../rules_vulkan",
 )
 
+local_path_override(
+    module_name = "rules_rust",
+    path = "../rules_rust",
+)
+
+
 # -----------------------------------------------------------------------------
 # shader-slang Rust bindings (external git repo with custom BUILD overlay)
 # -----------------------------------------------------------------------------
@@ -45,9 +51,18 @@ new_git_repository(
 
 bazel_dep(name = "rules_rust", version = "0.69.0")
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(edition = "2024")
+rust.toolchain(edition = "2024", versions = ["nightly/2026-04-03"])
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
 
-crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = ["//:Cargo.toml"],
+)
+use_repo(crate, "crates")
+
+
 crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "a335838a002d3a1787eb4877be2b7993b314701e")
 crate.annotation(
     crate = "pumicite_cli",
@@ -58,6 +73,5 @@ crate.annotation(
     gen_build_script = "off",
     deps = ["@@//third_party:slang"],
 )
-
-crate.from_specs()
-use_repo(crate, "crates")
+crate.from_specs(name = "bindeps")
+use_repo(crate, "bindeps")

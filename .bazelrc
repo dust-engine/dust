@@ -1,0 +1,1 @@
+build --@rules_rust//rust/toolchain/channel:channel=nightly
