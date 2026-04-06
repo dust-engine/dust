@@ -18,16 +18,11 @@ use_repo(vulkan_sdk, "vulkan_sdk_1.4.341.1")
 
 register_toolchains("@vulkan_sdk_1.4.341.1//:all")
 
-local_path_override(
+git_override(
     module_name = "rules_vulkan",
-    path = "../rules_vulkan",
+    remote = "https://github.com/0xbeefd1ed/rules_vulkan",
+    commit = "6fe52691ffde32f401d2644b4ace77ff4b09b1f2",
 )
-
-local_path_override(
-    module_name = "rules_rust",
-    path = "../rules_rust",
-)
-
 
 # -----------------------------------------------------------------------------
 # shader-slang Rust bindings (external git repo with custom BUILD overlay)
