@@ -31,3 +31,12 @@ cc_library(
         "//conditions:default": [],
     }),
 )
+
+cc_library(
+    name = "vma",
+    srcs = ["vma_wrapper.cpp"],
+    deps = [
+        "@vma//:vma_headers",
+        "@vulkan_sdk_1.4.341.1//:vulkan_headers",
+    ],
+)

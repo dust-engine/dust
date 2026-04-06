@@ -39,6 +39,13 @@ new_git_repository = use_repo_rule(
 )
 
 new_git_repository(
+    name = "vma",
+    remote = "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git",
+    tag = "v3.3.0",
+    build_file = "//third_party:vma.BUILD.bazel",
+)
+
+new_git_repository(
     name = "slang_rs",
     remote = "https://github.com/FloatyMonkey/slang-rs.git",
     commit = "4af0e9db151b9b8f52fa53390f13f3377e8e7df2",
@@ -56,9 +63,16 @@ use_repo(rust, "rust_toolchains")
 register_toolchains("@rust_toolchains//:all")
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.annotation(
+    crate = "vk-mem",
+    repositories = ["crates"],
+    gen_build_script = "off",
+    deps = ["@@//third_party:vma"],
+)
 crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
     manifests = ["//:Cargo.toml"],
+    name = "crates",
 )
 use_repo(crate, "crates")
 
@@ -66,10 +80,12 @@ use_repo(crate, "crates")
 crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "a335838a002d3a1787eb4877be2b7993b314701e")
 crate.annotation(
     crate = "pumicite_cli",
+    repositories = ["bindeps"],
     gen_all_binaries = True,
 )
 crate.annotation(
     crate = "shader-slang-sys",
+    repositories = ["bindeps"],
     gen_build_script = "off",
     deps = ["@@//third_party:slang"],
 )
