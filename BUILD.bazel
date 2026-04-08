@@ -43,6 +43,7 @@ rust_binary(
     crate_name = "dust",
     crate_root = "src/main.rs",
     srcs = glob(["src/**/*.rs"]),
+    compile_data = ["Cargo.toml"],
     edition = "2024",
     deps = all_crate_deps(normal = True) + [
         "//crates/vox:dust_vox",

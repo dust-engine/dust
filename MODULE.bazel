@@ -21,7 +21,7 @@ register_toolchains("@vulkan_sdk_1.4.341.1//:all")
 git_override(
     module_name = "rules_vulkan",
     remote = "https://github.com/0xbeefd1ed/rules_vulkan",
-    commit = "6fe52691ffde32f401d2644b4ace77ff4b09b1f2",
+    commit = "85c6ca71e2cecede88985ac89568230e772a4f34",
 )
 
 # -----------------------------------------------------------------------------
@@ -52,6 +52,12 @@ new_git_repository(
 # -----------------------------------------------------------------------------
 
 bazel_dep(name = "rules_rust", version = "0.69.0")
+git_override(
+    module_name = "rules_rust",
+    remote = "https://github.com/0xbeefd1ed/rules_rust",
+    commit = "080fca7ec79c6e810fdd7b951d8e82df4dceeb5f",
+)
+
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(edition = "2024", versions = ["nightly/2026-04-03"])
 use_repo(rust, "rust_toolchains")
