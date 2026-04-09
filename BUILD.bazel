@@ -30,6 +30,7 @@ filegroup(
         "//crates/vox/shaders:vox_pbr_rtx_pipeline_library",
         "//crates/vox/shaders:vox_pbr_shadow_pipeline_library",
         "//crates/vox/shaders:vox_shadow",
+        "//assets:castle.vox"
     ],
 )
 
@@ -48,6 +49,7 @@ rust_binary(
     deps = all_crate_deps(normal = True) + [
         "//crates/vox:dust_vox",
         "//crates/pbr:dust_pbr",
+        "@rules_rust//rust/runfiles"
     ],
     rustc_env_files = [":cargo_toml_env_vars"],
     aliases = aliases(),

@@ -321,12 +321,12 @@ pub fn setup(
     mut pipeline_manager: ResMut<RtxPipelineManager>,
 ) {
     let base_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("bazel://crates/pbr/shaders:pbr.rtx.pipeline.bin");
+        asset_server.load("bazel://dust/crates/pbr/shaders/pbr.rtx.pipeline.bin");
     let shadow_base_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("bazel://crates/pbr/shaders:shadow.rtx.pipeline.bin");
+        asset_server.load("bazel://dust/crates/pbr/shaders/shadow.rtx.pipeline.bin");
 
     let tonemap_pipeline: Handle<ComputePipeline> =
-        asset_server.load("bazel://crates/pbr/shaders:tonemap.comp.pipeline.bin");
+        asset_server.load("bazel://dust/crates/pbr/shaders/tonemap.comp.pipeline.bin");
 
     commands.insert_resource(PbrRenderState {
         pipeline: pipeline_manager.add_pipeline(base_library),

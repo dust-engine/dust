@@ -1,8 +1,8 @@
 ComputePipeline(
     shader: (
-        path: "bazel://crates/pbr/shaders/sky_atmosphere:sky_view_lut.spv",
+        path: "bazel://dust/crates/pbr/shaders/sky_atmosphere/sky_view_lut.spv",
         entry_point: "main",
     ),
-    layout: Path("bazel://crates//pbr/shaders/sky_atmosphere:sky_view_lut.playout.bin"),
+    layout: Path("bazel://dust/crates//pbr/shaders/sky_atmosphere/sky_view_lut.playout.bin"),
     disable_optimization: false,
 )

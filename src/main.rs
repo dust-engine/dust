@@ -16,17 +16,7 @@ use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {
     let mut app = bevy::app::App::new();
 
-    // Register bazel asset source before DefaultPlugins.
-    // Resolves "bazel://..." paths against bazel-bin/ (build outputs)
-    // with fallback to the workspace root (source files).
-    let workspace_root = std::env::var("BUILD_WORKSPACE_DIRECTORY")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::env::var("CARGO_MANIFEST_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::env::current_dir().unwrap())
-        });
-    app.register_asset_source("bazel", bazel_asset::bazel_asset_source(workspace_root));
+    app.register_asset_source("bazel", bazel_asset::bazel_asset_source());
 
     app.add_plugins(bevy::DefaultPlugins)
         .add_plugins(bevy_pumicite::SurfacePlugin::default())
@@ -72,7 +62,7 @@ fn startup_system(
     mut materials: ResMut<Assets<dust_vox::VoxMaterial>>,
     mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
 ) {
-    let scene: Handle<Scene> = asset_server.load("castle.vox");
+    let scene: Handle<Scene> = asset_server.load("bazel://dust/assets/castle.vox");
     commands.spawn(SceneRoot(scene));
     return;
     /*

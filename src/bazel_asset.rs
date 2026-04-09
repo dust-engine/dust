@@ -2,36 +2,18 @@ use atomicow::CowArc;
 use bevy::asset::io::AssetSource;
 use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
 use std::path::{Path, PathBuf};
+use runfiles::{Runfiles, rlocation};
 
-/// An [`AssetReader`] that resolves Bazel label paths against `bazel-bin/`.
-///
-/// Paths use Bazel label syntax: `//package:target`. In bevy asset path form
-/// this becomes `"bazel://package:target"` — the `bazel` source prefix
-/// naturally supplies the leading `//`.
-///
-/// The `:` separates the package directory from the target (file) name:
-/// - `bazel://crates/pbr/shaders:pbr.spv` → `bazel-bin/crates/pbr/shaders/pbr.spv`
+/// An [`AssetReader`] that resolves Bazel label paths using runfiles
 pub struct BazelAssetReader {
-    bazel_bin: PathBuf,
+    runfiles: Runfiles,
 }
 
 impl BazelAssetReader {
-    pub fn new(workspace_root: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
-            bazel_bin: workspace_root.join("bazel-bin"),
+            runfiles: Runfiles::create().unwrap(),
         }
-    }
-
-    /// Convert a Bazel label path (`package:target`) into a filesystem path
-    /// under `bazel-bin/` (`bazel-bin/package/target`).
-    fn resolve(&self, label: &Path) -> PathBuf {
-        let s = label.to_string_lossy();
-        let rel = if let Some((package, target)) = s.split_once(':') {
-            PathBuf::from(package).join(target)
-        } else {
-            label.to_path_buf()
-        };
-        self.bazel_bin.join(rel)
     }
 }
 
@@ -40,7 +22,7 @@ impl AssetReader for BazelAssetReader {
         &'a self,
         path: CowArc<'a, Path>,
     ) -> Result<impl Reader + 'a, AssetReaderError> {
-        let full_path = self.resolve(&path);
+        let full_path = rlocation!(self.runfiles, &path).ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
         let bytes = std::fs::read(&full_path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 AssetReaderError::NotFound(full_path)
@@ -62,7 +44,7 @@ impl AssetReader for BazelAssetReader {
         &'a self,
         path: &'a Path,
     ) -> Result<Box<PathStream>, AssetReaderError> {
-        let full_path = self.resolve(path);
+        let full_path = rlocation!(self.runfiles, &path).ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
         let entries: Vec<PathBuf> = std::fs::read_dir(&full_path)
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -81,7 +63,7 @@ impl AssetReader for BazelAssetReader {
     }
 
     async fn is_directory<'a>(&'a self, path: &'a Path) -> Result<bool, AssetReaderError> {
-        let full_path = self.resolve(path);
+        let full_path = rlocation!(self.runfiles, &path).ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
         let metadata = full_path
             .metadata()
             .map_err(|_| AssetReaderError::NotFound(full_path))?;
@@ -96,7 +78,7 @@ impl AssetReader for BazelAssetReader {
 /// ```ignore
 /// app.register_asset_source("bazel", bazel_asset_source(workspace_root));
 /// ```
-pub fn bazel_asset_source(workspace_root: PathBuf) -> bevy::asset::io::AssetSourceBuilder {
+pub fn bazel_asset_source() -> bevy::asset::io::AssetSourceBuilder {
     AssetSource::build()
-        .with_reader(move || Box::new(BazelAssetReader::new(workspace_root.clone())))
+        .with_reader(move || Box::new(BazelAssetReader::new()))
 }

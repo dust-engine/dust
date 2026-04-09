@@ -99,7 +99,7 @@ impl FromWorld for BlasBuilder {
     fn from_world(world: &mut World) -> Self {
         BlasBuilder {
             copy_coords_pipeline: world.load_asset(
-                "bazel://crates/vox/shaders:blas_builder_copy_coords.comp.pipeline.bin",
+                "bazel://dust/crates/vox/shaders/blas_builder_copy_coords.comp.pipeline.bin",
             ),
         }
     }
