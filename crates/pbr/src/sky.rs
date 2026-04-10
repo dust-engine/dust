@@ -52,7 +52,11 @@ impl Plugin for SkyPlugin {
         .unwrap();
 
         // Add egui plugin
-        app.add_plugins(pumicite_egui::EguiPlugin::<With<PrimaryWindow>>::default());
+        app.add_plugins(pumicite_egui::EguiPlugin::<With<PrimaryWindow>> {
+            framebuffer_format: pumicite::types::format::Format::R8G8B8A8_UNORM,
+            linear_colorspace: true,
+            ..Default::default()
+        });
 
         // Systems
         app.add_systems(Startup, setup);

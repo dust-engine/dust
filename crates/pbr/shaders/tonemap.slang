@@ -1,5 +1,6 @@
 [[vk::binding(0, 0)]] RWTexture2D<float4> hdrInput;
 [[vk::binding(1, 0)]] RWTexture2D<float4> ldrOutput;
+[[vk::binding(2, 0)]] RWTexture2D<float4> sdrInput;
 
 
 // Simple ACES tone mapping
@@ -17,6 +18,12 @@ float3 acesToneMap(float3 color) {
 void main(uint3 dispatchThreadID: SV_DispatchThreadID,
           uniform float exposure) {
     uint2 coord = dispatchThreadID.xy;
+
+    float4 sdr = sdrInput[coord];
+    if (sdr.a > 0) {
+        ldrOutput[coord] = sdr;
+        return;
+    }
 
     float4 hdr = hdrInput[coord];
     if (hdr.a > 0) {

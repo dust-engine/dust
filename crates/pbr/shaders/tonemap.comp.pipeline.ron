@@ -19,6 +19,11 @@ ComputePipeline(
                                 binding: 1,
                                 ty: StorageImage,
                                 stages: [Compute]
+                            ),
+                            Binding(
+                                binding: 2,
+                                ty: StorageImage,
+                                stages: [Compute]
                             )
                         ]
                     )

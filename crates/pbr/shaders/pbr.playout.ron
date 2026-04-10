@@ -27,7 +27,7 @@ PipelineLayout(
                     Binding( // Albedo sRGB (sampled read in shadow pass)
                         binding: 4,
                         ty: SampledImage,
-                        stages: [Miss, RayGen]
+                        stages: [Miss, ClosestHit, RayGen]
                     ),
                     Binding( // Normal
                         binding: 5,
@@ -42,7 +42,7 @@ PipelineLayout(
                     Binding( // Occlusion
                         binding: 7,
                         ty: StorageImage,
-                        stages: [RayGen]
+                        stages: [RayGen, Miss, ClosestHit]
                     ),
                     Binding( // Atmosphere Uniform
                         binding: 8,
