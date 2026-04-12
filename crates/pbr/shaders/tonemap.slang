@@ -1,7 +1,10 @@
-[[vk::binding(0, 0)]] RWTexture2D<float4> hdrInput;
-[[vk::binding(1, 0)]] RWTexture2D<float4> ldrOutput;
-[[vk::binding(2, 0)]] RWTexture2D<float4> sdrInput;
+public struct TonemapParams {
+    public RWTexture2D<float4> hdrInput;
+    public RWTexture2D<float4> ldrOutput;
+    public RWTexture2D<float4> sdrInput;
+}
 
+ParameterBlock<TonemapParams> params;
 
 // Simple ACES tone mapping
 float3 acesToneMap(float3 color) {
@@ -19,15 +22,15 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID,
           uniform float exposure) {
     uint2 coord = dispatchThreadID.xy;
 
-    float4 sdr = sdrInput[coord];
+    float4 sdr = params.sdrInput[coord];
     if (sdr.a > 0) {
-        ldrOutput[coord] = sdr;
+        params.ldrOutput[coord] = sdr;
         return;
     }
 
-    float4 hdr = hdrInput[coord];
+    float4 hdr = params.hdrInput[coord];
     if (hdr.a > 0) {
         float3 color = acesToneMap(hdr.rgb * exposure);
-        ldrOutput[coord] = float4(color, 1.0);
+        params.ldrOutput[coord] = float4(color, 1.0);
     }
 }

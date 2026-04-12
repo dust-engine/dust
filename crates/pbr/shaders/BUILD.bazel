@@ -55,15 +55,6 @@ slang_shader(
     ],
 )
 
-slang_shader(
-    name = "tonemap",
-    srcs = ["tonemap.slang"],
-    out = "tonemap.spv",
-    profile = "cs_6_0",
-    target = "spirv",
-    opts = ["-O3"],
-)
-
 ron2bin(
     name = "pbr_rtx_pipeline",
     src = "pbr.rtx.pipeline.ron",
@@ -85,9 +76,34 @@ ron2bin(
     type = "raytracing-pipeline",
 )
 
+slang_shader(
+    name = "tonemap",
+    srcs = ["tonemap.slang"],
+    out = "tonemap.spv",
+    profile = "cs_6_0",
+    target = "spirv",
+    opts = ["-O3"],
+)
+
 ron2bin(
     name = "tonemap_comp_pipeline",
     src = "tonemap.comp.pipeline.ron",
     out = "tonemap.comp.pipeline.bin",
     type = "compute-pipeline",
+)
+
+slang_playout(
+    name = "tonemap_layout_macro",
+    srcs = ["tonemap.slang"],
+    out = "tonemap_layout.rs",
+    format = "codegen",
+)
+slang_playout(
+    name = "tonemap_playout",
+    srcs = ["tonemap.slang"],
+    out = "tonemap.playout.bin",
+    set_attrs = [
+        "0:push_descriptor"
+    ],
+    format = "bin",
 )

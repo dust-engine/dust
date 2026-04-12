@@ -5,7 +5,10 @@ include!(concat!(
     env!("BAZEL_BIN"),
     "/crates/pbr/shaders/pbr_module_layout.rs"
 ));
-
+include!(concat!(
+    env!("BAZEL_BIN"),
+    "/crates/pbr/shaders/tonemap_layout.rs"
+));
 use std::ops::Deref;
 
 use bevy::prelude::*;
@@ -619,122 +622,20 @@ fn shadow_pass(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
             0,
-            &[
-                vk::WriteDescriptorSet {
-                    dst_binding: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
-                    ..Default::default()
-                }
-                .push(
-                    &mut vk::WriteDescriptorSetAccelerationStructureKHR::default()
-                        .acceleration_structures(&[tlas.vk_handle()]),
-                ),
-                vk::WriteDescriptorSet {
-                    dst_binding: 1,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    ..Default::default()
-                }
-                .buffer_info(&[vk::DescriptorBufferInfo {
-                    buffer: uniform.vk_handle(),
-                    offset: uniform.offset(),
-                    range: uniform.size(),
-                }]),
-                // Binding 2: HDR output texture (write)
-                vk::WriteDescriptorSet {
-                    dst_binding: 2,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: render_target_views.hdr_output.vk_handle(),
-                    ..Default::default()
-                }]),
-                // Binding 3: Albedo G-buffer (write, linear/UNORM view)
-                // Omitted
-                // Binding 4: Albedo G-buffer (write, srgb view)
-                vk::WriteDescriptorSet {
-                    dst_binding: 4,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: render_target_views.albedo.srgb_view().vk_handle(),
-                    ..Default::default()
-                }]),
-                // Binding 5: Normal G-buffer (write)
-                vk::WriteDescriptorSet {
-                    dst_binding: 5,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: render_target_views.normal.vk_handle(),
-                    ..Default::default()
-                }]),
-                // Binding 6: Depth G-buffer (write)
-                vk::WriteDescriptorSet {
-                    dst_binding: 6,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: render_target_views.depth.vk_handle(),
-                    ..Default::default()
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 8,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    ..Default::default()
-                }
-                .buffer_info(&[vk::DescriptorBufferInfo {
-                    buffer: atmo_buffer.vk_handle(),
-                    offset: atmo_buffer.offset(),
-                    range: atmo_buffer.size(),
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 9,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        image_view: transmittance_view.vk_handle(),
-                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        sampler: vk::Sampler::null(),
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 10,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        image_view: sky_view.vk_handle(),
-                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        sampler: vk::Sampler::null(),
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 11,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::SAMPLER,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        sampler: luts.sampler.vk_handle(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            ],
+            PbrPipelineParams::new()
+                .scene_bvh(tlas)
+                .uniforms(uniform)
+                .output_texture(&render_target_views.hdr_output)
+                .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
+                .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
+                .gbuffer_normal_texture(&render_target_views.normal)
+                .gbuffer_depth_texture(&render_target_views.depth)
+                .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+                .sky_atmosphere_params(atmo_buffer)
+                .sky_transmittance_lut(transmittance_view)
+                .sky_sky_view_lut(sky_view)
+                .sky_linear_sampler(&luts.sampler)
+                .as_slice(),
         );
         encoder.trace_rays(shadow_sbt, 0, sbt_buffer, UVec3 { x: hdr.extent.x, y: hdr.extent.y, z: 1 });
     });
@@ -805,41 +706,10 @@ fn tonemap_pass(
             vk::PipelineBindPoint::COMPUTE,
             pipeline.layout(),
             0,
-            &[
-                vk::WriteDescriptorSet {
-                    dst_binding: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: render_target_views.hdr_output.vk_handle(),
-                    ..Default::default()
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 1,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: swapchain_target.linear_view().vk_handle(),
-                    ..Default::default()
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 2,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::GENERAL,
-                    image_view: render_target_views.sdr_target.linear_view().vk_handle(),
-                    ..Default::default()
-                }]),
-            ],
+            TonemapParams::new()
+                .hdr_input(&render_target_views.hdr_output)
+                .ldr_output(swapchain_target.linear_view())
+                .sdr_input(render_target_views.sdr_target.linear_view()).as_slice(),
         );
 
         encoder.push_constants(

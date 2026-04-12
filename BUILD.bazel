@@ -14,6 +14,7 @@ filegroup(
         "//crates/pbr/shaders:shadow_rtx_pipeline",
         "//crates/pbr/shaders:tonemap",
         "//crates/pbr/shaders:tonemap_comp_pipeline",
+        "//crates/pbr/shaders:tonemap_playout",
         "//crates/pbr/shaders/sky_atmosphere:multi_scattering",
         "//crates/pbr/shaders/sky_atmosphere:multi_scattering_comp_pipeline",
         "//crates/pbr/shaders/sky_atmosphere:multi_scattering_layout",
