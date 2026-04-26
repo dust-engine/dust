@@ -51,7 +51,6 @@ void shadowMissShader() {
 
     // Sample albedo through sRGB view — hardware applies sRGB-to-linear conversion
     float2 uv = (float2(pixel) + 0.5) / float2(DispatchRaysDimensions().xy);
-    float3 albedo = params.gbuffer.albedoSRGB.SampleLevel(params.sky.linearSampler, uv, 0).rgb;
     float3 worldNormal = params.gbuffer.normalTexture[pixel].xyz;
 
     // Direct sun contribution via Lambertian BRDF:
@@ -61,7 +60,7 @@ void shadowMissShader() {
     // would be ~π× too bright. solar_illuminance is multiplied in explicitly
     // because transmittanceToSun is a unitless LUT lookup (see sky_view_lut).
     float NdotL = max(0.0, dot(worldNormal, params.sky.atmosphereParams.sun_direction));
-    float3 sunContribution = albedo / PI
+    float3 sunContribution = 1.0 / PI // albedo is demodulated
                            * params.sky.atmosphereParams.solar_illuminance
                            * transmittanceToSun
                            * NdotL;

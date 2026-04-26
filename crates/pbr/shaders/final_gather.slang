@@ -61,6 +61,8 @@ void finalGatherMissShader() {
     // No sun disk: shadow pass handles direct sun; including it here would cause
     // fireflies at 1 spp.
     uint2 pixel = DispatchRaysIndex().xy;
+    float4 current = params.outputTexture[pixel];
+
     float3 worldDir = WorldRayDirection();
     float3 skyLuminance = params.sky.atmosphereParams.solar_illuminance
         * params.sky.sampleScatteredTransfer(worldDir);
@@ -70,8 +72,5 @@ void finalGatherMissShader() {
     // The 1/π term (from the BRDF) and the cos(θ) term (from the integrand) gets cancelled
     // out by the cosine - weighted distribution with pdf(ω) = cos(θ) / π
     float2 uv = (float2(pixel) + 0.5) / float2(DispatchRaysDimensions().xy);
-    float3 albedo = params.gbuffer.albedoSRGB.SampleLevel(params.sky.linearSampler, uv, 0).rgb;
-
-    float4 current = params.outputTexture[pixel];
-    params.outputTexture[pixel] = float4(current.rgb + albedo * skyLuminance, current.a);
+    params.outputTexture[pixel] = float4(current.rgb + skyLuminance, current.a); // albedo is demodulated
 }

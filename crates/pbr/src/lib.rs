@@ -308,10 +308,15 @@ fn render(
 }
 
 pub struct HdrRenderTargetViews {
+    // R16G16B16A16_SFLOAT. Stores raw light.
     pub hdr_output: FullImageView<Image>,
+    // R8G8B8A8_UNORM. Stores sRGB UI elements.
     pub sdr_target: SrgbImageView<Image>,
+    /// R8G8B8A8_SRGB. Stores albedo.
     pub albedo: SrgbImageView<Image>,
+    /// R16G16B16A16_SFLOAT
     pub normal: FullImageView<Image>,
+    /// R32_SFLOAQT
     pub depth: FullImageView<Image>,
 }
 
