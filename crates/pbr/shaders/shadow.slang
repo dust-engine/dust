@@ -55,9 +55,32 @@ void shadowRayGenShader() {
 
 [shader("miss")]
 void shadowMissShader() {
+    uint2 pixel = DispatchRaysIndex().xy;
+    float4 current = params.outputTexture[pixel];
+
     // Shadow ray missed — no blocker between surface and sun.
     // Compute direct sunlight contribution and add to render target.
-    uint2 pixel = DispatchRaysIndex().xy;
+
+    // Reconstruct surface position in atmosphere frame (planet-centered, +Y up,
+    // bottom_radius offset) to sample transmittance from surface to sun — matches
+    // Hillaire EGSR2020 ground shading and pbr.slang:88-90.
+    float depth = params.gbuffer.depthTexture[pixel];
+    float3 dir = cameraDir(
+        pixel,
+        DispatchRaysDimensions().xy,
+        params.uniforms.tan_half_fov,
+        float3x3(params.uniforms.model[0].xyz, params.uniforms.model[1].xyz, params.uniforms.model[2].xyz)
+    );
+    float3 surfAtmPos = params.sky.atmosphereParams.camera_position
+        + float3(0.0, params.sky.atmosphereParams.bottom_radius, 0.0)
+        + dir * depth;
+    float viewHeight = max(length(surfAtmPos), params.sky.atmosphereParams.bottom_radius + 0.001);
+    float3 upVector = surfAtmPos / viewHeight;
+    float sunZenithCosAngle = dot(upVector, params.sky.atmosphereParams.sun_direction);
+    float3 transmittanceToSun = sampleTransmittance(
+        params.sky.atmosphereParams, viewHeight, sunZenithCosAngle,
+        params.sky.transmittanceLUT, params.sky.linearSampler
+    );
 
     // Sample albedo through sRGB view — hardware applies sRGB-to-linear conversion
     float2 uv = (float2(pixel) + 0.5) / float2(DispatchRaysDimensions().xy);
@@ -65,8 +88,7 @@ void shadowMissShader() {
     float3 worldNormal = params.gbuffer.normalTexture[pixel].xyz;
 
     float NdotL = max(0.0, dot(worldNormal, params.sky.atmosphereParams.sun_direction));
-    float3 sunContribution = albedo * params.sky.atmosphereParams.solar_irradiance * NdotL / PI;
+    float3 sunContribution = transmittanceToSun * albedo * params.sky.atmosphereParams.solar_irradiance * NdotL / PI;
 
-    float4 current = params.outputTexture[pixel];
     params.outputTexture[pixel] = float4(current.rgb + sunContribution, current.a);
 }
