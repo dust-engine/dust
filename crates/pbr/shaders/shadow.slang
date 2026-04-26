@@ -5,15 +5,6 @@ struct [raypayload] ShadowPayload {
     float shadow : read(caller) : write(caller, miss);
 }
 
-float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<float, 3, 3> rotation) {
-    float2 pixelNDC = (float2(position) + 0.5) / float2(screenSize);
-    float2 pixelCamera = 2 * pixelNDC - 1;
-    pixelCamera.y *= -1;
-    pixelCamera.x *= float(screenSize.x) / float(screenSize.y);
-    pixelCamera *= tan_half_fov;
-    return mul(rotation, float3(pixelCamera, -1));
-}
-
 [shader("raygeneration")]
 void shadowRayGenShader() {
     uint2 pixel = DispatchRaysIndex().xy;
@@ -26,14 +17,7 @@ void shadowRayGenShader() {
     }
 
     // Reconstruct world position from camera ray + hit distance
-    float3 dir = cameraDir(
-        pixel,
-        DispatchRaysDimensions().xy,
-        params.uniforms.tan_half_fov,
-        float3x3(params.uniforms.model[0].xyz, params.uniforms.model[1].xyz, params.uniforms.model[2].xyz)
-    );
-    float3 origin = float3(params.uniforms.model[0].w, params.uniforms.model[1].w, params.uniforms.model[2].w);
-    float3 worldPos = origin + dir * depth;
+    float3 worldPos = params.pixelPositionWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
     float3 worldNormal = params.gbuffer.normalTexture[pixel].xyz;
 
     RayDesc ray;
@@ -65,12 +49,7 @@ void shadowMissShader() {
     // bottom_radius offset) to sample transmittance from surface to sun — matches
     // Hillaire EGSR2020 ground shading and pbr.slang:88-90.
     float depth = params.gbuffer.depthTexture[pixel];
-    float3 dir = cameraDir(
-        pixel,
-        DispatchRaysDimensions().xy,
-        params.uniforms.tan_half_fov,
-        float3x3(params.uniforms.model[0].xyz, params.uniforms.model[1].xyz, params.uniforms.model[2].xyz)
-    );
+    float3 dir = params.uniforms.cameraDir(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
     float3 surfAtmPos = params.sky.atmosphereParams.camera_position
         + float3(0.0, params.sky.atmosphereParams.bottom_radius, 0.0)
         + dir * depth;

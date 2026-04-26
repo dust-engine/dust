@@ -5,14 +5,6 @@ struct [raypayload] GatherPayload {
     float dummy : read(caller) : write(caller, miss);
 }
 
-float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<float, 3, 3> rotation) {
-    float2 pixelNDC = (float2(position) + 0.5) / float2(screenSize);
-    float2 pixelCamera = 2 * pixelNDC - 1;
-    pixelCamera.y *= -1;
-    pixelCamera.x *= float(screenSize.x) / float(screenSize.y);
-    pixelCamera *= tan_half_fov;
-    return mul(rotation, float3(pixelCamera, -1));
-}
 [vk::push_constant] uniform uint frameIndex;
 
 [shader("raygeneration")]
@@ -25,15 +17,8 @@ void finalGatherRayGenShader() {
     }
 
     // Reconstruct world position
-    float3 dir = cameraDir(
-        pixel,
-        DispatchRaysDimensions().xy,
-        params.uniforms.tan_half_fov,
-        float3x3(params.uniforms.model[0].xyz, params.uniforms.model[1].xyz, params.uniforms.model[2].xyz)
-    );
-    float3 origin = float3(params.uniforms.model[0].w, params.uniforms.model[1].w, params.uniforms.model[2].w);
-    float3 worldPos = origin + dir * depth;
-    float3 N = normalize(params.gbuffer.normalTexture[pixel].xyz);
+    float3 worldPos = params.pixelPositionWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+    float3 N = params.gbuffer.normalTexture[pixel].xyz;
 
     // Sample blue noise cosine-weighted hemisphere direction
     uint2 texSize;

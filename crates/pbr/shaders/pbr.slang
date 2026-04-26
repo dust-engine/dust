@@ -5,16 +5,6 @@ struct [raypayload] RayPayload {
     float color : read(caller) : write(caller, closesthit, miss);
 }
 
-float3 cameraDir(uint2 position, uint2 screenSize, float tan_half_fov, matrix<float, 3, 3> rotation) {
-    float2 pixelNDC = (float2(position) + 0.5) / float2(screenSize);
-    float2 pixelCamera = 2 * pixelNDC - 1;
-    pixelCamera.y *= -1;
-    pixelCamera.x *= float(screenSize.x) / float(screenSize.y);
-    pixelCamera *= tan_half_fov;
-
-    return mul(rotation, float3(pixelCamera, -1));
-}
-
 [shader("raygeneration")]
 void rayGenShader() {
     // Check swapchain for egui occlusion
@@ -30,13 +20,8 @@ void rayGenShader() {
         params.outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 1.0);
     }
     RayDesc ray;
-    ray.Direction = cameraDir(
-        DispatchRaysIndex().xy,
-        DispatchRaysDimensions().xy,
-        params.uniforms.tan_half_fov,
-        float3x3(params.uniforms.model[0].xyz, params.uniforms.model[1].xyz, params.uniforms.model[2].xyz)
-    );
-    ray.Origin = float3(params.uniforms.model[0].w, params.uniforms.model[1].w, params.uniforms.model[2].w);
+    ray.Direction = params.uniforms.cameraDir(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+    ray.Origin = params.uniforms.cameraOrigin();
     ray.TMin = params.uniforms.near;
     ray.TMax = params.uniforms.far;
 
