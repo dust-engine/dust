@@ -1,7 +1,7 @@
 // Sky View LUT Compute Shader
 // Generates a per-frame 2D lookup table of sky radiance
 // Parameterized by view zenith angle and light-view angle
-// Output: 192x108 R16G16B16A16_SFLOAT texture
+// Output: 192x108 B10G11R11_UFLOAT_PACK32 texture
 
 import sky_atmosphere;
 
@@ -113,7 +113,7 @@ void main(
     uniform Texture2D<float4> transmittanceLUT,
     uniform Texture2D<float4> multiScatteringLUT,
     uniform SamplerState linearSampler,
-    [format("rgba16f")]
+    [format("r11f_g11f_b10f")]
     uniform RWTexture2D<float4> skyViewLUT
 ) {
     int2 coord = int2(dispatchThreadID.xy);
