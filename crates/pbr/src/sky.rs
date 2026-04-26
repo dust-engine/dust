@@ -574,47 +574,52 @@ fn compute_luts(
             let pipeline = encoder.retain(multi_scattering_pipeline.clone().into_inner());
             encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
 
-            let transmittance_image_info = vk::DescriptorImageInfo {
-                image_view: transmittance_view.vk_handle(),
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                sampler: vk::Sampler::null(),
-            };
-
-            let sampler_info = vk::DescriptorImageInfo {
-                sampler: atmosphere_luts.sampler.vk_handle(),
-                ..Default::default()
-            };
-
-            let multi_scattering_image_info = vk::DescriptorImageInfo {
-                image_view: multi_scattering_view.vk_handle(),
-                image_layout: vk::ImageLayout::GENERAL,
-                sampler: vk::Sampler::null(),
-            };
-
             encoder.push_descriptor_set(
                 vk::PipelineBindPoint::COMPUTE,
                 pipeline.layout(),
                 0,
                 &[
                     vk::WriteDescriptorSet {
+                        dst_binding: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: buffer.vk_handle(),
+                            offset: buffer.offset(),
+                            range: buffer.size(),
+                        },
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
                         dst_binding: 1,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLER,
-                        p_image_info: &sampler_info,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            sampler: atmosphere_luts.sampler.vk_handle(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
                         dst_binding: 2,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                        p_image_info: &transmittance_image_info,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            image_view: transmittance_view.vk_handle(),
+                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                            sampler: vk::Sampler::null(),
+                        },
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
                         dst_binding: 3,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                        p_image_info: &multi_scattering_image_info,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            image_view: multi_scattering_view.vk_handle(),
+                            image_layout: vk::ImageLayout::GENERAL,
+                            sampler: vk::Sampler::null(),
+                        },
                         ..Default::default()
                     },
                 ],
@@ -679,6 +684,38 @@ fn compute_luts(
                 pipeline.layout(),
                 0,
                 &[
+                    vk::WriteDescriptorSet {
+                        dst_binding: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: buffer.vk_handle(),
+                            offset: buffer.offset(),
+                            range: buffer.size(),
+                        },
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_binding: 1,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::SAMPLER,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            sampler: atmosphere_luts.sampler.vk_handle(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_binding: 2,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            image_view: transmittance_view.vk_handle(),
+                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                            sampler: vk::Sampler::null(),
+                        },
+                        ..Default::default()
+                    },
                     vk::WriteDescriptorSet {
                         dst_binding: 3,
                         descriptor_count: 1,

@@ -193,7 +193,8 @@ impl LpmConfig {
     pub fn new_for_colorspace(color_space: vk::ColorSpaceKHR) -> Self {
         Self {
             preset: LpmPreset::for_swapchain_colorspace(color_space),
-            sdr_colorspace_transform: ColorSpacePrimaries::BT709.to_color_space(&ColorSpace::from(color_space).primaries),
+            sdr_colorspace_transform: ColorSpacePrimaries::BT709
+                .to_color_space(&ColorSpace::from(color_space).primaries),
             swapchain_color_space: color_space,
 
             saturation: [0.0; 3],
@@ -217,11 +218,11 @@ impl LpmConfig {
         match self.swapchain_color_space {
             vk::ColorSpaceKHR::HDR10_ST2084_EXT => {
                 self.sdr_colorspace_transform * (self.paperwhite_nits / 10000.0)
-            },
+            }
             vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT => {
                 self.sdr_colorspace_transform * (self.paperwhite_nits / 80.0)
-            },
-            _ => Mat3::IDENTITY
+            }
+            _ => Mat3::IDENTITY,
         }
     }
     pub fn ctl_words(&self) -> [u32; LPM_CTL_WORDS] {
