@@ -93,7 +93,7 @@ float3 integrateScatteredLuminance(
         float3 multiScatteredLuminance = sampleMultiScattering(atm, P, sunZenithCosAngle, multiScatteringLUT, linearSampler);
 
         // Total in-scattered light
-        float3 S = atm.solar_irradiance * (earthShadow * transmittanceToSun * phaseTimesScattering +
+        float3 S = atm.solar_illuminance * (earthShadow * transmittanceToSun * phaseTimesScattering +
                                            multiScatteredLuminance * medium.scattering);
 
         // Analytical integration over segment

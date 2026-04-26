@@ -51,10 +51,18 @@ public struct AtmosphereParams {
     public float3 sun_direction;
     public float sun_angular_radius;
 
-    public float3 solar_irradiance;
+    // Sun illuminance at the top of the atmosphere [lux].
+    //
+    // Conventionally normalized to (1, 1, 1) so that the SkyView /
+    // Transmittance / MultiScattering LUTs act as *transfer factors* rather
+    // than storing absolute luminance. Shaders that consume those LUTs must
+    // multiply by this value to recover luminance [cd/m²].
+    public float3 solar_illuminance;
     public float _pad3;
 
-    // Camera
+    // Camera location in a coordinate system where the surface of the earth is (0, 0, 0).
+    // This is separate from the actual camera location in the game "world" space because our game
+    // assumes a flat earth.
     public float3 camera_position;
     public float _pad4;
 
@@ -282,13 +290,20 @@ public float3 sampleTransmittance(AtmosphereParams atm, float viewHeight, float 
     return transmittanceLUT.SampleLevel(linearSampler, uv, 0).rgb;
 }
 
-// Get sun luminance if looking directly at sun
-public float3 getSunLuminance(float3 worldPos, float3 worldDir, float3 sunDir, float sunAngularRadius, float bottomRadius) {
-    if (dot(worldDir, sunDir) > cos(sunAngularRadius)) {
-        float t = raySphereIntersectNearest(worldPos, worldDir, float3(0.0, 0.0, 0.0), bottomRadius);
-        if (t < 0.0) { // No intersection with ground
-            return float3(1000000.0, 1000000.0, 1000000.0); // Bright sun disk
+public extension AtmosphereParams {
+    // Sun-disk luminance [cd/m²] along `worldDir` from `worldPos` in atmosphere
+    // frame (planet-centered). Terminal photometric value — not multiplied by
+    // solar_illuminance; the sun disk is so bright that the exact number is
+    // arbitrary and only perceived through tone-mapping. Returns 0 outside the disk
+    // or when the planet occludes the sun.
+    public float3 getSunLuminance(float3 worldPos, float3 worldDir) {
+        if (dot(worldDir, sun_direction) > cos(sun_angular_radius)) {
+            float t = raySphereIntersectNearest(worldPos, worldDir, float3(0.0, 0.0, 0.0), bottom_radius);
+            if (t < 0.0) {
+                // No intersection with ground
+                return float3(1000000.0, 1000000.0, 1000000.0);
+            }
         }
+        return float3(0.0, 0.0, 0.0);
     }
-    return float3(0.0, 0.0, 0.0);
 }

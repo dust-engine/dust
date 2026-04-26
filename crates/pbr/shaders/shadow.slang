@@ -44,30 +44,27 @@ void shadowMissShader() {
 
     // Shadow ray missed — no blocker between surface and sun.
     // Compute direct sunlight contribution and add to render target.
-
-    // Reconstruct surface position in atmosphere frame (planet-centered, +Y up,
-    // bottom_radius offset) to sample transmittance from surface to sun — matches
-    // Hillaire EGSR2020 ground shading and pbr.slang:88-90.
     float depth = params.gbuffer.depthTexture[pixel];
-    float3 dir = params.uniforms.cameraDir(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
-    float3 surfAtmPos = params.sky.atmosphereParams.camera_position
-        + float3(0.0, params.sky.atmosphereParams.bottom_radius, 0.0)
-        + dir * depth;
-    float viewHeight = max(length(surfAtmPos), params.sky.atmosphereParams.bottom_radius + 0.001);
-    float3 upVector = surfAtmPos / viewHeight;
-    float sunZenithCosAngle = dot(upVector, params.sky.atmosphereParams.sun_direction);
-    float3 transmittanceToSun = sampleTransmittance(
-        params.sky.atmosphereParams, viewHeight, sunZenithCosAngle,
-        params.sky.transmittanceLUT, params.sky.linearSampler
-    );
+    float3 samplePosFromCamera = params.uniforms.primaryRayDirWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy) * depth;
+
+    float3 transmittanceToSun = params.sky.sampleTransmittanceAt(samplePosFromCamera);
 
     // Sample albedo through sRGB view — hardware applies sRGB-to-linear conversion
     float2 uv = (float2(pixel) + 0.5) / float2(DispatchRaysDimensions().xy);
     float3 albedo = params.gbuffer.albedoSRGB.SampleLevel(params.sky.linearSampler, uv, 0).rgb;
     float3 worldNormal = params.gbuffer.normalTexture[pixel].xyz;
 
+    // Direct sun contribution via Lambertian BRDF:
+    //   L_out [cd/m²] = (albedo / π [sr⁻¹]) * E_incident [lux]
+    //   E_incident   = solar_illuminance * transmittanceToSun * NdotL
+    // The 1/π is the Lambertian BRDF normalization; without it the surface
+    // would be ~π× too bright. solar_illuminance is multiplied in explicitly
+    // because transmittanceToSun is a unitless LUT lookup (see sky_view_lut).
     float NdotL = max(0.0, dot(worldNormal, params.sky.atmosphereParams.sun_direction));
-    float3 sunContribution = transmittanceToSun * albedo * params.sky.atmosphereParams.solar_irradiance * NdotL / PI;
+    float3 sunContribution = albedo / PI
+                           * params.sky.atmosphereParams.solar_illuminance
+                           * transmittanceToSun
+                           * NdotL;
 
     params.outputTexture[pixel] = float4(current.rgb + sunContribution, current.a);
 }

@@ -111,10 +111,18 @@ struct AtmosphereParams {
     sun_direction: [f32; 3],
     sun_angular_radius: f32,
 
-    solar_irradiance: [f32; 3],
+    // Sun illuminance at the top of the atmosphere [lux]. Conventionally
+    // normalized to (1, 1, 1) so the SkyView/Transmittance/MultiScattering LUTs
+    // act as unitless transfer factors; consumers multiply by this value to
+    // recover luminance [cd/m²]. If set to a non-normalized value, LUTs store
+    // luminance directly and callers must stop multiplying. See the matching
+    // field doc in sky_atmosphere.slang.
+    solar_illuminance: [f32; 3],
     _pad3: f32,
 
-    // Camera
+    // Camera location in a coordinate system where the surface of the earth is (0, 0, 0).
+    // This is separate from the actual camera location in the game "world" space because our game
+    // assumes a flat earth.
     camera_position: [f32; 3],
     _pad4: f32,
 
@@ -170,10 +178,10 @@ impl AtmosphereParams {
             sun_direction: [0.0, 0.4, 0.9165],
             sun_angular_radius: 0.00935 / 2.0,
 
-            solar_irradiance: [1.0, 1.0, 1.0],
+            solar_illuminance: [1.0, 1.0, 1.0],
             _pad3: 0.0,
 
-            camera_position: [0.0, 0.5, -0.3363016], // Just above ground
+            camera_position: [0.0, 0.5, 0.0], // Just above ground
             _pad4: 0.0,
 
             inv_view_proj_mat: [

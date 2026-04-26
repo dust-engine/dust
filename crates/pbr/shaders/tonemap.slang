@@ -23,7 +23,7 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID,
     uint2 coord = dispatchThreadID.xy;
 
     float4 sdr = params.sdrInput[coord];
-    if (sdr.a > 0) {
+    if (sdr.a == 1.0) {
         params.ldrOutput[coord] = sdr;
         return;
     }
@@ -31,6 +31,6 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID,
     float4 hdr = params.hdrInput[coord];
     if (hdr.a > 0) {
         float3 color = acesToneMap(hdr.rgb * exposure);
-        params.ldrOutput[coord] = float4(color, 1.0);
+        params.ldrOutput[coord].xyz = color.xyz * (1.0 - sdr.a) + sdr.xyz * sdr.a;
     }
 }
