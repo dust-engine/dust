@@ -20,6 +20,13 @@ cargo_toml_env_vars(
     src = "Cargo.toml",
 )
 
+genrule(
+    name = "bazel_bin_env",
+    outs = ["bazel_bin.env"],
+    cmd_bash = "echo 'BAZEL_BIN=$${pwd}/$(BINDIR)' > $@",
+    cmd_bat = "@echo BAZEL_BIN=%cd%/$(BINDIR)> $@",
+)
+
 rust_binary(
     name = "dust",
     crate_name = "dust",

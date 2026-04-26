@@ -262,10 +262,12 @@ fn write_sbt_entries(
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
         // Push same geometry to final gather SBT
-        let final_gather_sbt_index =
-            final_gather_sbt.push_hitgroup(vox_render_state.final_gather_hitgroup_index, |param_dst| {
+        let final_gather_sbt_index = final_gather_sbt.push_hitgroup(
+            vox_render_state.final_gather_hitgroup_index,
+            |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
-            });
+            },
+        );
         assert_eq!(final_gather_sbt_index, model.sbt_index);
     }
     for (entity, mut instance) in instances.iter_mut() {

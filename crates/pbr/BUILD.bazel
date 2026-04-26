@@ -9,12 +9,7 @@ cargo_toml_env_vars(
     src = "Cargo.toml",
 )
 
-genrule(
-    name = "bazel_bin_env",
-    outs = ["bazel_bin.env"],
-    cmd_bash = "echo 'BAZEL_BIN=$${pwd}/$(BINDIR)' > $@",
-    cmd_bat = "@echo BAZEL_BIN=%cd%/$(BINDIR)> $@",
-)
+
 
 rust_library(
     name = "dust_pbr",
@@ -31,6 +26,6 @@ rust_library(
     deps = all_crate_deps(normal = True),
     rustc_env_files = [
         ":cargo_toml_env_vars",
-        ":bazel_bin_env",
+        "//:bazel_bin_env",
     ],
 )

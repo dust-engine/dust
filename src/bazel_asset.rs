@@ -1,8 +1,8 @@
 use atomicow::CowArc;
 use bevy::asset::io::AssetSource;
 use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
-use std::path::{Path, PathBuf};
 use runfiles::{Runfiles, rlocation};
+use std::path::{Path, PathBuf};
 
 /// An [`AssetReader`] that resolves Bazel label paths using runfiles
 pub struct BazelAssetReader {
@@ -22,7 +22,8 @@ impl AssetReader for BazelAssetReader {
         &'a self,
         path: CowArc<'a, Path>,
     ) -> Result<impl Reader + 'a, AssetReaderError> {
-        let full_path = rlocation!(self.runfiles, &path).ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
+        let full_path = rlocation!(self.runfiles, &path)
+            .ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
         let bytes = std::fs::read(&full_path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 AssetReaderError::NotFound(full_path)
@@ -44,7 +45,8 @@ impl AssetReader for BazelAssetReader {
         &'a self,
         path: &'a Path,
     ) -> Result<Box<PathStream>, AssetReaderError> {
-        let full_path = rlocation!(self.runfiles, &path).ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
+        let full_path = rlocation!(self.runfiles, &path)
+            .ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
         let entries: Vec<PathBuf> = std::fs::read_dir(&full_path)
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -63,7 +65,8 @@ impl AssetReader for BazelAssetReader {
     }
 
     async fn is_directory<'a>(&'a self, path: &'a Path) -> Result<bool, AssetReaderError> {
-        let full_path = rlocation!(self.runfiles, &path).ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
+        let full_path = rlocation!(self.runfiles, &path)
+            .ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
         let metadata = full_path
             .metadata()
             .map_err(|_| AssetReaderError::NotFound(full_path))?;
@@ -79,6 +82,5 @@ impl AssetReader for BazelAssetReader {
 /// app.register_asset_source("bazel", bazel_asset_source(workspace_root));
 /// ```
 pub fn bazel_asset_source() -> bevy::asset::io::AssetSourceBuilder {
-    AssetSource::build()
-        .with_reader(move || Box::new(BazelAssetReader::new()))
+    AssetSource::build().with_reader(move || Box::new(BazelAssetReader::new()))
 }
