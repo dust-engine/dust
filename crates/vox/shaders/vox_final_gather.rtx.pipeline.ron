@@ -1,0 +1,16 @@
+RayTracingPipeline (
+    stages: [
+        HitGroup (
+            ty: Aabbs,
+            intersection: (
+                path: "bazel://dust/crates/vox/shaders/vox_final_gather.spv",
+                entry_point: "main",
+            ),
+            param_size: 24
+        ),
+    ],
+
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+    max_ray_payload_size: 4,
+    max_hit_attribute_size: 4,
+)

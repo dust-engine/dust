@@ -1,0 +1,20 @@
+RayTracingPipeline(
+    stages: [
+        RayGen (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/final_gather.spv",
+                entry_point: "finalGatherRayGenShader"
+            )
+        ),
+        Miss (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/final_gather.spv",
+                entry_point: "finalGatherMissShader",
+            )
+        ),
+    ],
+    max_ray_payload_size: 4,
+    max_hit_attribute_size: 4,
+
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+)

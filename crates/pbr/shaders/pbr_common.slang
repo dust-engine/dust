@@ -30,6 +30,7 @@ public struct PbrPipelineParams {
     public RWTexture2D outputTexture;
     public PbrPipelineGbuffer gbuffer;
     public SkyAtmosphereParams sky;
+    public Texture2DArray<float4> blueNoiseCosine;
 }
 
 public ParameterBlock<PbrPipelineParams> params;

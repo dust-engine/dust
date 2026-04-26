@@ -64,11 +64,16 @@ PipelineLayout(
                         ty: Sampler,
                         stages: [Miss, RayGen]
                     ),
+                    Binding( // Blue noise cosine hemisphere (STBN)
+                        binding: 12,
+                        ty: SampledImage,
+                        stages: [RayGen]
+                    ),
                 ]
             )
         ),
     ],
     push_constants: {
-        RayGen: (0, 4)
+        RayGen: (0, 4),
     }
 )

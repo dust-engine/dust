@@ -12,9 +12,9 @@ members = [
 dust_vdb = { path = "crates/vdb" }
 dust_vox = { path = "crates/vox" }
 dust_pbr = { path = "crates/pbr" }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "67c3f0e41f34643b71931a34592f514c54d423b6" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "67c3f0e41f34643b71931a34592f514c54d423b6" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "67c3f0e41f34643b71931a34592f514c54d423b6" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "d338fca276fceb57f8c12d746aa7f72250df231b" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "d338fca276fceb57f8c12d746aa7f72250df231b" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "d338fca276fceb57f8c12d746aa7f72250df231b" }
 
 [dependencies]
 dust_vox.workspace = true

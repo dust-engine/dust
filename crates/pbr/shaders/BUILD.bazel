@@ -77,6 +77,29 @@ ron2bin(
 )
 
 slang_shader(
+    name = "final_gather",
+    srcs = ["final_gather.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:pbr_module",
+    ],
+    out = "final_gather.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
+ron2bin(
+    name = "final_gather_rtx_pipeline",
+    src = "final_gather.rtx.pipeline.ron",
+    out = "final_gather.rtx.pipeline.bin",
+    type = "raytracing-pipeline",
+)
+
+slang_shader(
     name = "tonemap",
     srcs = ["tonemap.slang"],
     out = "tonemap.spv",
@@ -116,6 +139,8 @@ filegroup(
         ":pbr_rtx_pipeline",
         ":shadow",
         ":shadow_rtx_pipeline",
+        ":final_gather",
+        ":final_gather_rtx_pipeline",
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",

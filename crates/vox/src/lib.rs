@@ -161,6 +161,8 @@ pub struct VoxRenderState {
     hitgroup_index: u32,
     shadow_pipeline: Handle<RayTracingPipelineLibrary>,
     shadow_hitgroup_index: u32,
+    final_gather_pipeline: Handle<RayTracingPipelineLibrary>,
+    final_gather_hitgroup_index: u32,
 }
 
 fn setup(
@@ -181,11 +183,20 @@ fn setup(
         shadow_hitgroup_library.clone(),
     );
 
+    let final_gather_hitgroup_library: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://dust/crates/vox/shaders/vox_final_gather.rtx.pipeline.bin");
+    let final_gather_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
+        &pbr_render_state.final_gather_pipeline,
+        final_gather_hitgroup_library.clone(),
+    );
+
     commands.insert_resource(VoxRenderState {
         pipeline: hitgroup_library,
         hitgroup_index,
         shadow_pipeline: shadow_hitgroup_library,
         shadow_hitgroup_index,
+        final_gather_pipeline: final_gather_hitgroup_library,
+        final_gather_hitgroup_index,
     });
 }
 
@@ -208,8 +219,11 @@ fn write_sbt_entries(
     palette_assets: Res<Assets<VoxPalette>>,
 ) {
     let pbr_state = &mut *pbr_state;
-    let (Some(sbt), Some(shadow_sbt)) = (pbr_state.sbt.as_mut(), pbr_state.shadow_sbt.as_mut())
-    else {
+    let (Some(sbt), Some(shadow_sbt), Some(final_gather_sbt)) = (
+        pbr_state.sbt.as_mut(),
+        pbr_state.shadow_sbt.as_mut(),
+        pbr_state.final_gather_sbt.as_mut(),
+    ) else {
         for mut model in models.iter_mut() {
             model.sbt_index = u32::MAX;
         }
@@ -247,6 +261,12 @@ fn write_sbt_entries(
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
+        // Push same geometry to final gather SBT
+        let final_gather_sbt_index =
+            final_gather_sbt.push_hitgroup(vox_render_state.final_gather_hitgroup_index, |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            });
+        assert_eq!(final_gather_sbt_index, model.sbt_index);
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;

@@ -71,6 +71,24 @@ ron2bin(
     type = "raytracing-pipeline"
 )
 
+slang_shader(
+    name = "vox_final_gather",
+    srcs = ["vox_final_gather.slang"],
+    out = "vox_final_gather.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+ron2bin(
+    name = "vox_final_gather_pipeline_library",
+    src = "vox_final_gather.rtx.pipeline.ron",
+    out = "vox_final_gather.rtx.pipeline.bin",
+    type = "raytracing-pipeline"
+)
+
 filegroup(
     name = "runtime",
     srcs = [
@@ -81,5 +99,7 @@ filegroup(
         ":vox_pbr_rtx_pipeline_library",
         ":vox_pbr_shadow_pipeline_library",
         ":vox_shadow",
+        ":vox_final_gather",
+        ":vox_final_gather_pipeline_library",
     ],
 )

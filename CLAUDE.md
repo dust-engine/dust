@@ -6,8 +6,8 @@ Dust is a Rust-based 3D voxel rendering engine using physically-based ray tracin
 
 Hybrid Bazel + Cargo build. Bazel is the primary build system.
 
-- **Build all:** `bazelisk build //...`
-- **Run:** `bazelisk run //:dust`
+- **Build all:** `bazelisk build -c opt  //...`
+- **Run:** `bazelisk run -c opt //:dust`
 - **Cargo build:** `cargo build` (alternative, but Bazel handles shader compilation and asset bundling)
 - **Run tests:** `cargo test` (vdb crate has dev-dependency on rand for tests)
 
