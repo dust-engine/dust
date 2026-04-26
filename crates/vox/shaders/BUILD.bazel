@@ -70,3 +70,16 @@ ron2bin(
     out = "vox_shadow.rtx.pipeline.bin",
     type = "raytracing-pipeline"
 )
+
+filegroup(
+    name = "runtime",
+    srcs = [
+        ":blas_builder_copy_coords",
+        ":blas_builder_copy_coords_comp_pipeline",
+        ":blas_builder_copy_coords_playout",
+        ":vox_pbr",
+        ":vox_pbr_rtx_pipeline_library",
+        ":vox_pbr_shadow_pipeline_library",
+        ":vox_shadow",
+    ],
+)

@@ -90,3 +90,18 @@ ron2bin(
     out = "sky_view_lut.comp.pipeline.bin",
     type = "compute-pipeline",
 )
+
+filegroup(
+    name = "runtime",
+    srcs = [
+        ":multi_scattering",
+        ":multi_scattering_comp_pipeline",
+        ":multi_scattering_layout",
+        ":sky_view_lut",
+        ":sky_view_lut_comp_pipeline",
+        ":sky_view_lut_layout",
+        ":transmittance_lut",
+        ":transmittance_lut_comp_pipeline",
+        ":transmittance_lut_layout",
+    ],
+)

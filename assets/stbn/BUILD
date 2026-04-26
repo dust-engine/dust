@@ -1,5 +1,5 @@
 filegroup(
     name = "runtime",
-    srcs = glob(["*.vox"]),
+    srcs = glob(["*.png"]),
     visibility = ["//visibility:public"],
 )

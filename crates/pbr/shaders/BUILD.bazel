@@ -107,3 +107,17 @@ slang_playout(
     ],
     format = "bin",
 )
+
+filegroup(
+    name = "runtime",
+    srcs = [
+        ":pbr",
+        ":pbr_playout",
+        ":pbr_rtx_pipeline",
+        ":shadow",
+        ":shadow_rtx_pipeline",
+        ":tonemap",
+        ":tonemap_comp_pipeline",
+        ":tonemap_playout",
+    ],
+)

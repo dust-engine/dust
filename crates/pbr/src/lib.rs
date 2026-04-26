@@ -13,11 +13,7 @@ use std::ops::Deref;
 
 use bevy::prelude::*;
 use bevy_pumicite::{
-    DefaultRenderSet, PumiciteApp, SubmissionState,
-    rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
-    shader::RayTracingPipelineLibrary,
-    staging::{BufferInitializer, UniformRingBuffer},
-    swapchain::{SwapchainImage, SwapchainSet},
+    DefaultRenderSet, PumiciteApp, SubmissionState, loader::TextureAsset, rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS}, shader::RayTracingPipelineLibrary, staging::{BufferInitializer, UniformRingBuffer}, swapchain::{SwapchainImage, SwapchainSet}
 };
 use bytemuck::{Pod, Zeroable};
 use pumicite::{
@@ -97,6 +93,16 @@ impl Plugin for PbrRenderPlugin {
                 .before(render),
         );
     }
+}
+
+#[derive(Resource)]
+struct BlueNoiseTextures {
+    scalar: Handle<TextureAsset>,
+    unitvec2: Handle<TextureAsset>,
+    unitvec3: Handle<TextureAsset>,
+    unitvec3_cosine: Handle<TextureAsset>,
+    vec2: Handle<TextureAsset>,
+    vec3: Handle<TextureAsset>,
 }
 
 /// All the systems preparing for PBR raytracing render must go into this set.
@@ -274,12 +280,12 @@ fn render(
     });
 }
 
-struct HdrRenderTargetViews {
-    hdr_output: FullImageView<Image>,
-    sdr_target: SrgbImageView<Image>,
-    albedo: SrgbImageView<Image>,
-    normal: FullImageView<Image>,
-    depth: FullImageView<Image>,
+pub struct HdrRenderTargetViews {
+    pub hdr_output: FullImageView<Image>,
+    pub sdr_target: SrgbImageView<Image>,
+    pub albedo: SrgbImageView<Image>,
+    pub normal: FullImageView<Image>,
+    pub depth: FullImageView<Image>,
 }
 
 #[derive(Resource)]
@@ -322,6 +328,15 @@ pub fn setup(
         tonemap_pipeline,
         sbt: None,
         shadow_sbt: None,
+    });
+
+    commands.insert_resource(BlueNoiseTextures {
+        scalar: asset_server.load("bazel://dust/assets/stbn/scalar.png"),
+        unitvec2: asset_server.load("bazel://dust/assets/stbn/unitvec2.png"),
+        unitvec3: asset_server.load("bazel://dust/assets/stbn/unitvec3.png"),
+        unitvec3_cosine: asset_server.load("bazel://dust/assets/stbn/unitvec3_cosine.png"),
+        vec2: asset_server.load("bazel://dust/assets/stbn/vec2.png"),
+        vec3: asset_server.load("bazel://dust/assets/stbn/vec3.png"),
     });
 }
 
