@@ -1,0 +1,34 @@
+PipelineLayout(
+    sets: [
+        Inline(
+            DescriptorSetLayout(
+                push_descriptor: true,
+                bindings: [
+                    Binding( // hdrInput
+                        binding: 0,
+                        ty: StorageImage,
+                        stages: [Compute],
+                    ),
+                    Binding( // ldrOutput
+                        binding: 1,
+                        ty: StorageImage,
+                        stages: [Compute],
+                    ),
+                    Binding( // sdrInput
+                        binding: 2,
+                        ty: StorageImage,
+                        stages: [Compute],
+                    ),
+                    Binding( // LPM control block (uvec4 ctl[24])
+                        binding: 3,
+                        ty: UniformBuffer,
+                        stages: [Compute],
+                    ),
+                ],
+            ),
+        ),
+    ],
+    push_constants: {
+        Compute: (0, 4),
+    },
+)

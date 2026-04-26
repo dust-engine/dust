@@ -19,11 +19,12 @@ rust_library(
     compile_data = [
         "Cargo.toml",
         "//crates/pbr/shaders:pbr_module_layout_macro",
-        "//crates/pbr/shaders:tonemap_layout_macro",
     ],
     edition = "2024",
     aliases = aliases(),
-    deps = all_crate_deps(normal = True),
+    deps = all_crate_deps(normal = True) + [
+        "//third_party/ffx:ffx_lpm_cpu",
+    ],
     rustc_env_files = [
         ":cargo_toml_env_vars",
         "//:bazel_bin_env",

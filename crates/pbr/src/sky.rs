@@ -476,7 +476,8 @@ fn compute_luts(
         return;
     };
 
-    let Some(atmosphere_param_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
+    let Some(atmosphere_param_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned()
+    else {
         return;
     };
 
@@ -622,14 +623,14 @@ fn compute_luts(
             // Dispatch with 64 threads in z for sphere integration
             encoder.dispatch(UVec3::new(MULTI_SCATTERING_RES, MULTI_SCATTERING_RES, 1));
         }
-    
-    
-        let sky_view =
-            encoder.lock(&atmosphere_luts.sky_view.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+
+        let sky_view = encoder.lock(
+            &atmosphere_luts.sky_view.view,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
 
         // Sky View LUT
         {
-
             encoder.use_image_resource(
                 transmittance_view.image(),
                 &mut atmosphere_luts.transmittance.state,

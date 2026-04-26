@@ -1,0 +1,26 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "ffx_a.h",
+    "ffx_lpm.h",
+])
+
+filegroup(
+    name = "ffx_lpm_headers",
+    srcs = [
+        "ffx_a.h",
+        "ffx_lpm.h",
+    ],
+)
+
+cc_library(
+    name = "ffx_lpm_cpu",
+    srcs = ["lpm_setup.cc"],
+    hdrs = [
+        "ffx_a.h",
+        "ffx_lpm.h",
+    ],
+    includes = ["."],
+)

@@ -1,15 +1,15 @@
 pub mod camera;
 pub mod sky;
+pub mod tonemap;
 
 include!(concat!(
     env!("BAZEL_BIN"),
     "/crates/pbr/shaders/pbr_module_layout.rs"
 ));
-include!(concat!(
-    env!("BAZEL_BIN"),
-    "/crates/pbr/shaders/tonemap_layout.rs"
-));
+
 use std::ops::Deref;
+
+use tonemap::tonemap_pass;
 
 use bevy::prelude::*;
 use bevy_pumicite::{
@@ -22,16 +22,14 @@ use bevy_pumicite::{
 };
 use bytemuck::{Pod, Zeroable};
 use pumicite::{
-    Allocator, HasDevice,
+    Allocator,
     ash::vk::{self, TaggedStructure},
-    bevy::PipelineCache,
-    buffer::BufferLike,
     debug::DebugObject,
     image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView},
     rtx::ShaderBindingTable,
     sync::GPUMutex,
     tracking::{Access, ResourceState},
-    utils::{AsVkHandle, glam_to_vk_transform},
+    utils::glam_to_vk_transform,
 };
 use pumicite_egui::EguiRenderSet;
 
@@ -57,7 +55,7 @@ unsafe impl Zeroable for Uniforms {}
 pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup);
+        app.add_systems(Startup, (setup, tonemap::setup_lpm_ctl));
         app.add_systems(
             PostUpdate,
             (
@@ -127,10 +125,7 @@ fn render(
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    mut swapchain_images: Query<
-        (&Camera, &GlobalTransform),
-        With<bevy::window::PrimaryWindow>,
-    >,
+    mut swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     blue_noise: Res<BlueNoiseTextures>,
@@ -902,93 +897,6 @@ fn final_gather_pass(
                 z: 1,
             },
         );
-    });
-}
-
-fn tonemap_pass(
-    mut ctx: SubmissionState,
-    state: Res<PbrRenderState>,
-    compute_pipelines: Res<Assets<ComputePipeline>>,
-    mut swapchain_images: Query<(&mut SwapchainImage, &Camera), With<bevy::window::PrimaryWindow>>,
-    mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-) {
-    let Ok((mut swapchain_image, camera)) = swapchain_images.single_mut() else {
-        return;
-    };
-    let Some(pipeline) = compute_pipelines.get(&state.tonemap_pipeline) else {
-        return;
-    };
-    let Some(hdr) = hdr_target.as_mut() else {
-        return;
-    };
-    let exposure = camera.exposure;
-    let pipeline = pipeline.clone().into_inner();
-
-    ctx.record(move |encoder| {
-        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
-        let swapchain_target = encoder.lock(
-            swapchain_image.current_image().as_ref().unwrap(),
-            vk::PipelineStageFlags2::COMPUTE_SHADER,
-        );
-
-        // HDR intermediary: read
-        encoder.use_image_resource(
-            render_target_views.hdr_output.image(),
-            &mut hdr.state,
-            Access::COMPUTE_READ,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        // SDR target: read (egui / occluding content)
-        encoder.use_image_resource(
-            render_target_views.sdr_target.image(),
-            &mut hdr.sdr_target_state,
-            Access::COMPUTE_READ,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        // Swapchain: write (final composited output)
-        encoder.use_image_resource(
-            swapchain_target,
-            &mut swapchain_image.state,
-            Access::COMPUTE_WRITE,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        encoder.emit_barriers();
-
-        let pipeline = encoder.retain(pipeline);
-        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
-
-        encoder.push_descriptor_set(
-            vk::PipelineBindPoint::COMPUTE,
-            pipeline.layout(),
-            0,
-            TonemapParams::new()
-                .hdr_input(&render_target_views.hdr_output)
-                .ldr_output(swapchain_target.linear_view())
-                .sdr_input(render_target_views.sdr_target.linear_view())
-                .as_slice(),
-        );
-
-        encoder.push_constants(
-            pipeline.layout(),
-            vk::ShaderStageFlags::COMPUTE,
-            0,
-            bytemuck::bytes_of(&exposure),
-        );
-
-        encoder.dispatch(UVec3::new(
-            hdr.extent.x.div_ceil(8),
-            hdr.extent.y.div_ceil(8),
-            1,
-        ));
     });
 }
 

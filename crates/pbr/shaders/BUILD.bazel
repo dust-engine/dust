@@ -1,4 +1,4 @@
-load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
+load("@rules_vulkan//vulkan:defs.bzl", "glsl_shader", "slang_shader")
 load("//third_party:pumicite_cli.bzl", "ron2bin", "slang_playout")
 
 package(default_visibility = ["//visibility:public"])
@@ -99,13 +99,14 @@ ron2bin(
     type = "raytracing-pipeline",
 )
 
-slang_shader(
+glsl_shader(
     name = "tonemap",
-    srcs = ["tonemap.slang"],
-    out = "tonemap.spv",
-    profile = "cs_6_0",
-    target = "spirv",
-    opts = ["-O3"],
+    src = "tonemap.glsl",
+    stage = "compute",
+    hdrs = [
+        "//third_party/ffx:ffx_lpm_headers",
+    ],
+    target_env = "vulkan1.2",
 )
 
 ron2bin(
@@ -115,20 +116,11 @@ ron2bin(
     type = "compute-pipeline",
 )
 
-slang_playout(
-    name = "tonemap_layout_macro",
-    srcs = ["tonemap.slang"],
-    out = "tonemap_layout.rs",
-    format = "codegen",
-)
-slang_playout(
+ron2bin(
     name = "tonemap_playout",
-    srcs = ["tonemap.slang"],
+    src = "tonemap.playout.ron",
     out = "tonemap.playout.bin",
-    set_attrs = [
-        "0:push_descriptor"
-    ],
-    format = "bin",
+    type = "pipeline-layout",
 )
 
 filegroup(
