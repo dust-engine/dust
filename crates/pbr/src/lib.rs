@@ -9,7 +9,7 @@ include!(concat!(
 
 use std::ops::Deref;
 
-use tonemap::{tonemap_pass};
+use tonemap::tonemap_pass;
 
 use bevy::prelude::*;
 use bevy_pumicite::{
@@ -55,7 +55,7 @@ unsafe impl Zeroable for Uniforms {}
 pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
-         app.add_systems(Startup, setup);
+        app.add_systems(Startup, setup);
         app.add_systems(
             PostUpdate,
             (
@@ -101,6 +101,9 @@ impl Plugin for PbrRenderPlugin {
                 .in_set(DefaultRenderSet)
                 .before(render),
         );
+
+        app.add_device_extension::<pumicite::ash::ext::hdr_metadata::Meta>()
+            .ok();
     }
 }
 

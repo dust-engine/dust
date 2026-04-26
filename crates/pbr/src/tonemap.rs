@@ -5,7 +5,12 @@ use bevy_pumicite::{
 };
 use bytemuck::NoUninit;
 use pumicite::{
-    ash::vk, buffer::BufferLike, image::ImageLike, tracking::Access, utils::AsVkHandle
+    ash::vk,
+    buffer::BufferLike,
+    image::ImageLike,
+    tracking::Access,
+    types::format::{ColorSpace, ColorSpacePrimaries, ColorSpaceTransferFunction},
+    utils::AsVkHandle,
 };
 
 use crate::{HdrRenderTarget, PbrRenderState, camera::Camera};
@@ -93,9 +98,75 @@ pub enum LpmPreset {
     Hdr10Scrgb_Rec2020 = 14,
 }
 
+pub mod lpm_flags {
+    // Bit layout passed to the shader as `lpm_flags`. Must match the
+    // `LpmFilter()` call in `tonemap.glsl`.
+    pub const SHOULDER: u32 = 1 << 0;
+    pub const CON: u32 = 1 << 1;
+    pub const SOFT: u32 = 1 << 2;
+    pub const CON2: u32 = 1 << 3;
+    pub const CLIP: u32 = 1 << 4;
+    pub const SCALE_ONLY: u32 = 1 << 5;
+}
+
+impl LpmPreset {
+    /// CON/SOFT/CON2/CLIP/SCALEONLY flags from the matching `LPM_CONFIG_*`
+    /// macro in `ffx_lpm.h`. The shader forwards these to `LpmFilter` so the
+    /// runtime code path matches the baked control block. `SHOULDER` is
+    /// orthogonal and is OR'd in from `LpmConfig::shoulder`.
+    pub fn filter_flags(self) -> u32 {
+        use lpm_flags::*;
+        match self {
+            // 709 output (SDR): pure tonemap, no gamut convert, no OETF.
+            Self::Rec709_Rec709 => 0,
+            Self::Rec709_P3 | Self::Rec709_Rec2020 => CON | SOFT,
+            // FS2 raw: gamut convert + clip (applies gamma-2.2 OETF).
+            Self::Fs2Raw_Rec709 => CON2 | CLIP,
+            Self::Fs2Raw_P3 | Self::Fs2Raw_Rec2020 => CON | SOFT,
+            // FS2 scRGB: scale-only (linear FP16 output).
+            Self::Fs2Scrgb_Rec709 => SCALE_ONLY,
+            Self::Fs2Scrgb_P3 | Self::Fs2Scrgb_Rec2020 => CON | SOFT | CON2,
+            // HDR10 raw: gamut convert + clip (applies PQ OETF).
+            Self::Hdr10Raw_Rec709 | Self::Hdr10Raw_P3 => CON2 | CLIP,
+            Self::Hdr10Raw_Rec2020 => SCALE_ONLY,
+            // HDR10 scRGB: scale-only (709) or gamut convert (P3/2020).
+            Self::Hdr10Scrgb_Rec709 => SCALE_ONLY,
+            Self::Hdr10Scrgb_P3 | Self::Hdr10Scrgb_Rec2020 => CON2,
+        }
+    }
+
+    /// True when the preset leaves linear values in the output and the shader
+    /// must apply the SDR sRGB OETF. Every other preset bakes its own OETF
+    /// (PQ / gamma-2.2) or intentionally emits linear scRGB, so the shader
+    /// must NOT post-encode.
+    pub fn is_sdr_output(self) -> bool {
+        matches!(
+            self,
+            Self::Rec709_Rec709 | Self::Rec709_P3 | Self::Rec709_Rec2020
+        )
+    }
+
+    /// Pick the LPM output preset for a swapchain surface (format + color space).
+    pub fn for_swapchain_colorspace(color_space: vk::ColorSpaceKHR) -> LpmPreset {
+        match color_space {
+            // Linear floating-point surface → scRGB-style HDR (Windows
+            // `EXTENDED_SRGB_LINEAR_EXT` or AMD FS2 scRGB). LPM's SCALEONLY path
+            // applies only the HDR peak scalar; the compositor does the rest.
+            vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT
+            | vk::ColorSpaceKHR::EXTENDED_SRGB_NONLINEAR_EXT => LpmPreset::Hdr10Scrgb_Rec709,
+            vk::ColorSpaceKHR::HDR10_ST2084_EXT => LpmPreset::Hdr10Raw_Rec709,
+            vk::ColorSpaceKHR::SRGB_NONLINEAR | vk::ColorSpaceKHR::BT709_LINEAR_EXT => {
+                LpmPreset::Rec709_Rec709
+            }
+            _ => todo!(),
+        }
+    }
+}
+
 pub const LPM_CTL_WORDS: usize = 24 * 4;
 
 pub struct LpmConfig {
+    pub swapchain_color_space: vk::ColorSpaceKHR,
     pub preset: LpmPreset,
     pub saturation: [f32; 3],
     pub crosstalk: [f32; 3],
@@ -107,19 +178,24 @@ pub struct LpmConfig {
     /// FreeSync2 scRGB scalar. Only read by `Fs2Scrgb_*` presets.
     pub fs2_scalar: f32,
     /// HDR10 peak scalar. Only read by `Hdr10*` presets.
-    pub hdr10_scalar: f32,
+    pub hdr10_peak_nits: f32,
+    pub paperwhite_nits: f32,
     pub soft_gap: f32,
     pub hdr_max: f32,
     pub exposure: f32,
     pub contrast: f32,
     pub shoulder_contrast: f32,
     pub shoulder: bool,
+    pub sdr_colorspace_transform: Mat3,
 }
 
-impl Default for LpmConfig {
-    fn default() -> Self {
+impl LpmConfig {
+    pub fn new_for_colorspace(color_space: vk::ColorSpaceKHR) -> Self {
         Self {
-            preset: LpmPreset::Rec709_Rec709,
+            preset: LpmPreset::for_swapchain_colorspace(color_space),
+            sdr_colorspace_transform: ColorSpacePrimaries::BT709.to_color_space(&ColorSpace::from(color_space).primaries),
+            swapchain_color_space: color_space,
+
             saturation: [0.0; 3],
             crosstalk: [1.0, 0.5, 1.0 / 32.0],
             fs2_red: [0.0; 2],
@@ -127,7 +203,8 @@ impl Default for LpmConfig {
             fs2_blue: [0.0; 2],
             fs2_white: [0.0; 2],
             fs2_scalar: 1.0,
-            hdr10_scalar: 1.0,
+            hdr10_peak_nits: 350.0,
+            paperwhite_nits: 250.0,
             soft_gap: 0.0,
             hdr_max: 256.0,
             exposure: 8.0,
@@ -136,10 +213,31 @@ impl Default for LpmConfig {
             shoulder: false,
         }
     }
-}
-
-impl LpmConfig {
+    pub fn sdr_transform_matrix(&self) -> Mat3 {
+        match self.swapchain_color_space {
+            vk::ColorSpaceKHR::HDR10_ST2084_EXT => {
+                self.sdr_colorspace_transform * (self.paperwhite_nits / 10000.0)
+            },
+            vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT => {
+                self.sdr_colorspace_transform * (self.paperwhite_nits / 80.0)
+            },
+            _ => Mat3::IDENTITY
+        }
+    }
     pub fn ctl_words(&self) -> [u32; LPM_CTL_WORDS] {
+        let hdr10_scalar = match self.preset {
+            LpmPreset::Hdr10Raw_Rec709 | LpmPreset::Hdr10Raw_P3 | LpmPreset::Hdr10Raw_Rec2020 => {
+                // LpmHdr10RawScalar
+                self.hdr10_peak_nits * (1.0 / 10000.0)
+            }
+            LpmPreset::Hdr10Scrgb_Rec709
+            | LpmPreset::Hdr10Scrgb_P3
+            | LpmPreset::Hdr10Scrgb_Rec2020 => {
+                // LpmHdr10ScrgbScalar
+                self.hdr10_peak_nits * (1.0 / 80.0)
+            }
+            _ => 1.0,
+        };
         let mut ctl = [0u32; LPM_CTL_WORDS];
         unsafe {
             dust_lpm_setup(
@@ -152,7 +250,7 @@ impl LpmConfig {
                 &self.fs2_blue,
                 &self.fs2_white,
                 self.fs2_scalar,
-                self.hdr10_scalar,
+                hdr10_scalar,
                 self.soft_gap,
                 self.hdr_max,
                 self.exposure,
@@ -169,7 +267,16 @@ impl LpmConfig {
 #[repr(C)]
 struct TonemapPassUniforms {
     lpm_ctl: [u32; LPM_CTL_WORDS],
+
+    sdr_mapping_col0: [f32; 3],
+    // The OETF curve to apply after tonemapping
     gamma_mode: u32,
+
+    sdr_mapping_col1: [f32; 3],
+    lpm_flags: u32,
+
+    sdr_mapping_col2: [f32; 3],
+    _pad: u32,
 }
 
 pub(crate) fn tonemap_pass(
@@ -192,17 +299,33 @@ pub(crate) fn tonemap_pass(
     let swapchain_current_image = swapchain_image.current_image().unwrap();
     let lpm_ctl = LpmConfig {
         exposure: camera.exposure,
-        ..Default::default()
+        ..LpmConfig::new_for_colorspace(swapchain_current_image.color_space())
     };
     let pipeline = pipeline.clone().into_inner();
-    let gamma_mode = swapchain_current_image.color_space().transfer_function;
+    let swapchain_colorspace =
+        pumicite::types::format::ColorSpace::from(swapchain_current_image.color_space());
+    let gamma_mode = swapchain_colorspace.transfer_function;
+    let lpm_filter_flags = lpm_ctl.preset.filter_flags()
+        | if lpm_ctl.shoulder {
+            lpm_flags::SHOULDER
+        } else {
+            0
+        };
+    let sdr_transform_matrix = lpm_ctl.sdr_transform_matrix();
 
     ctx.record(move |encoder| {
-        let lpm_ctl_buffer =
-            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&TonemapPassUniforms {
+        let lpm_ctl_buffer = uniform_ring_buffer.create_uniform(
+            encoder,
+            bytemuck::bytes_of(&TonemapPassUniforms {
                 lpm_ctl: lpm_ctl.ctl_words(),
+                sdr_mapping_col0: sdr_transform_matrix.col(0).to_array(),
+                sdr_mapping_col1: sdr_transform_matrix.col(1).to_array(),
+                sdr_mapping_col2: sdr_transform_matrix.col(2).to_array(),
                 gamma_mode: gamma_mode as u32,
-            }));
+                lpm_flags: lpm_filter_flags,
+                _pad: 0,
+            }),
+        );
         let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
         let swapchain_target = encoder.lock(
             swapchain_image.current_image().as_ref().unwrap(),
