@@ -70,6 +70,14 @@ crate.annotation(
     gen_build_script = "off",
     deps = ["@@//third_party:vma"],
 )
+# `runfiles` is only needed for cargo builds. Bazel ships its own copy at
+# @rules_rust//rust/runfiles, so redirect the crates.io target there to avoid
+# pulling a duplicate.
+crate.annotation(
+    crate = "runfiles",
+    repositories = ["crates"],
+    override_target_lib = "@rules_rust//rust/runfiles",
+)
 crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
     manifests = ["//:Cargo.toml"],

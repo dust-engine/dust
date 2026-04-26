@@ -2,6 +2,7 @@
 name = "dust"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [workspace]
 members = [
@@ -24,6 +25,7 @@ pumicite.workspace = true
 bevy_pumicite.workspace = true
 atomicow = "1"
 futures-lite = "2"
+runfiles = "0.2"
 
 [workspace.dependencies.bevy]
 version = "0.17.0-dev"
@@ -70,5 +72,5 @@ ash = { git = "https://github.com/0xbeefd1ed/ash", branch = "meta" }
 [profile.release]
 debug = true
 
-[profile.dev.package.dust-vdb]
+[profile.dev.package.dust_vdb]
 opt-level = 3

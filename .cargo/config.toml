@@ -1,2 +1,5 @@
 [env]
 BAZEL_BIN = { value = "bazel-bin", relative = true }
+REPOSITORY_NAME = ""
+RUNFILES_DIR = { value = "bazel-bin/dust.exe.runfiles", relative = true }
+RUNFILES_MANIFEST_FILE = { value = "bazel-bin/dust.exe.runfiles_manifest", relative = true }
