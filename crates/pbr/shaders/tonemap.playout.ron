@@ -28,7 +28,5 @@ PipelineLayout(
             ),
         ),
     ],
-    push_constants: {
-        Compute: (0, 4),
-    },
+    push_constants: {},
 )

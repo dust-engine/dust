@@ -3,11 +3,9 @@ use bevy_pumicite::{
     SubmissionState, prelude::ComputePipeline, staging::UniformRingBuffer,
     swapchain::SwapchainImage,
 };
+use bytemuck::NoUninit;
 use pumicite::{
-    ash::vk,
-    buffer::BufferLike,
-    tracking::Access,
-    utils::AsVkHandle,
+    ash::vk, buffer::BufferLike, image::ImageLike, tracking::Access, utils::AsVkHandle
 };
 
 use crate::{HdrRenderTarget, PbrRenderState, camera::Camera};
@@ -41,7 +39,8 @@ unsafe extern "C" {
 /// color space. For the sample (ColorSpace × DisplayMode) selection matrix
 /// that picks between these presets, see `sample/src/DX12/LPMPS.cpp:157`.
 #[repr(u32)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
 pub enum LpmPreset {
     /// Rec.709 working → Rec.709 / sRGB / gamma 2.2 SDR output.
     /// Baseline SDR path (`LPM_CONFIG_709_709`).
@@ -138,8 +137,9 @@ impl Default for LpmConfig {
         }
     }
 }
+
 impl LpmConfig {
-    fn to_ctl(&self) -> [u32; LPM_CTL_WORDS] {
+    pub fn ctl_words(&self) -> [u32; LPM_CTL_WORDS] {
         let mut ctl = [0u32; LPM_CTL_WORDS];
         unsafe {
             dust_lpm_setup(
@@ -165,19 +165,16 @@ impl LpmConfig {
     }
 }
 
-/// Packed LPM control block consumed by the tonemap compute shader.
-/// Rebuild via [`LpmCtl::rebuild`] whenever the [`LpmConfig`] should change.
-#[derive(Resource)]
-pub struct LpmCtl(pub [u32; LPM_CTL_WORDS]);
-
-pub fn setup_lpm_ctl(mut commands: Commands) {
-    commands.insert_resource(LpmCtl(LpmConfig::default().to_ctl()));
+#[derive(NoUninit, Clone, Copy)]
+#[repr(C)]
+struct TonemapPassUniforms {
+    lpm_ctl: [u32; LPM_CTL_WORDS],
+    gamma_mode: u32,
 }
 
 pub(crate) fn tonemap_pass(
     mut ctx: SubmissionState,
     state: Res<PbrRenderState>,
-    lpm_ctl: Res<LpmCtl>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     mut swapchain_images: Query<(&mut SwapchainImage, &Camera), With<bevy::window::PrimaryWindow>>,
@@ -192,13 +189,20 @@ pub(crate) fn tonemap_pass(
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
-    let exposure = camera.exposure;
-    let lpm_ctl = lpm_ctl.0;
+    let swapchain_current_image = swapchain_image.current_image().unwrap();
+    let lpm_ctl = LpmConfig {
+        exposure: camera.exposure,
+        ..Default::default()
+    };
     let pipeline = pipeline.clone().into_inner();
+    let gamma_mode = swapchain_current_image.color_space().transfer_function;
 
     ctx.record(move |encoder| {
         let lpm_ctl_buffer =
-            uniform_ring_buffer.create_uniform(encoder, bytemuck::cast_slice(&lpm_ctl));
+            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&TonemapPassUniforms {
+                lpm_ctl: lpm_ctl.ctl_words(),
+                gamma_mode: gamma_mode as u32,
+            }));
         let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
         let swapchain_target = encoder.lock(
             swapchain_image.current_image().as_ref().unwrap(),
@@ -278,13 +282,6 @@ pub(crate) fn tonemap_pass(
                     range: lpm_ctl_buffer.size(),
                 }]),
             ],
-        );
-
-        encoder.push_constants(
-            pipeline.layout(),
-            vk::ShaderStageFlags::COMPUTE,
-            0,
-            bytemuck::bytes_of(&exposure),
         );
 
         encoder.dispatch(UVec3::new(

@@ -9,7 +9,7 @@ include!(concat!(
 
 use std::ops::Deref;
 
-use tonemap::tonemap_pass;
+use tonemap::{tonemap_pass};
 
 use bevy::prelude::*;
 use bevy_pumicite::{
@@ -31,7 +31,7 @@ use pumicite::{
     tracking::{Access, ResourceState},
     utils::glam_to_vk_transform,
 };
-use pumicite_egui::EguiRenderSet;
+use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
 
 use bevy_pumicite::prelude::ComputePipeline;
 
@@ -55,7 +55,7 @@ unsafe impl Zeroable for Uniforms {}
 pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (setup, tonemap::setup_lpm_ctl));
+         app.add_systems(Startup, setup);
         app.add_systems(
             PostUpdate,
             (
