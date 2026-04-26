@@ -3,6 +3,6 @@ ComputePipeline(
         path: "bazel://dust/crates/pbr/shaders/sky_atmosphere/multi_scattering.spv",
         entry_point: "main",
     ),
-    layout: Path("bazel://dust/crates//pbr/shaders/sky_atmosphere/multi_scattering.playout.bin"),
+    layout: Path("bazel://dust/crates/pbr/shaders/sky_atmosphere/multi_scattering.playout.bin"),
     disable_optimization: false,
 )

@@ -108,11 +108,11 @@ float3 integrateScatteredLuminance(
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void main(
-    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uint3 dispatchThreadID: SV_DispatchThreadID,
     uniform ConstantBuffer<AtmosphereParams> params,
+    uniform SamplerState linearSampler,
     uniform Texture2D<float4> transmittanceLUT,
     uniform Texture2D<float4> multiScatteringLUT,
-    uniform SamplerState linearSampler,
     [format("r11f_g11f_b10f")]
     uniform RWTexture2D<float4> skyViewLUT
 ) {

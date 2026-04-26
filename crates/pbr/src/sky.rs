@@ -13,18 +13,16 @@
 use std::ffi::CStr;
 
 use bevy::ecs::schedule::IntoScheduleConfigs;
-use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use bevy_pumicite::prelude::*;
-use glam::{IVec2, Mat4, Vec3, Vec3Swizzles};
 use pumicite::buffer::RingBufferSuballocation;
 use pumicite::{
     Sampler,
     image::{FullImageView, Image},
 };
-use pumicite_egui::{EguiContexts, EguiPrimaryContextPass, EguiRenderSet, egui};
+use pumicite_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 // LUT dimensions (must match shader constants)
 const TRANSMITTANCE_WIDTH: u32 = 256;
@@ -63,7 +61,7 @@ impl Plugin for SkyPlugin {
         app.add_systems(EguiPrimaryContextPass, egui_ui);
         app.add_systems(
             PostUpdate,
-            (prepare_atmosphere_uniform, compute_luts, render_skyview_lut)
+            (prepare_atmosphere_uniform, compute_luts)
                 .chain()
                 .in_set(SkyAtmosphereLUTRenderSet),
         );
@@ -75,7 +73,7 @@ pub struct SkyAtmosphereLUTRenderSet;
 
 // Atmosphere parameters - must match shader struct layout exactly
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod, Debug)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Zeroable, bytemuck::Pod, Debug)]
 struct AtmosphereParams {
     // Planet geometry (km)
     bottom_radius: f32,
@@ -203,28 +201,34 @@ impl AtmosphereParams {
     }
 }
 
-#[derive(Resource)]
+#[derive(Clone, PartialEq, Resource)]
 pub struct AtmosphereState {
     params: AtmosphereParams,
     sun_elevation: f32, // radians
     sun_azimuth: f32,   // radians
-    needs_lut_update: bool,
+}
 
-    pub uniform_buffer: Option<RingBufferSuballocation>,
+impl AtmosphereState {
+    fn sync_sun_direction(&mut self) {
+        self.params.sun_direction = [
+            self.sun_azimuth.cos() * self.sun_elevation.cos(),
+            self.sun_elevation.sin(),
+            self.sun_azimuth.sin() * self.sun_elevation.cos(),
+        ];
+    }
 }
 
 impl Default for AtmosphereState {
     fn default() -> Self {
-        Self {
+        let mut state = Self {
             params: AtmosphereParams::earth_default(),
             sun_elevation: 0.4,
             sun_azimuth: 0.0,
-            needs_lut_update: true,
-            uniform_buffer: None,
-        }
+        };
+        state.sync_sun_direction();
+        state
     }
 }
-
 #[derive(Resource)]
 struct Pipelines {
     transmittance_lut: Handle<ComputePipeline>,
@@ -242,16 +246,20 @@ pub struct AtmosphereLUTs {
     pub transmittance: LutImage,
     multi_scattering: LutImage,
     pub sky_view: LutImage,
+    pub luts_initialized: bool,
     pub sampler: Sampler,
+    pub param_buffer: Option<RingBufferSuballocation>,
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<Allocator>) {
     // Load pipelines
     commands.insert_resource(Pipelines {
-        transmittance_lut: asset_server
-            .load("bazel://dust/crates/pbr/shaders/sky_atmosphere/transmittance_lut.comp.pipeline.bin"),
-        multi_scattering: asset_server
-            .load("bazel://dust/crates/pbr/shaders/sky_atmosphere/multi_scattering.comp.pipeline.bin"),
+        transmittance_lut: asset_server.load(
+            "bazel://dust/crates/pbr/shaders/sky_atmosphere/transmittance_lut.comp.pipeline.bin",
+        ),
+        multi_scattering: asset_server.load(
+            "bazel://dust/crates/pbr/shaders/sky_atmosphere/multi_scattering.comp.pipeline.bin",
+        ),
         sky_view_lut: asset_server
             .load("bazel://dust/crates/pbr/shaders/sky_atmosphere/sky_view_lut.comp.pipeline.bin"),
     });
@@ -302,6 +310,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
         multi_scattering,
         sky_view,
         sampler,
+        param_buffer: None,
+        luts_initialized: false,
     });
 
     commands.insert_resource(AtmosphereState::default());
@@ -346,41 +356,36 @@ fn create_lut_image(
 }
 
 fn egui_ui(mut contexts: EguiContexts, mut atmosphere: ResMut<AtmosphereState>) {
+    let mut next = atmosphere.as_ref().clone();
+
     egui::Window::new("Sky Atmosphere")
         .default_width(300.0)
         .show(contexts.ctx_mut().unwrap(), |ui| {
             ui.heading("Sun");
-            if ui
-                .add(
-                    egui::Slider::new(&mut atmosphere.sun_elevation, -0.5..=1.57).text("Elevation"),
-                )
-                .changed()
-            {
-                atmosphere.needs_lut_update = true;
+            let elevation_changed = ui
+                .add(egui::Slider::new(&mut next.sun_elevation, -0.5..=1.57).text("Elevation"))
+                .changed();
+            let azimuth_changed = ui
+                .add(egui::Slider::new(&mut next.sun_azimuth, -3.14..=3.14).text("Azimuth"))
+                .changed();
+            if elevation_changed || azimuth_changed {
+                next.sync_sun_direction();
             }
-            ui.add(egui::Slider::new(&mut atmosphere.sun_azimuth, -3.14..=3.14).text("Azimuth"));
-
-            atmosphere.params.sun_direction = [
-                atmosphere.sun_azimuth.cos() * atmosphere.sun_elevation.cos(),
-                atmosphere.sun_elevation.sin(),
-                atmosphere.sun_azimuth.sin() * atmosphere.sun_elevation.cos(),
-            ];
 
             ui.separator();
             ui.heading("Rayleigh Scattering");
 
             let base_rayleigh = [0.005802f32, 0.013558, 0.033100];
-            let mut rayleigh_factor = atmosphere.params.rayleigh_scattering[0] / base_rayleigh[0];
+            let mut rayleigh_factor = next.params.rayleigh_scattering[0] / base_rayleigh[0];
             if ui
                 .add(egui::Slider::new(&mut rayleigh_factor, 0.0..=2.0).text("Factor"))
                 .changed()
             {
-                atmosphere.params.rayleigh_scattering = [
+                next.params.rayleigh_scattering = [
                     base_rayleigh[0] * rayleigh_factor,
                     base_rayleigh[1] * rayleigh_factor,
                     base_rayleigh[2] * rayleigh_factor,
                 ];
-                atmosphere.needs_lut_update = true;
             }
 
             ui.separator();
@@ -388,44 +393,31 @@ fn egui_ui(mut contexts: EguiContexts, mut atmosphere: ResMut<AtmosphereState>) 
 
             let base_mie_scattering = 0.003996f32;
             let base_mie_extinction = 0.004440f32;
-            let mut mie_factor = atmosphere.params.mie_scattering[0] / base_mie_scattering;
+            let mut mie_factor = next.params.mie_scattering[0] / base_mie_scattering;
             if ui
                 .add(egui::Slider::new(&mut mie_factor, 0.0..=2.0).text("Factor"))
                 .changed()
             {
-                atmosphere.params.mie_scattering = [base_mie_scattering * mie_factor; 3];
-                atmosphere.params.mie_extinction = [base_mie_extinction * mie_factor; 3];
-                atmosphere.needs_lut_update = true;
+                next.params.mie_scattering = [base_mie_scattering * mie_factor; 3];
+                next.params.mie_extinction = [base_mie_extinction * mie_factor; 3];
             }
 
-            if ui
-                .add(
-                    egui::Slider::new(&mut atmosphere.params.mie_phase_g, 0.0..=0.999)
-                        .text("Phase G"),
-                )
-                .changed()
-            {
-                atmosphere.needs_lut_update = true;
-            }
+            ui.add(egui::Slider::new(&mut next.params.mie_phase_g, 0.0..=0.999).text("Phase G"));
 
             ui.separator();
             ui.heading("Ground");
 
-            let mut albedo = atmosphere.params.ground_albedo[0];
+            let mut albedo = next.params.ground_albedo[0];
             if ui
                 .add(egui::Slider::new(&mut albedo, 0.0..=1.0).text("Albedo"))
                 .changed()
             {
-                atmosphere.params.ground_albedo = [albedo; 3];
-                atmosphere.needs_lut_update = true;
+                next.params.ground_albedo = [albedo; 3];
             }
 
             ui.separator();
             if ui.button("Reset to Earth Defaults").clicked() {
-                atmosphere.params = AtmosphereParams::earth_default();
-                atmosphere.sun_elevation = 0.4;
-                atmosphere.sun_azimuth = 0.0;
-                atmosphere.needs_lut_update = true;
+                next = AtmosphereState::default();
             }
 
             ui.separator();
@@ -435,11 +427,14 @@ fn egui_ui(mut contexts: EguiContexts, mut atmosphere: ResMut<AtmosphereState>) 
             ui.label("Arrow keys - Sun position");
             ui.label("Shift - Move faster");
         });
+
+    let _ = atmosphere.set_if_neq(next);
 }
 
 fn prepare_atmosphere_uniform(
     mut ring_buffer: ResMut<UniformRingBuffer>,
-    mut atmosphere: ResMut<AtmosphereState>,
+    atmosphere: Res<AtmosphereState>,
+    mut atmosphere_luts: ResMut<AtmosphereLUTs>,
 ) {
     // Allocate uniform buffer
     let mut buffer =
@@ -449,17 +444,17 @@ fn prepare_atmosphere_uniform(
         .unwrap()
         .copy_from_slice(bytemuck::bytes_of(&atmosphere.params));
 
-    atmosphere.uniform_buffer = Some(buffer);
+    atmosphere_luts.param_buffer = Some(buffer);
 }
 
 fn compute_luts(
     atmosphere: Res<AtmosphereState>,
-    mut luts: ResMut<AtmosphereLUTs>,
+    mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     pipelines: Res<Pipelines>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     mut state: SubmissionState,
 ) {
-    if !atmosphere.needs_lut_update {
+    if atmosphere_luts.luts_initialized && !(atmosphere.is_added() || atmosphere.is_changed()) {
         return;
     }
 
@@ -469,29 +464,29 @@ fn compute_luts(
     let Some(multi_scattering_pipeline) = compute_pipelines.get(&pipelines.multi_scattering) else {
         return;
     };
+    let Some(sky_view_pipeline) = compute_pipelines.get(&pipelines.sky_view_lut) else {
+        return;
+    };
 
-    //atmosphere.needs_lut_update = false;
-    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
+    let Some(atmosphere_param_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
+        return;
+    };
+
+    tracing::info!("Recomputing sky atmosphere LUTs");
+    atmosphere_luts.luts_initialized = true;
 
     state.record(|encoder| {
-        let buffer = encoder.retain(atmosphere_uniform_buffer);
+        let buffer = encoder.retain(atmosphere_param_uniform_buffer);
 
-        let buffer_info = vk::DescriptorBufferInfo {
-            buffer: buffer.vk_handle(),
-            offset: buffer.offset(),
-            range: buffer.size(),
-        };
-
+        let transmittance_view = encoder.lock(
+            &atmosphere_luts.transmittance.view,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
         // Transmittance LUT
         {
-            let transmittance_view = encoder.lock(
-                &luts.transmittance.view,
-                vk::PipelineStageFlags2::COMPUTE_SHADER,
-            );
-
             encoder.use_image_resource(
                 transmittance_view.image(),
-                &mut luts.transmittance.state,
+                &mut atmosphere_luts.transmittance.state,
                 Access::COMPUTE_WRITE,
                 vk::ImageLayout::GENERAL,
                 0..1,
@@ -503,12 +498,6 @@ fn compute_luts(
             let pipeline = encoder.retain(transmittance_pipeline.clone().into_inner());
             encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
 
-            let image_info = vk::DescriptorImageInfo {
-                image_view: transmittance_view.vk_handle(),
-                image_layout: vk::ImageLayout::GENERAL,
-                sampler: vk::Sampler::null(),
-            };
-
             encoder.push_descriptor_set(
                 vk::PipelineBindPoint::COMPUTE,
                 pipeline.layout(),
@@ -518,14 +507,22 @@ fn compute_luts(
                         dst_binding: 0,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: &buffer_info,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: buffer.vk_handle(),
+                            offset: buffer.offset(),
+                            range: buffer.size(),
+                        },
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
                         dst_binding: 1,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                        p_image_info: &image_info,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            image_view: transmittance_view.vk_handle(),
+                            image_layout: vk::ImageLayout::GENERAL,
+                            sampler: vk::Sampler::null(),
+                        },
                         ..Default::default()
                     },
                 ],
@@ -538,20 +535,16 @@ fn compute_luts(
             ));
         }
 
+        let multi_scattering_view = encoder.lock(
+            &atmosphere_luts.multi_scattering.view,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+
         // Multi-scattering LUT (depends on transmittance)
         {
-            let transmittance_view = encoder.lock(
-                &luts.transmittance.view,
-                vk::PipelineStageFlags2::COMPUTE_SHADER,
-            );
-            let multi_scattering_view = encoder.lock(
-                &luts.multi_scattering.view,
-                vk::PipelineStageFlags2::COMPUTE_SHADER,
-            );
-
             encoder.use_image_resource(
                 transmittance_view.image(),
-                &mut luts.transmittance.state,
+                &mut atmosphere_luts.transmittance.state,
                 Access::COMPUTE_READ,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 0..1,
@@ -560,7 +553,7 @@ fn compute_luts(
             );
             encoder.use_image_resource(
                 multi_scattering_view.image(),
-                &mut luts.multi_scattering.state,
+                &mut atmosphere_luts.multi_scattering.state,
                 Access::COMPUTE_WRITE,
                 vk::ImageLayout::GENERAL,
                 0..1,
@@ -579,7 +572,7 @@ fn compute_luts(
             };
 
             let sampler_info = vk::DescriptorImageInfo {
-                sampler: luts.sampler.vk_handle(),
+                sampler: atmosphere_luts.sampler.vk_handle(),
                 ..Default::default()
             };
 
@@ -595,24 +588,17 @@ fn compute_luts(
                 0,
                 &[
                     vk::WriteDescriptorSet {
-                        dst_binding: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: &buffer_info,
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
                         dst_binding: 1,
                         descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                        p_image_info: &transmittance_image_info,
+                        descriptor_type: vk::DescriptorType::SAMPLER,
+                        p_image_info: &sampler_info,
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
                         dst_binding: 2,
                         descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLER,
-                        p_image_info: &sampler_info,
+                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                        p_image_info: &transmittance_image_info,
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {
@@ -628,47 +614,17 @@ fn compute_luts(
             // Dispatch with 64 threads in z for sphere integration
             encoder.dispatch(UVec3::new(MULTI_SCATTERING_RES, MULTI_SCATTERING_RES, 1));
         }
-    });
-}
+    
+    
+        let sky_view =
+            encoder.lock(&atmosphere_luts.sky_view.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
-/// Writes into [`AtmosphereLUTs::sky_view`]
-fn render_skyview_lut(
-    atmosphere: Res<AtmosphereState>,
-    mut luts: ResMut<AtmosphereLUTs>,
-    pipelines: Res<Pipelines>,
-    compute_pipelines: Res<Assets<ComputePipeline>>,
-    mut state: SubmissionState,
-) {
-    let Some(sky_view_pipeline) = compute_pipelines.get(&pipelines.sky_view_lut) else {
-        return;
-    };
-    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
-
-    state.record(|encoder| {
-        let buffer = encoder.retain(atmosphere_uniform_buffer);
-
-        let buffer_info = vk::DescriptorBufferInfo {
-            buffer: buffer.vk_handle(),
-            offset: buffer.offset(),
-            range: buffer.size(),
-        };
-
-        // Sky View LUT (per-frame)
+        // Sky View LUT
         {
-            let transmittance_view = encoder.lock(
-                &luts.transmittance.view,
-                vk::PipelineStageFlags2::COMPUTE_SHADER,
-            );
-            let multi_scattering_view = encoder.lock(
-                &luts.multi_scattering.view,
-                vk::PipelineStageFlags2::COMPUTE_SHADER,
-            );
-            let sky_view =
-                encoder.lock(&luts.sky_view.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
             encoder.use_image_resource(
                 transmittance_view.image(),
-                &mut luts.transmittance.state,
+                &mut atmosphere_luts.transmittance.state,
                 Access::COMPUTE_READ,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 0..1,
@@ -677,7 +633,7 @@ fn render_skyview_lut(
             );
             encoder.use_image_resource(
                 multi_scattering_view.image(),
-                &mut luts.multi_scattering.state,
+                &mut atmosphere_luts.multi_scattering.state,
                 Access::COMPUTE_READ,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 0..1,
@@ -686,7 +642,7 @@ fn render_skyview_lut(
             );
             encoder.use_image_resource(
                 sky_view.image(),
-                &mut luts.sky_view.state,
+                &mut atmosphere_luts.sky_view.state,
                 Access::COMPUTE_WRITE,
                 vk::ImageLayout::GENERAL,
                 0..1,
@@ -698,19 +654,10 @@ fn render_skyview_lut(
             let pipeline = encoder.retain(sky_view_pipeline.clone().into_inner());
             encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
 
-            let transmittance_image_info = vk::DescriptorImageInfo {
-                image_view: transmittance_view.vk_handle(),
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                sampler: vk::Sampler::null(),
-            };
             let multi_scattering_image_info = vk::DescriptorImageInfo {
                 image_view: multi_scattering_view.vk_handle(),
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 sampler: vk::Sampler::null(),
-            };
-            let sampler_info = vk::DescriptorImageInfo {
-                sampler: luts.sampler.vk_handle(),
-                ..Default::default()
             };
             let sky_view_image_info = vk::DescriptorImageInfo {
                 image_view: sky_view.vk_handle(),
@@ -724,31 +671,10 @@ fn render_skyview_lut(
                 0,
                 &[
                     vk::WriteDescriptorSet {
-                        dst_binding: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: &buffer_info,
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 1,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                        p_image_info: &transmittance_image_info,
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 2,
+                        dst_binding: 3,
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &multi_scattering_image_info,
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 3,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::SAMPLER,
-                        p_image_info: &sampler_info,
                         ..Default::default()
                     },
                     vk::WriteDescriptorSet {

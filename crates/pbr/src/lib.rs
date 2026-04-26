@@ -13,7 +13,12 @@ use std::ops::Deref;
 
 use bevy::prelude::*;
 use bevy_pumicite::{
-    DefaultRenderSet, PumiciteApp, SubmissionState, loader::TextureAsset, rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS}, shader::RayTracingPipelineLibrary, staging::{BufferInitializer, UniformRingBuffer}, swapchain::{SwapchainImage, SwapchainSet}
+    DefaultRenderSet, PumiciteApp, SubmissionState,
+    loader::TextureAsset,
+    rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
+    shader::RayTracingPipelineLibrary,
+    staging::{BufferInitializer, UniformRingBuffer},
+    swapchain::{SwapchainImage, SwapchainSet},
 };
 use bytemuck::{Pod, Zeroable};
 use pumicite::{
@@ -34,7 +39,7 @@ use bevy_pumicite::prelude::ComputePipeline;
 
 use crate::{
     camera::Camera,
-    sky::{AtmosphereLUTs, AtmosphereState, SkyAtmosphereLUTRenderSet},
+    sky::{AtmosphereLUTs, SkyAtmosphereLUTRenderSet},
 };
 
 #[repr(C)]
@@ -123,16 +128,15 @@ fn render(
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     mut swapchain_images: Query<
-        (&mut SwapchainImage, &Camera, &GlobalTransform),
+        (&Camera, &GlobalTransform),
         With<bevy::window::PrimaryWindow>,
     >,
-    atmosphere: Res<AtmosphereState>,
-    mut luts: ResMut<AtmosphereLUTs>,
+    mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     blue_noise: Res<BlueNoiseTextures>,
     texture_assets: Res<Assets<TextureAsset>>,
 ) {
-    let Ok((mut swapchain_image, camera, transform)) = swapchain_images.single_mut() else {
+    let Ok((camera, transform)) = swapchain_images.single_mut() else {
         tracing::warn!("Frame not rendered; missing swapchain image");
         return;
     };
@@ -164,7 +168,10 @@ fn render(
         model: glam_to_vk_transform(transform.affine()),
         tan_half_fov: camera.tan_half_fov(),
     };
-    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
+    let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
+        tracing::warn!("Frame not rendered; missing atmosphere uniform buffer");
+        return;
+    };
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
@@ -179,15 +186,16 @@ fn render(
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
         // HDR intermediary at binding 1
-        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        let render_target_views =
+            encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         // Lock sky atmosphere LUTs for reading in the miss shader
         let transmittance_view = encoder.lock(
-            &luts.transmittance.view,
+            &atmosphere_luts.transmittance.view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         let sky_view = encoder.lock(
-            &luts.sky_view.view,
+            &atmosphere_luts.sky_view.view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
 
@@ -243,7 +251,7 @@ fn render(
         );
         encoder.use_image_resource(
             transmittance_view.image(),
-            &mut luts.transmittance.state,
+            &mut atmosphere_luts.transmittance.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             0..1,
@@ -252,7 +260,7 @@ fn render(
         );
         encoder.use_image_resource(
             sky_view.image(),
-            &mut luts.sky_view.state,
+            &mut atmosphere_luts.sky_view.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             0..1,
@@ -285,10 +293,19 @@ fn render(
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
-                .sky_linear_sampler(&luts.sampler)
+                .sky_linear_sampler(&atmosphere_luts.sampler)
                 .as_slice(),
         );
-        encoder.trace_rays(sbt, 0, sbt_buffer, UVec3 { x: hdr.extent.x, y: hdr.extent.y, z: 1 });
+        encoder.trace_rays(
+            sbt,
+            0,
+            sbt_buffer,
+            UVec3 {
+                x: hdr.extent.x,
+                y: hdr.extent.y,
+                z: 1,
+            },
+        );
     });
 }
 
@@ -450,7 +467,6 @@ fn ensure_hdr_target(
     )
     .unwrap();
 
-
     let albedo = Image::new_private(
         allocator.clone(),
         &vk::ImageCreateInfo {
@@ -522,11 +538,8 @@ fn shadow_pass(
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
-    atmosphere: Res<AtmosphereState>,
-    mut luts: ResMut<AtmosphereLUTs>,
+    mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-    blue_noise: Res<BlueNoiseTextures>,
-    texture_assets: Res<Assets<TextureAsset>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
@@ -546,9 +559,6 @@ fn shadow_pass(
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
-    let Some(noise_texture) = texture_assets.get(&blue_noise.unitvec3_cosine) else {
-        return;
-    };
     shadow_sbt.push_raygen(0, |_| {});
     shadow_sbt.push_miss(0, |_| {});
     let uniform = Uniforms {
@@ -557,7 +567,9 @@ fn shadow_pass(
         model: glam_to_vk_transform(transform.affine()),
         tan_half_fov: camera.tan_half_fov(),
     };
-    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
+    let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
+        return;
+    };
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, shadow_sbt.layout(), |slice| {
@@ -571,7 +583,8 @@ fn shadow_pass(
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
-        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        let render_target_views =
+            encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         // HDR: read-write (miss shader reads current value and adds sun contribution)
         encoder.use_image_resource(
@@ -628,17 +641,17 @@ fn shadow_pass(
         );
         // Lock sky atmosphere LUTs for reading in the miss shader
         let transmittance_view = encoder.lock(
-            &luts.transmittance.view,
+            &atmosphere_luts.transmittance.view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         let sky_view = encoder.lock(
-            &luts.sky_view.view,
+            &atmosphere_luts.sky_view.view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
 
         encoder.use_image_resource(
             transmittance_view.image(),
-            &mut luts.transmittance.state,
+            &mut atmosphere_luts.transmittance.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             0..1,
@@ -647,7 +660,7 @@ fn shadow_pass(
         );
         encoder.use_image_resource(
             sky_view.image(),
-            &mut luts.sky_view.state,
+            &mut atmosphere_luts.sky_view.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             0..1,
@@ -680,10 +693,19 @@ fn shadow_pass(
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
-                .sky_linear_sampler(&luts.sampler)
+                .sky_linear_sampler(&atmosphere_luts.sampler)
                 .as_slice(),
         );
-        encoder.trace_rays(shadow_sbt, 0, sbt_buffer, UVec3 { x: hdr.extent.x, y: hdr.extent.y, z: 1 });
+        encoder.trace_rays(
+            shadow_sbt,
+            0,
+            sbt_buffer,
+            UVec3 {
+                x: hdr.extent.x,
+                y: hdr.extent.y,
+                z: 1,
+            },
+        );
     });
 }
 
@@ -695,8 +717,7 @@ fn final_gather_pass(
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
-    atmosphere: Res<AtmosphereState>,
-    mut luts: ResMut<AtmosphereLUTs>,
+    mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     blue_noise: Res<BlueNoiseTextures>,
     texture_assets: Res<Assets<TextureAsset>>,
@@ -733,7 +754,9 @@ fn final_gather_pass(
         model: glam_to_vk_transform(transform.affine()),
         tan_half_fov: camera.tan_half_fov(),
     };
-    let atmosphere_uniform_buffer = atmosphere.uniform_buffer.as_ref().unwrap().clone();
+    let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
+        return;
+    };
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, gather_sbt.layout(), |slice| {
@@ -747,7 +770,8 @@ fn final_gather_pass(
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
-        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        let render_target_views =
+            encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         // HDR: read-write (additive indirect contribution)
         encoder.use_image_resource(
@@ -804,17 +828,17 @@ fn final_gather_pass(
         );
         // Sky atmosphere LUTs
         let transmittance_view = encoder.lock(
-            &luts.transmittance.view,
+            &atmosphere_luts.transmittance.view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         let sky_view = encoder.lock(
-            &luts.sky_view.view,
+            &atmosphere_luts.sky_view.view,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
 
         encoder.use_image_resource(
             transmittance_view.image(),
-            &mut luts.transmittance.state,
+            &mut atmosphere_luts.transmittance.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             0..1,
@@ -823,7 +847,7 @@ fn final_gather_pass(
         );
         encoder.use_image_resource(
             sky_view.image(),
-            &mut luts.sky_view.state,
+            &mut atmosphere_luts.sky_view.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             0..1,
@@ -856,7 +880,7 @@ fn final_gather_pass(
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
-                .sky_linear_sampler(&luts.sampler)
+                .sky_linear_sampler(&atmosphere_luts.sampler)
                 .blue_noise_cosine(noise_texture.deref())
                 .as_slice(),
         );
@@ -868,7 +892,16 @@ fn final_gather_pass(
             bytemuck::bytes_of(&frame_index),
         );
 
-        encoder.trace_rays(gather_sbt, 0, sbt_buffer, UVec3 { x: hdr.extent.x, y: hdr.extent.y, z: 1 });
+        encoder.trace_rays(
+            gather_sbt,
+            0,
+            sbt_buffer,
+            UVec3 {
+                x: hdr.extent.x,
+                y: hdr.extent.y,
+                z: 1,
+            },
+        );
     });
 }
 
@@ -940,7 +973,8 @@ fn tonemap_pass(
             TonemapParams::new()
                 .hdr_input(&render_target_views.hdr_output)
                 .ldr_output(swapchain_target.linear_view())
-                .sdr_input(render_target_views.sdr_target.linear_view()).as_slice(),
+                .sdr_input(render_target_views.sdr_target.linear_view())
+                .as_slice(),
         );
 
         encoder.push_constants(
@@ -950,7 +984,11 @@ fn tonemap_pass(
             bytemuck::bytes_of(&exposure),
         );
 
-        encoder.dispatch(UVec3::new(hdr.extent.x.div_ceil(8), hdr.extent.y.div_ceil(8), 1));
+        encoder.dispatch(UVec3::new(
+            hdr.extent.x.div_ceil(8),
+            hdr.extent.y.div_ceil(8),
+            1,
+        ));
     });
 }
 
@@ -968,10 +1006,8 @@ fn start_occluding_render_pass(
         return;
     };
     ctx.record(|encoder| {
-        let render_target_views = encoder.lock(
-            &hdr.view,
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-        );
+        let render_target_views =
+            encoder.lock(&hdr.view, vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT);
 
         encoder.use_image_resource(
             render_target_views.sdr_target.image(),
