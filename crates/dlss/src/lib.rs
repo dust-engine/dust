@@ -311,6 +311,134 @@ impl NgxContext {
         }
         Ok(ParameterMap(NonNull::new(parameters).unwrap()))
     }
+
+    /// Probes the driver capability map for DLSS-RR (Ray Reconstruction).
+    ///
+    /// Returns `Ok(())` if the runtime reports the feature as available. If
+    /// unavailable, surfaces the most specific failure NGX provides — the
+    /// per-feature `FeatureInitResult` if set, otherwise
+    /// [`sys::NVSDK_NGX_Result::FAIL_FeatureNotSupported`]. A non-zero
+    /// `NeedsUpdatedDriver` flag is logged at warn level.
+    pub fn check_dlss_rr_available(&self) -> DlssResult<()> {
+        let caps = Self::get_capability_parameters()?;
+
+        let available: c_uint = caps
+            .get_param(sys::params::SuperSamplingDenoising_Available)
+            .unwrap_or(0);
+
+        if available != 0 {
+            return Ok(());
+        }
+
+        if let Ok(needs_update) =
+            caps.get_param::<c_uint>(sys::params::SuperSamplingDenoising_NeedsUpdatedDriver)
+            && needs_update != 0
+        {
+            tracing::warn!(target: "ngx", "DLSS-RR unavailable: driver update required");
+        }
+
+        let init_result: c_int = caps
+            .get_param(sys::params::SuperSamplingDenoising_FeatureInitResult)
+            .unwrap_or(0);
+        if init_result != 0 {
+            return Err(sys::NVSDK_NGX_Result(init_result as u32));
+        }
+        Err(sys::NVSDK_NGX_Result::FAIL_FeatureNotSupported)
+    }
+
+    /// Creates a DLSS-RR (Ray Reconstruction) feature on `cmd_buffer`.
+    ///
+    /// Mirrors the `NGX_VULKAN_CREATE_DLSSD_EXT` C helper: checks runtime
+    /// availability, allocates a parameter map populated from `create_params`,
+    /// and calls `NVSDK_NGX_VULKAN_CreateFeature1` with
+    /// [`sys::NVSDK_NGX_Feature::RayReconstruction`].
+    ///
+    /// `cmd_buffer` must be in the recording state — NGX records its own
+    /// initialization commands into it. The caller is responsible for
+    /// submitting the buffer before evaluating the returned feature.
+    pub fn create_dlssd_feature(
+        &self,
+        cmd_buffer: pumicite::ash::vk::CommandBuffer,
+        create_params: &sys::NVSDK_NGX_DLSSD_Create_Params,
+    ) -> DlssResult<NgxFeature> {
+
+        let mut params = Self::allocate_parameters()?;
+        params.set_param(sys::params::CreationNodeMask, 1u32);
+        params.set_param(sys::params::VisibilityNodeMask, 1u32);
+        params.set_param(sys::params::Width, create_params.InWidth);
+        params.set_param(sys::params::Height, create_params.InHeight);
+        params.set_param(sys::params::OutWidth, create_params.InTargetWidth);
+        params.set_param(sys::params::OutHeight, create_params.InTargetHeight);
+        params.set_param(
+            sys::params::PerfQualityValue,
+            create_params.InPerfQualityValue as c_int,
+        );
+        params.set_param(
+            sys::params::DLSS_Feature_Create_Flags,
+            create_params.InFeatureCreateFlags,
+        );
+        params.set_param(
+            sys::params::DLSS_Enable_Output_Subrects,
+            create_params.InEnableOutputSubrects as c_int,
+        );
+        params.set_param(
+            sys::params::DLSS_Denoise_Mode,
+            create_params.InDenoiseMode as c_uint,
+        );
+        params.set_param(
+            sys::params::DLSS_Roughness_Mode,
+            create_params.InRoughnessMode as c_uint,
+        );
+        params.set_param(
+            sys::params::Use_HW_Depth,
+            create_params.InUseHWDepth as c_uint,
+        );
+
+        let mut handle: *mut sys::NVSDK_NGX_Handle = ptr::null_mut();
+        unsafe {
+            sys::NVSDK_NGX_VULKAN_CreateFeature1(
+                self.device.vk_handle(),
+                cmd_buffer,
+                sys::NVSDK_NGX_Feature::RayReconstruction,
+                params.0.as_ptr(),
+                &mut handle,
+            )
+            .result()?;
+        }
+
+        Ok(NgxFeature {
+            handle: NonNull::new(handle).expect("NGX returned null handle on success"),
+        })
+    }
+}
+
+/// Owns an NGX feature handle (e.g. a DLSS-RR instance).
+///
+/// Created via [`NgxContext::create_dlss_rr_feature`]. Drop calls
+/// `NVSDK_NGX_VULKAN_ReleaseFeature`, which must run before the
+/// [`NgxContext`] that produced it is shut down.
+pub struct NgxFeature {
+    handle: NonNull<sys::NVSDK_NGX_Handle>,
+}
+
+unsafe impl Send for NgxFeature {}
+unsafe impl Sync for NgxFeature {}
+
+impl NgxFeature {
+    /// Raw NGX handle pointer, for `NVSDK_NGX_VULKAN_EvaluateFeature_C`.
+    pub fn handle(&self) -> *mut sys::NVSDK_NGX_Handle {
+        self.handle.as_ptr()
+    }
+}
+
+impl Drop for NgxFeature {
+    fn drop(&mut self) {
+        unsafe {
+            if let Err(e) = sys::NVSDK_NGX_VULKAN_ReleaseFeature(self.handle.as_ptr()).result() {
+                tracing::warn!(target: "ngx", "ReleaseFeature failed: {e}");
+            }
+        }
+    }
 }
 impl Drop for NgxContext {
     fn drop(&mut self) {
