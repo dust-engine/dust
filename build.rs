@@ -7,5 +7,8 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", bazel_bin.display());
     println!("cargo:rustc-link-lib=static=ffx_lpm_cpu");
-    println!("cargo:rerun-if-changed={}", bazel_bin.join("ffx_lpm_cpu.lib").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        bazel_bin.join("ffx_lpm_cpu.lib").display()
+    );
 }

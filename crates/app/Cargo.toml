@@ -1,0 +1,13 @@
+[package]
+name = "dust_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy.workspace = true
+bevy_pumicite.workspace = true
+pumicite.workspace = true
+runfiles = "0.2"
+atomicow = "1"
+futures-lite = "2"
+directories = "6"

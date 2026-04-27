@@ -100,3 +100,13 @@ crate.annotation(
 )
 crate.from_specs(name = "bindeps")
 use_repo(crate, "bindeps")
+
+# -----------------------------------------------------------------------------
+# NVIDIA DLSS
+# -----------------------------------------------------------------------------
+new_git_repository(
+    name = "dlss",
+    remote = "https://github.com/NVIDIA/DLSS.git",
+    commit = "d1bef2006b41eefd9d44b0a05f123993f3acbf3c",
+    build_file = "//third_party:dlss.BUILD.bazel",
+)

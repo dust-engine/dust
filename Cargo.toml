@@ -13,6 +13,8 @@ members = [
 dust_vdb = { path = "crates/vdb" }
 dust_vox = { path = "crates/vox" }
 dust_pbr = { path = "crates/pbr" }
+dust_app = { path = "crates/app" }
+dust_dlss = { path = "crates/dlss" }
 pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "dbf6e131f2b6f8fece3d77e6e1e2e044ca917af6" }
 bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "dbf6e131f2b6f8fece3d77e6e1e2e044ca917af6" }
 pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "dbf6e131f2b6f8fece3d77e6e1e2e044ca917af6" }
@@ -20,12 +22,11 @@ pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "db
 [dependencies]
 dust_vox.workspace = true
 dust_pbr.workspace = true
+dust_app.workspace = true
+dust_dlss.workspace = true
 bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
-atomicow = "1"
-futures-lite = "2"
-runfiles = "0.2"
 
 [workspace.dependencies.bevy]
 version = "0.17.0-dev"

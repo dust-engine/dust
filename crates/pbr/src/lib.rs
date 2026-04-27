@@ -108,7 +108,10 @@ impl Plugin for PbrRenderPlugin {
         app.add_device_extension::<pumicite::ash::khr::robustness2::Meta>()
             .or_else(|_| app.add_device_extension::<pumicite::ash::ext::robustness2::Meta>())
             .ok(); // Enable either VK_KHR_robustness2 or VK_EXT_robustness2. This allows us to write null descriptors - required by pumicite cli codegen
-        app.enable_feature::<vk::PhysicalDeviceRobustness2FeaturesKHR>(|feature| &mut feature.null_descriptor).ok();
+        app.enable_feature::<vk::PhysicalDeviceRobustness2FeaturesKHR>(|feature| {
+            &mut feature.null_descriptor
+        })
+        .ok();
     }
 }
 

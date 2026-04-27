@@ -1,6 +1,5 @@
 #![feature(impl_trait_in_fn_trait_return)]
 
-mod bazel_asset;
 mod flycam;
 
 use bevy::prelude::*;
@@ -10,14 +9,16 @@ use crate::flycam::{FlyCamera, FlyCameraPlugin};
 fn main() {
     let mut app = bevy::app::App::new();
 
-    app.register_asset_source("bazel", bazel_asset::bazel_asset_source());
-
-    app.add_plugins(bevy::DefaultPlugins)
+    app.add_plugins(dust_app::DustApp)
+        .add_plugins(bevy::DefaultPlugins)
         .add_plugins(bevy_pumicite::SurfacePlugin::default())
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())
+        .add_plugins(dust_dlss::DLSSInstancePlugin)
         .add_plugins(bevy_pumicite::PumicitePlugin::default())
         .add_plugins(bevy_pumicite::swapchain::SwapchainPlugin)
-        .add_plugins(FlyCameraPlugin);
+        .add_plugins(dust_dlss::DLSSPlugin);
+
+    app.add_plugins(FlyCameraPlugin);
 
     // Dust plugins
     app.add_plugins(dust_pbr::PbrRenderPlugin)
@@ -31,17 +32,17 @@ fn main() {
         .unwrap();
     app.world_mut()
         .entity_mut(primary_window)
-        .insert(bevy_pumicite::swapchain::SwapchainConfig {
-            image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            color_mode: SwapchainColorMode::ScRgbLinear,
-            ..Default::default()
-        })
         .insert((
             dust_pbr::camera::Camera::default(),
             GlobalTransform::default(),
             Transform::from_translation(Vec3::new(122.0, 300.61, 54.45)),
             FlyCamera::default(),
-        ));
+        ))
+        .insert(bevy_pumicite::swapchain::SwapchainConfig {
+            image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            color_mode: SwapchainColorMode::HDR,
+            ..Default::default()
+        });
 
     app.add_systems(Startup, startup_system);
 

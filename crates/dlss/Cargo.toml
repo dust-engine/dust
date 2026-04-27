@@ -1,0 +1,15 @@
+[package]
+name = "dust_dlss"
+version = "0.1.0"
+edition = "2024"
+
+# Safe(ish) Rust wrapper around the NVIDIA DLSS NGX SDK.
+# This crate is the only place inside dust that calls into nvsdk_ngx_*; everything
+# above (engine integration, Bevy plugin, render-graph node) lives in dust_pbr.
+
+[dependencies]
+bevy.workspace = true
+pumicite.workspace = true
+bevy_pumicite.workspace = true
+dust_app.workspace = true
+tracing = "0.1"

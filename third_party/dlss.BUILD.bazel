@@ -1,0 +1,35 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "dlss_headers",
+    hdrs = glob(["include/*.h"]),
+    includes = ["include"],
+)
+
+cc_import(
+    name = "dlss_windows",
+    # nvsdk_ngx_d.lib is a static library (not an import lib) — _d denotes
+    # dynamic-CRT linkage which matches Rust's MSVC default. The actual
+    # feature implementation lives in nvngx_dlssd.dll, loaded at runtime
+    # by NGX from the application directory.
+    static_library = "lib/Windows_x86_64/x64/nvsdk_ngx_d.lib",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+cc_import(
+    name = "dlss_linux",
+    static_library = "lib/Linux_x86_64/libnvsdk_ngx.a",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+cc_library(
+    name = "dlss",
+    deps = [":dlss_headers"] + select({
+        "@platforms//os:windows": [":dlss_windows"],
+        "@platforms//os:linux": [":dlss_linux"],
+        "//conditions:default": [],
+    }),
+)
