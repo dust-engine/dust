@@ -1808,6 +1808,7 @@ dependencies = [
  "bevy_pumicite",
  "dust_app",
  "pumicite",
+ "runfiles",
  "tracing",
 ]
 
@@ -1818,6 +1819,7 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "bytemuck",
+ "dust_dlss",
  "glam",
  "pumicite",
  "pumicite_egui",

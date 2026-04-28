@@ -4,6 +4,7 @@
 //! (`NgxContext`, `DlssRrFeature`, `Resource`) land in later stages once the
 //! engine has motion vectors, jitter, and split render/output resolutions.
 
+use pumicite::ash::vk;
 use pumicite::utils::AsVkHandle;
 use pumicite::Device;
 use std::ffi::{c_int, c_uint, c_void, c_ulonglong};
@@ -15,7 +16,7 @@ use crate::sys::wchar_t;
 pub use bevy::*;
 
 mod bevy;
-mod sys;
+pub mod sys;
 
 const PROJECT_ID: &CStr = c"d6922120-3e84-46b5-bf33-dabeea210fd5";
 const ENGINE_VERSION: &CStr = c"1.0";
@@ -102,6 +103,13 @@ impl ParameterMap {
     /// Writes a value into the parameter map by name.
     pub fn set_param<T: NgxParam>(&mut self, name: &CStr, value: T) {
         unsafe { T::set(self.0.as_ptr(), name.as_ptr(), value) }
+    }
+
+    /// Stores a pointer to `resource`'s underlying [`sys::NVSDK_NGX_Resource_VK`]
+    /// in the parameter map. NGX does not copy the struct — `resource` must
+    /// remain valid until the command buffer that consumes it has completed.
+    pub fn set_resource(&mut self, name: &CStr, resource: &Resource) {
+        self.set_param(name, resource.as_ngx_ptr());
     }
 }
 
@@ -205,11 +213,8 @@ impl sys::NVSDK_NGX_FeatureDiscoveryInfo {
     }
 }
 
-/// Owns the NGX runtime + capability parameter map for the lifetime of the app.
-///
-/// Inserted as a Bevy resource by [`DLSSPlugin::finish`]. Dropping the resource
-/// destroys the parameter map and calls `NVSDK_NGX_VULKAN_Shutdown1`, so the
-/// context must be removed before the [`Device`] it references is destroyed.
+/// Implicitly owns the NGX context. NGX functions are non-threadsafe, so we generally
+/// require the caller to NGX functions to acquire mutable ownership to this struct.
 pub struct NgxContext {
     device: Device,
 }
@@ -220,12 +225,37 @@ unsafe impl Sync for NgxContext {}
 impl NgxContext {
     /// Allocates the capability parameter map and probes DLSS-RR availability.
     /// Must be called only after `NVSDK_NGX_VULKAN_Init_with_ProjectID` succeeded.
-    fn new(device: Device, application_data_path: &[wchar_t]) -> DlssResult<Self> {
+    ///
+    /// `feature_search_paths` are passed to NGX as `PathListInfo` and
+    /// determine where the SDK looks for the `nvngx_dlssd.dll` /
+    /// `libnvidia-ngx-dlssd.so` runtime in addition to the application
+    /// directory. Each path must be a NUL-terminated `wchar_t` slice.
+    fn new(
+        device: Device,
+        application_data_path: &[wchar_t],
+    ) -> DlssResult<Self> {
         assert_eq!(
             application_data_path.last(),
             Some(&0),
             "application_data_path must be null-terminated"
         );
+
+        let runfile_dll_dir = match runfiles::Runfiles::create().and_then(|runfiles| {
+                #[cfg(target_os = "windows")]
+                const DLSSD_RUNFILES_PATH: &str = "dlss/lib/Windows_x86_64/rel/nvngx_dlssd.dll";
+                #[cfg(target_os = "linux")]
+                const DLSSD_RUNFILES_PATH: &str = "dlss/lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.6.0";
+                runfiles::rlocation!(runfiles, DLSSD_RUNFILES_PATH).ok_or(runfiles::RunfilesError::RunfilesDirNotFound)
+        }) {
+            Ok(runfiles) => Some(runfiles),
+            Err(e) => {
+                tracing::warn!("DLSS DLLs not found in runfiles dir {}", e);
+                None
+            },
+        };
+        let runfile_dll_dir = runfile_dll_dir.as_ref().and_then(|x| x.parent()).map(encode_app_data_path);
+        let mut runfile_dll_dir_ptr = runfile_dll_dir.map(|x| x.as_ptr()).unwrap_or_default();
+
         unsafe {
             sys::NVSDK_NGX_VULKAN_Init_with_ProjectID(
                 PROJECT_ID.as_ptr(),
@@ -238,10 +268,14 @@ impl NgxContext {
                 Some(device.instance().entry().static_fn().get_instance_proc_addr),
                 Some(device.instance().fp_v1_0().get_device_proc_addr),
                 &sys::NVSDK_NGX_FeatureCommonInfo {
-                    PathListInfo: sys::NVSDK_NGX_PathListInfo {
-                        Path: std::ptr::null(),
-                        Length: 0,
-                    },
+                    PathListInfo: if runfile_dll_dir_ptr.is_null() {
+                            sys::NVSDK_NGX_PathListInfo::default()
+                        } else {
+                            sys::NVSDK_NGX_PathListInfo {
+                                Path: &mut runfile_dll_dir_ptr,
+                                Length: 1,
+                            }
+                        },
                     InternalData: std::ptr::null_mut(),
                     LoggingInfo: sys::NVSDK_NGX_LoggingInfo {
                         LoggingCallback: Some(ngx_log_callback),
@@ -279,7 +313,7 @@ impl NgxContext {
     // This function may return NVSDK_NGX_Result_FAIL_OutOfDate if using an
     // older driver that does not support this API call. In such a case,
     // NVSDK_NGX_GetParameters may be used as a fallback.
-    pub fn allocate_parameters() -> DlssResult<ParameterMap> {
+    pub fn allocate_parameters(&mut self) -> DlssResult<ParameterMap> {
         let mut parameters: *mut sys::NVSDK_NGX_Parameter = ptr::null_mut();
         unsafe {
             sys::NVSDK_NGX_VULKAN_AllocateParameters(&mut parameters).result()?;
@@ -304,7 +338,7 @@ impl NgxContext {
     // This function may return NVSDK_NGX_Result_FAIL_OutOfDate if using an
     // older driver that does not support this API call. In such a case,
     // NVSDK_NGX_GetParameters may be used as a fallback.
-    pub fn get_capability_parameters() -> DlssResult<ParameterMap> {
+    pub fn get_capability_parameters(&mut self) -> DlssResult<ParameterMap> {
         let mut parameters: *mut sys::NVSDK_NGX_Parameter = ptr::null_mut();
         unsafe {
             sys::NVSDK_NGX_VULKAN_GetCapabilityParameters(&mut parameters).result()?;
@@ -319,8 +353,8 @@ impl NgxContext {
     /// per-feature `FeatureInitResult` if set, otherwise
     /// [`sys::NVSDK_NGX_Result::FAIL_FeatureNotSupported`]. A non-zero
     /// `NeedsUpdatedDriver` flag is logged at warn level.
-    pub fn check_dlss_rr_available(&self) -> DlssResult<()> {
-        let caps = Self::get_capability_parameters()?;
+    pub fn check_dlss_rr_available(&mut self) -> DlssResult<()> {
+        let caps = self.get_capability_parameters()?;
 
         let available: c_uint = caps
             .get_param(sys::params::SuperSamplingDenoising_Available)
@@ -357,51 +391,21 @@ impl NgxContext {
     /// initialization commands into it. The caller is responsible for
     /// submitting the buffer before evaluating the returned feature.
     pub fn create_dlssd_feature(
-        &self,
+        &mut self,
         cmd_buffer: pumicite::ash::vk::CommandBuffer,
         create_params: &sys::NVSDK_NGX_DLSSD_Create_Params,
     ) -> DlssResult<NgxFeature> {
-
-        let mut params = Self::allocate_parameters()?;
-        params.set_param(sys::params::CreationNodeMask, 1u32);
-        params.set_param(sys::params::VisibilityNodeMask, 1u32);
-        params.set_param(sys::params::Width, create_params.InWidth);
-        params.set_param(sys::params::Height, create_params.InHeight);
-        params.set_param(sys::params::OutWidth, create_params.InTargetWidth);
-        params.set_param(sys::params::OutHeight, create_params.InTargetHeight);
-        params.set_param(
-            sys::params::PerfQualityValue,
-            create_params.InPerfQualityValue as c_int,
-        );
-        params.set_param(
-            sys::params::DLSS_Feature_Create_Flags,
-            create_params.InFeatureCreateFlags,
-        );
-        params.set_param(
-            sys::params::DLSS_Enable_Output_Subrects,
-            create_params.InEnableOutputSubrects as c_int,
-        );
-        params.set_param(
-            sys::params::DLSS_Denoise_Mode,
-            create_params.InDenoiseMode as c_uint,
-        );
-        params.set_param(
-            sys::params::DLSS_Roughness_Mode,
-            create_params.InRoughnessMode as c_uint,
-        );
-        params.set_param(
-            sys::params::Use_HW_Depth,
-            create_params.InUseHWDepth as c_uint,
-        );
-
+        let mut params = self.allocate_parameters()?;
         let mut handle: *mut sys::NVSDK_NGX_Handle = ptr::null_mut();
         unsafe {
-            sys::NVSDK_NGX_VULKAN_CreateFeature1(
+            sys::dust_ngx_vulkan_create_dlssd_ext1(
                 self.device.vk_handle(),
                 cmd_buffer,
-                sys::NVSDK_NGX_Feature::RayReconstruction,
-                params.0.as_ptr(),
+                1,   // Multi GPU only (default 1)
+                1, // Multi GPU only (default 1)
                 &mut handle,
+                params.0.as_ptr(),
+                create_params,
             )
             .result()?;
         }
@@ -440,6 +444,88 @@ impl Drop for NgxFeature {
         }
     }
 }
+
+/// Wraps an [`sys::NVSDK_NGX_Resource_VK`] describing a Vulkan image view that
+/// NGX should read from or write to during feature evaluation.
+///
+/// NGX takes the resource pointer by value into its parameter map and
+/// dereferences it inside `EvaluateFeature`, so `Resource` stores its descriptor
+/// inline. The caller is responsible for keeping the underlying image, view,
+/// and any backing memory alive at least until the command buffer recorded by
+/// the `evaluate` call has completed on the GPU.
+#[repr(transparent)]
+pub struct Resource(sys::NVSDK_NGX_Resource_VK);
+
+impl Resource {
+    /// Builds a resource backed by a Vulkan image view.
+    ///
+    /// `read_write` must be `true` for output / mutated targets and `false`
+    /// for read-only inputs (NGX validates this against the bound descriptor
+    /// type).
+    pub fn image_view(
+        image_view: vk::ImageView,
+        image: vk::Image,
+        subresource_range: vk::ImageSubresourceRange,
+        format: vk::Format,
+        width: u32,
+        height: u32,
+        read_write: bool,
+    ) -> Self {
+        Self(sys::NVSDK_NGX_Resource_VK {
+            Resource: sys::NVSDK_NGX_Resource_VK_Resource {
+                ImageViewInfo: sys::NVSDK_NGX_ImageViewInfo_VK {
+                    ImageView: image_view,
+                    Image: image,
+                    SubresourceRange: subresource_range,
+                    Format: format,
+                    Width: width,
+                    Height: height,
+                },
+            },
+            Type: sys::NVSDK_NGX_Resource_VK_Type::ImageView,
+            ReadWrite: read_write,
+        })
+    }
+
+    fn as_ngx_ptr(&self) -> *mut c_void {
+        &self.0 as *const sys::NVSDK_NGX_Resource_VK as *mut c_void
+    }
+}
+
+/// Inputs and per-frame state for one DLSS-RR evaluate call.
+///
+/// All `Resource` references must outlive the recorded command buffer's GPU
+/// execution. `render_extent` may be smaller than the resource extent when
+/// rendering at sub-output resolution; matrices, hit-distance buffers, and the
+/// roughness texture are optional and should only be supplied if the engine
+/// actually produces them — NGX otherwise infers from packed inputs.
+pub struct DlssRrEvalDesc<'a> {
+    pub color: &'a Resource,
+    pub output: &'a Resource,
+    pub depth: &'a Resource,
+    pub motion_vectors: &'a Resource,
+    pub normals: &'a Resource,
+    pub diffuse_albedo: &'a Resource,
+    pub specular_albedo: &'a Resource,
+    pub roughness: Option<&'a Resource>,
+    pub diffuse_hit_distance: Option<&'a Resource>,
+    pub specular_hit_distance: Option<&'a Resource>,
+    /// Sub-pixel jitter applied to this frame's projection, in pixels.
+    pub jitter_offset: [f32; 2],
+    /// Multiplier applied to the motion-vector texture (typically render
+    /// extent if MVs are stored in NDC, or `[1.0, 1.0]` if in pixels).
+    pub mv_scale: [f32; 2],
+    /// Subrect of the input textures that contains valid render data.
+    pub render_extent: [u32; 2],
+    /// Set on the first frame and after any camera teleport / scene cut, to
+    /// flush DLSS-RR's history.
+    pub reset: bool,
+    pub world_to_view: Option<[[f32; 4]; 4]>,
+    pub view_to_clip: Option<[[f32; 4]; 4]>,
+}
+
+impl NgxFeature {
+}
 impl Drop for NgxContext {
     fn drop(&mut self) {
         unsafe {
@@ -468,5 +554,26 @@ unsafe extern "C" fn ngx_log_callback(
         sys::NVSDK_NGX_Logging_Level::Verbose => {
             tracing::debug!(target: "ngx", ?component, "{msg}")
         }
+    }
+}
+
+/// NUL-terminated `wchar_t` encoding of `path`, suitable for
+/// `NVSDK_NGX_FeatureDiscoveryInfo::ApplicationDataPath`.
+fn encode_app_data_path<'a>(path: &'a std::path::Path) -> std::borrow::Cow<'a, [sys::wchar_t]> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let mut v: Vec<u16> = path.as_os_str().encode_wide().collect();
+        v.push(0);
+        std::borrow::Cow::Owned(v)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let bytes = cache_path.as_os_str().as_bytes();
+        std::borrow::Cow::Borrowed(std::slice::from_raw_parts(
+            bytes.as_ptr() as *const sys::wchar_t,
+            bytes.len(),
+        ))
     }
 }

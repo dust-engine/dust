@@ -33,3 +33,20 @@ cc_library(
         "//conditions:default": [],
     }),
 )
+
+# Release DLLs that NGX loads at runtime. Per section 4.2 of the DLSS
+# Programming Guide, these must ship next to the application binary; the
+# `dev/` variants must NOT be distributed (they include debug overlays).
+#
+# We expose only the DLSS-RR (RayReconstruction, "DLSSD") runtime since
+# that's the only NGX feature dust uses. Add `nvngx_dlss.dll` (super
+# resolution) or `nvngx_dlssg.dll` (frame generation) here if they're ever
+# wired up.
+filegroup(
+    name = "dlssd_runtime",
+    srcs = select({
+        "@platforms//os:windows": ["lib/Windows_x86_64/rel/nvngx_dlssd.dll"],
+        "@platforms//os:linux": ["lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.6.0"],
+        "//conditions:default": [],
+    }),
+)

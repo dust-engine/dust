@@ -29,7 +29,7 @@ use pumicite::{
     rtx::ShaderBindingTable,
     sync::GPUMutex,
     tracking::{Access, ResourceState},
-    utils::glam_to_vk_transform,
+    utils::{AsVkHandle, glam_to_vk_transform},
 };
 use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
 
@@ -61,6 +61,10 @@ impl Plugin for PbrRenderPlugin {
             (
                 create_sbt.before(PbrRenderSet),
                 ensure_hdr_target.in_set(SwapchainSet).before(render),
+                ensure_dlss_feature
+                    .in_set(DefaultRenderSet)
+                    .after(ensure_hdr_target)
+                    .before(render),
                 render
                     .in_set(DefaultRenderSet)
                     .after(PbrRenderSet)
@@ -404,6 +408,95 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
         state.final_gather_sbt = Some(pipeline.create_sbt(state.final_gather_sbt.take()));
     } else {
         state.final_gather_sbt = None;
+    }
+}
+
+/// Holds the active DLSS-RR feature handle and the render extent it was
+/// configured for. Recreated whenever the HDR target's extent changes.
+#[derive(Resource, Default)]
+pub struct DlssState {
+    pub feature: Option<dust_dlss::NgxFeature>,
+    pub configured_extent: UVec2,
+}
+
+fn ensure_dlss_feature(
+    mut ctx: SubmissionState,
+    mut ngx: ResMut<dust_dlss::NgxContext>,
+    state: Option<ResMut<DlssState>>,
+    hdr_target: Option<Res<HdrRenderTarget>>,
+    mut commands: Commands,
+) {
+    ngx.check_dlss_rr_available().unwrap();
+    let Some(hdr) = hdr_target else { return };
+    if hdr.extent.x == 0 || hdr.extent.y == 0 {
+        return;
+    }
+
+    let needs_create = match state.as_deref() {
+        Some(s) => s.configured_extent != hdr.extent || s.feature.is_none(),
+        None => true,
+    };
+    if !needs_create {
+        return;
+    }
+
+    // Drop any previous feature before recording the new one. NGX records
+    // initialization commands into the active command buffer, so this must
+    // happen during a SubmissionState::record callback.
+    let mut state = state;
+    if let Some(s) = state.as_mut() {
+        s.feature = None;
+    }
+
+    let create_params = dust_dlss::sys::NVSDK_NGX_DLSSD_Create_Params {
+        InDenoiseMode: dust_dlss::sys::NVSDK_NGX_DLSS_Denoise_Mode::DLUnified,  // DL based unified upscaler
+        InRoughnessMode: dust_dlss::sys::NVSDK_NGX_DLSS_Roughness_Mode::Packed, // Read roughness from normals.w
+        InUseHWDepth: dust_dlss::sys::NVSDK_NGX_DLSS_Depth_Type::HW,
+        InWidth: hdr.extent.x,
+        InHeight: hdr.extent.y,
+        InTargetWidth: hdr.extent.x,
+        InTargetHeight: hdr.extent.y, // No upscaling for now
+        InPerfQualityValue: dust_dlss::sys::NVSDK_NGX_PerfQuality_Value::Balanced,
+        // MVLowRes is required by DLSS-RR (the SwinDenoiser refuses to
+        // initialize without it): motion vectors are sampled at the input /
+        // render resolution rather than the output resolution.
+        InFeatureCreateFlags: dust_dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::IsHDR
+            | dust_dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::MVLowRes,
+        InEnableOutputSubrects: false,
+    };
+
+    let mut result = None;
+    ctx.record(|encoder| {
+        encoder.emit_barriers();
+        let cmd_buffer = encoder.buffer().vk_handle();
+        result = Some(ngx.create_dlssd_feature(cmd_buffer, &create_params));
+    });
+
+    match result {
+        Some(Ok(feature)) => {
+            tracing::info!(
+                target: "ngx",
+                extent = ?hdr.extent,
+                "Created DLSS-RR feature"
+            );
+            if let Some(mut s) = state {
+                s.feature = Some(feature);
+                s.configured_extent = hdr.extent;
+            } else {
+                commands.insert_resource(DlssState {
+                    feature: Some(feature),
+                    configured_extent: hdr.extent,
+                });
+            }
+        }
+        Some(Err(e)) => {
+            tracing::error!(
+                target: "ngx",
+                extent = ?hdr.extent,
+                "DLSS-RR feature creation failed: {e}"
+            );
+        }
+        None => {}
     }
 }
 

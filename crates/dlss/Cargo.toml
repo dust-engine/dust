@@ -12,4 +12,5 @@ bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
 dust_app.workspace = true
+runfiles = "0.2"
 tracing = "0.1"

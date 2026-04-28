@@ -263,6 +263,14 @@ pub struct NVSDK_NGX_PathListInfo {
     pub Path: *const *const wchar_t,
     pub Length: u32,
 }
+impl Default for NVSDK_NGX_PathListInfo {
+    fn default() -> Self {
+        Self {
+            Path: std::ptr::null(),
+            Length: 0
+        }
+    }
+}
 
 /// Opaque internal NGX state.
 #[repr(C)]
@@ -435,6 +443,19 @@ unsafe extern "C" {
     ) -> NVSDK_NGX_Result;
 
     pub fn NVSDK_NGX_VULKAN_ReleaseFeature(InHandle: *mut NVSDK_NGX_Handle) -> NVSDK_NGX_Result;
+
+    /// C wrapper around the `static inline` `NGX_VULKAN_CREATE_DLSSD_EXT1`
+    /// helper from `nvsdk_ngx_helpers_dlssd_vk.h`. Defined in
+    /// `third_party/dlss_wrapper.c` (target `//third_party:dlss_helpers`).
+    pub fn dust_ngx_vulkan_create_dlssd_ext1(
+        InDevice: vk::Device,
+        InCmdList: vk::CommandBuffer,
+        InCreationNodeMask: c_uint,
+        InVisibilityNodeMask: c_uint,
+        ppOutHandle: *mut *mut NVSDK_NGX_Handle,
+        pInParams: *mut NVSDK_NGX_Parameter,
+        pInDlssDCreateParams: *const NVSDK_NGX_DLSSD_Create_Params,
+    ) -> NVSDK_NGX_Result;
 
     pub fn NVSDK_NGX_VULKAN_EvaluateFeature_C(
         InCmdList: vk::CommandBuffer,

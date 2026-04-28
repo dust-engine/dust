@@ -17,10 +17,17 @@ pub struct DLSSPlugin;
 
 impl Plugin for DLSSPlugin {
     fn build(&self, app: &mut bevy::app::App) {
+        let physical_device = app.world().resource::<PhysicalDevice>();
+        
+        let driver_properties = physical_device
+            .properties()
+            .get::<vk::PhysicalDeviceDriverProperties>();
+        if driver_properties.driver_id != vk::DriverId::NVIDIA_PROPRIETARY {
+            return;
+        }
         let app_settings = app.world().resource::<dust_app::ApplicationSettings>();
         let instance = app.world().resource::<Instance>();
-        let physical_device = app.world().resource::<PhysicalDevice>();
-        let path_buf = encode_app_data_path(app_settings.project_dirs.cache_dir());
+        let path_buf = super::encode_app_data_path(app_settings.project_dirs.cache_dir());
         let info = sys::NVSDK_NGX_FeatureDiscoveryInfo::new(&path_buf);
 
         let props = unsafe {
@@ -46,12 +53,21 @@ impl Plugin for DLSSPlugin {
     }
 
     fn finish(&self, app: &mut bevy::app::App) {
+        let physical_device = app.world().resource::<PhysicalDevice>();
+        let driver_properties = physical_device
+            .properties()
+            .get::<vk::PhysicalDeviceDriverProperties>();
+        if driver_properties.driver_id != vk::DriverId::NVIDIA_PROPRIETARY {
+            return;
+        }
+
         let app_settings = app.world().resource::<dust_app::ApplicationSettings>();
         let device = app.world().resource::<Device>().clone();
 
-        let path_buf = encode_app_data_path(app_settings.project_dirs.cache_dir());
+        let path_buf = super::encode_app_data_path(app_settings.project_dirs.cache_dir());
 
-        let ctx = NgxContext::new(device, &path_buf).expect("Unable to create NGX context");
+        let ctx = NgxContext::new(device, &path_buf)
+            .expect("Unable to create NGX context");
         app.world_mut().insert_resource(ctx);
     }
 }
@@ -67,10 +83,7 @@ impl Plugin for DLSSInstancePlugin {
             .resource::<dust_app::ApplicationSettings>()
             .project_dirs
             .cache_dir();
-        // NGX rejects the discovery info with FAIL_InvalidParameter if this path
-        // doesn't exist, so make sure it does before encoding. Or this could be BS.
-        std::fs::create_dir_all(&cache_dir).expect("failed to create DLSS cache dir");
-        let path_buf = encode_app_data_path(cache_dir);
+        let path_buf = super::encode_app_data_path(cache_dir);
         let info = sys::NVSDK_NGX_FeatureDiscoveryInfo::new(&path_buf);
 
         let props = unsafe {
@@ -90,29 +103,5 @@ impl Plugin for DLSSInstancePlugin {
             app.add_instance_extension_named(name)
                 .unwrap_or_else(|e| panic!("DLSS instance extension {name:?} unavailable: {e:?}"));
         }
-    }
-}
-
-/// NUL-terminated `wchar_t` encoding of `path`, suitable for
-/// `NVSDK_NGX_FeatureDiscoveryInfo::ApplicationDataPath`.
-///
-/// The returned buffer must outlive every NGX call that reads the resulting
-/// `NVSDK_NGX_FeatureDiscoveryInfo` — NGX does *not* copy the string.
-fn encode_app_data_path<'a>(path: &'a std::path::Path) -> std::borrow::Cow<'a, [sys::wchar_t]> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        let mut v: Vec<u16> = path.as_os_str().encode_wide().collect();
-        v.push(0);
-        std::borrow::Cow::Owned(v)
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        let bytes = cache_path.as_os_str().as_bytes();
-        std::borrow::Cow::Borrowed(std::slice::from_raw_parts(
-            bytes.as_ptr() as *const sys::wchar_t,
-            bytes.len(),
-        ))
     }
 }
