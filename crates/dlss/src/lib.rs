@@ -414,6 +414,36 @@ impl NgxContext {
             handle: NonNull::new(handle).expect("NGX returned null handle on success"),
         })
     }
+
+    /// Records a DLSS-RR evaluate dispatch into `cmd_buffer`.
+    ///
+    /// Mirrors the `NGX_VULKAN_EVALUATE_DLSSD_EXT` C helper: writes every
+    /// field of `eval_params` into a freshly-allocated parameter map and
+    /// calls `NVSDK_NGX_VULKAN_EvaluateFeature_C`. NGX consumes the resource
+    /// pointers stored in `eval_params` *during the recorded dispatch*, so
+    /// the `NVSDK_NGX_Resource_VK` values referenced by those pointers — and
+    /// the underlying images, image views, and backing memory — must remain
+    /// valid until the GPU has finished executing `cmd_buffer`.
+    ///
+    /// `cmd_buffer` must be in the recording state and must have been
+    /// allocated from a queue family that supports compute.
+    pub fn evaluate_dlssd(
+        &mut self,
+        cmd_buffer: pumicite::ash::vk::CommandBuffer,
+        feature: &NgxFeature,
+        eval_params: &mut sys::NVSDK_NGX_VK_DLSSD_Eval_Params,
+    ) -> DlssResult<()> {
+        let params = self.allocate_parameters()?;
+        unsafe {
+            sys::dust_ngx_vulkan_evaluate_dlssd_ext(
+                cmd_buffer,
+                feature.handle.as_ptr(),
+                params.0.as_ptr(),
+                eval_params,
+            )
+            .result()
+        }
+    }
 }
 
 /// Owns an NGX feature handle (e.g. a DLSS-RR instance).

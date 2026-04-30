@@ -26,3 +26,16 @@ NVSDK_NGX_Result dust_ngx_vulkan_create_dlssd_ext1(
         p_in_params,
         p_in_dlssd_create_params);
 }
+
+NVSDK_NGX_Result dust_ngx_vulkan_evaluate_dlssd_ext(
+    VkCommandBuffer in_cmd_list,
+    NVSDK_NGX_Handle *p_in_handle,
+    NVSDK_NGX_Parameter *p_in_params,
+    NVSDK_NGX_VK_DLSSD_Eval_Params *p_in_dlssd_eval_params)
+{
+    return NGX_VULKAN_EVALUATE_DLSSD_EXT(
+        in_cmd_list,
+        p_in_handle,
+        p_in_params,
+        p_in_dlssd_eval_params);
+}

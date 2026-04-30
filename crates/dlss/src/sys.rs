@@ -330,6 +330,156 @@ pub struct NVSDK_NGX_DLSSD_Create_Params {
 }
 
 // ============================================================================
+// DLSS-D Evaluate params
+// ============================================================================
+
+/// Slots in [`NVSDK_NGX_VK_GBuffer::pInAttrib`]; from `NVSDK_NGX_GBufferType`
+/// in `nvsdk_ngx_defs.h`. The array is sized to `NVSDK_NGX_GBUFFERTYPE_NUM`
+/// (16) so the C ABI matches even when callers leave most slots null.
+pub const NVSDK_NGX_GBUFFERTYPE_NUM: usize = 16;
+
+#[repr(C)]
+pub struct NVSDK_NGX_VK_GBuffer {
+    pub pInAttrib: [*mut NVSDK_NGX_Resource_VK; NVSDK_NGX_GBUFFERTYPE_NUM],
+}
+
+#[repr(u32)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum NVSDK_NGX_ToneMapperType {
+    String = 0,
+    Reinhard = 1,
+    OneOverLuma = 2,
+    Aces = 3,
+}
+
+/// `NVSDK_NGX_VK_DLSSD_Eval_Params` — see `nvsdk_ngx_helpers_dlssd_vk.h`.
+///
+/// Layout must match the C struct exactly: every pointer/coordinate slot is
+/// preserved even when unused, because the C helper macro reads each one
+/// unconditionally and forwards it into the parameter map.
+///
+/// Construct via `unsafe { std::mem::zeroed() }` (or
+/// [`NVSDK_NGX_VK_DLSSD_Eval_Params::zeroed`]) and fill only the fields you
+/// need — every field is either a nullable pointer, a numeric "leave at 0
+/// for default" value, or a `Coordinates` whose 0/0 origin is the documented
+/// default.
+#[repr(C)]
+pub struct NVSDK_NGX_VK_DLSSD_Eval_Params {
+    pub pInDiffuseAlbedo: *mut NVSDK_NGX_Resource_VK,
+    pub pInSpecularAlbedo: *mut NVSDK_NGX_Resource_VK,
+    pub pInNormals: *mut NVSDK_NGX_Resource_VK,
+    pub pInRoughness: *mut NVSDK_NGX_Resource_VK,
+
+    pub pInColor: *mut NVSDK_NGX_Resource_VK,
+    pub pInAlpha: *mut NVSDK_NGX_Resource_VK,
+    pub pInOutput: *mut NVSDK_NGX_Resource_VK,
+    pub pInOutputAlpha: *mut NVSDK_NGX_Resource_VK,
+    pub pInDepth: *mut NVSDK_NGX_Resource_VK,
+    pub pInMotionVectors: *mut NVSDK_NGX_Resource_VK,
+    pub InJitterOffsetX: f32,
+    pub InJitterOffsetY: f32,
+    pub InRenderSubrectDimensions: NVSDK_NGX_Dimensions,
+
+    pub InReset: c_int,
+    pub InMVScaleX: f32,
+    pub InMVScaleY: f32,
+    pub pInTransparencyMask: *mut NVSDK_NGX_Resource_VK,
+    pub pInExposureTexture: *mut NVSDK_NGX_Resource_VK,
+    pub pInBiasCurrentColorMask: *mut NVSDK_NGX_Resource_VK,
+    pub InAlphaSubrectBase: NVSDK_NGX_Coordinates,
+    pub InOutputAlphaSubrectBase: NVSDK_NGX_Coordinates,
+    pub InDiffuseAlbedoSubrectBase: NVSDK_NGX_Coordinates,
+    pub InSpecularAlbedoSubrectBase: NVSDK_NGX_Coordinates,
+    pub InNormalsSubrectBase: NVSDK_NGX_Coordinates,
+    pub InRoughnessSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorSubrectBase: NVSDK_NGX_Coordinates,
+    pub InDepthSubrectBase: NVSDK_NGX_Coordinates,
+    pub InMVSubrectBase: NVSDK_NGX_Coordinates,
+    pub InTranslucencySubrectBase: NVSDK_NGX_Coordinates,
+    pub InBiasCurrentColorSubrectBase: NVSDK_NGX_Coordinates,
+    pub InOutputSubrectBase: NVSDK_NGX_Coordinates,
+    pub InPreExposure: f32,
+    pub InExposureScale: f32,
+    pub InIndicatorInvertXAxis: c_int,
+    pub InIndicatorInvertYAxis: c_int,
+
+    pub pInReflectedAlbedo: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorBeforeParticles: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorAfterParticles: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorBeforeTransparency: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorAfterTransparency: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorBeforeFog: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorAfterFog: *mut NVSDK_NGX_Resource_VK,
+    pub pInScreenSpaceSubsurfaceScatteringGuide: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorBeforeScreenSpaceSubsurfaceScattering: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorAfterScreenSpaceSubsurfaceScattering: *mut NVSDK_NGX_Resource_VK,
+    pub pInScreenSpaceRefractionGuide: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorBeforeScreenSpaceRefraction: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorAfterScreenSpaceRefraction: *mut NVSDK_NGX_Resource_VK,
+    pub pInDepthOfFieldGuide: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorBeforeDepthOfField: *mut NVSDK_NGX_Resource_VK,
+    pub pInColorAfterDepthOfField: *mut NVSDK_NGX_Resource_VK,
+    pub pInDiffuseHitDistance: *mut NVSDK_NGX_Resource_VK,
+    pub pInSpecularHitDistance: *mut NVSDK_NGX_Resource_VK,
+    pub pInDiffuseRayDirection: *mut NVSDK_NGX_Resource_VK,
+    pub pInSpecularRayDirection: *mut NVSDK_NGX_Resource_VK,
+    pub pInDiffuseRayDirectionHitDistance: *mut NVSDK_NGX_Resource_VK,
+    pub pInSpecularRayDirectionHitDistance: *mut NVSDK_NGX_Resource_VK,
+    pub InReflectedAlbedoSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorBeforeParticlesSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorAfterParticlesSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorBeforeTransparencySubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorAfterTransparencySubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorBeforeFogSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorAfterFogSubrectBase: NVSDK_NGX_Coordinates,
+    pub InScreenSpaceSubsurfaceScatteringGuideSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorBeforeScreenSpaceSubsurfaceScatteringSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorAfterScreenSpaceSubsurfaceScatteringSubrectBase: NVSDK_NGX_Coordinates,
+    pub InScreenSpaceRefractionGuideSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorBeforeScreenSpaceRefractionSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorAfterScreenSpaceRefractionSubrectBase: NVSDK_NGX_Coordinates,
+    pub InDepthOfFieldGuideSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorBeforeDepthOfFieldSubrectBase: NVSDK_NGX_Coordinates,
+    pub InColorAfterDepthOfFieldSubrectBase: NVSDK_NGX_Coordinates,
+    pub InDiffuseHitDistanceSubrectBase: NVSDK_NGX_Coordinates,
+    pub InSpecularHitDistanceSubrectBase: NVSDK_NGX_Coordinates,
+    pub InDiffuseRayDirectionSubrectBase: NVSDK_NGX_Coordinates,
+    pub InSpecularRayDirectionSubrectBase: NVSDK_NGX_Coordinates,
+    pub InDiffuseRayDirectionHitDistanceSubrectBase: NVSDK_NGX_Coordinates,
+    pub InSpecularRayDirectionHitDistanceSubrectBase: NVSDK_NGX_Coordinates,
+    pub pInWorldToViewMatrix: *mut f32,
+    pub pInViewToClipMatrix: *mut f32,
+
+    pub GBufferSurface: NVSDK_NGX_VK_GBuffer,
+    pub InToneMapperType: NVSDK_NGX_ToneMapperType,
+    pub pInMotionVectors3D: *mut NVSDK_NGX_Resource_VK,
+    pub pInIsParticleMask: *mut NVSDK_NGX_Resource_VK,
+    pub pInAnimatedTextureMask: *mut NVSDK_NGX_Resource_VK,
+    pub pInDepthHighRes: *mut NVSDK_NGX_Resource_VK,
+    pub pInPositionViewSpace: *mut NVSDK_NGX_Resource_VK,
+    pub InFrameTimeDeltaInMsec: f32,
+    pub pInRayTracingHitDistance: *mut NVSDK_NGX_Resource_VK,
+    pub pInMotionVectorsReflections: *mut NVSDK_NGX_Resource_VK,
+    pub pInTransparencyLayer: *mut NVSDK_NGX_Resource_VK,
+    pub InTransparencyLayerSubrectBase: NVSDK_NGX_Coordinates,
+    pub pInTransparencyLayerOpacity: *mut NVSDK_NGX_Resource_VK,
+    pub InTransparencyLayerOpacitySubrectBase: NVSDK_NGX_Coordinates,
+    pub pInTransparencyLayerMvecs: *mut NVSDK_NGX_Resource_VK,
+    pub InTransparencyLayerMvecsSubrectBase: NVSDK_NGX_Coordinates,
+    pub pInDisocclusionMask: *mut NVSDK_NGX_Resource_VK,
+    pub InDisocclusionMaskSubrectBase: NVSDK_NGX_Coordinates,
+}
+
+impl NVSDK_NGX_VK_DLSSD_Eval_Params {
+    /// Zero-initialised eval params — every pointer NULL, every coordinate
+    /// (0, 0), every numeric 0. Matches the documented "leave to 0/0.0f if
+    /// unused" defaults of the C struct.
+    pub fn zeroed() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+// ============================================================================
 // Parameter map (opaque) + setters/getters
 // ============================================================================
 
@@ -446,7 +596,7 @@ unsafe extern "C" {
 
     /// C wrapper around the `static inline` `NGX_VULKAN_CREATE_DLSSD_EXT1`
     /// helper from `nvsdk_ngx_helpers_dlssd_vk.h`. Defined in
-    /// `third_party/dlss_wrapper.c` (target `//third_party:dlss_helpers`).
+    /// `crates/dlss/src/dlss_wrapper.c` (target `//crates/dlss:dlss_helpers`).
     pub fn dust_ngx_vulkan_create_dlssd_ext1(
         InDevice: vk::Device,
         InCmdList: vk::CommandBuffer,
@@ -455,6 +605,16 @@ unsafe extern "C" {
         ppOutHandle: *mut *mut NVSDK_NGX_Handle,
         pInParams: *mut NVSDK_NGX_Parameter,
         pInDlssDCreateParams: *const NVSDK_NGX_DLSSD_Create_Params,
+    ) -> NVSDK_NGX_Result;
+
+    /// C wrapper around the `static inline` `NGX_VULKAN_EVALUATE_DLSSD_EXT`
+    /// helper from `nvsdk_ngx_helpers_dlssd_vk.h`. Defined in
+    /// `crates/dlss/src/dlss_wrapper.c` (target `//crates/dlss:dlss_helpers`).
+    pub fn dust_ngx_vulkan_evaluate_dlssd_ext(
+        InCmdList: vk::CommandBuffer,
+        pInHandle: *mut NVSDK_NGX_Handle,
+        pInParams: *mut NVSDK_NGX_Parameter,
+        pInDlssDEvalParams: *mut NVSDK_NGX_VK_DLSSD_Eval_Params,
     ) -> NVSDK_NGX_Result;
 
     pub fn NVSDK_NGX_VULKAN_EvaluateFeature_C(
