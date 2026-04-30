@@ -3,6 +3,7 @@
 
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
+use bevy::ecs::schedule::{IntoScheduleConfigs, Schedules};
 use bevy::math::U8Vec4;
 use bevy::prelude::*;
 use bevy::reflect::Reflect;
@@ -15,14 +16,15 @@ use bevy::{
 use bevy_pumicite::rtx::RtxPipelineManager;
 use bevy_pumicite::rtx::tlas::TLASInstance;
 use bevy_pumicite::shader::RayTracingPipelineLibrary;
-use bevy_pumicite::{DefaultTransferSet, PumiciteApp, SubmissionState};
+use bevy_pumicite::{CreateDevice, DefaultTransferSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dot_vox::Color;
 use dust_pbr::PbrRenderState;
 use dust_vdb::hierarchy;
-use pumicite::Device;
 use pumicite::ash::{VkResult, vk};
 use pumicite::buffer::{Buffer, BufferLike, ManagedBuffer};
+use pumicite::device::DeviceBuilder;
+use pumicite::{Allocator, Device};
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
@@ -120,38 +122,57 @@ impl Plugin for VoxPlugin {
             geometry::BlasBuilder,
         >::default());
 
-        app.add_device_extension::<pumicite::ash::khr::push_descriptor::Meta>()
-            .unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int64)
-            .unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDeviceFeatures| &mut features.shader_int16)
-            .unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDeviceFloat16Int8FeaturesKHR| {
-            &mut features.shader_int8
-        })
-        .unwrap();
-        app.enable_feature(|features: &mut vk::PhysicalDevice8BitStorageFeatures| {
-            &mut features.storage_buffer8_bit_access
-        })
-        .unwrap();
-
-        app.add_systems(Startup, setup.after(dust_pbr::setup));
-
-        app.add_systems(PostUpdate, write_sbt_entries.in_set(dust_pbr::PbrRenderSet));
-    }
-    fn finish(&self, app: &mut App) {
-        app.init_asset_loader::<VoxLoader>();
-
         if app
             .world()
-            .resource::<Device>()
-            .physical_device()
+            .resource::<pumicite::physical_device::PhysicalDevice>()
             .properties()
             .device_type
             != vk::PhysicalDeviceType::INTEGRATED_GPU
         {
             app.add_systems(PostUpdate, sync_buffers_system.in_set(DefaultTransferSet));
         }
+
+        app.add_systems(
+            Startup,
+            (|mut device_builder: ResMut<DeviceBuilder>| {
+                device_builder
+                    .enable_extension::<pumicite::ash::khr::push_descriptor::Meta>()
+                    .unwrap();
+                device_builder
+                    .enable_feature(|features: &mut vk::PhysicalDeviceFeatures| {
+                        &mut features.shader_int64
+                    })
+                    .unwrap();
+                device_builder
+                    .enable_feature(|features: &mut vk::PhysicalDeviceFeatures| {
+                        &mut features.shader_int16
+                    })
+                    .unwrap();
+                device_builder
+                    .enable_feature(|features: &mut vk::PhysicalDeviceFloat16Int8FeaturesKHR| {
+                        &mut features.shader_int8
+                    })
+                    .unwrap();
+                device_builder
+                    .enable_feature(|features: &mut vk::PhysicalDevice8BitStorageFeatures| {
+                        &mut features.storage_buffer8_bit_access
+                    })
+                    .unwrap();
+            })
+            .before(CreateDevice),
+        );
+
+        app.add_systems(
+            Startup,
+            (|allocator: Res<Allocator>, asset_server: Res<AssetServer>| {
+                asset_server.register_loader(VoxLoader::new(allocator.clone()));
+            })
+            .after(CreateDevice),
+        );
+
+        app.add_systems(Startup, setup.after(dust_pbr::setup));
+
+        app.add_systems(PostUpdate, write_sbt_entries.in_set(dust_pbr::PbrRenderSet));
     }
 }
 

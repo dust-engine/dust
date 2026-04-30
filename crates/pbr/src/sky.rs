@@ -16,8 +16,10 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use bevy_pumicite::CreateDevice;
 use bevy_pumicite::prelude::*;
 use pumicite::buffer::RingBufferSuballocation;
+use pumicite::device::DeviceBuilder;
 use pumicite::{
     Sampler,
     image::{FullImageView, Image},
@@ -35,19 +37,29 @@ pub struct SkyPlugin;
 
 impl Plugin for SkyPlugin {
     fn build(&self, app: &mut App) {
-        // Enable required extensions
-        app.add_device_extension::<ash::khr::push_descriptor::Meta>()
-            .unwrap();
-        app.add_device_extension::<ash::khr::dynamic_rendering::Meta>()
-            .unwrap();
-        app.enable_feature::<vk::PhysicalDeviceDynamicRenderingFeatures>(|x| {
-            &mut x.dynamic_rendering
-        })
-        .unwrap();
-        app.enable_feature::<vk::PhysicalDeviceShaderDrawParameterFeatures>(|x| {
-            &mut x.shader_draw_parameters
-        })
-        .unwrap();
+        // Enable required extensions before device creation
+        app.add_systems(
+            Startup,
+            (|mut device_builder: ResMut<DeviceBuilder>| {
+                device_builder
+                    .enable_extension::<ash::khr::push_descriptor::Meta>()
+                    .unwrap();
+                device_builder
+                    .enable_extension::<ash::khr::dynamic_rendering::Meta>()
+                    .unwrap();
+                device_builder
+                    .enable_feature::<vk::PhysicalDeviceDynamicRenderingFeatures>(|x| {
+                        &mut x.dynamic_rendering
+                    })
+                    .unwrap();
+                device_builder
+                    .enable_feature::<vk::PhysicalDeviceShaderDrawParameterFeatures>(|x| {
+                        &mut x.shader_draw_parameters
+                    })
+                    .unwrap();
+            })
+            .before(CreateDevice),
+        );
 
         // Add egui plugin
         app.add_plugins(pumicite_egui::EguiPlugin::<With<PrimaryWindow>> {
@@ -57,7 +69,7 @@ impl Plugin for SkyPlugin {
         });
 
         // Systems
-        app.add_systems(Startup, setup);
+        app.add_systems(Startup, setup.after(CreateDevice));
         app.add_systems(EguiPrimaryContextPass, egui_ui);
         app.add_systems(
             PostUpdate,

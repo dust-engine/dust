@@ -201,6 +201,11 @@ pub enum VoxLoadingError {
 pub struct VoxLoader {
     allocator: Allocator,
 }
+impl VoxLoader {
+    pub fn new(allocator: Allocator) -> Self {
+        Self { allocator }
+    }
+}
 impl FromWorld for VoxLoader {
     fn from_world(world: &mut World) -> Self {
         Self {

@@ -11,9 +11,10 @@ use std::ops::Deref;
 
 use tonemap::tonemap_pass;
 
+use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bevy_pumicite::{
-    DefaultRenderSet, PumiciteApp, SubmissionState,
+    CreateDevice, DefaultRenderSet, PumiciteApp, SubmissionState,
     loader::TextureAsset,
     rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
     shader::RayTracingPipelineLibrary,
@@ -21,6 +22,7 @@ use bevy_pumicite::{
     swapchain::{SwapchainImage, SwapchainSet},
 };
 use bytemuck::{Pod, Zeroable};
+use pumicite::device::DeviceBuilder;
 use pumicite::{
     Allocator,
     ash::vk::{self, TaggedStructure},
@@ -55,7 +57,7 @@ unsafe impl Zeroable for Uniforms {}
 pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup);
+        app.add_systems(Startup, setup.after(CreateDevice));
         app.add_systems(
             PostUpdate,
             (
@@ -106,16 +108,29 @@ impl Plugin for PbrRenderPlugin {
                 .before(render),
         );
 
-        app.add_device_extension::<pumicite::ash::ext::hdr_metadata::Meta>()
-            .ok();
+        app.add_systems(
+            Startup,
+            (|mut device_builder: ResMut<DeviceBuilder>| {
+                device_builder
+                    .enable_extension::<pumicite::ash::ext::hdr_metadata::Meta>()
+                    .ok();
 
-        app.add_device_extension::<pumicite::ash::khr::robustness2::Meta>()
-            .or_else(|_| app.add_device_extension::<pumicite::ash::ext::robustness2::Meta>())
-            .ok(); // Enable either VK_KHR_robustness2 or VK_EXT_robustness2. This allows us to write null descriptors - required by pumicite cli codegen
-        app.enable_feature::<vk::PhysicalDeviceRobustness2FeaturesKHR>(|feature| {
-            &mut feature.null_descriptor
-        })
-        .ok();
+                // Enable either VK_KHR_robustness2 or VK_EXT_robustness2. This allows us to write
+                // null descriptors - required by pumicite cli codegen
+                device_builder
+                    .enable_extension::<pumicite::ash::khr::robustness2::Meta>()
+                    .or_else(|_| {
+                        device_builder.enable_extension::<pumicite::ash::ext::robustness2::Meta>()
+                    })
+                    .ok();
+                device_builder
+                    .enable_feature::<vk::PhysicalDeviceRobustness2FeaturesKHR>(|feature| {
+                        &mut feature.null_descriptor
+                    })
+                    .ok();
+            })
+            .before(CreateDevice),
+        );
     }
 }
 
@@ -449,7 +464,7 @@ fn ensure_dlss_feature(
     }
 
     let create_params = dust_dlss::sys::NVSDK_NGX_DLSSD_Create_Params {
-        InDenoiseMode: dust_dlss::sys::NVSDK_NGX_DLSS_Denoise_Mode::DLUnified,  // DL based unified upscaler
+        InDenoiseMode: dust_dlss::sys::NVSDK_NGX_DLSS_Denoise_Mode::DLUnified, // DL based unified upscaler
         InRoughnessMode: dust_dlss::sys::NVSDK_NGX_DLSS_Roughness_Mode::Packed, // Read roughness from normals.w
         InUseHWDepth: dust_dlss::sys::NVSDK_NGX_DLSS_Depth_Type::HW,
         InWidth: hdr.extent.x,

@@ -3,6 +3,7 @@
 mod flycam;
 
 use bevy::prelude::*;
+use bevy_pumicite::CreateDevice;
 use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode, tracking::Access};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
@@ -13,10 +14,9 @@ fn main() {
         .add_plugins(bevy::DefaultPlugins)
         .add_plugins(bevy_pumicite::SurfacePlugin::default())
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())
-        .add_plugins(dust_dlss::DLSSInstancePlugin)
+        .add_plugins(dust_dlss::DLSSPlugin)
         .add_plugins(bevy_pumicite::PumicitePlugin::default())
-        .add_plugins(bevy_pumicite::swapchain::SwapchainPlugin)
-        .add_plugins(dust_dlss::DLSSPlugin);
+        .add_plugins(bevy_pumicite::swapchain::SwapchainPlugin);
 
     app.add_plugins(FlyCameraPlugin);
 
@@ -44,7 +44,7 @@ fn main() {
             ..Default::default()
         });
 
-    app.add_systems(Startup, startup_system);
+    app.add_systems(Startup, startup_system.after(CreateDevice));
 
     app.run();
 }

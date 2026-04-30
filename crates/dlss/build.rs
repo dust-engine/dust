@@ -3,10 +3,13 @@ fn main() {
     let manifest_dir = std::path::Path::new(&manifest_dir);
 
     let third_party_dir = manifest_dir
-        .join("bazel-bin/third_party")
+        .join("../../bazel-bin/crates/dlss")
         .canonicalize()
         .expect("bazel-bin/third_party not found — run `bazelisk build //third_party:dlss_helpers` first");
-    println!("cargo:rustc-link-search=native={}", third_party_dir.display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        third_party_dir.display()
+    );
     println!("cargo:rustc-link-lib=static=dlss_helpers");
     println!(
         "cargo:rerun-if-changed={}",

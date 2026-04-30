@@ -9,8 +9,8 @@
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 
 use core::ffi::{c_char, c_int, c_void};
-use std::ffi::{c_uint, c_ulonglong};
 use pumicite::ash::vk;
+use std::ffi::{c_uint, c_ulonglong};
 
 /// `wchar_t` — 16-bit on Windows (UTF-16), 32-bit on Linux (UTF-32).
 /// NGX takes paths as `wchar_t*`, so callers must pre-encode strings.
@@ -267,7 +267,7 @@ impl Default for NVSDK_NGX_PathListInfo {
     fn default() -> Self {
         Self {
             Path: std::ptr::null(),
-            Length: 0
+            Length: 0,
         }
     }
 }

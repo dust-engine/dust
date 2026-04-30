@@ -4,10 +4,10 @@
 //! (`NgxContext`, `DlssRrFeature`, `Resource`) land in later stages once the
 //! engine has motion vectors, jitter, and split render/output resolutions.
 
+use pumicite::Device;
 use pumicite::ash::vk;
 use pumicite::utils::AsVkHandle;
-use pumicite::Device;
-use std::ffi::{c_int, c_uint, c_void, c_ulonglong};
+use std::ffi::{c_int, c_uint, c_ulonglong, c_void};
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 use std::{ffi::CStr, ptr};
@@ -147,11 +147,7 @@ pub trait NgxParam: sealed::Sealed + Sized {
     /// # Safety
     /// `map` must be a valid parameter-map pointer and `name` must be a
     /// NUL-terminated C string.
-    unsafe fn set(
-        map: *mut sys::NVSDK_NGX_Parameter,
-        name: *const std::ffi::c_char,
-        value: Self,
-    );
+    unsafe fn set(map: *mut sys::NVSDK_NGX_Parameter, name: *const std::ffi::c_char, value: Self);
 }
 
 macro_rules! impl_ngx_param {
@@ -163,10 +159,7 @@ macro_rules! impl_ngx_param {
                 name: *const std::ffi::c_char,
             ) -> DlssResult<Self> {
                 let mut out = MaybeUninit::<Self>::uninit();
-                unsafe {
-                    sys::$getter(map, name, out.as_mut_ptr())
-                        .assume_init_on_success(out)
-                }
+                unsafe { sys::$getter(map, name, out.as_mut_ptr()).assume_init_on_success(out) }
             }
 
             unsafe fn set(
@@ -180,11 +173,19 @@ macro_rules! impl_ngx_param {
     };
 }
 
-impl_ngx_param!(c_ulonglong, NVSDK_NGX_Parameter_GetULL, NVSDK_NGX_Parameter_SetULL);
+impl_ngx_param!(
+    c_ulonglong,
+    NVSDK_NGX_Parameter_GetULL,
+    NVSDK_NGX_Parameter_SetULL
+);
 impl_ngx_param!(f32, NVSDK_NGX_Parameter_GetF, NVSDK_NGX_Parameter_SetF);
 impl_ngx_param!(c_uint, NVSDK_NGX_Parameter_GetUI, NVSDK_NGX_Parameter_SetUI);
 impl_ngx_param!(c_int, NVSDK_NGX_Parameter_GetI, NVSDK_NGX_Parameter_SetI);
-impl_ngx_param!(*mut c_void, NVSDK_NGX_Parameter_GetVoidPointer, NVSDK_NGX_Parameter_SetVoidPointer);
+impl_ngx_param!(
+    *mut c_void,
+    NVSDK_NGX_Parameter_GetVoidPointer,
+    NVSDK_NGX_Parameter_SetVoidPointer
+);
 
 impl sys::NVSDK_NGX_FeatureDiscoveryInfo {
     /// `app_data_path` must be a NUL-terminated `wchar_t` string and must remain
@@ -230,10 +231,7 @@ impl NgxContext {
     /// determine where the SDK looks for the `nvngx_dlssd.dll` /
     /// `libnvidia-ngx-dlssd.so` runtime in addition to the application
     /// directory. Each path must be a NUL-terminated `wchar_t` slice.
-    fn new(
-        device: Device,
-        application_data_path: &[wchar_t],
-    ) -> DlssResult<Self> {
+    fn new(device: Device, application_data_path: &[wchar_t]) -> DlssResult<Self> {
         assert_eq!(
             application_data_path.last(),
             Some(&0),
@@ -241,20 +239,28 @@ impl NgxContext {
         );
 
         let runfile_dll_dir = match runfiles::Runfiles::create().and_then(|runfiles| {
-                #[cfg(target_os = "windows")]
-                const DLSSD_RUNFILES_PATH: &str = "dlss/lib/Windows_x86_64/rel/nvngx_dlssd.dll";
-                #[cfg(target_os = "linux")]
-                const DLSSD_RUNFILES_PATH: &str = "dlss/lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.6.0";
-                runfiles::rlocation!(runfiles, DLSSD_RUNFILES_PATH).ok_or(runfiles::RunfilesError::RunfilesDirNotFound)
+            #[cfg(target_os = "windows")]
+            const DLSSD_RUNFILES_PATH: &str = "dlss/lib/Windows_x86_64/rel/nvngx_dlssd.dll";
+            #[cfg(target_os = "linux")]
+            const DLSSD_RUNFILES_PATH: &str =
+                "dlss/lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.6.0";
+            runfiles::rlocation!(runfiles, DLSSD_RUNFILES_PATH)
+                .ok_or(runfiles::RunfilesError::RunfilesDirNotFound)
         }) {
             Ok(runfiles) => Some(runfiles),
             Err(e) => {
                 tracing::warn!("DLSS DLLs not found in runfiles dir {}", e);
                 None
-            },
+            }
         };
-        let runfile_dll_dir = runfile_dll_dir.as_ref().and_then(|x| x.parent()).map(encode_app_data_path);
-        let mut runfile_dll_dir_ptr = runfile_dll_dir.map(|x| x.as_ptr()).unwrap_or_default();
+        let runfile_dll_dir = runfile_dll_dir
+            .as_ref()
+            .and_then(|x| x.parent())
+            .map(encode_app_data_path);
+        let mut runfile_dll_dir_ptr = runfile_dll_dir
+            .as_ref()
+            .map(|x| x.as_ptr())
+            .unwrap_or_default();
 
         unsafe {
             sys::NVSDK_NGX_VULKAN_Init_with_ProjectID(
@@ -269,13 +275,13 @@ impl NgxContext {
                 Some(device.instance().fp_v1_0().get_device_proc_addr),
                 &sys::NVSDK_NGX_FeatureCommonInfo {
                     PathListInfo: if runfile_dll_dir_ptr.is_null() {
-                            sys::NVSDK_NGX_PathListInfo::default()
-                        } else {
-                            sys::NVSDK_NGX_PathListInfo {
-                                Path: &mut runfile_dll_dir_ptr,
-                                Length: 1,
-                            }
-                        },
+                        sys::NVSDK_NGX_PathListInfo::default()
+                    } else {
+                        sys::NVSDK_NGX_PathListInfo {
+                            Path: &mut runfile_dll_dir_ptr,
+                            Length: 1,
+                        }
+                    },
                     InternalData: std::ptr::null_mut(),
                     LoggingInfo: sys::NVSDK_NGX_LoggingInfo {
                         LoggingCallback: Some(ngx_log_callback),
@@ -401,7 +407,7 @@ impl NgxContext {
             sys::dust_ngx_vulkan_create_dlssd_ext1(
                 self.device.vk_handle(),
                 cmd_buffer,
-                1,   // Multi GPU only (default 1)
+                1, // Multi GPU only (default 1)
                 1, // Multi GPU only (default 1)
                 &mut handle,
                 params.0.as_ptr(),
@@ -554,8 +560,7 @@ pub struct DlssRrEvalDesc<'a> {
     pub view_to_clip: Option<[[f32; 4]; 4]>,
 }
 
-impl NgxFeature {
-}
+impl NgxFeature {}
 impl Drop for NgxContext {
     fn drop(&mut self) {
         unsafe {
