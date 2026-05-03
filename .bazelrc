@@ -1,1 +1,5 @@
 build --@rules_rust//rust/toolchain/channel:channel=nightly
+
+# Bundle the DLSS development DLLs (with on-screen debug overlays) instead
+# of the release DLLs. Use as `bazelisk run --config=dlss_dev //:dust`.
+build:dlss_dev --define=dlss=dev

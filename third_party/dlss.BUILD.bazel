@@ -34,19 +34,64 @@ cc_library(
     }),
 )
 
-# Release DLLs that NGX loads at runtime. Per section 4.2 of the DLSS
-# Programming Guide, these must ship next to the application binary; the
-# `dev/` variants must NOT be distributed (they include debug overlays).
+# DLLs that NGX loads at runtime. Per section 4.2 of the DLSS Programming
+# Guide, the `rel/` variants ship next to the application binary; the
+# `dev/` variants include debug overlays and indicators useful while
+# developing but MUST NOT be distributed.
+#
+# Pass `--config=dlss_dev` (see .bazelrc) to bundle the development DLLs.
 #
 # We expose only the DLSS-RR (RayReconstruction, "DLSSD") runtime since
 # that's the only NGX feature dust uses. Add `nvngx_dlss.dll` (super
 # resolution) or `nvngx_dlssg.dll` (frame generation) here if they're ever
 # wired up.
+config_setting(
+    name = "dev_windows",
+    values = {"define": "dlss=dev"},
+    constraint_values = ["@platforms//os:windows"],
+)
+
+config_setting(
+    name = "dev_linux",
+    values = {"define": "dlss=dev"},
+    constraint_values = ["@platforms//os:linux"],
+)
+
+# Copy the selected DLSSD library into a stable `runtime/` subdir so callers
+# (in particular the runfiles lookup in dust_denoiser) can reference one
+# fixed path that doesn't change between dev/rel builds. NGX requires the
+# original filenames, so we relocate but don't rename.
+#
+# `genrule.outs` is not configurable, so the dev/rel select goes on `srcs`
+# and the platform split is expressed as two separate per-OS genrules.
+genrule(
+    name = "dlssd_runtime_windows",
+    srcs = select({
+        ":dev_windows": ["lib/Windows_x86_64/dev/nvngx_dlssd.dll"],
+        "//conditions:default": ["lib/Windows_x86_64/rel/nvngx_dlssd.dll"],
+    }),
+    outs = ["runtime/nvngx_dlssd.dll"],
+    cmd = "cp $< $@",
+    cmd_bat = 'copy /Y "$<" "$@"',
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+genrule(
+    name = "dlssd_runtime_linux",
+    srcs = select({
+        ":dev_linux": ["lib/Linux_x86_64/dev/libnvidia-ngx-dlssd.so.310.6.0"],
+        "//conditions:default": ["lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.6.0"],
+    }),
+    outs = ["runtime/libnvidia-ngx-dlssd.so.310.6.0"],
+    cmd = "cp $< $@",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
 filegroup(
     name = "dlssd_runtime",
     srcs = select({
-        "@platforms//os:windows": ["lib/Windows_x86_64/rel/nvngx_dlssd.dll"],
-        "@platforms//os:linux": ["lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.6.0"],
+        "@platforms//os:windows": [":dlssd_runtime_windows"],
+        "@platforms//os:linux": [":dlssd_runtime_linux"],
         "//conditions:default": [],
     }),
 )

@@ -239,11 +239,14 @@ impl NgxContext {
         );
 
         let runfile_dll_dir = match runfiles::Runfiles::create().and_then(|runfiles| {
+            // Stable path produced by the `dlssd_runtime` genrule in
+            // `third_party/dlss.BUILD.bazel`, which copies the dev or rel
+            // variant of the SDK library into `runtime/` based on the
+            // active Bazel config.
             #[cfg(target_os = "windows")]
-            const DLSSD_RUNFILES_PATH: &str = "dlss/lib/Windows_x86_64/rel/nvngx_dlssd.dll";
+            const DLSSD_RUNFILES_PATH: &str = "dlss/runtime/nvngx_dlssd.dll";
             #[cfg(target_os = "linux")]
-            const DLSSD_RUNFILES_PATH: &str =
-                "dlss/lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.6.0";
+            const DLSSD_RUNFILES_PATH: &str = "dlss/runtime/libnvidia-ngx-dlssd.so.310.6.0";
             runfiles::rlocation!(runfiles, DLSSD_RUNFILES_PATH)
                 .ok_or(runfiles::RunfilesError::RunfilesDirNotFound)
         }) {
