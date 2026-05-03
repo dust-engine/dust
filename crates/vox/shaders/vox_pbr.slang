@@ -111,11 +111,13 @@ void closestHitShader(
 
     params.gbuffer.depthTexture[DispatchRaysIndex().xy] = RayTCurrent();
 
-    // Screen-space motion vector: project this frame's world hit through last
-    // frame's camera and take the pixel-space delta.
-    float3 worldHit = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    // Screen-space motion vector: take the object-space hit point, transform
+    // it through the instance's previous-frame world-from-object matrix, then
+    // project through last frame's camera. This captures both camera motion
+    // and per-object motion for moving instances.
+    float3 objectHit = ObjectRayOrigin() + ObjectRayDirection() * RayTCurrent();
     uint2 screenSize = DispatchRaysDimensions().xy;
-    float2 prevPixel = params.uniforms.prevPixelFromWorld(worldHit, screenSize);
+    float2 prevPixel = params.prevPixelFromObjectHit(objectHit, InstanceIndex(), screenSize);
     float2 currPixel = float2(DispatchRaysIndex().xy);
     params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
 }

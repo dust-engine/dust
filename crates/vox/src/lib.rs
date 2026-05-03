@@ -105,7 +105,7 @@ pub struct VoxInstanceBundle {
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub instance: VoxInstance,
-    pub tlas_instance: TLASInstance<()>,
+    pub tlas_instance: TLASInstance<dust_pbr::PbrInstanceData>,
 }
 
 pub struct VoxPlugin;
@@ -231,7 +231,7 @@ struct VoxModelParams {
 
 fn write_sbt_entries(
     mut models: Query<&mut VoxModel>,
-    mut instances: Query<(Entity, &mut TLASInstance<()>), With<VoxInstance>>,
+    mut instances: Query<(Entity, &mut TLASInstance<dust_pbr::PbrInstanceData>), With<VoxInstance>>,
     mut pbr_state: ResMut<PbrRenderState>,
     vox_render_state: Res<VoxRenderState>,
 

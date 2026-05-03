@@ -74,6 +74,11 @@ PipelineLayout(
                         ty: SampledImage,
                         stages: [RayGen]
                     ),
+                    Binding( // Per-instance previous-frame transforms (PbrInstanceData[])
+                        binding: 14,
+                        ty: StorageBuffer,
+                        stages: [ClosestHit]
+                    ),
                 ]
             )
         ),

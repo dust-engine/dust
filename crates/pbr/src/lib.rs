@@ -16,7 +16,10 @@ use bevy::prelude::*;
 use bevy_pumicite::{
     CreateDevice, DefaultRenderSet, PumiciteApp, SubmissionState,
     loader::TextureAsset,
-    rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS},
+    rtx::{
+        RayTracingPipeline, RtxPipelineManager,
+        tlas::{TLAS, TLASInstance, tlas_build_input_upload_system},
+    },
     shader::RayTracingPipelineLibrary,
     staging::{BufferInitializer, UniformRingBuffer},
     swapchain::{SwapchainImage, SwapchainSet},
@@ -60,6 +63,22 @@ struct Uniforms {
 }
 unsafe impl Pod for Uniforms {}
 unsafe impl Zeroable for Uniforms {}
+
+#[derive(Pod, Clone, Copy, Zeroable, bevy::reflect::TypePath)]
+#[repr(C)]
+pub struct PbrInstanceData {
+    /// Row-major 3x4 world-from-object transform from the previous frame.
+    /// Layout matches `vk::TransformMatrixKHR::matrix`. Filled by
+    /// `update_prev_transforms` after the per-instance buffer is uploaded, so
+    /// next frame's upload reads this frame's current transform.
+    pub previous_transform: [f32; 12],
+}
+
+impl Default for PbrInstanceData {
+    fn default() -> Self {
+        Self::zeroed()
+    }
+}
 
 /// Last frame's camera transform and FOV. Held as `Local` state on the
 /// `render` system to fill the `prev_*` fields of the camera uniform.
@@ -109,6 +128,19 @@ fn build_camera_uniform(
     }
 }
 
+/// Snapshot the current world-from-object transform of every TLAS instance
+/// into its `PbrInstanceData::previous_transform` slot. Runs after
+/// `tlas_build_input_upload_system::<PbrInstanceData>`, so this frame's upload
+/// has already consumed the value written last frame; the value we write here
+/// becomes the "previous transform" for next frame's upload.
+fn update_prev_transforms(
+    mut instances: Query<(&GlobalTransform, &mut TLASInstance<PbrInstanceData>)>,
+) {
+    for (transform, mut instance) in instances.iter_mut() {
+        instance.data.previous_transform = glam_to_vk_transform(transform.affine()).matrix;
+    }
+}
+
 pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
@@ -122,10 +154,13 @@ impl Plugin for PbrRenderPlugin {
                     .in_set(DefaultRenderSet)
                     .after(ensure_hdr_target)
                     .before(render),
+                update_prev_transforms
+                    .in_set(DefaultRenderSet)
+                    .after(tlas_build_input_upload_system::<PbrInstanceData>),
                 render
                     .in_set(DefaultRenderSet)
                     .after(PbrRenderSet)
-                    .after(bevy_pumicite::rtx::tlas::tlas_build_system::<()>)
+                    .after(bevy_pumicite::rtx::tlas::tlas_build_system::<PbrInstanceData>)
                     .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
                     .after(OccludingRenderPass)
                     .after(create_sbt),
@@ -158,7 +193,7 @@ impl Plugin for PbrRenderPlugin {
         app.configure_sets(PostUpdate, EguiRenderSet.in_set(OccludingRenderPass));
 
         // Build a TLAS over everything.
-        app.add_plugins(bevy_pumicite::rtx::tlas::TLASBuilderPlugin::<()>::default());
+        app.add_plugins(bevy_pumicite::rtx::tlas::TLASBuilderPlugin::<PbrInstanceData>::default());
 
         app.add_plugins(sky::SkyPlugin);
         app.configure_sets(
@@ -211,7 +246,7 @@ pub struct PbrRenderSet;
 fn render(
     mut ctx: SubmissionState,
     mut state: ResMut<PbrRenderState>,
-    tlas: Res<TLAS>,
+    tlas: Res<TLAS<PbrInstanceData>>,
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
@@ -232,6 +267,10 @@ fn render(
     };
     let Some(sbt) = state.sbt.as_mut() else {
         tracing::warn!("Frame not rendered; missing SBT");
+        return;
+    };
+    let Some(per_instance_mutex) = tlas.tlas_per_instance_data.as_ref() else {
+        tracing::warn!("Frame not rendered; missing per-instance data buffer");
         return;
     };
     let Some(tlas) = tlas.get() else {
@@ -264,6 +303,10 @@ fn render(
 
         let pipeline = encoder.retain(pipeline);
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        let per_instance_buf = encoder.lock(
+            per_instance_mutex,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
         // HDR intermediary at binding 1
@@ -386,6 +429,7 @@ fn render(
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
                 .sky_linear_sampler(&atmosphere_luts.sampler)
+                .per_instance_data(per_instance_buf)
                 .as_slice(),
         );
         encoder.trace_rays(
@@ -1042,7 +1086,7 @@ fn ensure_hdr_target(
 fn shadow_pass(
     mut ctx: SubmissionState,
     mut state: ResMut<PbrRenderState>,
-    tlas: Res<TLAS>,
+    tlas: Res<TLAS<PbrInstanceData>>,
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
@@ -1060,6 +1104,9 @@ fn shadow_pass(
         return;
     };
     let Some(shadow_sbt) = state.shadow_sbt.as_mut() else {
+        return;
+    };
+    let Some(per_instance_mutex) = tlas.tlas_per_instance_data.as_ref() else {
         return;
     };
     let Some(tlas) = tlas.get() else {
@@ -1086,6 +1133,10 @@ fn shadow_pass(
 
         let pipeline = encoder.retain(pipeline);
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        let per_instance_buf = encoder.lock(
+            per_instance_mutex,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
         let render_target_views =
@@ -1200,6 +1251,7 @@ fn shadow_pass(
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
                 .sky_linear_sampler(&atmosphere_luts.sampler)
+                .per_instance_data(per_instance_buf)
                 .as_slice(),
         );
         encoder.trace_rays(
@@ -1218,7 +1270,7 @@ fn shadow_pass(
 fn final_gather_pass(
     mut ctx: SubmissionState,
     mut state: ResMut<PbrRenderState>,
-    tlas: Res<TLAS>,
+    tlas: Res<TLAS<PbrInstanceData>>,
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
@@ -1239,6 +1291,9 @@ fn final_gather_pass(
         return;
     };
     let Some(gather_sbt) = state.final_gather_sbt.as_mut() else {
+        return;
+    };
+    let Some(per_instance_mutex) = tlas.tlas_per_instance_data.as_ref() else {
         return;
     };
     let Some(tlas) = tlas.get() else {
@@ -1270,6 +1325,10 @@ fn final_gather_pass(
 
         let pipeline = encoder.retain(pipeline);
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
+        let per_instance_buf = encoder.lock(
+            per_instance_mutex,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
 
         let render_target_views =
@@ -1385,6 +1444,7 @@ fn final_gather_pass(
                 .sky_sky_view_lut(sky_view)
                 .sky_linear_sampler(&atmosphere_luts.sampler)
                 .blue_noise_cosine(noise_texture.deref())
+                .per_instance_data(per_instance_buf)
                 .as_slice(),
         );
 

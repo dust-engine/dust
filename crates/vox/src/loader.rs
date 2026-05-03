@@ -64,7 +64,10 @@ impl<'a> SceneGraphTraverser<'a> {
                     transform: Transform::default(),
                     global_transform: GlobalTransform::default(),
                     instance: VoxInstance,
-                    tlas_instance: TLASInstance::new(Entity::PLACEHOLDER),
+                    tlas_instance: TLASInstance::new(
+                        Entity::PLACEHOLDER,
+                        dust_pbr::PbrInstanceData::default(),
+                    ),
                 })
                 .id();
             self.instances.push((0, entity));
@@ -339,7 +342,11 @@ impl AssetLoader for VoxLoader {
                     let model_entity = model_handles.get(&model_id).unwrap();
 
                     let mut entity = world.entity_mut(entity_id);
-                    entity.get_mut::<TLASInstance<()>>().as_mut().unwrap().blas = *model_entity;
+                    entity
+                        .get_mut::<TLASInstance<dust_pbr::PbrInstanceData>>()
+                        .as_mut()
+                        .unwrap()
+                        .blas = *model_entity;
                 });
             let scene = bevy::scene::Scene::new(world);
 

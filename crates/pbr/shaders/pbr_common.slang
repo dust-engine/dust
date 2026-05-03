@@ -147,6 +147,14 @@ public struct CameraUniforms {
     }
 }
 
+// Per-TLAS-instance data uploaded by the PBR plugin's `update_prev_transforms`
+// system. `previous_transform` is the entity's GlobalTransform from the
+// previous frame (world-from-object). Used to reproject moving objects' hit
+// points through last frame's camera for DLSS-RR motion vectors.
+public struct PbrInstanceData {
+    public matrix<float, 3, 4> previous_transform;
+}
+
 public struct PbrPipelineGbuffer {
     public RWTexture2D<float4> albedoLinear;
     public Texture2D<float4> albedoSRGB;
@@ -165,6 +173,10 @@ public struct PbrPipelineParams {
     public PbrPipelineGbuffer gbuffer;
     public SkyAtmosphereParams sky;
     public Texture2DArray<float4> blueNoiseCosine;
+    // Per-TLAS-instance data, indexed by InstanceIndex(). Uploaded once per
+    // frame after the TLAS instance buffer; each entry holds the previous
+    // frame's world-from-object transform.
+    public StructuredBuffer<PbrInstanceData> perInstanceData;
 
     // Reconstructs the world-space surface position for a pixel from the gbuffer.
     public float3 pixelPositionWorldSpace(uint2 position, uint2 screenSize) {
@@ -173,6 +185,16 @@ public struct PbrPipelineParams {
         float depth = gbuffer.depthTexture[position];
         float3 worldPos = origin + dir * depth;
         return worldPos;
+    }
+
+    // Pixel coordinate of an object-space hit point as seen through the
+    // previous frame's camera, accounting for the instance's own motion.
+    // `objectHit` is the hit point in object-local coordinates;
+    // `instanceIndex` is the TLAS instance index (i.e. SPIR-V InstanceIndex()).
+    public float2 prevPixelFromObjectHit(float3 objectHit, uint instanceIndex, uint2 screenSize) {
+        float3x4 prevObjToWorld = perInstanceData[instanceIndex].previous_transform;
+        float3 prevWorldHit = mul(prevObjToWorld, float4(objectHit, 1.0));
+        return uniforms.prevPixelFromWorld(prevWorldHit, screenSize);
     }
 }
 
