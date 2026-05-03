@@ -80,18 +80,23 @@ public struct CameraUniforms {
     public float tan_half_fov;
     public float far;
     public float near;
-    float _padding;
+    // Sub-pixel jitter in pixels for the current frame. `jitter_x` reuses
+    // the slot formerly named `_padding`; `jitter_y` reuses the first slot
+    // of `_padding2`. Layout must match the Rust `Uniforms` struct.
+    public float jitter_x;
     // Previous-frame world-from-view matrix and FOV. Used by the primary RT
     // pass to project this frame's hit point through last frame's camera and
     // produce screen-space motion vectors for DLSS-RR.
     public matrix<float, 3, 4> prev_model;
     public float prev_tan_half_fov;
-    float3 _padding2;
+    public float jitter_y;
+    float2 _padding2;
 
     // Camera-space (view-local) primary ray direction for a given pixel.
     // View frame convention: -Z forward, +Y up, +X right.
     public float3 primaryRayDirCameraSpace(uint2 position, uint2 screenSize) {
-        float2 pixelNDC = (float2(position) + 0.5) / float2(screenSize);
+        float2 jitter = float2(jitter_x, jitter_y);
+        float2 pixelNDC = (float2(position) + 0.5 - jitter) / float2(screenSize);
         float2 pixelCamera = 2 * pixelNDC - 1;
         pixelCamera.y *= -1;
         pixelCamera.x *= float(screenSize.x) / float(screenSize.y);

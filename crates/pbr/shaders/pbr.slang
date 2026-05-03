@@ -19,7 +19,10 @@ void rayGenShader() {
         // motion consistent with camera rotation rather than a stationary mask.
         float3 worldDir = params.uniforms.primaryRayDirWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
         float2 prevPixel = params.uniforms.prevPixelFromWorldDir(worldDir, DispatchRaysDimensions().xy);
-        float2 currPixel = float2(DispatchRaysIndex().xy);
+        // Subtract jitter so currPixel is the *un-jittered* projection of the
+        // sample we cast (the jittered ray sampled the world at sub-pixel
+        // p - jitter in unjittered NDC). DLSS expects MV in unjittered grid.
+        float2 currPixel = float2(DispatchRaysIndex().xy) - float2(params.uniforms.jitter_x, params.uniforms.jitter_y);
         params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
         return;
     } else {
@@ -57,6 +60,7 @@ void missShader() {
     // Sky is at infinity — reproject the view direction through the previous
     // camera (rotation only) so DLSS sees motion from camera turn/FOV change.
     float2 prevPixel = params.uniforms.prevPixelFromWorldDir(worldDir, DispatchRaysDimensions().xy);
-    float2 currPixel = float2(DispatchRaysIndex().xy);
+    // See pbr.slang ray-gen for the un-jittering rationale.
+    float2 currPixel = float2(DispatchRaysIndex().xy) - float2(params.uniforms.jitter_x, params.uniforms.jitter_y);
     params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
 }

@@ -118,7 +118,10 @@ void closestHitShader(
     float3 objectHit = ObjectRayOrigin() + ObjectRayDirection() * RayTCurrent();
     uint2 screenSize = DispatchRaysDimensions().xy;
     float2 prevPixel = params.prevPixelFromObjectHit(objectHit, InstanceIndex(), screenSize);
-    float2 currPixel = float2(DispatchRaysIndex().xy);
+    // Subtract jitter: the jittered ray sampled the world at sub-pixel
+    // p - jitter in unjittered NDC, so the un-jittered current projection
+    // of this hit is p - jitter. DLSS expects MV in unjittered grid.
+    float2 currPixel = float2(DispatchRaysIndex().xy) - float2(params.uniforms.jitter_x, params.uniforms.jitter_y);
     params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
 }
 

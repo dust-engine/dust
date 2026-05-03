@@ -53,13 +53,18 @@ struct Uniforms {
     tan_half_fov: f32,
     far: f32,
     near: f32,
-    _padding: f32,
+    /// Sub-pixel jitter applied to the current frame's primary ray, in pixels.
+    /// `jitter_x` is laid out where `_padding` used to be so the existing
+    /// `prev_*` block stays at the same offset; `jitter_y` reuses the first
+    /// slot of `_padding2`.
+    jitter_x: f32,
     /// Previous-frame world-from-view matrix; used by the primary RT pass to
     /// project hit points through last frame's camera and produce screen-space
     /// motion vectors for DLSS-RR.
     prev_model: vk::TransformMatrixKHR,
     prev_tan_half_fov: f32,
-    _padding2: [f32; 3],
+    jitter_y: f32,
+    _padding2: [f32; 2],
 }
 unsafe impl Pod for Uniforms {}
 unsafe impl Zeroable for Uniforms {}
@@ -99,6 +104,7 @@ fn build_camera_uniform(
     camera: &Camera,
     transform: &GlobalTransform,
     prev: Option<&mut PreviousCameraState>,
+    jitter: Vec2,
 ) -> Uniforms {
     let model = glam_to_vk_transform(transform.affine());
     let tan_half_fov = camera.tan_half_fov();
@@ -121,10 +127,11 @@ fn build_camera_uniform(
         near: camera.depth.start,
         model,
         tan_half_fov,
-        _padding: 0.0,
+        jitter_x: jitter.x,
         prev_model,
         prev_tan_half_fov,
-        _padding2: [0.0; 3],
+        jitter_y: jitter.y,
+        _padding2: [0.0; 2],
     }
 }
 
@@ -145,6 +152,7 @@ pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup.after(CreateDevice));
+        app.init_resource::<JitterState>();
         app.add_systems(
             PostUpdate,
             (
@@ -256,6 +264,7 @@ fn render(
     blue_noise: Res<BlueNoiseTextures>,
     texture_assets: Res<Assets<TextureAsset>>,
     mut prev_camera: Local<PreviousCameraState>,
+    jitter: Res<JitterState>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single_mut() else {
         tracing::warn!("Frame not rendered; missing swapchain image");
@@ -287,7 +296,7 @@ fn render(
     };
     sbt.push_raygen(0, |_| {});
     sbt.push_miss(0, |_| {});
-    let uniform = build_camera_uniform(camera, transform, Some(&mut prev_camera));
+    let uniform = build_camera_uniform(camera, transform, Some(&mut prev_camera), jitter.offset);
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         tracing::warn!("Frame not rendered; missing atmosphere uniform buffer");
         return;
@@ -498,6 +507,50 @@ pub struct PbrRenderState {
 #[derive(Default)]
 struct FrameCounter(u32);
 
+/// Sub-pixel jitter for the current frame, in pixels. Refreshed once per
+/// frame by `advance_jitter` and read by `render`, `final_gather_pass` (kept
+/// at zero — final gather doesn't reproject), and `dlss_evaluate`.
+#[derive(Resource)]
+struct JitterState {
+    frame_count: u32,
+    offset: Vec2,
+}
+impl Default for JitterState {
+    fn default() -> Self {
+        let mut state = JitterState {
+            frame_count: 0,
+            offset: Vec2::ZERO,
+        };
+        state.advance_jitter();
+        state
+    }
+}
+impl JitterState {
+    /// Length of the jitter window. NVIDIA recommends ≥ 32 jitter positions; we
+    /// use 64 to match the codebase's existing 64-layer blue-noise convention.
+    const JITTER_SAMPLE_COUNT: u32 = 256;
+
+    pub fn advance_jitter(&mut self) {
+        /// Radical-inverse / van der Corput sample for the Halton sequence at `index`
+        /// in the given `base`. Returns a value in `[0, 1)`.
+        fn halton(mut index: u32, base: u32) -> f32 {
+            let mut f = 1.0_f32;
+            let mut r = 0.0_f32;
+            let inv_base = 1.0_f32 / base as f32;
+            while index > 0 {
+                f *= inv_base;
+                r += f * (index % base) as f32;
+                index /= base;
+            }
+            r
+        }
+
+        let i = self.frame_count % Self::JITTER_SAMPLE_COUNT;
+        self.offset = Vec2::new(halton(i, 2) - 0.5, halton(i, 3) - 0.5);
+        self.frame_count = self.frame_count.wrapping_add(1);
+    }
+}
+
 pub fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -652,6 +705,7 @@ fn dlss_evaluate(
     ngx: Option<ResMut<dust_denoiser::dlss::NgxContext>>,
     state: Option<ResMut<DlssState>>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
+    mut jitter: ResMut<JitterState>,
 ) {
     let (Some(mut ngx), Some(mut state), Some(mut hdr_target)) = (ngx, state, hdr_target) else {
         return;
@@ -865,6 +919,12 @@ fn dlss_evaluate(
         };
         eval_params.InMVScaleX = 1.0;
         eval_params.InMVScaleY = 1.0;
+        // Sub-pixel jitter applied to this frame's primary ray, in pixels.
+        // Must match the value baked into the camera uniform consumed by the
+        // RT pass (see `advance_jitter`).
+        eval_params.InJitterOffsetX = jitter.offset.x;
+        eval_params.InJitterOffsetY = jitter.offset.y;
+        jitter.advance_jitter();
         // No history yet — flag every frame as a teleport so DLSS-RR
         // discards its temporal accumulation.
         eval_params.InReset = 0;
@@ -1093,6 +1153,7 @@ fn shadow_pass(
     swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
+    jitter: Res<JitterState>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
@@ -1117,8 +1178,11 @@ fn shadow_pass(
     };
     shadow_sbt.push_raygen(0, |_| {});
     shadow_sbt.push_miss(0, |_| {});
-    // Shadow pass doesn't reproject.
-    let uniform = build_camera_uniform(camera, transform, None);
+    // Shadow pass doesn't reproject, but its ray-gen reconstructs world
+    // position from the depth G-buffer via `primaryRayDirWorldSpace` — that
+    // depth was written by the jittered primary ray, so we must reuse the
+    // same jitter or the reconstructed shading point drifts off the surface.
+    let uniform = build_camera_uniform(camera, transform, None, jitter.offset);
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
@@ -1279,7 +1343,8 @@ fn final_gather_pass(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     blue_noise: Res<BlueNoiseTextures>,
     texture_assets: Res<Assets<TextureAsset>>,
-    mut frame_counter: Local<FrameCounter>,
+    mut frame_index: Local<u32>,
+    jitter: Res<JitterState>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
@@ -1307,10 +1372,10 @@ fn final_gather_pass(
     };
     gather_sbt.push_raygen(0, |_| {});
     gather_sbt.push_miss(0, |_| {});
-    let frame_index = frame_counter.0;
-    frame_counter.0 = frame_counter.0.wrapping_add(1);
-    // Final-gather doesn't reproject.
-    let uniform = build_camera_uniform(camera, transform, None);
+    // Final-gather doesn't reproject, but it reconstructs world position from
+    // the depth G-buffer via `primaryRayDirWorldSpace` — that depth was
+    // written by the jittered primary ray, so we must reuse the same jitter.
+    let uniform = build_camera_uniform(camera, transform, None, jitter.offset);
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
@@ -1452,8 +1517,9 @@ fn final_gather_pass(
             pipeline.layout(),
             vk::ShaderStageFlags::RAYGEN_KHR,
             0,
-            bytemuck::bytes_of(&frame_index),
+            bytemuck::bytes_of(&*frame_index),
         );
+        *frame_index = frame_index.wrapping_add(1);
 
         encoder.trace_rays(
             gather_sbt,
