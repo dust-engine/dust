@@ -4,9 +4,19 @@ mod flycam;
 
 use bevy::prelude::*;
 use bevy_pumicite::CreateDevice;
-use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode, tracking::Access};
+use pumicite::{ash::vk, swapchain::SwapchainColorMode};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
+
+#[derive(Component)]
+struct MovingTeapot {
+    origin: Vec3,
+    radius: f32,
+    height: f32,
+    angular_speed: f32,
+    spin_speed: f32,
+}
+
 fn main() {
     let mut app = bevy::app::App::new();
 
@@ -44,21 +54,33 @@ fn main() {
             ..Default::default()
         });
 
-    app.add_systems(Startup, startup_system.after(CreateDevice));
+    app.add_systems(Startup, startup_system.after(CreateDevice))
+        .add_systems(Update, animate_teapot_system);
 
     app.run();
 }
 
-fn startup_system(
-    mut commands: Commands,
-    asset_server: Res<bevy::asset::AssetServer>,
-    allocator: Res<Allocator>,
-    mut geometries: ResMut<Assets<dust_vox::VoxGeometry>>,
-    mut materials: ResMut<Assets<dust_vox::VoxMaterial>>,
-    mut palettes: ResMut<Assets<dust_vox::VoxPalette>>,
-) {
+fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetServer>) {
     let scene: Handle<Scene> = asset_server.load("bazel://dust/assets/castle.vox");
     commands.spawn(SceneRoot(scene));
+
+    let teapot_origin = Vec3::new(122.0, 260.0, 180.0);
+    let mut teapot_transform = Transform::from_translation(teapot_origin);
+    teapot_transform.scale = Vec3::splat(1.5);
+
+    let teapot: Handle<Scene> = asset_server.load("bazel://dust/assets/teapot.vox");
+    commands.spawn((
+        SceneRoot(teapot),
+        teapot_transform,
+        GlobalTransform::default(),
+        MovingTeapot {
+            origin: teapot_origin,
+            radius: 56.0,
+            height: 18.0,
+            angular_speed: 0.6,
+            spin_speed: 1.4,
+        },
+    ));
     return;
     /*
 
@@ -80,4 +102,19 @@ fn startup_system(
         instance: VoxInstance { model },
     });
     */
+}
+
+fn animate_teapot_system(time: Res<Time>, mut teapots: Query<(&MovingTeapot, &mut Transform)>) {
+    let elapsed = time.elapsed_secs();
+
+    for (teapot, mut transform) in teapots.iter_mut() {
+        let angle = elapsed * teapot.angular_speed;
+        transform.translation = teapot.origin
+            + Vec3::new(
+                angle.cos() * teapot.radius,
+                (angle * 1.7).sin() * teapot.height,
+                angle.sin() * teapot.radius,
+            );
+        transform.rotation = Quat::from_rotation_y(elapsed * teapot.spin_speed);
+    }
 }

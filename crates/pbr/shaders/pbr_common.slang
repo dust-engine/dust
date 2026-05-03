@@ -129,6 +129,22 @@ public struct CameraUniforms {
         float ndcY = -(viewPos.y / negZ) / prev_tan_half_fov * 0.5 + 0.5;
         return float2(ndcX, ndcY) * float2(screenSize) - 0.5;
     }
+
+    // Pixel coordinate of an infinitely-distant point along `worldDir` as seen
+    // through the previous frame's camera. Same projection as
+    // prevPixelFromWorld but ignores translation, so motion is purely from
+    // camera rotation + FOV change. Used for sky and UI-occluded pixels where
+    // there is no surface to reproject.
+    public float2 prevPixelFromWorldDir(float3 worldDir, uint2 screenSize) {
+        matrix<float, 3, 3> rotation =
+            float3x3(prev_model[0].xyz, prev_model[1].xyz, prev_model[2].xyz);
+        float3 viewDir = mul(transpose(rotation), worldDir);
+        float negZ = max(-viewDir.z, 1e-6);
+        float aspect = float(screenSize.x) / float(screenSize.y);
+        float ndcX = (viewDir.x / negZ) / (prev_tan_half_fov * aspect) * 0.5 + 0.5;
+        float ndcY = -(viewDir.y / negZ) / prev_tan_half_fov * 0.5 + 0.5;
+        return float2(ndcX, ndcY) * float2(screenSize) - 0.5;
+    }
 }
 
 public struct PbrPipelineGbuffer {

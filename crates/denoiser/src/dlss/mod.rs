@@ -12,8 +12,8 @@ use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 use std::{ffi::CStr, ptr};
 
-use self::sys::wchar_t;
 pub use self::bevy::*;
+use self::sys::wchar_t;
 
 mod bevy;
 pub mod sys;

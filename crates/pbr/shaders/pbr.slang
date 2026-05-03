@@ -15,7 +15,12 @@ void rayGenShader() {
         params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 0.0;
-        params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = float2(0, 0);
+        // No surface info under UI — reproject as if at infinity so DLSS sees
+        // motion consistent with camera rotation rather than a stationary mask.
+        float3 worldDir = params.uniforms.primaryRayDirWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+        float2 prevPixel = params.uniforms.prevPixelFromWorldDir(worldDir, DispatchRaysDimensions().xy);
+        float2 currPixel = float2(DispatchRaysIndex().xy);
+        params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
         return;
     } else {
         params.outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 1.0);
@@ -49,6 +54,9 @@ void missShader() {
     params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 0.0;
-    // No surface to reproject — DLSS-RR uses zero motion for sky pixels.
-    params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = float2(0, 0);
+    // Sky is at infinity — reproject the view direction through the previous
+    // camera (rotation only) so DLSS sees motion from camera turn/FOV change.
+    float2 prevPixel = params.uniforms.prevPixelFromWorldDir(worldDir, DispatchRaysDimensions().xy);
+    float2 currPixel = float2(DispatchRaysIndex().xy);
+    params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
 }

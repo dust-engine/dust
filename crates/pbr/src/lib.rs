@@ -420,7 +420,7 @@ pub struct HdrRenderTargetViews {
     /// specular term — voxel materials are matte today, so black is a
     /// physically reasonable placeholder.
     pub specular_albedo: FullImageView<Image>,
-    
+
     // R16G16B16A16_SFLOAT. Stores denoised (and potentially upscaled) raw light.
     pub hdr_denoised_output: FullImageView<Image>,
 }
@@ -529,9 +529,7 @@ fn ensure_dlss_feature(
     }
 
     let needs_create = match state.as_deref() {
-        Some(s) => {
-            s.configured_extent != hdr.extent || s.feature.is_none()
-        }
+        Some(s) => s.configured_extent != hdr.extent || s.feature.is_none(),
         None => true,
     };
     if !needs_create {
@@ -611,8 +609,7 @@ fn dlss_evaluate(
     state: Option<ResMut<DlssState>>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
 ) {
-    let (Some(mut ngx), Some(mut state), Some(mut hdr_target)) = (ngx, state, hdr_target)
-    else {
+    let (Some(mut ngx), Some(mut state), Some(mut hdr_target)) = (ngx, state, hdr_target) else {
         return;
     };
     if state.feature.is_none() {
@@ -624,15 +621,11 @@ fn dlss_evaluate(
     }
 
     ctx.record(move |encoder| {
-        let DlssState {
-            feature,
-            ..
-        } = &mut *state;
+        let DlssState { feature, .. } = &mut *state;
         let feature = feature.as_ref().unwrap();
         let hdr = &mut *hdr_target;
 
-        let render_target_views =
-            encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
         let read_access = Access {
             stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -1028,7 +1021,7 @@ fn ensure_hdr_target(
         depth,
         motion_vectors,
         specular_albedo,
-        hdr_denoised_output
+        hdr_denoised_output,
     });
 
     commands.insert_resource(HdrRenderTarget {

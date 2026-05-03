@@ -337,7 +337,7 @@ pub(crate) fn tonemap_pass(
         // HDR intermediary: read
         encoder.use_image_resource(
             render_target_views.hdr_denoised_output.image(),
-             &mut hdr.hdr_denoised_target_state,
+            &mut hdr.hdr_denoised_target_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
             0..1,
