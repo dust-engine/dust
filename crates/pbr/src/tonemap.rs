@@ -13,7 +13,7 @@ use pumicite::{
     utils::AsVkHandle,
 };
 
-use crate::{HdrRenderTarget, PbrRenderState, camera::Camera};
+use crate::{DlssState, HdrRenderTarget, PbrRenderState, camera::Camera};
 
 unsafe extern "C" {
     fn dust_lpm_setup(
@@ -287,6 +287,7 @@ pub(crate) fn tonemap_pass(
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     mut swapchain_images: Query<(&mut SwapchainImage, &Camera), With<bevy::window::PrimaryWindow>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
+    dlss_state: Option<ResMut<DlssState>>,
 ) {
     let Ok((mut swapchain_image, camera)) = swapchain_images.single_mut() else {
         return;
@@ -335,8 +336,8 @@ pub(crate) fn tonemap_pass(
 
         // HDR intermediary: read
         encoder.use_image_resource(
-            render_target_views.hdr_output.image(),
-            &mut hdr.state,
+            render_target_views.hdr_denoised_output.image(),
+             &mut hdr.hdr_denoised_target_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
             0..1,
@@ -381,7 +382,7 @@ pub(crate) fn tonemap_pass(
                 .image_info(&[
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: render_target_views.hdr_output.vk_handle(),
+                        image_view: render_target_views.hdr_denoised_output.vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
                     vk::DescriptorImageInfo {

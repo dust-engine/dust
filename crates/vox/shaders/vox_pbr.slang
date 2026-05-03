@@ -110,6 +110,14 @@ void closestHitShader(
     params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, 1.0);
 
     params.gbuffer.depthTexture[DispatchRaysIndex().xy] = RayTCurrent();
+
+    // Screen-space motion vector: project this frame's world hit through last
+    // frame's camera and take the pixel-space delta.
+    float3 worldHit = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    uint2 screenSize = DispatchRaysDimensions().xy;
+    float2 prevPixel = params.uniforms.prevPixelFromWorld(worldHit, screenSize);
+    float2 currPixel = float2(DispatchRaysIndex().xy);
+    params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
 }
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {

@@ -68,9 +68,8 @@ void finalGatherMissShader() {
         * params.sky.sampleScatteredTransfer(worldDir);
 
     // Cosine-weighted importance sampling of Lambertian BRDF:
-    // L_indirect = albedo * (1/PI) * L_i * cos(theta) / pdf = albedo * L_i
-    // The 1/π term (from the BRDF) and the cos(θ) term (from the integrand) gets cancelled
-    // out by the cosine - weighted distribution with pdf(ω) = cos(θ) / π
-    float2 uv = (float2(pixel) + 0.5) / float2(DispatchRaysDimensions().xy);
-    params.outputTexture[pixel] = float4(current.rgb + skyLuminance, current.a); // albedo is demodulated
+    //   L_indirect = albedo * (1/π) * L_i * cos(θ) / pdf = albedo * L_i
+    // The 1/π (BRDF) and cos(θ) (integrand) cancel against pdf(ω) = cos(θ)/π.
+    float3 albedo = params.gbuffer.albedoSRGB[pixel].rgb;
+    params.outputTexture[pixel] = float4(current.rgb + albedo * skyLuminance, current.a);
 }

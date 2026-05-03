@@ -44,28 +44,33 @@ PipelineLayout(
                         ty: StorageImage,
                         stages: [RayGen, Miss, ClosestHit]
                     ),
-                    Binding( // Atmosphere Uniform
+                    Binding( // Motion vectors (R16G16_SFLOAT)
                         binding: 8,
+                        ty: StorageImage,
+                        stages: [RayGen, Miss, ClosestHit]
+                    ),
+                    Binding( // Atmosphere Uniform
+                        binding: 9,
                         ty: UniformBuffer,
                         stages: [RayGen, Miss]
                     ),
                     Binding( // Transmittance
-                        binding: 9,
-                        ty: SampledImage,
-                        stages: [Miss]
-                    ),
-                    Binding( // SkyView
                         binding: 10,
                         ty: SampledImage,
                         stages: [Miss]
                     ),
-                    Binding( // Linear Sampler
+                    Binding( // SkyView
                         binding: 11,
+                        ty: SampledImage,
+                        stages: [Miss]
+                    ),
+                    Binding( // Linear Sampler
+                        binding: 12,
                         ty: Sampler,
                         stages: [Miss, RayGen]
                     ),
                     Binding( // Blue noise cosine hemisphere (STBN)
-                        binding: 12,
+                        binding: 13,
                         ty: SampledImage,
                         stages: [RayGen]
                     ),

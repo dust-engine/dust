@@ -81,6 +81,12 @@ public struct CameraUniforms {
     public float far;
     public float near;
     float _padding;
+    // Previous-frame world-from-view matrix and FOV. Used by the primary RT
+    // pass to project this frame's hit point through last frame's camera and
+    // produce screen-space motion vectors for DLSS-RR.
+    public matrix<float, 3, 4> prev_model;
+    public float prev_tan_half_fov;
+    float3 _padding2;
 
     // Camera-space (view-local) primary ray direction for a given pixel.
     // View frame convention: -Z forward, +Y up, +X right.
@@ -104,6 +110,25 @@ public struct CameraUniforms {
     public float3 cameraOrigin() {
         return float3(model[0].w, model[1].w, model[2].w);
     }
+
+    // Pixel coordinate of `worldPos` as seen through the previous frame's
+    // camera. Used to compute screen-space motion vectors. Returns NaN-free
+    // garbage if the point is behind the previous camera; callers should
+    // ignore MVs in that case.
+    public float2 prevPixelFromWorld(float3 worldPos, uint2 screenSize) {
+        // model is world-from-view, orthonormal rotation in the upper 3x3 +
+        // translation in the .w column. Inverse rotation is the transpose.
+        matrix<float, 3, 3> rotation =
+            float3x3(prev_model[0].xyz, prev_model[1].xyz, prev_model[2].xyz);
+        float3 origin = float3(prev_model[0].w, prev_model[1].w, prev_model[2].w);
+        float3 viewPos = mul(transpose(rotation), worldPos - origin);
+        // -Z is forward, so a point in front of the camera has viewPos.z < 0.
+        float negZ = max(-viewPos.z, 1e-6);
+        float aspect = float(screenSize.x) / float(screenSize.y);
+        float ndcX = (viewPos.x / negZ) / (prev_tan_half_fov * aspect) * 0.5 + 0.5;
+        float ndcY = -(viewPos.y / negZ) / prev_tan_half_fov * 0.5 + 0.5;
+        return float2(ndcX, ndcY) * float2(screenSize) - 0.5;
+    }
 }
 
 public struct PbrPipelineGbuffer {
@@ -112,6 +137,9 @@ public struct PbrPipelineGbuffer {
     public RWTexture2D<float4> normalTexture;
     public RWTexture2D<float> depthTexture;
     public RWTexture2D<float4> occlusionTexture;
+    // Screen-space motion (in pixels): currentPixel - prevPixel. Consumed by
+    // DLSS-RR; set to (0, 0) for sky/miss pixels.
+    public RWTexture2D<float2> motionVectorTexture;
 }
 
 public struct PbrPipelineParams {

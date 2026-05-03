@@ -15,6 +15,7 @@ void rayGenShader() {
         params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 0.0;
+        params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = float2(0, 0);
         return;
     } else {
         params.outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 1.0);
@@ -48,4 +49,6 @@ void missShader() {
     params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 0.0;
+    // No surface to reproject — DLSS-RR uses zero motion for sky pixels.
+    params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = float2(0, 0);
 }

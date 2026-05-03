@@ -60,7 +60,8 @@ void shadowMissShader() {
     // would be ~π× too bright. solar_illuminance is multiplied in explicitly
     // because transmittanceToSun is a unitless LUT lookup (see sky_view_lut).
     float NdotL = max(0.0, dot(worldNormal, params.sky.atmosphereParams.sun_direction));
-    float3 sunContribution = 1.0 / PI // albedo is demodulated
+    float3 albedo = params.gbuffer.albedoSRGB[pixel].rgb;
+    float3 sunContribution = albedo / PI
                            * params.sky.atmosphereParams.solar_illuminance
                            * transmittanceToSun
                            * NdotL;

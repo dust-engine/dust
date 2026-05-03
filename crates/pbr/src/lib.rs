@@ -24,7 +24,7 @@ use bevy_pumicite::{
 use bytemuck::{Pod, Zeroable};
 use pumicite::device::DeviceBuilder;
 use pumicite::{
-    Allocator,
+    Allocator, HasDevice,
     ash::vk::{self, TaggedStructure},
     debug::DebugObject,
     image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView},
@@ -50,9 +50,24 @@ struct Uniforms {
     tan_half_fov: f32,
     far: f32,
     near: f32,
+    _padding: f32,
+    /// Previous-frame world-from-view matrix; used by the primary RT pass to
+    /// project hit points through last frame's camera and produce screen-space
+    /// motion vectors for DLSS-RR.
+    prev_model: vk::TransformMatrixKHR,
+    prev_tan_half_fov: f32,
+    _padding2: [f32; 3],
 }
 unsafe impl Pod for Uniforms {}
 unsafe impl Zeroable for Uniforms {}
+
+/// Last frame's camera transform and FOV. Read by `render` to fill the
+/// `prev_*` fields of the camera uniform; updated at the end of each frame.
+#[derive(Resource, Default)]
+struct PreviousCameraState {
+    model: Option<vk::TransformMatrixKHR>,
+    tan_half_fov: f32,
+}
 
 pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
@@ -84,11 +99,16 @@ impl Plugin for PbrRenderPlugin {
                     .after(PbrRenderSet)
                     .after(shadow_pass)
                     .after(create_sbt),
+                dlss_evaluate
+                    .in_set(DefaultRenderSet)
+                    .after(ensure_dlss_feature)
+                    .after(final_gather_pass),
                 tonemap_pass
                     .in_set(DefaultRenderSet)
                     .after(render)
                     .after(shadow_pass)
-                    .after(final_gather_pass),
+                    .after(final_gather_pass)
+                    .after(dlss_evaluate),
             ),
         );
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
@@ -160,6 +180,7 @@ fn render(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     blue_noise: Res<BlueNoiseTextures>,
     texture_assets: Res<Assets<TextureAsset>>,
+    mut prev_camera: ResMut<PreviousCameraState>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single_mut() else {
         tracing::warn!("Frame not rendered; missing swapchain image");
@@ -187,12 +208,29 @@ fn render(
     };
     sbt.push_raygen(0, |_| {});
     sbt.push_miss(0, |_| {});
+    let model = glam_to_vk_transform(transform.affine());
+    let tan_half_fov = camera.tan_half_fov();
+    // First frame: there's no history, so reuse the current camera as the
+    // previous camera. That gives MVs of zero, which is what DLSS-RR
+    // expects for a teleport / reset.
+    let prev_model = prev_camera.model.unwrap_or(model);
+    let prev_tan_half_fov = if prev_camera.model.is_some() {
+        prev_camera.tan_half_fov
+    } else {
+        tan_half_fov
+    };
     let uniform = Uniforms {
         far: camera.depth.end,
         near: camera.depth.start,
-        model: glam_to_vk_transform(transform.affine()),
-        tan_half_fov: camera.tan_half_fov(),
+        model,
+        tan_half_fov,
+        _padding: 0.0,
+        prev_model,
+        prev_tan_half_fov,
+        _padding2: [0.0; 3],
     };
+    prev_camera.model = Some(model);
+    prev_camera.tan_half_fov = tan_half_fov;
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         tracing::warn!("Frame not rendered; missing atmosphere uniform buffer");
         return;
@@ -264,6 +302,16 @@ fn render(
             0..1,
             true,
         );
+        // Motion vectors G-buffer: write (discard previous contents)
+        encoder.use_image_resource(
+            render_target_views.motion_vectors.image(),
+            &mut hdr.motion_vectors_state,
+            Access::RTX_WRITE,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            true,
+        );
         // SDR target: read (occlusion check against egui content)
         encoder.use_image_resource(
             render_target_views.sdr_target.image(),
@@ -315,6 +363,7 @@ fn render(
                 .gbuffer_normal_texture(&render_target_views.normal)
                 .gbuffer_depth_texture(&render_target_views.depth)
                 .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+                .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
@@ -335,7 +384,7 @@ fn render(
 }
 
 pub struct HdrRenderTargetViews {
-    // R16G16B16A16_SFLOAT. Stores raw light.
+    // R16G16B16A16_SFLOAT. Stores noisy raw light.
     pub hdr_output: FullImageView<Image>,
     // R8G8B8A8_UNORM. Stores sRGB UI elements.
     pub sdr_target: SrgbImageView<Image>,
@@ -345,6 +394,17 @@ pub struct HdrRenderTargetViews {
     pub normal: FullImageView<Image>,
     /// R32_SFLOAQT
     pub depth: FullImageView<Image>,
+    /// R16G16_SFLOAT. Screen-space motion vectors in pixels
+    /// (currentPixel - prevPixel). Written by the primary RT pass.
+    pub motion_vectors: FullImageView<Image>,
+    /// R8G8B8A8_UNORM. Stand-in specular albedo for DLSS-RR. Cleared to 0
+    /// each frame in `dlss_evaluate` until the renderer produces a real
+    /// specular term — voxel materials are matte today, so black is a
+    /// physically reasonable placeholder.
+    pub specular_albedo: FullImageView<Image>,
+    
+    // R16G16B16A16_SFLOAT. Stores denoised (and potentially upscaled) raw light.
+    pub hdr_denoised_output: FullImageView<Image>,
 }
 
 #[derive(Resource)]
@@ -356,6 +416,9 @@ pub struct HdrRenderTarget {
     pub depth_state: ResourceState,
     pub sdr_target_state: ResourceState,
     pub hdr_target_state: ResourceState,
+    pub hdr_denoised_target_state: ResourceState,
+    pub motion_vectors_state: ResourceState,
+    pub specular_albedo_state: ResourceState,
     pub extent: UVec2,
 }
 
@@ -397,6 +460,8 @@ pub fn setup(
         shadow_sbt: None,
         final_gather_sbt: None,
     });
+
+    commands.insert_resource(PreviousCameraState::default());
 
     commands.insert_resource(BlueNoiseTextures {
         scalar: asset_server.load("bazel://dust/assets/stbn/scalar.png"),
@@ -448,7 +513,9 @@ fn ensure_dlss_feature(
     }
 
     let needs_create = match state.as_deref() {
-        Some(s) => s.configured_extent != hdr.extent || s.feature.is_none(),
+        Some(s) => {
+            s.configured_extent != hdr.extent || s.feature.is_none()
+        }
         None => true,
     };
     if !needs_create {
@@ -515,6 +582,272 @@ fn ensure_dlss_feature(
     }
 }
 
+/// Records a DLSS-RR evaluate dispatch for the current frame.
+///
+/// Wraps the existing G-buffers as `NVSDK_NGX_Resource_VK` descriptors and
+/// drives the denoiser into [`DlssState::output`]. Required inputs that the
+/// engine does not yet produce (motion vectors, specular albedo, roughness,
+/// hit distances, jitter) are left as their NGX-default null/zero values —
+/// NGX will return `FAIL_MissingInput` until those are wired up.
+fn dlss_evaluate(
+    mut ctx: SubmissionState,
+    ngx: Option<ResMut<dust_dlss::NgxContext>>,
+    state: Option<ResMut<DlssState>>,
+    hdr_target: Option<ResMut<HdrRenderTarget>>,
+) {
+    let (Some(mut ngx), Some(mut state), Some(mut hdr_target)) = (ngx, state, hdr_target)
+    else {
+        return;
+    };
+    if state.feature.is_none() {
+        return;
+    }
+    let extent = hdr_target.extent;
+    if extent.x == 0 || extent.y == 0 {
+        return;
+    }
+
+    ctx.record(move |encoder| {
+        let DlssState {
+            feature,
+            ..
+        } = &mut *state;
+        let feature = feature.as_ref().unwrap();
+        let hdr = &mut *hdr_target;
+
+        let render_target_views =
+            encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+
+        let read_access = Access {
+            stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+            access: vk::AccessFlags2::SHADER_STORAGE_READ,
+        };
+        let write_access = Access {
+            stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+            access: vk::AccessFlags2::SHADER_STORAGE_WRITE,
+        };
+
+        encoder.use_image_resource(
+            render_target_views.hdr_output.image(),
+            &mut hdr.state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            render_target_views.albedo.image(),
+            &mut hdr.albedo_state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            render_target_views.normal.image(),
+            &mut hdr.normal_state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            render_target_views.depth.image(),
+            &mut hdr.depth_state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            render_target_views.motion_vectors.image(),
+            &mut hdr.motion_vectors_state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Specular albedo stand-in: clear to black this frame, then read.
+        encoder.use_image_resource(
+            render_target_views.specular_albedo.image(),
+            &mut hdr.specular_albedo_state,
+            Access::CLEAR,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            0..1,
+            0..1,
+            true,
+        );
+        encoder.use_image_resource(
+            render_target_views.hdr_denoised_output.image(),
+            &mut hdr.hdr_denoised_target_state,
+            write_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            true,
+        );
+        encoder.emit_barriers();
+
+        // Zero-fill the specular albedo stand-in.
+        let device = encoder.device().clone();
+        let cmd_buffer = encoder.buffer().vk_handle();
+        unsafe {
+            device.cmd_clear_color_image(
+                cmd_buffer,
+                render_target_views.specular_albedo.image().vk_handle(),
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 0.0],
+                },
+                &[vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                }],
+            );
+        }
+
+        // Transition specular to GENERAL for the NGX read.
+        encoder.use_image_resource(
+            render_target_views.specular_albedo.image(),
+            &mut hdr.specular_albedo_state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.emit_barriers();
+
+        let subres = vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+
+        let mut color = ngx_image_resource(
+            render_target_views.hdr_output.vk_handle(),
+            render_target_views.hdr_output.image().vk_handle(),
+            subres,
+            vk::Format::R16G16B16A16_SFLOAT,
+            extent.x,
+            extent.y,
+            false,
+        );
+        let mut output_resource = ngx_image_resource(
+            render_target_views.hdr_denoised_output.vk_handle(),
+            render_target_views.hdr_denoised_output.image().vk_handle(),
+            subres,
+            vk::Format::R16G16B16A16_SFLOAT,
+            extent.x,
+            extent.y,
+            true,
+        );
+        let mut depth = ngx_image_resource(
+            render_target_views.depth.vk_handle(),
+            render_target_views.depth.image().vk_handle(),
+            subres,
+            vk::Format::R32_SFLOAT,
+            extent.x,
+            extent.y,
+            false,
+        );
+        let mut normals = ngx_image_resource(
+            render_target_views.normal.vk_handle(),
+            render_target_views.normal.image().vk_handle(),
+            subres,
+            vk::Format::R16G16B16A16_SFLOAT,
+            extent.x,
+            extent.y,
+            false,
+        );
+        let mut diffuse_albedo = ngx_image_resource(
+            render_target_views.albedo.linear_view().vk_handle(),
+            render_target_views.albedo.image().vk_handle(),
+            subres,
+            vk::Format::R8G8B8A8_SRGB,
+            extent.x,
+            extent.y,
+            false,
+        );
+        let mut motion_vectors = ngx_image_resource(
+            render_target_views.motion_vectors.vk_handle(),
+            render_target_views.motion_vectors.image().vk_handle(),
+            subres,
+            vk::Format::R16G16_SFLOAT,
+            extent.x,
+            extent.y,
+            false,
+        );
+        let mut specular_albedo = ngx_image_resource(
+            render_target_views.specular_albedo.vk_handle(),
+            render_target_views.specular_albedo.image().vk_handle(),
+            subres,
+            vk::Format::R8G8B8A8_UNORM,
+            extent.x,
+            extent.y,
+            false,
+        );
+
+        let mut eval_params = dust_dlss::sys::NVSDK_NGX_VK_DLSSD_Eval_Params::zeroed();
+        eval_params.pInColor = &mut color;
+        eval_params.pInOutput = &mut output_resource;
+        eval_params.pInDepth = &mut depth;
+        eval_params.pInNormals = &mut normals;
+        eval_params.pInDiffuseAlbedo = &mut diffuse_albedo;
+        eval_params.pInSpecularAlbedo = &mut specular_albedo;
+        eval_params.pInMotionVectors = &mut motion_vectors;
+        eval_params.InRenderSubrectDimensions = dust_dlss::sys::NVSDK_NGX_Dimensions {
+            Width: extent.x,
+            Height: extent.y,
+        };
+        eval_params.InMVScaleX = 1.0;
+        eval_params.InMVScaleY = 1.0;
+        // No history yet — flag every frame as a teleport so DLSS-RR
+        // discards its temporal accumulation.
+        eval_params.InReset = 0;
+
+        let cmd_buffer = encoder.buffer().vk_handle();
+        if let Err(e) = ngx.evaluate_dlssd(cmd_buffer, feature, &mut eval_params) {
+            tracing::error!(target: "ngx", "DLSS-RR evaluate failed: {e}");
+        }
+    });
+}
+
+fn ngx_image_resource(
+    image_view: vk::ImageView,
+    image: vk::Image,
+    subresource_range: vk::ImageSubresourceRange,
+    format: vk::Format,
+    width: u32,
+    height: u32,
+    read_write: bool,
+) -> dust_dlss::sys::NVSDK_NGX_Resource_VK {
+    dust_dlss::sys::NVSDK_NGX_Resource_VK {
+        Resource: dust_dlss::sys::NVSDK_NGX_Resource_VK_Resource {
+            ImageViewInfo: dust_dlss::sys::NVSDK_NGX_ImageViewInfo_VK {
+                ImageView: image_view,
+                Image: image,
+                SubresourceRange: subresource_range,
+                Format: format,
+                Width: width,
+                Height: height,
+            },
+        },
+        Type: dust_dlss::sys::NVSDK_NGX_Resource_VK_Type::ImageView,
+        ReadWrite: read_write,
+    }
+}
+
 fn ensure_hdr_target(
     mut commands: Commands,
     hdr_target: Option<Res<HdrRenderTarget>>,
@@ -562,6 +895,19 @@ fn ensure_hdr_target(
     .create_full_view()
     .unwrap()
     .with_name(c"HDR Render Target View");
+
+    let hdr_denoised_output = Image::new_private(
+        allocator.clone(),
+        &vk::ImageCreateInfo {
+            format: vk::Format::R16G16B16A16_SFLOAT,
+            ..create_info
+        },
+    )
+    .unwrap()
+    .with_name(c"HDR Denoised Render Target")
+    .create_full_view()
+    .unwrap()
+    .with_name(c"HDR Denoised Render Target View");
 
     let sdr_target = Image::new_private(
         allocator.clone(),
@@ -629,12 +975,44 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"G-Buffer Depth View");
 
+    let motion_vectors = Image::new_private(
+        allocator.clone(),
+        &vk::ImageCreateInfo {
+            format: vk::Format::R16G16_SFLOAT,
+            ..create_info
+        },
+    )
+    .unwrap()
+    .with_name(c"G-Buffer Motion Vectors")
+    .create_full_view()
+    .unwrap()
+    .with_name(c"G-Buffer Motion Vectors View");
+
+    let specular_albedo = Image::new_private(
+        allocator.clone(),
+        &vk::ImageCreateInfo {
+            format: vk::Format::R8G8B8A8_UNORM,
+            usage: vk::ImageUsageFlags::STORAGE
+                | vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::SAMPLED,
+            ..create_info
+        },
+    )
+    .unwrap()
+    .with_name(c"DLSS-RR Specular Albedo Stand-in")
+    .create_full_view()
+    .unwrap()
+    .with_name(c"DLSS-RR Specular Albedo Stand-in View");
+
     let view = GPUMutex::new(HdrRenderTargetViews {
         hdr_output,
         sdr_target,
         albedo,
         normal,
         depth,
+        motion_vectors,
+        specular_albedo,
+        hdr_denoised_output
     });
 
     commands.insert_resource(HdrRenderTarget {
@@ -645,7 +1023,10 @@ fn ensure_hdr_target(
         depth_state: Default::default(),
         sdr_target_state: Default::default(),
         hdr_target_state: Default::default(),
+        motion_vectors_state: Default::default(),
+        specular_albedo_state: Default::default(),
         extent,
+        hdr_denoised_target_state: Default::default(),
     });
 }
 
@@ -680,11 +1061,18 @@ fn shadow_pass(
     };
     shadow_sbt.push_raygen(0, |_| {});
     shadow_sbt.push_miss(0, |_| {});
+    let model = glam_to_vk_transform(transform.affine());
+    let tan_half_fov = camera.tan_half_fov();
+    // Shadow pass doesn't reproject; leave prev_* equal to the current camera.
     let uniform = Uniforms {
         far: camera.depth.end,
         near: camera.depth.start,
-        model: glam_to_vk_transform(transform.affine()),
-        tan_half_fov: camera.tan_half_fov(),
+        model,
+        tan_half_fov,
+        _padding: 0.0,
+        prev_model: model,
+        prev_tan_half_fov: tan_half_fov,
+        _padding2: [0.0; 3],
     };
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
@@ -809,6 +1197,7 @@ fn shadow_pass(
                 .gbuffer_normal_texture(&render_target_views.normal)
                 .gbuffer_depth_texture(&render_target_views.depth)
                 .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+                .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
@@ -867,11 +1256,18 @@ fn final_gather_pass(
     gather_sbt.push_miss(0, |_| {});
     let frame_index = frame_counter.0;
     frame_counter.0 = frame_counter.0.wrapping_add(1);
+    let model = glam_to_vk_transform(transform.affine());
+    let tan_half_fov = camera.tan_half_fov();
+    // Final-gather doesn't reproject; leave prev_* equal to the current camera.
     let uniform = Uniforms {
         far: camera.depth.end,
         near: camera.depth.start,
-        model: glam_to_vk_transform(transform.affine()),
-        tan_half_fov: camera.tan_half_fov(),
+        model,
+        tan_half_fov,
+        _padding: 0.0,
+        prev_model: model,
+        prev_tan_half_fov: tan_half_fov,
+        _padding2: [0.0; 3],
     };
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
@@ -996,6 +1392,7 @@ fn final_gather_pass(
                 .gbuffer_normal_texture(&render_target_views.normal)
                 .gbuffer_depth_texture(&render_target_views.depth)
                 .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+                .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
