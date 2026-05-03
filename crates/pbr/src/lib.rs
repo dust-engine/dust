@@ -824,7 +824,7 @@ fn dlss_evaluate(
             false,
         );
         let mut diffuse_albedo = ngx_image_resource(
-            render_target_views.albedo.linear_view().vk_handle(),
+            render_target_views.albedo.srgb_view().vk_handle(),
             render_target_views.albedo.image().vk_handle(),
             subres,
             vk::Format::R8G8B8A8_SRGB,

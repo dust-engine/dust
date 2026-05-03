@@ -64,10 +64,7 @@ impl<'a> SceneGraphTraverser<'a> {
                     transform: Transform::default(),
                     global_transform: GlobalTransform::default(),
                     instance: VoxInstance,
-                    tlas_instance: TLASInstance::new(
-                        Entity::PLACEHOLDER,
-                        dust_pbr::PbrInstanceData::default(),
-                    ),
+                    tlas_instance: TLASInstance::new(Entity::PLACEHOLDER),
                 })
                 .id();
             self.instances.push((0, entity));

@@ -10,6 +10,7 @@ use pumicite::utils::AsVkHandle;
 use std::ffi::{c_int, c_uint, c_ulonglong, c_void};
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
+use std::sync::Arc;
 use std::{ffi::CStr, ptr};
 
 pub use self::bevy::*;
@@ -214,10 +215,31 @@ impl sys::NVSDK_NGX_FeatureDiscoveryInfo {
     }
 }
 
+/// Owns the global NGX runtime. Drop calls `NVSDK_NGX_VULKAN_Shutdown`.
+///
+/// Wrapped in [`Arc`] inside [`NgxContext`] and cloned into every [`NgxFeature`]
+/// so that `Shutdown` is deferred until *after* every feature has had a chance
+/// to release its handle. Otherwise Bevy may drop the [`NgxContext`] resource
+/// before [`NgxFeature`]-bearing resources, causing
+/// `NVSDK_NGX_VULKAN_ReleaseFeature` to fail with `FAIL_NotInitialized`.
+struct NgxRuntimeGuard {
+    device: Device,
+}
+
+impl Drop for NgxRuntimeGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if let Err(e) = sys::NVSDK_NGX_VULKAN_Shutdown(self.device.vk_handle()).result() {
+                tracing::warn!(target: "ngx", "Shutdown failed: {e}");
+            }
+        }
+    }
+}
+
 /// Implicitly owns the NGX context. NGX functions are non-threadsafe, so we generally
 /// require the caller to NGX functions to acquire mutable ownership to this struct.
 pub struct NgxContext {
-    device: Device,
+    runtime: Arc<NgxRuntimeGuard>,
 }
 
 unsafe impl Send for NgxContext {}
@@ -296,7 +318,9 @@ impl NgxContext {
             )
             .result()?;
         }
-        Ok(Self { device })
+        Ok(Self {
+            runtime: Arc::new(NgxRuntimeGuard { device }),
+        })
     }
 
     /// Allocates a parameter map used to set parameters needed by the SDK.
@@ -408,7 +432,7 @@ impl NgxContext {
         let mut handle: *mut sys::NVSDK_NGX_Handle = ptr::null_mut();
         unsafe {
             sys::dust_ngx_vulkan_create_dlssd_ext1(
-                self.device.vk_handle(),
+                self.runtime.device.vk_handle(),
                 cmd_buffer,
                 1, // Multi GPU only (default 1)
                 1, // Multi GPU only (default 1)
@@ -421,6 +445,7 @@ impl NgxContext {
 
         Ok(NgxFeature {
             handle: NonNull::new(handle).expect("NGX returned null handle on success"),
+            _runtime: self.runtime.clone(),
         })
     }
 
@@ -458,10 +483,15 @@ impl NgxContext {
 /// Owns an NGX feature handle (e.g. a DLSS-RR instance).
 ///
 /// Created via [`NgxContext::create_dlss_rr_feature`]. Drop calls
-/// `NVSDK_NGX_VULKAN_ReleaseFeature`, which must run before the
-/// [`NgxContext`] that produced it is shut down.
+/// `NVSDK_NGX_VULKAN_ReleaseFeature`, then drops its strong reference to the
+/// shared NGX runtime — `NVSDK_NGX_VULKAN_Shutdown` only fires once both the
+/// originating [`NgxContext`] and every [`NgxFeature`] it produced are gone.
 pub struct NgxFeature {
     handle: NonNull<sys::NVSDK_NGX_Handle>,
+    // Order matters: `handle` field is dropped first (calling
+    // `ReleaseFeature`), then `_runtime` may release the last strong
+    // reference and trigger `Shutdown`.
+    _runtime: Arc<NgxRuntimeGuard>,
 }
 
 unsafe impl Send for NgxFeature {}
@@ -561,17 +591,6 @@ pub struct DlssRrEvalDesc<'a> {
     pub reset: bool,
     pub world_to_view: Option<[[f32; 4]; 4]>,
     pub view_to_clip: Option<[[f32; 4]; 4]>,
-}
-
-impl NgxFeature {}
-impl Drop for NgxContext {
-    fn drop(&mut self) {
-        unsafe {
-            if let Err(e) = sys::NVSDK_NGX_VULKAN_Shutdown(self.device.vk_handle()).result() {
-                tracing::warn!(target: "ngx", "Shutdown1 failed: {e}");
-            }
-        }
-    }
 }
 
 unsafe extern "C" fn ngx_log_callback(
