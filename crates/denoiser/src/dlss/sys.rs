@@ -1,6 +1,6 @@
 //! Raw FFI bindings to the NVIDIA DLSS NGX SDK (Vulkan + DLSS-D / RayReconstruction).
 //!
-//! Only the subset used by `dust_dlss` is bound here. Symbol names mirror the C
+//! Only the subset used by `dust_denoiser::dlss` is bound here. Symbol names mirror the C
 //! API exactly so the upstream documentation in `nvsdk_ngx_*.h` applies directly.
 //!
 //! Vulkan handle and enum types are re-exported from `ash` so callers don't need
@@ -596,7 +596,7 @@ unsafe extern "C" {
 
     /// C wrapper around the `static inline` `NGX_VULKAN_CREATE_DLSSD_EXT1`
     /// helper from `nvsdk_ngx_helpers_dlssd_vk.h`. Defined in
-    /// `crates/dlss/src/dlss_wrapper.c` (target `//crates/dlss:dlss_helpers`).
+    /// `crates/denoiser/src/dlss/dlss_wrapper.c` (target `//crates/denoiser:dlss_helpers`).
     pub fn dust_ngx_vulkan_create_dlssd_ext1(
         InDevice: vk::Device,
         InCmdList: vk::CommandBuffer,
@@ -609,7 +609,7 @@ unsafe extern "C" {
 
     /// C wrapper around the `static inline` `NGX_VULKAN_EVALUATE_DLSSD_EXT`
     /// helper from `nvsdk_ngx_helpers_dlssd_vk.h`. Defined in
-    /// `crates/dlss/src/dlss_wrapper.c` (target `//crates/dlss:dlss_helpers`).
+    /// `crates/denoiser/src/dlss/dlss_wrapper.c` (target `//crates/denoiser:dlss_helpers`).
     pub fn dust_ngx_vulkan_evaluate_dlssd_ext(
         InCmdList: vk::CommandBuffer,
         pInHandle: *mut NVSDK_NGX_Handle,

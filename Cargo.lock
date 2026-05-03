@@ -1781,7 +1781,7 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "dust_app",
- "dust_dlss",
+ "dust_denoiser",
  "dust_pbr",
  "dust_vox",
  "pumicite",
@@ -1801,7 +1801,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dust_dlss"
+name = "dust_denoiser"
 version = "0.1.0"
 dependencies = [
  "bevy",
@@ -1819,7 +1819,7 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "bytemuck",
- "dust_dlss",
+ "dust_denoiser",
  "glam",
  "pumicite",
  "pumicite_egui",

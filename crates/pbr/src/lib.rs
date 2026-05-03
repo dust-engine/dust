@@ -61,12 +61,52 @@ struct Uniforms {
 unsafe impl Pod for Uniforms {}
 unsafe impl Zeroable for Uniforms {}
 
-/// Last frame's camera transform and FOV. Read by `render` to fill the
-/// `prev_*` fields of the camera uniform; updated at the end of each frame.
-#[derive(Resource, Default)]
+/// Last frame's camera transform and FOV. Held as `Local` state on the
+/// `render` system to fill the `prev_*` fields of the camera uniform.
+#[derive(Default)]
 struct PreviousCameraState {
     model: Option<vk::TransformMatrixKHR>,
     tan_half_fov: f32,
+}
+
+/// Build a camera uniform for the current frame.
+///
+/// If `prev` is `Some`, the previous-frame matrix/FOV are read from it and
+/// then overwritten with the current frame's values. If `None` (or on the
+/// very first call), `prev_*` mirror the current camera, which produces zero
+/// motion vectors — the right behavior for passes that don't reproject and
+/// for the first frame after a camera teleport / reset.
+fn build_camera_uniform(
+    camera: &Camera,
+    transform: &GlobalTransform,
+    prev: Option<&mut PreviousCameraState>,
+) -> Uniforms {
+    let model = glam_to_vk_transform(transform.affine());
+    let tan_half_fov = camera.tan_half_fov();
+    let (prev_model, prev_tan_half_fov) = match prev {
+        Some(prev) => {
+            let prev_model = prev.model.unwrap_or(model);
+            let prev_tan_half_fov = if prev.model.is_some() {
+                prev.tan_half_fov
+            } else {
+                tan_half_fov
+            };
+            prev.model = Some(model);
+            prev.tan_half_fov = tan_half_fov;
+            (prev_model, prev_tan_half_fov)
+        }
+        None => (model, tan_half_fov),
+    };
+    Uniforms {
+        far: camera.depth.end,
+        near: camera.depth.start,
+        model,
+        tan_half_fov,
+        _padding: 0.0,
+        prev_model,
+        prev_tan_half_fov,
+        _padding2: [0.0; 3],
+    }
 }
 
 pub struct PbrRenderPlugin;
@@ -180,7 +220,7 @@ fn render(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     blue_noise: Res<BlueNoiseTextures>,
     texture_assets: Res<Assets<TextureAsset>>,
-    mut prev_camera: ResMut<PreviousCameraState>,
+    mut prev_camera: Local<PreviousCameraState>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single_mut() else {
         tracing::warn!("Frame not rendered; missing swapchain image");
@@ -208,29 +248,7 @@ fn render(
     };
     sbt.push_raygen(0, |_| {});
     sbt.push_miss(0, |_| {});
-    let model = glam_to_vk_transform(transform.affine());
-    let tan_half_fov = camera.tan_half_fov();
-    // First frame: there's no history, so reuse the current camera as the
-    // previous camera. That gives MVs of zero, which is what DLSS-RR
-    // expects for a teleport / reset.
-    let prev_model = prev_camera.model.unwrap_or(model);
-    let prev_tan_half_fov = if prev_camera.model.is_some() {
-        prev_camera.tan_half_fov
-    } else {
-        tan_half_fov
-    };
-    let uniform = Uniforms {
-        far: camera.depth.end,
-        near: camera.depth.start,
-        model,
-        tan_half_fov,
-        _padding: 0.0,
-        prev_model,
-        prev_tan_half_fov,
-        _padding2: [0.0; 3],
-    };
-    prev_camera.model = Some(model);
-    prev_camera.tan_half_fov = tan_half_fov;
+    let uniform = build_camera_uniform(camera, transform, Some(&mut prev_camera));
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         tracing::warn!("Frame not rendered; missing atmosphere uniform buffer");
         return;
@@ -461,8 +479,6 @@ pub fn setup(
         final_gather_sbt: None,
     });
 
-    commands.insert_resource(PreviousCameraState::default());
-
     commands.insert_resource(BlueNoiseTextures {
         scalar: asset_server.load("bazel://dust/assets/stbn/scalar.png"),
         unitvec2: asset_server.load("bazel://dust/assets/stbn/unitvec2.png"),
@@ -495,13 +511,13 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
 /// configured for. Recreated whenever the HDR target's extent changes.
 #[derive(Resource, Default)]
 pub struct DlssState {
-    pub feature: Option<dust_dlss::NgxFeature>,
+    pub feature: Option<dust_denoiser::dlss::NgxFeature>,
     pub configured_extent: UVec2,
 }
 
 fn ensure_dlss_feature(
     mut ctx: SubmissionState,
-    mut ngx: ResMut<dust_dlss::NgxContext>,
+    mut ngx: ResMut<dust_denoiser::dlss::NgxContext>,
     state: Option<ResMut<DlssState>>,
     hdr_target: Option<Res<HdrRenderTarget>>,
     mut commands: Commands,
@@ -530,20 +546,20 @@ fn ensure_dlss_feature(
         s.feature = None;
     }
 
-    let create_params = dust_dlss::sys::NVSDK_NGX_DLSSD_Create_Params {
-        InDenoiseMode: dust_dlss::sys::NVSDK_NGX_DLSS_Denoise_Mode::DLUnified, // DL based unified upscaler
-        InRoughnessMode: dust_dlss::sys::NVSDK_NGX_DLSS_Roughness_Mode::Packed, // Read roughness from normals.w
-        InUseHWDepth: dust_dlss::sys::NVSDK_NGX_DLSS_Depth_Type::HW,
+    let create_params = dust_denoiser::dlss::sys::NVSDK_NGX_DLSSD_Create_Params {
+        InDenoiseMode: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Denoise_Mode::DLUnified, // DL based unified upscaler
+        InRoughnessMode: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Roughness_Mode::Packed, // Read roughness from normals.w
+        InUseHWDepth: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Depth_Type::HW,
         InWidth: hdr.extent.x,
         InHeight: hdr.extent.y,
         InTargetWidth: hdr.extent.x,
         InTargetHeight: hdr.extent.y, // No upscaling for now
-        InPerfQualityValue: dust_dlss::sys::NVSDK_NGX_PerfQuality_Value::Balanced,
+        InPerfQualityValue: dust_denoiser::dlss::sys::NVSDK_NGX_PerfQuality_Value::Balanced,
         // MVLowRes is required by DLSS-RR (the SwinDenoiser refuses to
         // initialize without it): motion vectors are sampled at the input /
         // render resolution rather than the output resolution.
-        InFeatureCreateFlags: dust_dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::IsHDR
-            | dust_dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::MVLowRes,
+        InFeatureCreateFlags: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::IsHDR
+            | dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::MVLowRes,
         InEnableOutputSubrects: false,
     };
 
@@ -591,7 +607,7 @@ fn ensure_dlss_feature(
 /// NGX will return `FAIL_MissingInput` until those are wired up.
 fn dlss_evaluate(
     mut ctx: SubmissionState,
-    ngx: Option<ResMut<dust_dlss::NgxContext>>,
+    ngx: Option<ResMut<dust_denoiser::dlss::NgxContext>>,
     state: Option<ResMut<DlssState>>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
 ) {
@@ -798,7 +814,7 @@ fn dlss_evaluate(
             false,
         );
 
-        let mut eval_params = dust_dlss::sys::NVSDK_NGX_VK_DLSSD_Eval_Params::zeroed();
+        let mut eval_params = dust_denoiser::dlss::sys::NVSDK_NGX_VK_DLSSD_Eval_Params::zeroed();
         eval_params.pInColor = &mut color;
         eval_params.pInOutput = &mut output_resource;
         eval_params.pInDepth = &mut depth;
@@ -806,7 +822,7 @@ fn dlss_evaluate(
         eval_params.pInDiffuseAlbedo = &mut diffuse_albedo;
         eval_params.pInSpecularAlbedo = &mut specular_albedo;
         eval_params.pInMotionVectors = &mut motion_vectors;
-        eval_params.InRenderSubrectDimensions = dust_dlss::sys::NVSDK_NGX_Dimensions {
+        eval_params.InRenderSubrectDimensions = dust_denoiser::dlss::sys::NVSDK_NGX_Dimensions {
             Width: extent.x,
             Height: extent.y,
         };
@@ -831,10 +847,10 @@ fn ngx_image_resource(
     width: u32,
     height: u32,
     read_write: bool,
-) -> dust_dlss::sys::NVSDK_NGX_Resource_VK {
-    dust_dlss::sys::NVSDK_NGX_Resource_VK {
-        Resource: dust_dlss::sys::NVSDK_NGX_Resource_VK_Resource {
-            ImageViewInfo: dust_dlss::sys::NVSDK_NGX_ImageViewInfo_VK {
+) -> dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK {
+    dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK {
+        Resource: dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK_Resource {
+            ImageViewInfo: dust_denoiser::dlss::sys::NVSDK_NGX_ImageViewInfo_VK {
                 ImageView: image_view,
                 Image: image,
                 SubresourceRange: subresource_range,
@@ -843,7 +859,7 @@ fn ngx_image_resource(
                 Height: height,
             },
         },
-        Type: dust_dlss::sys::NVSDK_NGX_Resource_VK_Type::ImageView,
+        Type: dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK_Type::ImageView,
         ReadWrite: read_write,
     }
 }
@@ -1061,19 +1077,8 @@ fn shadow_pass(
     };
     shadow_sbt.push_raygen(0, |_| {});
     shadow_sbt.push_miss(0, |_| {});
-    let model = glam_to_vk_transform(transform.affine());
-    let tan_half_fov = camera.tan_half_fov();
-    // Shadow pass doesn't reproject; leave prev_* equal to the current camera.
-    let uniform = Uniforms {
-        far: camera.depth.end,
-        near: camera.depth.start,
-        model,
-        tan_half_fov,
-        _padding: 0.0,
-        prev_model: model,
-        prev_tan_half_fov: tan_half_fov,
-        _padding2: [0.0; 3],
-    };
+    // Shadow pass doesn't reproject.
+    let uniform = build_camera_uniform(camera, transform, None);
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
@@ -1256,19 +1261,8 @@ fn final_gather_pass(
     gather_sbt.push_miss(0, |_| {});
     let frame_index = frame_counter.0;
     frame_counter.0 = frame_counter.0.wrapping_add(1);
-    let model = glam_to_vk_transform(transform.affine());
-    let tan_half_fov = camera.tan_half_fov();
-    // Final-gather doesn't reproject; leave prev_* equal to the current camera.
-    let uniform = Uniforms {
-        far: camera.depth.end,
-        near: camera.depth.start,
-        model,
-        tan_half_fov,
-        _padding: 0.0,
-        prev_model: model,
-        prev_tan_half_fov: tan_half_fov,
-        _padding2: [0.0; 3],
-    };
+    // Final-gather doesn't reproject.
+    let uniform = build_camera_uniform(camera, transform, None);
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };

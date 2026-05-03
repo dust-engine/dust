@@ -7,7 +7,7 @@ package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "dlss_helpers",
-    srcs = ["src/dlss_wrapper.c"],
+    srcs = ["src/dlss/dlss_wrapper.c"],
     deps = [
         "@dlss//:dlss_headers",
         "@vulkan_sdk_1.4.341.1//:vulkan_headers",
@@ -20,8 +20,8 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "dust_dlss",
-    crate_name = "dust_dlss",
+    name = "dust_denoiser",
+    crate_name = "dust_denoiser",
     crate_root = "src/lib.rs",
     srcs = glob(["src/**/*.rs"]),
     edition = "2024",

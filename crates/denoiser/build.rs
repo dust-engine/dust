@@ -3,9 +3,9 @@ fn main() {
     let manifest_dir = std::path::Path::new(&manifest_dir);
 
     let third_party_dir = manifest_dir
-        .join("../../bazel-bin/crates/dlss")
+        .join("../../bazel-bin/crates/denoiser")
         .canonicalize()
-        .expect("bazel-bin/third_party not found — run `bazelisk build //third_party:dlss_helpers` first");
+        .expect("bazel-bin/crates/denoiser not found — run `bazelisk build //crates/denoiser:dlss_helpers` first");
     println!(
         "cargo:rustc-link-search=native={}",
         third_party_dir.display()

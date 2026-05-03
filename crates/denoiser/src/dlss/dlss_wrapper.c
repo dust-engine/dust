@@ -1,7 +1,7 @@
 // Thin C wrapper around the `static inline` helper macros declared in
 // `nvsdk_ngx_helpers_dlssd_vk.h`. We can't call those directly from Rust
 // since they aren't compiled into `nvsdk_ngx_d.lib`. Re-export them under
-// stable symbols so the FFI in `dust_dlss::sys` can bind them.
+// stable symbols so the FFI in `dust_denoiser::dlss::sys` can bind them.
 
 #include <vulkan/vulkan.h>
 

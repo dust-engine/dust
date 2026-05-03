@@ -24,7 +24,7 @@ rust_library(
     aliases = aliases(),
     deps = all_crate_deps(normal = True) + [
         "//third_party/ffx:ffx_lpm_cpu",
-        "//crates/dlss:dust_dlss",
+        "//crates/denoiser:dust_denoiser",
     ],
     rustc_env_files = [
         ":cargo_toml_env_vars",

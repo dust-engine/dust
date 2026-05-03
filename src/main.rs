@@ -14,7 +14,7 @@ fn main() {
         .add_plugins(bevy::DefaultPlugins)
         .add_plugins(bevy_pumicite::SurfacePlugin::default())
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())
-        .add_plugins(dust_dlss::DLSSPlugin)
+        .add_plugins(dust_denoiser::dlss::DLSSPlugin)
         .add_plugins(bevy_pumicite::PumicitePlugin::default())
         .add_plugins(bevy_pumicite::swapchain::SwapchainPlugin);
 

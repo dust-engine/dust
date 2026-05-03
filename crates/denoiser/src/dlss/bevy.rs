@@ -1,6 +1,6 @@
 use std::ffi::CStr;
 
-use crate::NgxContext;
+use super::NgxContext;
 
 use super::sys;
 use bevy::ecs::schedule::IntoScheduleConfigs;
