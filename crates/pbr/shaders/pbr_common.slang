@@ -177,7 +177,6 @@ public struct PbrPipelineParams {
     public RWTexture2D outputTexture;
     public PbrPipelineGbuffer gbuffer;
     public SkyAtmosphereParams sky;
-    public Texture2DArray<float4> blueNoiseCosine;
     // Per-TLAS-instance data, indexed by InstanceIndex(). Uploaded once per
     // frame after the TLAS instance buffer; each entry holds the previous
     // frame's world-from-object transform.

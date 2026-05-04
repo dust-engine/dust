@@ -8,7 +8,6 @@ filegroup(
     name = "runtime_assets",
     srcs = [
         "//assets:runtime",
-        "//assets/stbn:runtime",
         "//crates/pbr/shaders:runtime",
         "//crates/pbr/shaders/sky_atmosphere:runtime",
         "//crates/vox/shaders:runtime",

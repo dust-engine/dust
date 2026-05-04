@@ -1,10 +1,21 @@
 import pbr_common;
+import random;
 
 struct [raypayload] GatherPayload {
     float dummy : read(caller) : write(caller, miss);
 }
 
 [vk::push_constant] uniform uint frameIndex;
+
+// xxhash32 over a 4D uint key. From Jarzynski & Olano,
+// "Hash Functions for GPU Rendering" (JCGT 9.3, 2020). Passes BigCrush with
+// few failures, which is what DLSS-RR's sampling guidance asks for. Use a
+// distinct sample-dimension key in `.w` per output dimension to keep the
+// low-dimensional projections decorrelated.
+static const uint XXH_PRIME32_2 = 2246822519u;
+static const uint XXH_PRIME32_3 = 3266489917u;
+static const uint XXH_PRIME32_4 = 668265263u;
+static const uint XXH_PRIME32_5 = 374761393u;
 
 [shader("raygeneration")]
 void finalGatherRayGenShader() {
@@ -19,12 +30,12 @@ void finalGatherRayGenShader() {
     float3 worldPos = params.pixelPositionWorldSpace(pixel, DispatchRaysDimensions().xy);
     float3 N = params.gbuffer.normalTexture[pixel].xyz;
 
-    // Sample blue noise cosine-weighted hemisphere direction
-    uint2 texSize;
-    uint _numLayers;
-    params.blueNoiseCosine.GetDimensions(texSize.x, texSize.y, _numLayers);
-    uint2 noiseCoord = pixel % texSize;
-    float3 tangentDir = params.blueNoiseCosine.Load(int4(noiseCoord, frameIndex % 64, 0)).xyz * 2.0 - 1.0;
+    uint seed = xxhash32(uint3(pixel.x, pixel.y, frameIndex));
+    float u0 = rand(seed);
+    float u1 = rand(seed);
+    float r = sqrt(u0);
+    float phi = 6.2831853071795864 * u1;
+    float3 tangentDir = float3(r * cos(phi), r * sin(phi), sqrt(1.0 - u0));
 
     // Build TBN from surface normal
     float3 T, B;

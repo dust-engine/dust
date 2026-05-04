@@ -15,7 +15,6 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bevy_pumicite::{
     CreateDevice, DefaultRenderSet, PumiciteApp, SubmissionState,
-    loader::TextureAsset,
     rtx::{
         RayTracingPipeline, RtxPipelineManager,
         tlas::{TLAS, TLASInstance, tlas_build_input_upload_system},
@@ -237,16 +236,6 @@ impl Plugin for PbrRenderPlugin {
     }
 }
 
-#[derive(Resource)]
-struct BlueNoiseTextures {
-    scalar: Handle<TextureAsset>,
-    unitvec2: Handle<TextureAsset>,
-    unitvec3: Handle<TextureAsset>,
-    unitvec3_cosine: Handle<TextureAsset>,
-    vec2: Handle<TextureAsset>,
-    vec3: Handle<TextureAsset>,
-}
-
 /// All the systems preparing for PBR raytracing render must go into this set.
 #[derive(SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone)]
 pub struct PbrRenderSet;
@@ -261,8 +250,6 @@ fn render(
     mut swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-    blue_noise: Res<BlueNoiseTextures>,
-    texture_assets: Res<Assets<TextureAsset>>,
     mut prev_camera: Local<PreviousCameraState>,
     jitter: Res<JitterState>,
 ) {
@@ -288,10 +275,6 @@ fn render(
     };
     let Some(hdr) = hdr_target.as_mut() else {
         tracing::warn!("Frame not rendered; missing HDR target");
-        return;
-    };
-    let Some(_noise_texture) = texture_assets.get(&blue_noise.unitvec3_cosine) else {
-        tracing::warn!("Frame not rendered; missing blue noise texture");
         return;
     };
     sbt.push_raygen(0, |_| {});
@@ -574,15 +557,6 @@ pub fn setup(
         sbt: None,
         shadow_sbt: None,
         final_gather_sbt: None,
-    });
-
-    commands.insert_resource(BlueNoiseTextures {
-        scalar: asset_server.load("bazel://dust/assets/stbn/scalar.png"),
-        unitvec2: asset_server.load("bazel://dust/assets/stbn/unitvec2.png"),
-        unitvec3: asset_server.load("bazel://dust/assets/stbn/unitvec3.png"),
-        unitvec3_cosine: asset_server.load("bazel://dust/assets/stbn/unitvec3_cosine.png"),
-        vec2: asset_server.load("bazel://dust/assets/stbn/vec2.png"),
-        vec3: asset_server.load("bazel://dust/assets/stbn/vec3.png"),
     });
 }
 
@@ -1341,8 +1315,6 @@ fn final_gather_pass(
     swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-    blue_noise: Res<BlueNoiseTextures>,
-    texture_assets: Res<Assets<TextureAsset>>,
     mut frame_index: Local<u32>,
     jitter: Res<JitterState>,
 ) {
@@ -1365,9 +1337,6 @@ fn final_gather_pass(
         return;
     };
     let Some(hdr) = hdr_target.as_mut() else {
-        return;
-    };
-    let Some(noise_texture) = texture_assets.get(&blue_noise.unitvec3_cosine) else {
         return;
     };
     gather_sbt.push_raygen(0, |_| {});
@@ -1508,7 +1477,6 @@ fn final_gather_pass(
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
                 .sky_linear_sampler(&atmosphere_luts.sampler)
-                .blue_noise_cosine(noise_texture.deref())
                 .per_instance_data(per_instance_buf)
                 .as_slice(),
         );

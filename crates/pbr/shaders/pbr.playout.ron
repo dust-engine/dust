@@ -69,13 +69,8 @@ PipelineLayout(
                         ty: Sampler,
                         stages: [Miss, RayGen]
                     ),
-                    Binding( // Blue noise cosine hemisphere (STBN)
-                        binding: 13,
-                        ty: SampledImage,
-                        stages: [RayGen]
-                    ),
                     Binding( // Per-instance previous-frame transforms (PbrInstanceData[])
-                        binding: 14,
+                        binding: 13,
                         ty: StorageBuffer,
                         stages: [ClosestHit]
                     ),
