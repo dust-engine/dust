@@ -14,16 +14,12 @@ void rayGenShader() {
         params.outputTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
-        params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 0.0;
-        // No surface info under UI — reproject as if at infinity so DLSS sees
-        // motion consistent with camera rotation rather than a stationary mask.
-        float3 worldDir = params.uniforms.primaryRayDirWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
-        float2 prevPixel = params.uniforms.prevPixelFromWorldDir(worldDir, DispatchRaysDimensions().xy);
-        // Subtract jitter so currPixel is the *un-jittered* projection of the
-        // sample we cast (the jittered ray sampled the world at sub-pixel
-        // p - jitter in unjittered NDC). DLSS expects MV in unjittered grid.
-        float2 currPixel = float2(DispatchRaysIndex().xy) - float2(params.uniforms.jitter_x, params.uniforms.jitter_y);
-        params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
+        // UI occludes the world: treat it as a screen-locked surface stuck to
+        // the near plane. depth = 1 in reverse-infinite-Z (closest), and MV = 0
+        // because UI is fixed in screen space — last frame the same screen
+        // pixel was the same UI element, not a rotated world direction.
+        params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 1.0;
+        params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = float2(0, 0);
         return;
     } else {
         params.outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 1.0);

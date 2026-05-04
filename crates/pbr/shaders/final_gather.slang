@@ -21,9 +21,10 @@ static const uint XXH_PRIME32_5 = 374761393u;
 void finalGatherRayGenShader() {
     uint2 pixel = DispatchRaysIndex().xy;
 
-    float depth = params.gbuffer.depthTexture[pixel];
-    if (depth == 0.0) {
-        return; // Sky or UI pixel
+    // Skip pixels with no opaque surface to shade. The primary RT pass writes
+    // albedo.a = 1 only for real hits; sky and UI both write 0.
+    if (params.gbuffer.albedoSRGB[pixel].a == 0.0) {
+        return;
     }
 
     // Reconstruct world position

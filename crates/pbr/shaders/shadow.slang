@@ -9,10 +9,9 @@ struct [raypayload] ShadowPayload {
 void shadowRayGenShader() {
     uint2 pixel = DispatchRaysIndex().xy;
 
-    float depth = params.gbuffer.depthTexture[pixel];
-
-    if (depth == 0.0) {
-        // No hit (sky or UI)
+    // Skip pixels with no opaque surface to shade. The primary RT pass writes
+    // albedo.a = 1 only for real hits; sky and UI both write 0.
+    if (params.gbuffer.albedoSRGB[pixel].a == 0.0) {
         return;
     }
 
@@ -44,8 +43,8 @@ void shadowMissShader() {
 
     // Shadow ray missed — no blocker between surface and sun.
     // Compute direct sunlight contribution and add to render target.
-    float depth = params.gbuffer.depthTexture[pixel];
-    float3 samplePosFromCamera = params.uniforms.primaryRayDirWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy) * depth;
+    float3 samplePosFromCamera = params.pixelPositionWorldSpace(pixel, DispatchRaysDimensions().xy)
+                               - params.uniforms.cameraOrigin();
 
     float3 transmittanceToSun = params.sky.sampleTransmittanceAt(samplePosFromCamera);
 

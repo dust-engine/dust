@@ -182,13 +182,24 @@ public struct PbrPipelineParams {
     // frame's world-from-object transform.
     public StructuredBuffer<PbrInstanceData> perInstanceData;
 
+    // Ray-length `t` from the camera origin to the surface stored at `position`.
+    // The depth gbuffer holds reverse-infinite-Z hardware depth: `near /
+    // linearViewZ`, where linearViewZ is the perpendicular distance from the
+    // camera plane to the surface. Sky/UI pixels store 0, which decodes to
+    // `t = +infinity`; callers must gate on `depth == 0` before using `t`.
+    public float pixelDistanceFromCamera(uint2 position, uint2 screenSize) {
+        float3 dirCam = uniforms.primaryRayDirCameraSpace(position, screenSize);
+        float depthHw = gbuffer.depthTexture[position];
+        // linearViewZ = near / depthHw; t = linearViewZ / cos(angle_from_forward).
+        // dirCam is unit with -Z forward, so cos = -dirCam.z (> 0).
+        return uniforms.near / (depthHw * -dirCam.z);
+    }
+
     // Reconstructs the world-space surface position for a pixel from the gbuffer.
+    // Undefined for sky/UI pixels (depth == 0); callers must gate.
     public float3 pixelPositionWorldSpace(uint2 position, uint2 screenSize) {
         float3 dir = uniforms.primaryRayDirWorldSpace(position, screenSize);
-        float3 origin = uniforms.cameraOrigin();
-        float depth = gbuffer.depthTexture[position];
-        float3 worldPos = origin + dir * depth;
-        return worldPos;
+        return uniforms.cameraOrigin() + dir * pixelDistanceFromCamera(position, screenSize);
     }
 
     // Pixel coordinate of an object-space hit point as seen through the

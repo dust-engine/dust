@@ -627,8 +627,12 @@ fn ensure_dlss_feature(
         // MVLowRes is required by DLSS-RR (the SwinDenoiser refuses to
         // initialize without it): motion vectors are sampled at the input /
         // render resolution rather than the output resolution.
+        // DepthInverted matches the reverse-infinite-Z encoding written by the
+        // RT closest-hit shader (depth = near / linearViewZ, so 0 = far,
+        // 1 = near plane).
         InFeatureCreateFlags: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::IsHDR
-            | dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::MVLowRes,
+            | dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::MVLowRes
+            | dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::DepthInverted,
         InEnableOutputSubrects: false,
     };
 

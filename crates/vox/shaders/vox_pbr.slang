@@ -109,7 +109,12 @@ void closestHitShader(
     float3 worldNormal = normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), normal));
     params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, 1.0);
 
-    params.gbuffer.depthTexture[DispatchRaysIndex().xy] = RayTCurrent();
+    // Encode reverse-infinite-Z hardware depth: `near / linearViewZ`, where
+    // linearViewZ is the perpendicular distance from the camera plane to the
+    // hit (ray length × cos(angle_from_forward)). Sky/UI write 0 = infinity.
+    float3 dirCam = params.uniforms.primaryRayDirCameraSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+    float linearViewZ = RayTCurrent() * -dirCam.z;
+    params.gbuffer.depthTexture[DispatchRaysIndex().xy] = params.uniforms.near / linearViewZ;
 
     // Screen-space motion vector: take the object-space hit point, transform
     // it through the instance's previous-frame world-from-object matrix, then
