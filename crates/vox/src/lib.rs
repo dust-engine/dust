@@ -64,13 +64,13 @@ impl VoxPalette {
         let saturation = 0.8;
         let value = 0.9;
 
-        let mut arr: Box<[U8Vec4; 255]> = Box::new([U8Vec4::ZERO; 255]);
-        for x in 0..255 {
+        let mut arr: Box<[U8Vec4; 256]> = Box::new([U8Vec4::ZERO; 256]);
+        for x in 0..256 {
             let color = Hsva::new(hue, saturation, value, 1.0);
             let rgb_color: Srgba = color.into();
             let rgb_color: [u8; 4] = rgb_color.to_u8_array();
             arr[x] = U8Vec4::from_array(rgb_color);
-            hue += 360.0 / 255.0;
+            hue += 360.0 / 256.0;
         }
 
         let mut buffer = ManagedBuffer::new(
@@ -100,6 +100,22 @@ pub struct VoxModel {
     pub sbt_index: u32,
 }
 
+/// A marker trait for requesting BLAS rebuilds.
+#[derive(Component, Default, Reflect)]
+#[reflect(Component)]
+pub struct VoxModelBLASRebuild;
+impl VoxModelBLASRebuild {
+    pub fn request_rebuild(&mut self) {
+        // No-op. BlasBuilder uses change tracker to schedule BLAS rebuilds.
+    }
+}
+
+#[derive(Bundle, Default)]
+pub struct VoxModelBundle {
+    pub model: VoxModel,
+    pub blas_rebuild_tracker: VoxModelBLASRebuild,
+}
+
 #[derive(Bundle, Default)]
 pub struct VoxInstanceBundle {
     pub transform: Transform,
@@ -115,7 +131,8 @@ impl Plugin for VoxPlugin {
             .init_asset::<VoxPalette>()
             .init_asset::<VoxMaterial>()
             .register_type::<VoxInstance>()
-            .register_type::<VoxModel>();
+            .register_type::<VoxModel>()
+            .register_type::<VoxModelBLASRebuild>();
 
         // Build a BLAS for all entities with VoxModel and without the BLAS component.
         app.add_plugins(bevy_pumicite::rtx::blas::BLASBuilderPlugin::<

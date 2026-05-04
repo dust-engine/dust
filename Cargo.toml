@@ -15,9 +15,9 @@ dust_vox = { path = "crates/vox" }
 dust_pbr = { path = "crates/pbr" }
 dust_app = { path = "crates/app" }
 dust_denoiser = { path = "crates/denoiser" }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "d910d52d59720c8cb49a0e5c4696bf18ac99d05b" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "d910d52d59720c8cb49a0e5c4696bf18ac99d05b" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "d910d52d59720c8cb49a0e5c4696bf18ac99d05b" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "022619cad28e5b053e3740761ea0b0a1bd77af8f" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "022619cad28e5b053e3740761ea0b0a1bd77af8f" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "022619cad28e5b053e3740761ea0b0a1bd77af8f" }
 
 [dependencies]
 dust_vox.workspace = true
@@ -69,6 +69,12 @@ bevy = { git = "https://github.com/dust-engine/bevy", branch = "release-0.17.3" 
 
 [patch."https://github.com/ash-rs/ash.git"]
 ash = { git = "https://github.com/0xbeefd1ed/ash", branch = "meta" }
+
+# If overriding pumicite, use cargo to build the project. Bazel wouldn't support this.
+# [patch."https://github.com/dust-engine/pumicite.git"]
+# pumicite = { path = "../pumicite" }
+# bevy_pumicite = { path = "../pumicite/crates/bevy" }
+# pumicite_egui = { path = "../pumicite/crates/egui" }
 
 [profile.release]
 debug = true

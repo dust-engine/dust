@@ -12,8 +12,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxPalette,
-    geometry::VoxGeometryLeafStorage,
+    Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxModelBundle, VoxPalette, geometry::VoxGeometryLeafStorage
 };
 
 enum WorldOrParent<'w, 'q> {
@@ -321,11 +320,13 @@ impl AssetLoader for VoxLoader {
                                 .add_labeled_asset(format!("Geometry{}", model_id), tree);
                             let material = load_context
                                 .add_labeled_asset(format!("Material{}", model_id), material);
-                            let bundle = VoxModel {
+                            let bundle = VoxModelBundle {
+                                model: VoxModel {
                                 geometry,
                                 material,
                                 palette: palette_handle.clone(),
-                                sbt_index: u32::MAX,
+                                sbt_index: u32::MAX},
+                                ..Default::default()
                             };
                             bundle
                         });

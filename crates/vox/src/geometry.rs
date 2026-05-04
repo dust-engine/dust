@@ -1,11 +1,11 @@
 use std::{any::Any, sync::Arc};
 
-use crate::{Tree, VoxModel};
+use crate::{Tree, VoxModel, VoxModelBLASRebuild};
 use bevy::{
     ecs::system::lifetimeless::{SRes, SResMut},
     prelude::*,
 };
-use bevy_pumicite::{shader::compute::ComputePipeline, staging::DeviceLocalRingBuffer};
+use bevy_pumicite::{rtx::blas::BLAS, shader::compute::ComputePipeline, staging::DeviceLocalRingBuffer};
 use dust_vdb::pool::PoolStorage;
 use pumicite::{
     Allocator,
@@ -108,7 +108,7 @@ impl FromWorld for BlasBuilder {
 impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
     type QueryData = &'static VoxModel;
 
-    type QueryFilter = ();
+    type QueryFilter = Or<(Without<BLAS>, Changed<VoxModelBLASRebuild>)>;
 
     type Params = (
         SRes<Assets<VoxGeometry>>,
@@ -216,5 +216,9 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
             }]
             .into()
         }
+    }
+
+    fn batch_size(&self, _params: &mut bevy::ecs::system::SystemParamItem<'_, '_, Self::Params>) -> usize {
+        128
     }
 }
