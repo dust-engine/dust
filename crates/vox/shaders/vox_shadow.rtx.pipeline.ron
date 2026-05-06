@@ -6,7 +6,7 @@ RayTracingPipeline (
                 path: "bazel://dust/crates/vox/shaders/vox_shadow.spv",
                 entry_point: "main",
             ),
-            param_size: 24
+            param_size: 32
         ),
     ],
 

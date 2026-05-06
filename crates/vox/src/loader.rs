@@ -179,8 +179,13 @@ impl<'a> SceneGraphTraverser<'a> {
         );
         offset = quat.mul_vec3a(offset); // If another seam shows up in the future, try multiplying this with `scale`
         let center = quat * (size.xzy().as_vec3a() / 2.0);
+        // BLAS AABBs are in object-space units of `unit_size` per voxel cell, but
+        // `translation`, `center`, and `offset` are computed in voxel-grid units
+        // from the MagicaVoxel scene graph. Scale them so the world-space placement
+        // matches the world-space size of the model.
+        let unit_size = self.unit_size;
         Transform {
-            translation: (translation - center * scale + offset).into(),
+            translation: ((translation - center * scale + offset) * unit_size).into(),
             rotation: quat,
             scale: scale.into(),
         }
@@ -219,7 +224,9 @@ pub struct VoxLoaderSettings {
 }
 impl Default for VoxLoaderSettings {
     fn default() -> Self {
-        Self { unit_size: 1.0 }
+        // The default scale was set up this way because 1 minecraft block has 16x16 texture.
+        // so if unit_size is 1.0 / 16.0, we have one voxel for every pixel on a minecraft block.
+        Self { unit_size: 1.0 / 16.0 }
     }
 }
 

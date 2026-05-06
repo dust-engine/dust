@@ -10,7 +10,7 @@ RayTracingPipeline (
                 path: "bazel://dust/crates/vox/shaders/vox_pbr.spv",
                 entry_point: "intersectionShader",
             ),
-            param_size: 24
+            param_size: 32
         ),
     ],
 

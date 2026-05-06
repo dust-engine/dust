@@ -20,6 +20,8 @@ struct FinalGatherVoxParams {
     Block* geometry_info;
     uint64_t _pad0;
     uint64_t _pad1;
+    float unit_size;
+    uint32_t _pad2;
 
     Block getCurrentPrimitive() {
         return geometry_info[PrimitiveIndex()];
@@ -74,9 +76,10 @@ void final_gather_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
 [shader("intersection")]
 void main(uniform FinalGatherVoxParams params) {
     Block block = params.getCurrentPrimitive();
+    float inv_unit = 1.0 / params.unit_size;
     final_gather_dda(
-        ObjectRayOrigin() - block.coords,
-        ObjectRayDirection(),
+        (ObjectRayOrigin() - block.coords * params.unit_size) * inv_unit,
+        ObjectRayDirection() * inv_unit,
         block.mask,
         1.0
     );

@@ -244,6 +244,8 @@ struct VoxModelParams {
     geometry_info: u64,
     material_info: u64,
     palette: u64,
+    unit_size: f32,
+    _pad: u32,
 }
 
 fn write_sbt_entries(
@@ -289,6 +291,8 @@ fn write_sbt_entries(
             geometry_info: geometry.tree.pools()[0].storage().device_address(),
             material_info: material.buffer.device_address(),
             palette: palette.0.device_address(),
+            unit_size: geometry.unit_size,
+            _pad: 0,
         };
         model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, |param_dst| {
             param_dst.copy_from_slice(bytemuck::bytes_of(&params));

@@ -49,6 +49,8 @@ struct VoxModelParams {
     Block* geometry_info;
     uint32_t* material_info;
     uint32_t* palette_info;
+    float unit_size;
+    uint32_t _pad;
 
     Block getCurrentPrimitive() {
         return geometry_info[PrimitiveIndex()];
@@ -88,7 +90,8 @@ void closestHitShader(
     Block block = model.getCurrentPrimitive();
     float3 voxelPos = float3(voxelId >> 4, (voxelId >> 2) & 0x3, voxelId & 0x3);
     float3 hitPoint = ObjectRayOrigin() + ObjectRayDirection() * RayTCurrent();
-    float3 hitLocal = hitPoint - block.coords - voxelPos; // [0,1]^3 within the voxel
+    float3 voxelObjCorner = (block.coords + voxelPos) * model.unit_size;
+    float3 hitLocal = (hitPoint - voxelObjCorner) / model.unit_size; // [0,1]^3 within the voxel
 
     float3 d0 = abs(hitLocal);
     float3 d1 = abs(hitLocal - 1.0);
@@ -238,9 +241,14 @@ void intersectionShader(
 ) {
     Block block = params.getCurrentPrimitive();
 
+    // Object-space leaf corner is block.coords * unit_size. Map ray into
+    // voxel-space ([0,4]^3 with unit-sized cells) by subtracting the leaf
+    // corner and dividing by unit_size. Both origin offset and direction
+    // are scaled by 1/unit_size, so dda's t parameter equals object-space t.
+    float inv_unit = 1.0 / params.unit_size;
     dda(
-        ObjectRayOrigin() - block.coords, // origin
-        ObjectRayDirection(),    // dir
+        (ObjectRayOrigin() - block.coords * params.unit_size) * inv_unit,
+        ObjectRayDirection() * inv_unit,
         block.mask,
         1.0
     );
