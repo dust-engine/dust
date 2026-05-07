@@ -18,6 +18,28 @@ struct Block
     }
 };
 
+struct HitAttribute {
+    uint8_t voxelId;
+    uint8_t normal;
+    [mutating]
+    void setNormal(int8_t3 n) {
+        int8_t axis = (n.y & 1) * 2 + (n.z & 1) * 4;
+        int8_t sign = ((n.x | n.y | n.z) >> 7) & 1;
+        this.normal = axis + sign;
+    }
+
+    int8_t3 getNormal() {
+        int axis = this.normal >> 1;            // 0, 1, or 2
+        int val = 1 - ((this.normal & 1) << 1); // sign bit: 0 -> +1, 1 -> -1
+
+        int8_t3 d;
+        d.x = axis == 0 ? val : 0;
+        d.y = axis == 1 ? val : 0;
+        d.z = axis == 2 ? val : 0;
+        return d;
+    }
+}
+
 // Usually one would expect the `hitAttributeEXT` value in the closest hit shader to be the one set
 // during the intersection shader invocation of the closest hit point. This is the case on NVIDIA GPUs.
 // However, on my AMD GPU (6600XT), the `hitAttributeEXT` value seems to reflect the value set during
@@ -74,38 +96,17 @@ struct VoxModelParams {
     }
 }
 
-float SRGBToLinear(float color) {
-    return color < 0.04045 ? color / 12.92 : pow(abs(color + 0.055) / 1.055, 2.4);
-}
-
 [shader("closesthit")]
 void closestHitShader(
     uniform VoxModelParams model,
-    in uint8_t voxelId,
+    in HitAttribute hitAttr,
 ) {
-    float4 color = model.getColorForVoxel(voxelId);                                // Colors sampled from the palette are sRGB
+    float4 color = model.getColorForVoxel(hitAttr.voxelId);                                // Colors sampled from the palette are sRGB
     params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(color.xyz, 1.0); //Directly write sRGB.
 
-    // Compute face normal from voxel hit
-    Block block = model.getCurrentPrimitive();
-    float3 voxelPos = float3(voxelId >> 4, (voxelId >> 2) & 0x3, voxelId & 0x3);
-    float3 hitPoint = ObjectRayOrigin() + ObjectRayDirection() * RayTCurrent();
-    float3 voxelObjCorner = (block.coords + voxelPos) * model.unit_size;
-    float3 hitLocal = (hitPoint - voxelObjCorner) / model.unit_size; // [0,1]^3 within the voxel
-
-    float3 d0 = abs(hitLocal);
-    float3 d1 = abs(hitLocal - 1.0);
-    float3 minD = min(d0, d1);
-    float3 normalSign = select(d0 < d1, float3(-1.0), float3(1.0));
-
-    float3 normal;
-    if (minD.x < minD.y && minD.x < minD.z) {
-        normal = float3(normalSign.x, 0, 0);
-    } else if (minD.y < minD.z) {
-        normal = float3(0, normalSign.y, 0);
-    } else {
-        normal = float3(0, 0, normalSign.z);
-    }
+    // The face the ray entered is whichever axis the dda last stepped across;
+    // the normal points opposite the ray direction on that axis.
+    float3 normal = float3(hitAttr.getNormal());
 
     // Transform to world space
     float3x4 o2w = ObjectToWorld3x4();
@@ -133,13 +134,15 @@ void closestHitShader(
     params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
 }
 
-float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {
+float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max, out int8_t3 positionDelta) {
     float3 tMin = (box_min - origin) / dir;
     float3 tMax = (box_max - origin) / dir;
     float3 t1 = min(tMin, tMax);
     float3 t2 = max(tMin, tMax);
     float t_min = max(max(t1.x, t1.y), t1.z);
     float t_max = min(min(t2.x, t2.y), t2.z);
+    float3 compResult = step(t1.yzx, t1.xyz) * step(t1.zxy, t1.xyz);
+    positionDelta = int8_t3(sign(dir) * compResult);
     return float2(t_min, t_max);
 }
 
@@ -163,7 +166,8 @@ void dda(float3 origin, float3 dir, uint64_t grid, float scale) {
     // The integer variables `position` are initialized to the starting voxel coordinates.
 
     // We assume that the AABB box is located in 0-1. We extend that to 0-4 so we match our DDAed unit box of 4x4x4.
-    float2 initialIntersectionT = intersectAABB(origin, dir, float3(0.0, 0.0, 0.0), float3(4.0, 4.0, 4.0));
+    int8_t3 positionDelta;
+    float2 initialIntersectionT = intersectAABB(origin, dir, float3(0.0, 0.0, 0.0), float3(4.0, 4.0, 4.0), positionDelta);
     if (initialIntersectionT.x >= initialIntersectionT.y) {
         // No intersection
         return;
@@ -214,11 +218,13 @@ void dda(float3 origin, float3 dir, uint64_t grid, float scale) {
     float3 tDelta = float3(1.0, 1.0, 1.0) * t_coef * STEP;
 
     // Intersection phase
-    uint8_t hit = encode_index(position);
+    uint8_t hitVoxelId = encode_index(position);
 
-    while ((grid & (uint64_t(1) << hit)) == 0) {
+    while ((grid & (uint64_t(1) << hitVoxelId)) == 0) {
         float3 compResult = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
-        int8_t3 positionDelta = int8_t3(STEP * compResult); // Either +1 or -1 or 0 on each digit.
+        // The axis selected is the one whose tMax was smallest. Either +1 or -1 on that digit.
+        // 0 on the other two digits.
+        positionDelta = int8_t3(STEP * compResult); 
         position += positionDelta;
 
         hitDistance = min(min(tMax.x, tMax.y), tMax.z);
@@ -227,9 +233,12 @@ void dda(float3 origin, float3 dir, uint64_t grid, float scale) {
         }
         tMax += tDelta * compResult;
 
-        hit = encode_index(position);
+        hitVoxelId = encode_index(position);
     };
 
+    HitAttribute hit;
+    hit.voxelId = hitVoxelId;
+    hit.setNormal(-positionDelta);
     float realT = hitDistance / scale;
 
     ReportHitWithAMDWorkaround(realT, 0, hit);
