@@ -86,7 +86,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "022619cad28e5b053e3740761ea0b0a1bd77af8f")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "45cd16d4e4091cb96f4baa6d5099ab08c081d6e7")
 crate.annotation(
     crate = "pumicite_cli",
     repositories = ["bindeps"],
@@ -109,4 +109,14 @@ new_git_repository(
     remote = "https://github.com/NVIDIA/DLSS.git",
     commit = "d1bef2006b41eefd9d44b0a05f123993f3acbf3c",
     build_file = "//third_party:dlss.BUILD.bazel",
+)
+
+# -----------------------------------------------------------------------------
+# NVIDIA SHARC
+# -----------------------------------------------------------------------------
+new_git_repository(
+    name = "sharc",
+    remote = "https://github.com/NVIDIA-RTX/SHARC.git",
+    commit = "76238ef61abc67cd7ab29ea8a763e3226adc5ca5",
+    build_file = "//third_party:SHARC.BUILD.bazel",
 )

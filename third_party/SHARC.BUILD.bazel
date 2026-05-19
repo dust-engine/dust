@@ -1,0 +1,17 @@
+package(default_visibility = ["//visibility:public"])
+
+# NVIDIA SHaRC is a header-only world-space radiance cache. The headers are
+# written in HLSL with optional GLSL bindings; Slang ingests them via #include
+# during shader compilation. There is no host-side C/C++ library to link —
+# integrators allocate the three GPU buffers themselves and dispatch the
+# update / resolve / query passes from their own pipelines.
+filegroup(
+    name = "sharc_headers",
+    srcs = [
+        "include/HashGridCommon.h",
+        "include/HashGridTypes.h",
+        "include/SharcCommon.h",
+        "include/SharcGlslHelpers.h",
+        "include/SharcTypes.h",
+    ],
+)

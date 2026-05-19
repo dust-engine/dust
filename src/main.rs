@@ -29,7 +29,7 @@ const RAINBOW_DEPTH: u32 = 6;
 const RAINBOW_WEDGES: u32 = 64;
 const RAINBOW_HOLD_TICKS: u32 = 24;
 const RAINBOW_TICK_SECONDS: f32 = 0.01;
-const RAINBOW_WORLD_TRANSLATION: Vec3 = Vec3::new(260.0, 240.0, 240.0);
+const RAINBOW_WORLD_TRANSLATION: Vec3 = Vec3::new(26.0, 24.0, 24.0);
 
 // Palette indices into VoxPalette::colorful() approximating ROYGBIV.
 // VoxMaterial stores `value - 1` as the palette index, and value 0 is the
@@ -75,7 +75,7 @@ fn main() {
         .insert((
             dust_pbr::camera::Camera::default(),
             GlobalTransform::default(),
-            Transform::from_translation(Vec3::new(122.0, 300.61, 54.45)),
+            Transform::from_translation(Vec3::new(12.2, 30.61, 14.45)),
             FlyCamera::default(),
         ))
         .insert(bevy_pumicite::swapchain::SwapchainConfig {
@@ -97,7 +97,7 @@ fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetSe
     let scene: Handle<Scene> = asset_server.load("bazel://dust/assets/castle.vox");
     commands.spawn(SceneRoot(scene));
 
-    let teapot_origin = Vec3::new(122.0, 260.0, 180.0);
+    let teapot_origin = Vec3::new(12.2, 26.0, 18.0);
     let mut teapot_transform = Transform::from_translation(teapot_origin);
     teapot_transform.scale = Vec3::splat(1.5);
 
