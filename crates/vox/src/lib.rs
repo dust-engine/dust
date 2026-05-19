@@ -91,13 +91,27 @@ impl VoxPalette {
 #[reflect(Component)]
 pub struct VoxInstance;
 
-#[derive(Component, Default, Reflect)]
+#[derive(Component, Reflect)]
 #[reflect(Component)]
 pub struct VoxModel {
     pub geometry: Handle<VoxGeometry>,
     pub material: Handle<VoxMaterial>,
     pub palette: Handle<VoxPalette>,
     pub sbt_index: u32,
+    pub enable_compaction: bool,
+    pub prefer_fast_build: bool,
+}
+impl Default for VoxModel {
+    fn default() -> Self {
+        Self {
+            geometry: Handle::default(),
+            material: Handle::default(),
+            palette: Handle::default(),
+            sbt_index: 0,
+            enable_compaction: true,
+            prefer_fast_build: false,
+        }
+    }
 }
 
 /// A marker trait for requesting BLAS rebuilds.

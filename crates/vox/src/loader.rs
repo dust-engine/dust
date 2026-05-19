@@ -329,10 +329,13 @@ impl AssetLoader for VoxLoader {
                                 .add_labeled_asset(format!("Material{}", model_id), material);
                             let bundle = VoxModelBundle {
                                 model: VoxModel {
-                                geometry,
-                                material,
-                                palette: palette_handle.clone(),
-                                sbt_index: u32::MAX},
+                                    geometry,
+                                    material,
+                                    palette: palette_handle.clone(),
+                                    sbt_index: u32::MAX,
+                                    enable_compaction: true,
+                                    prefer_fast_build: false,
+                                },
                                 ..Default::default()
                             };
                             bundle

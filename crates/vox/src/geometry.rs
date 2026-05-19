@@ -118,6 +118,22 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
 
     type BufferType = RingBufferSuballocation;
 
+    fn build_flags(
+        &mut self,
+        _params: &mut bevy::ecs::system::SystemParamItem<Self::Params>,
+        model: &bevy::ecs::query::QueryItem<Self::QueryData>,
+    ) -> vk::BuildAccelerationStructureFlagsKHR
+    {
+        let mut flags = vk::BuildAccelerationStructureFlagsKHR::empty();
+        if model.enable_compaction {
+            flags |= vk::BuildAccelerationStructureFlagsKHR::ALLOW_COMPACTION;
+        }
+        if model.prefer_fast_build {
+            flags |= vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD;
+        }
+        flags
+    }
+
     fn is_ready(
         &self,
         (_, _, compute_pipelines): &mut bevy::ecs::system::SystemParamItem<'_, '_, Self::Params>,

@@ -159,6 +159,8 @@ fn setup_rainbow_demo(
                 material: material.clone(),
                 palette: palette.clone(),
                 sbt_index: u32::MAX,
+                prefer_fast_build: true,
+                enable_compaction: false,
             },
             ..Default::default()
         })
@@ -214,6 +216,8 @@ fn update_rainbow_demo_system(
             material: new_material,
             palette: demo.palette.clone(),
             sbt_index: u32::MAX,
+            prefer_fast_build: true,
+            enable_compaction: false,
         });
         commands.entity(demo.model_entity).remove::<BLAS>();
         return;
