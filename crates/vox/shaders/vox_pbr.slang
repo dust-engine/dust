@@ -222,15 +222,18 @@ void dda(float3 origin, float3 dir, uint64_t grid, float scale) {
 
     while ((grid & (uint64_t(1) << hitVoxelId)) == 0) {
         float3 compResult = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
-        // The axis selected is the one whose tMax was smallest. Either +1 or -1 on that digit.
-        // 0 on the other two digits.
+        // The axis selected is the one whose tMax was smallest. Either +1 or -1 on that position.
+        // 0 on the other two positions.
         positionDelta = int8_t3(STEP * compResult); 
         position += positionDelta;
 
-        hitDistance = min(min(tMax.x, tMax.y), tMax.z);
-        if (hitDistance + 0.001 >= initialIntersectionT.y) {
+        // Exit when the step pushed us out of [0,3]^3. Casting to uint8_t maps
+        // any negative position (e.g. -1 → 255) above 3, so a single unsigned
+        // compare catches both under- and over-flow.
+        if (any(uint8_t3(position) > uint8_t(3))) {
             return;
         }
+        hitDistance = min(min(tMax.x, tMax.y), tMax.z);
         tMax += tDelta * compResult;
 
         hitVoxelId = encode_index(position);

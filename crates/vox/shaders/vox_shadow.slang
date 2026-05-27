@@ -63,9 +63,13 @@ void shadow_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
     while ((grid & (uint64_t(1) << hit)) == 0) {
         float3 comp = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
         position += int8_t3(STEP * comp);
-        hitDistance = min(min(tMax.x, tMax.y), tMax.z);
-        if (hitDistance + 0.001 >= t.y)
+        // Exit when the step pushed us out of [0,3]^3. Casting to uint8_t maps
+        // any negative position (e.g. -1 → 255) above 3, so a single unsigned
+        // compare catches both under- and over-flow.
+        if (any(uint8_t3(position) > uint8_t(3))) {
             return;
+        }
+        hitDistance = min(min(tMax.x, tMax.y), tMax.z);
         tMax += tDelta * comp;
         hit = encode_index(position);
     }
