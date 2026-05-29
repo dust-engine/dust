@@ -1,0 +1,44 @@
+// SHARC ray-tracing pipeline layout (Update + Query permutations).
+//
+// Single descriptor set: bindings 0..13 mirror pbr.playout.ron exactly (the
+// `pbr_common::params` ParameterBlock is pinned to set 0 — see pbr_common.slang),
+// bindings 14..17 are the SHARC working storage. Vulkan permits only one
+// push-descriptor set per pipeline layout, so collapsing everything into one
+// set is the simplest correct choice. AGENTS.md §9: bindings stay stable
+// across Update and Query.
+PipelineLayout(
+    sets: [
+        Inline(
+            DescriptorSetLayout(
+                push_descriptor: true,
+                bindings: [
+                    // PbrPipelineParams (mirrors pbr.playout.ron set 0).
+                    Binding(binding: 0,  ty: AccelerationStructure, stages: [RayGen]),
+                    Binding(binding: 1,  ty: UniformBuffer,         stages: [Miss, ClosestHit, RayGen]),
+                    Binding(binding: 2,  ty: StorageImage,          stages: [Miss, ClosestHit, RayGen]),
+                    Binding(binding: 3,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
+                    Binding(binding: 4,  ty: SampledImage,          stages: [Miss, ClosestHit, RayGen]),
+                    Binding(binding: 5,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
+                    Binding(binding: 6,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
+                    Binding(binding: 7,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
+                    Binding(binding: 8,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
+                    Binding(binding: 9,  ty: UniformBuffer,         stages: [RayGen, Miss]),
+                    Binding(binding: 10, ty: SampledImage,          stages: [Miss, RayGen]),
+                    Binding(binding: 11, ty: SampledImage,          stages: [Miss, RayGen]),
+                    Binding(binding: 12, ty: Sampler,               stages: [Miss, RayGen]),
+                    Binding(binding: 13, ty: StorageBuffer,         stages: [ClosestHit]),
+
+                    // SHARC additions.
+                    Binding(binding: 14, ty: StorageBuffer,         stages: [RayGen, Miss]),  // hashEntries
+                    Binding(binding: 15, ty: StorageBuffer,         stages: [RayGen, Miss]),  // accumulation
+                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen]),        // resolved
+                    Binding(binding: 17, ty: UniformBuffer,         stages: [RayGen]),        // SHARC constants
+                ]
+            )
+        ),
+    ],
+    push_constants: {
+        // sharc_pt.slang push_constant: { uint frameIndex; }
+        RayGen: (0, 4),
+    }
+)

@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod sharc;
 pub mod sky;
 pub mod tonemap;
 
@@ -46,7 +47,7 @@ use crate::{
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct Uniforms {
+pub(crate) struct Uniforms {
     /// row-major affine transformation matrix.
     model: vk::TransformMatrixKHR,
     tan_half_fov: f32,
@@ -99,7 +100,7 @@ struct PreviousCameraState {
 /// very first call), `prev_*` mirror the current camera, which produces zero
 /// motion vectors — the right behavior for passes that don't reproject and
 /// for the first frame after a camera teleport / reset.
-fn build_camera_uniform(
+pub(crate) fn build_camera_uniform(
     camera: &Camera,
     transform: &GlobalTransform,
     prev: Option<&mut PreviousCameraState>,
@@ -203,6 +204,7 @@ impl Plugin for PbrRenderPlugin {
         app.add_plugins(bevy_pumicite::rtx::tlas::TLASBuilderPlugin::<PbrInstanceData>::default());
 
         app.add_plugins(sky::SkyPlugin);
+        app.add_plugins(sharc::SharcDebugPlugin);
         app.configure_sets(
             PostUpdate,
             SkyAtmosphereLUTRenderSet
@@ -228,6 +230,42 @@ impl Plugin for PbrRenderPlugin {
                 device_builder
                     .enable_feature::<vk::PhysicalDeviceRobustness2FeaturesKHR>(|feature| {
                         &mut feature.null_descriptor
+                    })
+                    .ok();
+
+                // SHARC requirements (AGENTS.md §14, SDK v1.8):
+                //   * shaderFloat16 + 16-bit storage for the SharcPackedData
+                //     resolved buffer (float16x4 per entry).
+                //   * shaderBufferInt64Atomics for the 64-bit hash-key CAS used
+                //     by HashGridInsert when HASH_GRID_ENABLE_64_BIT_ATOMICS = 1.
+                device_builder
+                    .enable_feature::<vk::PhysicalDeviceFloat16Int8FeaturesKHR>(|feature| {
+                        &mut feature.shader_float16
+                    })
+                    .ok();
+                device_builder
+                    .enable_feature::<vk::PhysicalDevice16BitStorageFeatures>(|feature| {
+                        &mut feature.storage_buffer16_bit_access
+                    })
+                    .ok();
+                // Slang lowers `RWStructuredBuffer<SharcPackedData>` (which
+                // contains `float16_t4`) through the older Uniform-Block
+                // SPIR-V form, so storageBuffer16BitAccess alone is not
+                // enough — the validator demands
+                // uniformAndStorageBuffer16BitAccess too. Without this
+                // feature the SHARC shader modules silently fail to create
+                // (the validation error we hit on first run).
+                device_builder
+                    .enable_feature::<vk::PhysicalDevice16BitStorageFeatures>(|feature| {
+                        &mut feature.uniform_and_storage_buffer16_bit_access
+                    })
+                    .ok();
+                device_builder
+                    .enable_extension::<pumicite::ash::khr::shader_atomic_int64::Meta>()
+                    .ok();
+                device_builder
+                    .enable_feature::<vk::PhysicalDeviceShaderAtomicInt64Features>(|feature| {
+                        &mut feature.shader_buffer_int64_atomics
                     })
                     .ok();
             })
@@ -494,9 +532,9 @@ struct FrameCounter(u32);
 /// frame by `advance_jitter` and read by `render`, `final_gather_pass` (kept
 /// at zero — final gather doesn't reproject), and `dlss_evaluate`.
 #[derive(Resource)]
-struct JitterState {
-    frame_count: u32,
-    offset: Vec2,
+pub(crate) struct JitterState {
+    pub(crate) frame_count: u32,
+    pub(crate) offset: Vec2,
 }
 impl Default for JitterState {
     fn default() -> Self {
@@ -678,7 +716,7 @@ fn ensure_dlss_feature(
 /// engine does not yet produce (motion vectors, specular albedo, roughness,
 /// hit distances, jitter) are left as their NGX-default null/zero values —
 /// NGX will return `FAIL_MissingInput` until those are wired up.
-fn dlss_evaluate(
+pub(crate) fn dlss_evaluate(
     mut ctx: SubmissionState,
     ngx: Option<ResMut<dust_denoiser::dlss::NgxContext>>,
     state: Option<ResMut<DlssState>>,
@@ -1321,7 +1359,15 @@ fn final_gather_pass(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut frame_index: Local<u32>,
     jitter: Res<JitterState>,
+    sharc_debug: Res<sharc::SharcDebugState>,
+    sharc_config: Res<sharc::SharcConfig>,
 ) {
+    // SHARC enabled ⇒ skip the legacy sky-only final gather; the SHARC Query
+    // pass produces the indirect-lighting contribution instead. AGENTS.md §1
+    // calls this out: the original PT stays as the fallback when SHARC is off.
+    if sharc_config.enabled {
+        return;
+    }
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
     };
@@ -1352,6 +1398,8 @@ fn final_gather_pass(
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
+    let push = sharc::FinalGatherPush::new(*frame_index, &sharc_debug);
+    *frame_index = frame_index.wrapping_add(1);
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, gather_sbt.layout(), |slice| {
@@ -1489,9 +1537,8 @@ fn final_gather_pass(
             pipeline.layout(),
             vk::ShaderStageFlags::RAYGEN_KHR,
             0,
-            bytemuck::bytes_of(&*frame_index),
+            bytemuck::bytes_of(&push),
         );
-        *frame_index = frame_index.wrapping_add(1);
 
         encoder.trace_rays(
             gather_sbt,

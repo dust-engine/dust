@@ -83,6 +83,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":random.slang",
+        "@sharc//:sharc_headers",
     ],
     out = "final_gather.spv",
     profile = "lib_6_3",

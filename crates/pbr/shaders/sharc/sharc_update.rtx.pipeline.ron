@@ -1,0 +1,33 @@
+// SHARC Update permutation: SHARC_UPDATE=1, SHARC_QUERY=0 (see BUILD.bazel).
+// Sparse cache-population pass; writes only to SHARC buffers (AGENTS.md §15).
+RayTracingPipeline(
+    stages: [
+        RayGen (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_update.spv",
+                entry_point: "rayGenShader"
+            )
+        ),
+        // Miss index 0: bounce-ray miss (sets payload.t = -1).
+        Miss (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_update.spv",
+                entry_point: "primaryMissShader",
+            )
+        ),
+        // Miss index 1: shadow-ray miss (sun visible).
+        Miss (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_update.spv",
+                entry_point: "shadowMissShader",
+            )
+        ),
+    ],
+    // SharcHitPayload: float t + float3 albedo + float3 normal = 28 B; round
+    // to 32 with alignment. SharcShadowPayload is 4 B — covered by the same
+    // max.
+    max_ray_payload_size: 32,
+    max_hit_attribute_size: 4,
+
+    layout: Path("bazel://dust/crates/pbr/shaders/sharc/sharc.playout.bin"),
+)

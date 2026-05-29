@@ -213,4 +213,29 @@ public struct PbrPipelineParams {
     }
 }
 
-public ParameterBlock<PbrPipelineParams> params;
+// Force the ParameterBlock to descriptor set 0. Without this, Slang reserves
+// its own set for ParameterBlock contents as soon as any shader declares
+// other explicit `[vk::binding(_, 0)]` globals — which would land `params` at
+// set 1 and the SHARC working buffers at set 0, requiring a multi-set pipeline
+// layout (only one set per layout can be a push-descriptor set, so that path
+// fails validation). Pinning it here keeps a single push-descriptor layout.
+[vk::binding(0, 0)] public ParameterBlock<PbrPipelineParams> params;
+
+// Payloads for the SHARC path-tracer pipelines (Update / Query). Defined here
+// so the ray-gen (sharc_pt.slang) and the voxel closest-hit
+// (vox_sharc_pt.slang) agree on the layout; max_ray_payload_size in
+// sharc.playout-derived pipeline RONs must cover the larger of the two.
+public struct [raypayload] SharcHitPayload {
+    // Ray distance; negative ⇒ miss (set by the miss shader).
+    public float t       : read(caller) : write(caller, closesthit, miss);
+    // Linear albedo at the hit (sRGB-as-linear, matching the renderer's convention).
+    public float3 albedo : read(caller) : write(closesthit);
+    // Geometry normal in world space.
+    public float3 normal : read(caller) : write(closesthit);
+}
+
+public struct [raypayload] SharcShadowPayload {
+    // 0 ⇒ sun visible, 1 ⇒ occluded. Initialized to 1 by the caller; the miss
+    // shader writes 0 when the shadow ray escapes.
+    public uint occluded : read(caller) : write(caller, miss);
+}

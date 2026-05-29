@@ -10,6 +10,7 @@ filegroup(
         "//assets:runtime",
         "//crates/pbr/shaders:runtime",
         "//crates/pbr/shaders/sky_atmosphere:runtime",
+        "//crates/pbr/shaders/sharc:runtime",
         "//crates/vox/shaders:runtime",
         "@dlss//:dlssd_runtime",
     ],

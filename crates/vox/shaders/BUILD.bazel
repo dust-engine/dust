@@ -89,6 +89,31 @@ ron2bin(
     type = "raytracing-pipeline"
 )
 
+# Voxel hit group attached to both SHARC RT pipelines (Update + Query). Single
+# closest-hit / intersection pair, no per-permutation variants: the SHARC state
+# machine lives in the ray-gen, not the hit shader.
+slang_shader(
+    name = "vox_sharc_pt",
+    srcs = ["vox_sharc_pt.slang"],
+    hdrs = [
+        "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+    ],
+    out = "vox_sharc_pt.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+ron2bin(
+    name = "vox_sharc_pt_pipeline_library",
+    src = "vox_sharc_pt.rtx.pipeline.ron",
+    out = "vox_sharc_pt.rtx.pipeline.bin",
+    type = "raytracing-pipeline",
+)
+
 filegroup(
     name = "runtime",
     srcs = [
@@ -101,5 +126,7 @@ filegroup(
         ":vox_shadow",
         ":vox_final_gather",
         ":vox_final_gather_pipeline_library",
+        ":vox_sharc_pt",
+        ":vox_sharc_pt_pipeline_library",
     ],
 )

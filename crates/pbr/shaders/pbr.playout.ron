@@ -79,6 +79,7 @@ PipelineLayout(
         ),
     ],
     push_constants: {
-        RayGen: (0, 4),
+        // FinalGatherPush: frameIndex + SHARC debug params (see final_gather.slang).
+        RayGen: (0, 24),
     }
 )

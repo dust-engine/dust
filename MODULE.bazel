@@ -117,6 +117,6 @@ new_git_repository(
 new_git_repository(
     name = "sharc",
     remote = "https://github.com/NVIDIA-RTX/SHARC.git",
-    commit = "76238ef61abc67cd7ab29ea8a763e3226adc5ca5",
+    commit = "5a976dc60d3a035a63a3f1959c77f1adaa1ec23c",
     build_file = "//third_party:SHARC.BUILD.bazel",
 )

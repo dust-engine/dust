@@ -1,0 +1,103 @@
+load("@rules_vulkan//vulkan:defs.bzl", "slang_shader")
+load("//third_party:pumicite_cli.bzl", "ron2bin", "slang_playout")
+
+package(default_visibility = ["//visibility:public"])
+
+# Common Slang opts. -DSHARC_UPDATE / -DSHARC_QUERY are appended per permutation.
+_SLANG_BASE_OPTS = [
+    "-O3",
+    "-matrix-layout-row-major",
+]
+
+# Two permutations of the same source, differing only in SHARC_UPDATE / SHARC_QUERY.
+# Build each as its own .spv (NVIDIA RTXGI sample pattern, AGENTS.md §11).
+slang_shader(
+    name = "sharc_pt_update",
+    srcs = ["sharc_pt.slang"],
+    hdrs = [
+        "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:random.slang",
+        "@sharc//:sharc_headers",
+    ],
+    out = "sharc_pt_update.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = _SLANG_BASE_OPTS + ["-DSHARC_UPDATE=1", "-DSHARC_QUERY=0"],
+)
+
+slang_shader(
+    name = "sharc_pt_query",
+    srcs = ["sharc_pt.slang"],
+    hdrs = [
+        "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:random.slang",
+        "@sharc//:sharc_headers",
+    ],
+    out = "sharc_pt_query.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = _SLANG_BASE_OPTS + ["-DSHARC_UPDATE=0", "-DSHARC_QUERY=1"],
+)
+
+# Shared RT pipeline layout for both Update and Query (hand-written; mirrors
+# pbr.playout.ron + 4 SHARC bindings).
+ron2bin(
+    name = "sharc_playout",
+    src = "sharc.playout.ron",
+    out = "sharc.playout.bin",
+    type = "pipeline-layout",
+)
+
+ron2bin(
+    name = "sharc_update_rtx_pipeline",
+    src = "sharc_update.rtx.pipeline.ron",
+    out = "sharc_update.rtx.pipeline.bin",
+    type = "raytracing-pipeline",
+)
+
+ron2bin(
+    name = "sharc_query_rtx_pipeline",
+    src = "sharc_query.rtx.pipeline.ron",
+    out = "sharc_query.rtx.pipeline.bin",
+    type = "raytracing-pipeline",
+)
+
+# Resolve compute pass (single source, layout auto-derived).
+slang_shader(
+    name = "sharc_resolve",
+    srcs = ["sharc_resolve.slang"],
+    hdrs = ["@sharc//:sharc_headers"],
+    out = "sharc_resolve.spv",
+    profile = "cs_6_0",
+    target = "spirv",
+    opts = _SLANG_BASE_OPTS,
+)
+slang_playout(
+    name = "sharc_resolve_layout",
+    srcs = ["sharc_resolve.slang"],
+    hdrs = ["@sharc//:sharc_headers"],
+    out = "sharc_resolve.playout.bin",
+    set_attrs = ["0:push_descriptor"],
+)
+ron2bin(
+    name = "sharc_resolve_comp_pipeline",
+    src = "sharc_resolve.comp.pipeline.ron",
+    out = "sharc_resolve.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+
+filegroup(
+    name = "runtime",
+    srcs = [
+        ":sharc_pt_update",
+        ":sharc_pt_query",
+        ":sharc_playout",
+        ":sharc_update_rtx_pipeline",
+        ":sharc_query_rtx_pipeline",
+        ":sharc_resolve",
+        ":sharc_resolve_layout",
+        ":sharc_resolve_comp_pipeline",
+    ],
+)

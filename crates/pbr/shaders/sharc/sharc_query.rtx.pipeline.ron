@@ -1,0 +1,29 @@
+// SHARC Query permutation: SHARC_UPDATE=0, SHARC_QUERY=1.
+// Full-resolution gather; replaces the sky-only final_gather as the indirect
+// integrator when SHARC is enabled.
+RayTracingPipeline(
+    stages: [
+        RayGen (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_query.spv",
+                entry_point: "rayGenShader"
+            )
+        ),
+        Miss (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_query.spv",
+                entry_point: "primaryMissShader",
+            )
+        ),
+        Miss (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_query.spv",
+                entry_point: "shadowMissShader",
+            )
+        ),
+    ],
+    max_ray_payload_size: 32,
+    max_hit_attribute_size: 4,
+
+    layout: Path("bazel://dust/crates/pbr/shaders/sharc/sharc.playout.bin"),
+)

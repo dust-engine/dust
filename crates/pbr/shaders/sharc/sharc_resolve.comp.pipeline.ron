@@ -1,0 +1,8 @@
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.spv",
+        entry_point: "main",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.playout.bin"),
+    disable_optimization: false,
+)

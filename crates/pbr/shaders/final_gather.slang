@@ -1,11 +1,40 @@
 import pbr_common;
 import random;
 
+// SHARC reusable hash grid (header-only, @sharc//:sharc_headers). For the debug
+// visualization we only need HashGridCommon, so set up its prefix macros
+// directly rather than pulling the fp16 cache types in via SharcCommon.h. That
+// also means defining the buffer-access macros SharcCommon.h would normally
+// provide. 64-bit keys (not compact) and 64-bit atomics keep HashGridData free
+// of the lock buffer (we never insert here anyway).
+#define HASH_GRID_COMPACT 0
+#define SHARC_ENABLE_GLSL 0
+#define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
+#define RW_STRUCTURED_BUFFER(name, type) RWStructuredBuffer<type> name
+#define BUFFER_AT_OFFSET(name, offset) name[offset]
+#define HASH_GRID_PREFIX HashGrid
+#define HASH_GRID_CONST_PREFIX HASH_GRID
+#include "HashGridTypes.h"
+#include "HashGridCommon.h"
+
 struct [raypayload] GatherPayload {
     float dummy : read(caller) : write(caller, miss);
 }
 
-[vk::push_constant] uniform uint frameIndex;
+// Push constant block shared by the final-gather ray-gen. `frameIndex` drives
+// the per-frame sampling seed; the `sharcDebug*` fields drive the Phase 1
+// hash-grid debug overlay (see PbrPipelineParams / pbr.playout.ron). When
+// `sharcDebugEnabled` is non-zero the ray-gen paints the SHARC colored-hash
+// instead of tracing an indirect bounce.
+struct FinalGatherPush {
+    uint frameIndex;
+    uint sharcDebugEnabled;
+    float sharcLogarithmBase;
+    float sharcSceneScale;
+    float sharcLevelBias;
+    float sharcBrightness;
+}
+[vk::push_constant] uniform FinalGatherPush pc;
 
 // xxhash32 over a 4D uint key. From Jarzynski & Olano,
 // "Hash Functions for GPU Rendering" (JCGT 9.3, 2020). Passes BigCrush with
@@ -31,7 +60,21 @@ void finalGatherRayGenShader() {
     float3 worldPos = params.pixelPositionWorldSpace(pixel, DispatchRaysDimensions().xy);
     float3 N = params.gbuffer.normalTexture[pixel].xyz;
 
-    uint seed = xxhash32(uint3(pixel.x, pixel.y, frameIndex));
+    // Phase 1 SHARC debug overlay: replace the indirect bounce with the spatial
+    // hash color so we can verify grid layout / scale against surfaces.
+    if (pc.sharcDebugEnabled != 0) {
+        HashGridParameters gridParameters;
+        gridParameters.cameraPosition = params.uniforms.cameraOrigin();
+        gridParameters.logarithmBase = pc.sharcLogarithmBase;
+        gridParameters.sceneScale = pc.sharcSceneScale;
+        gridParameters.levelBias = pc.sharcLevelBias;
+
+        float3 color = HashGridDebugColoredHash(worldPos, N, gridParameters);
+        params.outputTexture[pixel] = float4(color * pc.sharcBrightness, 1.0);
+        return;
+    }
+
+    uint seed = xxhash32(uint3(pixel.x, pixel.y, pc.frameIndex));
     float u0 = rand(seed);
     float u1 = rand(seed);
     float r = sqrt(u0);

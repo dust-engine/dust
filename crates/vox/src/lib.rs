@@ -19,6 +19,7 @@ use bevy_pumicite::shader::RayTracingPipelineLibrary;
 use bevy_pumicite::{CreateDevice, DefaultTransferSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dot_vox::Color;
+use dust_pbr::sharc::SharcPipelines;
 use dust_pbr::PbrRenderState;
 use dust_vdb::hierarchy;
 use pumicite::ash::{VkResult, vk};
@@ -201,7 +202,12 @@ impl Plugin for VoxPlugin {
             .after(CreateDevice),
         );
 
-        app.add_systems(Startup, setup.after(dust_pbr::setup));
+        app.add_systems(
+            Startup,
+            setup
+                .after(dust_pbr::setup)
+                .after(dust_pbr::sharc::setup_sharc),
+        );
 
         app.add_systems(PostUpdate, write_sbt_entries.in_set(dust_pbr::PbrRenderSet));
     }
@@ -215,6 +221,12 @@ pub struct VoxRenderState {
     shadow_hitgroup_index: u32,
     final_gather_pipeline: Handle<RayTracingPipelineLibrary>,
     final_gather_hitgroup_index: u32,
+    // One shared closest-hit + intersection serves BOTH SHARC RT pipelines;
+    // we register it twice so each base pipeline gets its own hitgroup index.
+    sharc_update_pipeline: Handle<RayTracingPipelineLibrary>,
+    sharc_update_hitgroup_index: u32,
+    sharc_query_pipeline: Handle<RayTracingPipelineLibrary>,
+    sharc_query_hitgroup_index: u32,
 }
 
 fn setup(
@@ -222,6 +234,7 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut pipeline_manager: ResMut<RtxPipelineManager>,
     pbr_render_state: Res<PbrRenderState>,
+    sharc_pipelines: Res<SharcPipelines>,
 ) {
     let hitgroup_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_pbr.rtx.pipeline.bin");
@@ -242,6 +255,20 @@ fn setup(
         final_gather_hitgroup_library.clone(),
     );
 
+    // SHARC hit group: one library, attached to both Update and Query base
+    // pipelines. Closest-hit returns hit data via SharcHitPayload — the SHARC
+    // state machine lives in the ray-gen, not here.
+    let sharc_hitgroup_library: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_pt.rtx.pipeline.bin");
+    let sharc_update_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
+        &sharc_pipelines.update_pipeline,
+        sharc_hitgroup_library.clone(),
+    );
+    let sharc_query_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
+        &sharc_pipelines.query_pipeline,
+        sharc_hitgroup_library.clone(),
+    );
+
     commands.insert_resource(VoxRenderState {
         pipeline: hitgroup_library,
         hitgroup_index,
@@ -249,6 +276,10 @@ fn setup(
         shadow_hitgroup_index,
         final_gather_pipeline: final_gather_hitgroup_library,
         final_gather_hitgroup_index,
+        sharc_update_pipeline: sharc_hitgroup_library.clone(),
+        sharc_update_hitgroup_index,
+        sharc_query_pipeline: sharc_hitgroup_library,
+        sharc_query_hitgroup_index,
     });
 }
 
@@ -266,6 +297,7 @@ fn write_sbt_entries(
     mut models: Query<&mut VoxModel>,
     mut instances: Query<(Entity, &mut TLASInstance<dust_pbr::PbrInstanceData>), With<VoxInstance>>,
     mut pbr_state: ResMut<PbrRenderState>,
+    mut sharc_pipelines: ResMut<SharcPipelines>,
     vox_render_state: Res<VoxRenderState>,
 
     geometry_assets: Res<Assets<VoxGeometry>>,
@@ -273,6 +305,7 @@ fn write_sbt_entries(
     palette_assets: Res<Assets<VoxPalette>>,
 ) {
     let pbr_state = &mut *pbr_state;
+    let sharc_state = &mut *sharc_pipelines;
     let (Some(sbt), Some(shadow_sbt), Some(final_gather_sbt)) = (
         pbr_state.sbt.as_mut(),
         pbr_state.shadow_sbt.as_mut(),
@@ -285,6 +318,18 @@ fn write_sbt_entries(
             instance.disabled = true;
         }
         tracing::warn!("Missing SBT");
+        return;
+    };
+    let (Some(sharc_update_sbt), Some(sharc_query_sbt)) =
+        (sharc_state.update_sbt.as_mut(), sharc_state.query_sbt.as_mut())
+    else {
+        for mut model in models.iter_mut() {
+            model.sbt_index = u32::MAX;
+        }
+        for (_, mut instance) in instances.iter_mut() {
+            instance.disabled = true;
+        }
+        tracing::warn!("Missing SHARC SBT");
         return;
     };
     for mut model in models.iter_mut() {
@@ -325,6 +370,22 @@ fn write_sbt_entries(
             },
         );
         assert_eq!(final_gather_sbt_index, model.sbt_index);
+
+        // SHARC Update + Query both share the same hit-group library (vox_sharc_pt).
+        let sharc_update_idx = sharc_update_sbt.push_hitgroup(
+            vox_render_state.sharc_update_hitgroup_index,
+            |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            },
+        );
+        assert_eq!(sharc_update_idx, model.sbt_index);
+        let sharc_query_idx = sharc_query_sbt.push_hitgroup(
+            vox_render_state.sharc_query_hitgroup_index,
+            |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            },
+        );
+        assert_eq!(sharc_query_idx, model.sbt_index);
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;
