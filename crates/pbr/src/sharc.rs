@@ -143,10 +143,10 @@ pub(crate) struct SharcConstantsRaw {
 }
 
 #[derive(Resource, Default)]
-struct SharcFrameState {
-    frame_index: u32,
-    prev_camera_position: Vec3,
-    prev_has_value: bool,
+pub(crate) struct SharcFrameState {
+    pub(crate) frame_index: u32,
+    pub(crate) prev_camera_position: Vec3,
+    pub(crate) prev_has_value: bool,
 }
 
 #[derive(Resource)]
@@ -352,7 +352,7 @@ fn clear_sharc_buffers(
 
 // ─── Per-frame constants ───────────────────────────────────────────────────
 
-fn build_sharc_constants(
+pub(crate) fn build_sharc_constants(
     config: &SharcConfig,
     frame_state: &SharcFrameState,
     camera_origin: Vec3,
@@ -474,9 +474,7 @@ fn sharc_query_pass(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<crate::JitterState>,
 ) {
-    if !config.enabled {
-        return;
-    }
+    return;
     let Some(resources) = sharc_resources.as_deref_mut() else { return };
     let Ok((camera, transform)) = swapchain_images.single() else { return };
     let Some(pipeline) = pipelines

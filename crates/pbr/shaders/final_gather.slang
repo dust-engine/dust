@@ -103,7 +103,7 @@ void finalGatherRayGenShader() {
     payload.dummy = 0.0;
     TraceRay(
         params.sceneBVH,
-        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_FORCE_OPAQUE,
+        RAY_FLAG_FORCE_OPAQUE,
         ~0,
         0, 1, 0,
         ray, payload

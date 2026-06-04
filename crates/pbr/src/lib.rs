@@ -29,6 +29,7 @@ use pumicite::device::DeviceBuilder;
 use pumicite::{
     Allocator, HasDevice,
     ash::vk::{self, TaggedStructure},
+    buffer::BufferLike,
     debug::DebugObject,
     image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView},
     rtx::ShaderBindingTable,
@@ -1361,13 +1362,9 @@ fn final_gather_pass(
     jitter: Res<JitterState>,
     sharc_debug: Res<sharc::SharcDebugState>,
     sharc_config: Res<sharc::SharcConfig>,
+    sharc_frame_state: Res<sharc::SharcFrameState>,
+    mut sharc_resources: Option<ResMut<sharc::SharcResources>>,
 ) {
-    // SHARC enabled ⇒ skip the legacy sky-only final gather; the SHARC Query
-    // pass produces the indirect-lighting contribution instead. AGENTS.md §1
-    // calls this out: the original PT stays as the fallback when SHARC is off.
-    if sharc_config.enabled {
-        return;
-    }
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
     };
@@ -1389,12 +1386,17 @@ fn final_gather_pass(
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
+    let Some(sharc_resources) = sharc_resources.as_deref_mut() else {
+        return;
+    };
     gather_sbt.push_raygen(0, |_| {});
     gather_sbt.push_miss(0, |_| {});
     // Final-gather doesn't reproject, but it reconstructs world position from
     // the depth G-buffer via `primaryRayDirWorldSpace` — that depth was
     // written by the jittered primary ray, so we must reuse the same jitter.
     let uniform = build_camera_uniform(camera, transform, None, jitter.offset);
+    let sharc_constants =
+        sharc::build_sharc_constants(&sharc_config, &sharc_frame_state, transform.translation());
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
@@ -1501,6 +1503,48 @@ fn final_gather_pass(
             0..1,
             false,
         );
+        // SHARC working storage. Bindings 14..17 are declared in
+        // pbr.playout.ron but only used when the final-gather shader actually
+        // calls into the SHARC cache; this plumbing makes them available so
+        // the shader-side query can land later. Access flags are RT-stage
+        // storage reads — Update/Resolve declare R/W on these buffers, so the
+        // Bevy tracker inserts the necessary barriers between Resolve and the
+        // final-gather query.
+        let sharc_hash_buf = encoder.lock(
+            &sharc_resources.hash_entries,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sharc_accum_buf = encoder.lock(
+            &sharc_resources.accumulation,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sharc_resolved_buf = encoder.lock(
+            &sharc_resources.resolved,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sharc_constants_buf = uniform_ring_buffer
+            .create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
+
+        let sharc_rt_read = Access {
+            stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            access: vk::AccessFlags2::SHADER_STORAGE_READ,
+        };
+        encoder.use_buffer_resource(
+            sharc_hash_buf,
+            &mut sharc_resources.hash_entries_state,
+            sharc_rt_read,
+        );
+        encoder.use_buffer_resource(
+            sharc_accum_buf,
+            &mut sharc_resources.accumulation_state,
+            sharc_rt_read,
+        );
+        encoder.use_buffer_resource(
+            sharc_resolved_buf,
+            &mut sharc_resources.resolved_state,
+            sharc_rt_read,
+        );
+
         encoder.memory_barrier(
             Access::COPY_WRITE,
             Access {
@@ -1511,26 +1555,78 @@ fn final_gather_pass(
 
         encoder.emit_barriers();
 
+        let sharc_hash_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_hash_buf.vk_handle(),
+            offset: 0,
+            range: sharc_hash_buf.size(),
+        }];
+        let sharc_accum_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_accum_buf.vk_handle(),
+            offset: 0,
+            range: sharc_accum_buf.size(),
+        }];
+        let sharc_resolved_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_resolved_buf.vk_handle(),
+            offset: 0,
+            range: sharc_resolved_buf.size(),
+        }];
+        let sharc_constants_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_constants_buf.vk_handle(),
+            offset: sharc_constants_buf.offset(),
+            range: sharc_constants_buf.size(),
+        }];
+        let mut params = PbrPipelineParams::new();
+        params
+            .scene_bvh(tlas)
+            .uniforms(uniform)
+            .output_texture(&render_target_views.hdr_output)
+            .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
+            .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
+            .gbuffer_normal_texture(&render_target_views.normal)
+            .gbuffer_depth_texture(&render_target_views.depth)
+            .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+            .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
+            .sky_atmosphere_params(atmo_buffer)
+            .sky_transmittance_lut(transmittance_view)
+            .sky_sky_view_lut(sky_view)
+            .sky_linear_sampler(&atmosphere_luts.sampler)
+            .per_instance_data(per_instance_buf);
+        let mut writes: Vec<vk::WriteDescriptorSet> = params.as_slice().to_vec();
+        writes.extend_from_slice(&[
+            vk::WriteDescriptorSet {
+                dst_binding: 14,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_hash_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 15,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_accum_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 16,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_resolved_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 17,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_constants_info),
+        ]);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
             0,
-            PbrPipelineParams::new()
-                .scene_bvh(tlas)
-                .uniforms(uniform)
-                .output_texture(&render_target_views.hdr_output)
-                .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
-                .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
-                .gbuffer_normal_texture(&render_target_views.normal)
-                .gbuffer_depth_texture(&render_target_views.depth)
-                .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
-                .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
-                .sky_atmosphere_params(atmo_buffer)
-                .sky_transmittance_lut(transmittance_view)
-                .sky_sky_view_lut(sky_view)
-                .sky_linear_sampler(&atmosphere_luts.sampler)
-                .per_instance_data(per_instance_buf)
-                .as_slice(),
+            &writes,
         );
 
         encoder.push_constants(

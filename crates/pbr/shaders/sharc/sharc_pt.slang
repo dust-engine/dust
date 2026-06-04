@@ -13,6 +13,7 @@
 
 import pbr_common;
 import random;
+import sharc;
 
 #ifndef SHARC_UPDATE
 #define SHARC_UPDATE 0
@@ -32,21 +33,11 @@ import random;
 #define BUFFER_AT_OFFSET(name, offset) name[offset]
 #include "SharcCommon.h"
 
-// Per-frame SHARC constants (matches the Rust SharcConstants in sharc.rs).
-struct SharcShaderConstants {
-    float3 cameraPosition;
-    float sceneScale;
-    float3 cameraPositionPrev;
-    float radianceScale;
-    float roughnessMin;
-    uint accumulationFrameNum;
-    uint staleFrameNum;
-    uint entriesNum;
-    uint frameIndex;
-    uint downscaleFactor;
-    uint debugMode;
-    uint _pad;
-}
+// SharcShaderConstants now lives in pbr_common.slang as a public struct so
+// that PbrPipelineParams can carry it as a field (its layout still mirrors
+// crates/pbr/src/sharc.rs::SharcConstantsRaw). The standalone `[vk::binding(17,
+// 0)] g_sharcConstants` below is preserved for sharc_pt's own use; it reuses
+// the same descriptor slot.
 
 // SHARC bindings co-locate with `params` in descriptor set 0 (see
 // pbr_common.slang for why the ParameterBlock is pinned to set 0). Bindings

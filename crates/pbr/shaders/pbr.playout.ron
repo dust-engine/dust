@@ -74,6 +74,18 @@ PipelineLayout(
                         ty: StorageBuffer,
                         stages: [ClosestHit]
                     ),
+
+                    // SHARC working storage. Used by the final-gather ray-gen
+                    // (no-op currently — payload-side path) and by the
+                    // vox_final_gather closest hit, which queries the resolved
+                    // cache at the gather-ray hit to fold cached indirect into
+                    // HDR. Bindings mirror sharc.playout.ron exactly so the
+                    // same Slang reflection assignments align across
+                    // pipelines.
+                    Binding(binding: 14, ty: StorageBuffer, stages: [RayGen, ClosestHit]), // hashEntries
+                    Binding(binding: 15, ty: StorageBuffer, stages: [RayGen, ClosestHit]), // accumulation
+                    Binding(binding: 16, ty: StorageBuffer, stages: [RayGen, ClosestHit]), // resolved
+                    Binding(binding: 17, ty: UniformBuffer, stages: [RayGen, ClosestHit]), // SHARC constants
                 ]
             )
         ),

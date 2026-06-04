@@ -3,6 +3,16 @@ load("//third_party:pumicite_cli.bzl", "slang_playout", "ron2bin")
 
 package(default_visibility = ["//visibility:public"])
 
+# Shared voxel types (Block, HitAttribute, VoxModelParams,
+# ReportHitWithAMDWorkaround). Compiled to a Slang IR module so the voxel hit
+# groups (vox_pbr, vox_shadow, vox_final_gather, vox_sharc_pt) can import it.
+slang_shader(
+    name = "vox_common_module",
+    srcs = ["vox_common.slang"],
+    out = "vox_common.slang-module",
+    opts = ["-emit-ir"],
+)
+
 slang_shader(
     name = "blas_builder_copy_coords",
     srcs = ["blas_builder_copy_coords.slang"],
@@ -34,6 +44,7 @@ slang_shader(
     name = "vox_pbr",
     srcs = ["vox_pbr.slang"],
     hdrs = [
+        ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
     ],
@@ -74,6 +85,11 @@ ron2bin(
 slang_shader(
     name = "vox_final_gather",
     srcs = ["vox_final_gather.slang"],
+    hdrs = [
+        ":vox_common_module",
+        "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+    ],
     out = "vox_final_gather.spv",
     profile = "lib_6_3",
     target = "spirv",

@@ -1,5 +1,6 @@
 import sky_atmosphere;
 module pbr_common;
+import sharc;
 
 public struct SkyAtmosphereParams {
     public ConstantBuffer<AtmosphereParams> atmosphereParams;
@@ -181,6 +182,8 @@ public struct PbrPipelineParams {
     // frame after the TLAS instance buffer; each entry holds the previous
     // frame's world-from-object transform.
     public StructuredBuffer<PbrInstanceData> perInstanceData;
+    public SharcParams sharc;
+
 
     // Ray-length `t` from the camera origin to the surface stored at `position`.
     // The depth gbuffer holds reverse-infinite-Z hardware depth: `near /

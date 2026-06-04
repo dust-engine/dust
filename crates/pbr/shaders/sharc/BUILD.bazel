@@ -16,6 +16,7 @@ slang_shader(
     srcs = ["sharc_pt.slang"],
     hdrs = [
         "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders:sharc_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",
         "@sharc//:sharc_headers",
@@ -31,6 +32,7 @@ slang_shader(
     srcs = ["sharc_pt.slang"],
     hdrs = [
         "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders:sharc_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",
         "@sharc//:sharc_headers",

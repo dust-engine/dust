@@ -4,7 +4,11 @@ RayTracingPipeline (
             ty: Aabbs,
             intersection: (
                 path: "bazel://dust/crates/vox/shaders/vox_final_gather.spv",
-                entry_point: "main",
+                entry_point: "intersectionShader",
+            ),
+            closest_hit: (
+                path: "bazel://dust/crates/vox/shaders/vox_final_gather.spv",
+                entry_point: "closestHitShader",
             ),
             param_size: 32
         ),

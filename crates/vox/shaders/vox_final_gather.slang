@@ -1,40 +1,15 @@
-struct Block
-{
-    uint64_t mask;
-    private uint32_t coords_packed;
-    uint32_t material_ptr;
+import pbr_common;
+import vox_common;
 
-    property float3 coords {
-        get {
-            static const uint32_t mask = ((1 << 10) - 1);
-            uint32_t3 min;
-            min.x = coords_packed >> 20;
-            min.y = (coords_packed >> 10) & mask;
-            min.z = coords_packed & mask;
-            return min << 2;
-        }
-    }
-};
-
-struct FinalGatherVoxParams {
-    Block* geometry_info;
-    uint64_t _pad0;
-    uint64_t _pad1;
-    float unit_size;
-    uint32_t _pad2;
-
-    Block getCurrentPrimitive() {
-        return geometry_info[PrimitiveIndex()];
-    }
-};
-
-float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {
+float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max, out int8_t3 positionDelta) {
     float3 tMin = (box_min - origin) / dir;
     float3 tMax = (box_max - origin) / dir;
     float3 t1 = min(tMin, tMax);
     float3 t2 = max(tMin, tMax);
     float t_min = max(max(t1.x, t1.y), t1.z);
     float t_max = min(min(t2.x, t2.y), t2.z);
+    float3 compResult = step(t1.yzx, t1.xyz) * step(t1.zxy, t1.xyz);
+    positionDelta = int8_t3(sign(dir) * compResult);
     return float2(t_min, t_max);
 }
 
@@ -42,10 +17,12 @@ uint8_t encode_index(uint8_t3 position) {
     return (position.x << 4) | (position.y << 2) | position.z;
 }
 
-/// Simplified DDA for final gather rays. No AMD workaround needed since hit attributes
-/// are never read (closest hit shader is skipped for final gather rays).
+// DDA mirrored from vox_pbr's dda(), trimmed of the visualization branches.
+// Tracks `positionDelta` so we can hand the face normal to the closest hit
+// shader for SHARC's worldNormal-keyed cache query.
 void final_gather_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
-    float2 t = intersectAABB(origin, dir, float3(0.0), float3(4.0));
+    int8_t3 positionDelta;
+    float2 t = intersectAABB(origin, dir, float3(0.0), float3(4.0), positionDelta);
     if (t.x >= t.y || t.y <= 0.0)
         return;
 
@@ -62,7 +39,8 @@ void final_gather_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
     uint8_t hit = encode_index(position);
     while ((grid & (uint64_t(1) << hit)) == 0) {
         float3 comp = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
-        position += int8_t3(STEP * comp);
+        positionDelta = int8_t3(STEP * comp);
+        position += positionDelta;
         // Exit when the step pushed us out of [0,3]^3. Casting to uint8_t maps
         // any negative position (e.g. -1 → 255) above 3, so a single unsigned
         // compare catches both under- and over-flow.
@@ -74,11 +52,14 @@ void final_gather_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
         hit = encode_index(position);
     }
 
-    ReportHit(hitDistance / scale, 0, uint8_t(0));
+    HitAttribute attr;
+    attr.voxelId = hit;
+    attr.setNormal(-positionDelta);
+    ReportHitWithAMDWorkaround(hitDistance / scale, 0, attr);
 }
 
 [shader("intersection")]
-void main(uniform FinalGatherVoxParams params) {
+void intersectionShader(uniform VoxModelParams params) {
     Block block = params.getCurrentPrimitive();
     float inv_unit = 1.0 / params.unit_size;
     final_gather_dda(
@@ -88,3 +69,34 @@ void main(uniform FinalGatherVoxParams params) {
         1.0
     );
 }
+
+// Final-gather indirect via SHARC. The gather ray hits a surface here; we look
+// up the cached outgoing radiance at that surface and additively fold it into
+// the HDR, modulated by the *primary* surface's albedo (Lambertian throughput
+// cancellation: (albedo / pi) * cos / pdf collapses to `primaryAlbedo` when
+// the gather ray is cosine-importance-sampled — same pattern the miss shader
+// uses for sky contribution).
+//
+// Cache miss ⇒ no contribution: the SHARC update pass will populate this entry
+// over the next few frames. Until then this pixel's indirect is missing one
+// sample, but the sky path still contributes whenever the gather ray escapes.
+[shader("closesthit")]
+void closestHitShader(uniform VoxModelParams model,
+                      in HitAttribute hitAttr) {
+    float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3x4 o2w = ObjectToWorld3x4();
+    float3 worldNormal = normalize(
+        mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(hitAttr.getNormal())));
+
+    float3 cachedRadiance;
+    if (!params.sharc.getCachedRadiance(worldPos, worldNormal, cachedRadiance)) {
+        return;
+    }
+    uint2 pixel = DispatchRaysIndex().xy;
+    float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;
+    // TODO: premultiply the albedo to make this even faster.
+    float4 current = params.outputTexture[pixel];
+    params.outputTexture[pixel] =
+        float4(current.rgb + primaryAlbedo * cachedRadiance, current.a);
+}
+
