@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bazelisk build:*)"
+      "Bash(bazelisk build:*)",
+      "Read(//c/Users/neo/Developer/pumicite/**)",
+      "Bash(cargo check *)",
+      "Bash(cargo test *)"
     ]
   }
 }

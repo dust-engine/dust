@@ -77,9 +77,11 @@ void intersectionShader(uniform VoxModelParams params) {
 // the gather ray is cosine-importance-sampled — same pattern the miss shader
 // uses for sky contribution).
 //
-// Cache miss ⇒ no contribution: the SHARC update pass will populate this entry
-// over the next few frames. Until then this pixel's indirect is missing one
-// sample, but the sky path still contributes whenever the gather ray escapes.
+// Cache miss ⇒ no HDR contribution this frame, but we push (worldPos, normal)
+// into the SHARC candidate pool so next frame's Update populates this cell.
+// Weight = luminance(primaryAlbedo): dark pixels (shadowed cavities) have
+// little visual impact, so they shouldn't outcompete bright pixels for pool
+// slots under contention.
 [shader("closesthit")]
 void closestHitShader(uniform VoxModelParams model,
                       in HitAttribute hitAttr) {
@@ -88,12 +90,25 @@ void closestHitShader(uniform VoxModelParams model,
     float3 worldNormal = normalize(
         mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(hitAttr.getNormal())));
 
-    float3 cachedRadiance;
-    if (!params.sharc.getCachedRadiance(worldPos, worldNormal, cachedRadiance)) {
-        return;
-    }
     uint2 pixel = DispatchRaysIndex().xy;
     float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;
+
+    float3 cachedRadiance;
+    if (!params.sharc.getCachedRadiance(worldPos, worldNormal, cachedRadiance)) {
+        // Hit-point's own albedo (sampled from the voxel palette by the same
+        // CHS) — gets stored in the candidate so the Update path next frame
+        // doesn't need a probe ray to recover it.
+        float3 hitAlbedo = model.getColorForVoxel(hitAttr.voxelId).rgb;
+        // Weight by impact on the visible image: primary-pixel albedo is a
+        // proxy for "how much would populating this cell change what the
+        // user sees." Dark primary pixels lose pool slots to bright ones.
+        float weight = dot(primaryAlbedo, float3(0.2126, 0.7152, 0.0722));
+        uint seed = pixel.x
+                    ^ (pixel.y * 0x100u)
+                    ^ (params.sharc.g_sharcConstants.frameIndex * 0x10000u);
+        params.sharc.pushCandidate(worldPos, worldNormal, hitAlbedo, weight, seed);
+        return;
+    }
     // TODO: premultiply the albedo to make this even faster.
     float4 current = params.outputTexture[pixel];
     params.outputTexture[pixel] =

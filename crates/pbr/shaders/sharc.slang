@@ -30,7 +30,32 @@ public struct SharcShaderConstants {
     public uint frameIndex;
     public uint downscaleFactor;
     public uint debugMode;
-    public uint _pad;
+    public uint poolCapacity;
+}
+
+/// Candidate-pool entry — one surface point whose cache cell was a miss
+/// this frame and should be populated by Update on the next frame.
+///
+/// `albedo` is included so the Update raygen doesn't have to fire a probe
+/// ray to recover it from the voxel palette: both the Query CHS (where the
+/// candidate is born) and the Update cascade (after a bounce) already have
+/// it via vox CHS, so paying 12 B in the buffer is cheaper than 1 ray per
+/// pool slot.
+///
+/// Layout matches `SharcResources::STRIDE_CANDIDATE` (std430 stride 48 B):
+/// each `float3` aligns to 16 with a 4 B trailing pad per field.
+public struct Candidate {
+    public float3 worldPos;
+    public float3 normal;
+    public float3 albedo;
+}
+
+// Local hash used by pushCandidate — keeps `sharc.slang` self-contained
+// without an `import random;` dependency.
+uint pcgHash(uint x) {
+    x = x * 747796405u + 2891336453u;
+    uint word = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
 public struct SharcParams {
@@ -42,14 +67,22 @@ public struct SharcParams {
     // (query, debug overlays) via public input/output types only.
     //
     // Slang auto-assigns these to set 0 bindings 14..16 once any accessor is
-    // referenced; the constants UBO lands at binding 17. The bindings match
-    // pbr.playout.ron and sharc.playout.ron exactly. Importers of this module
-    // (e.g. sharc_pt.slang) do NOT see these private fields, so their own
-    // standalone `[vk::binding(14..17, 0)]` globals don't collide.
+    // referenced; the constants UBO lands at binding 17. Bindings 18..21 are
+    // the ping-ponged candidate pool. All match pbr.playout.ron and
+    // sharc.playout.ron exactly. Importers of this module (e.g. sharc_pt.slang)
+    // do NOT see these private fields, so their own standalone
+    // `[vk::binding(14..17, 0)]` globals don't collide.
     RWStructuredBuffer<HashGridKey> g_sharcHashEntries;
     RWStructuredBuffer<SharcAccumulationData> g_sharcAccumulation;
     RWStructuredBuffer<SharcPackedData> g_sharcResolved;
     public ConstantBuffer<SharcShaderConstants> g_sharcConstants;
+    // Candidate pool — read side fed Update's primary vertices, write side
+    // accumulated this frame's Query misses and Update cascade pushes for
+    // *next* frame to consume.
+    public RWStructuredBuffer<Candidate> g_sharcCandidatesRead;
+    public RWStructuredBuffer<uint> g_sharcKeysRead;
+    RWStructuredBuffer<Candidate> g_sharcCandidatesWrite;
+    RWStructuredBuffer<uint> g_sharcKeysWrite;
 
     // Private helpers used by the public accessor methods below.
     SharcParameters buildSharcParameters() {
@@ -101,5 +134,52 @@ public struct SharcParams {
     public float3 debugHashCollisions(float3 worldPos, float3 normal) {
         SharcParameters p = buildSharcParameters();
         return HashGridDebugHashCollisions(worldPos, normal, p.hashGridParameters, p.hashGridData);
+    }
+
+    // ── Candidate-pool API ────────────────────────────────────────────────
+    // Streaming weighted-reservoir-sampling, one independent reservoir of
+    // size 1 per pool slot. Each call hashes `seed` to a slot and competes
+    // for it with `r = U(0,1)^(1/weight)` via `InterlockedMax` on the slot's
+    // u32 key. The candidate write is non-atomic and may race with another
+    // winner; we accept the inconsistency (the slot still holds a valid push
+    // from this frame, just possibly not the strictly-maximum-weight one).
+    public void pushCandidate(float3 worldPos, float3 normal, float3 albedo,
+                              float weight, uint seed) {
+        if (weight <= 0.0) return;
+        uint cap = g_sharcConstants.poolCapacity;
+        if (cap == 0) return;
+
+        // Two independent hashes: one for slot, one for U.
+        uint h0 = pcgHash(seed ^ 0x9e3779b9u);
+        uint h1 = pcgHash(h0 ^ 0x517cc1b7u);
+
+        uint slot = h0 % cap;
+        // Avoid U == 0 (yields r = 0, ties with empty sentinel). Map h1 to
+        // (0, 1] by using the upper 24 bits and adding 1 LSB.
+        float u = (float((h1 >> 8) & 0x00FFFFFFu) + 1.0) * (1.0 / 16777217.0);
+        // r = U^(1/w). Higher weight ⇒ r closer to 1 ⇒ wins atomic_max.
+        float r = pow(u, 1.0 / weight);
+        uint rUi = asuint(r);
+        // Guard against r being exactly 0 in the bit pattern (denormals etc.).
+        if (rUi == 0u) rUi = 1u;
+
+        uint old;
+        InterlockedMax(g_sharcKeysWrite[slot], rUi, old);
+        if (rUi > old) {
+            Candidate c;
+            c.worldPos = worldPos;
+            c.normal = normal;
+            c.albedo = albedo;
+            g_sharcCandidatesWrite[slot] = c;
+        }
+    }
+
+    // Read side: Update raygen calls these to consume the pool. `keyAt`
+    // returns 0 for empty slots — caller must gate.
+    public uint keyAt(uint slot) {
+        return g_sharcKeysRead[slot];
+    }
+    public Candidate candidateAt(uint slot) {
+        return g_sharcCandidatesRead[slot];
     }
 }

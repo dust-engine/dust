@@ -34,7 +34,7 @@ struct SharcResolveConstants {
     uint frameIndex;
     uint downscaleFactor;
     uint debugMode;
-    uint _pad;
+    uint poolCapacity;
 }
 
 [shader("compute")]

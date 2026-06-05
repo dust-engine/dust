@@ -105,6 +105,10 @@ pub struct SharcConfig {
     pub roughness_min: f32,
     pub radiance_scale: f32,
     pub debug_mode: u32,
+    /// Size of the candidate pool — each slot is one Update-pass dispatch
+    /// invocation. Query CHS and Update cascade run a per-slot WRS-of-1, so
+    /// this is also the effective Update ray-count budget.
+    pub pool_capacity: u32,
 }
 
 impl Default for SharcConfig {
@@ -120,11 +124,12 @@ impl Default for SharcConfig {
             roughness_min: 0.4,
             radiance_scale: 1.0e3,
             debug_mode: 0,
+            pool_capacity: 1 << 16, // 64K candidates × 32 B = 2 MiB per pool
         }
     }
 }
 
-/// CPU mirror of `SharcShaderConstants` in `sharc_pt.slang`.
+/// CPU mirror of `SharcShaderConstants` in `sharc.slang`.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct SharcConstantsRaw {
@@ -139,7 +144,7 @@ pub(crate) struct SharcConstantsRaw {
     pub frame_index: u32,
     pub downscale_factor: u32,
     pub debug_mode: u32,
-    pub _pad: u32,
+    pub pool_capacity: u32,
 }
 
 #[derive(Resource, Default)]
@@ -147,6 +152,22 @@ pub(crate) struct SharcFrameState {
     pub(crate) frame_index: u32,
     pub(crate) prev_camera_position: Vec3,
     pub(crate) prev_has_value: bool,
+}
+
+/// One side of the ping-ponged candidate pool. Each frame the renderer reads
+/// one and writes the other; roles swap based on `SharcFrameState::frame_index`
+/// parity.
+///
+/// Layout:
+///   - `candidates`: capacity × 32 B (`Candidate { vec3 worldPos; vec3 normal; }`
+///     padded to std430 stride).
+///   - `keys`: capacity × 4 B (`asuint(r)` per slot — the WRS-of-1 reservoir
+///     key; 0 means empty).
+pub struct CandidatePool {
+    pub candidates: GPUMutex<Buffer>,
+    pub keys: GPUMutex<Buffer>,
+    pub candidates_state: ResourceState,
+    pub keys_state: ResourceState,
 }
 
 #[derive(Resource)]
@@ -158,6 +179,9 @@ pub struct SharcResources {
     pub hash_entries_state: ResourceState,
     pub accumulation_state: ResourceState,
     pub resolved_state: ResourceState,
+    pub pool_capacity: u32,
+    /// Ping-ponged. `frame_index & 1 == 0` ⇒ pool[0] = read, pool[1] = write.
+    pub pool: [CandidatePool; 2],
     needs_clear: bool,
 }
 
@@ -165,9 +189,27 @@ impl SharcResources {
     const STRIDE_HASH_ENTRIES: u64 = 8;
     const STRIDE_ACCUMULATION: u64 = 16;
     const STRIDE_RESOLVED: u64 = 16;
+    /// Std430 stride for
+    /// `Candidate { vec3 worldPos; vec3 normal; vec3 albedo; }`. Each vec3
+    /// is 16-aligned in std430 (12 B payload + 4 B pad), so the struct sums
+    /// to 48 B with no trailing pad needed.
+    const STRIDE_CANDIDATE: u64 = 48;
+    const STRIDE_KEY: u64 = 4;
+
+    /// Returns `(read_index, write_index)` into `self.pool` based on the
+    /// frame parity. Frame N reads what frame N-1 wrote, and writes for
+    /// frame N+1 to read.
+    pub fn pool_indices(frame_index: u32) -> (usize, usize) {
+        let read = (frame_index & 1) as usize;
+        (read, 1 - read)
+    }
 }
 
-fn create_sharc_resources(allocator: &Allocator, entries_num: u32) -> SharcResources {
+fn create_sharc_resources(
+    allocator: &Allocator,
+    entries_num: u32,
+    pool_capacity: u32,
+) -> SharcResources {
     let n = entries_num as u64;
     let usage = vk::BufferUsageFlags::STORAGE_BUFFER
         | vk::BufferUsageFlags::TRANSFER_DST
@@ -193,6 +235,29 @@ fn create_sharc_resources(allocator: &Allocator, entries_num: u32) -> SharcResou
         usage,
     )
     .expect("SHARC resolved buffer");
+    let pool = [(); 2].map(|_| {
+        let cap = pool_capacity as u64;
+        let candidates = Buffer::new_private(
+            allocator.clone(),
+            cap * SharcResources::STRIDE_CANDIDATE,
+            16,
+            usage,
+        )
+        .expect("SHARC candidate pool buffer");
+        let keys = Buffer::new_private(
+            allocator.clone(),
+            cap * SharcResources::STRIDE_KEY,
+            16,
+            usage,
+        )
+        .expect("SHARC reservoir keys buffer");
+        CandidatePool {
+            candidates: GPUMutex::new(candidates),
+            keys: GPUMutex::new(keys),
+            candidates_state: ResourceState::default(),
+            keys_state: ResourceState::default(),
+        }
+    });
     SharcResources {
         entries_num,
         hash_entries: GPUMutex::new(hash_entries),
@@ -201,6 +266,8 @@ fn create_sharc_resources(allocator: &Allocator, entries_num: u32) -> SharcResou
         hash_entries_state: ResourceState::default(),
         accumulation_state: ResourceState::default(),
         resolved_state: ResourceState::default(),
+        pool_capacity,
+        pool,
         needs_clear: true,
     }
 }
@@ -237,7 +304,13 @@ impl Plugin for SharcDebugPlugin {
                 sharc_update_pass
                     .in_set(DefaultRenderSet)
                     .after(clear_sharc_buffers)
-                    .after(create_sharc_sbts),
+                    .after(create_sharc_sbts)
+                    // Update consumes this frame's read pool but ALSO writes
+                    // cascade entries into the *write* pool — same buffer
+                    // Query CHS is pushing into. Serializing avoids both
+                    // dispatches' atomic_max ops racing on the same shader
+                    // storage in adjacent submissions.
+                    .after(crate::final_gather_pass),
                 sharc_resolve_pass
                     .in_set(DefaultRenderSet)
                     .after(sharc_update_pass),
@@ -262,7 +335,7 @@ pub fn setup_sharc(
     mut pipeline_manager: ResMut<RtxPipelineManager>,
     config: Res<SharcConfig>,
 ) {
-    let resources = create_sharc_resources(&allocator, config.entries_num);
+    let resources = create_sharc_resources(&allocator, config.entries_num, config.pool_capacity);
     commands.insert_resource(resources);
 
     let update_library: Handle<RayTracingPipelineLibrary> = asset_server.load(
@@ -301,53 +374,91 @@ fn create_sharc_sbts(
 
 // ─── Clear ─────────────────────────────────────────────────────────────────
 
-fn clear_sharc_buffers(
+pub(crate) fn clear_sharc_buffers(
     mut ctx: SubmissionState,
     mut resources: Option<ResMut<SharcResources>>,
     mut config: ResMut<SharcConfig>,
+    frame_state: Res<SharcFrameState>,
 ) {
     let Some(resources) = resources.as_deref_mut() else { return };
-    if !resources.needs_clear && !config.reset_pending {
-        return;
-    }
+    let full_reset = resources.needs_clear || config.reset_pending;
+    // Per-frame: the side that's about to be *written* (by Query CHS and
+    // Update cascade) needs its reservoir keys zeroed so the WRS-of-1
+    // atomic_max starts from "empty". The candidates buffer doesn't need
+    // clearing — consumers gate on `keys[slot] != 0`.
+    let (_, write_idx) = SharcResources::pool_indices(frame_state.frame_index);
+
     ctx.record(|encoder| {
-        let hash_buf = encoder.lock(&resources.hash_entries, vk::PipelineStageFlags2::COPY);
-        let accum_buf = encoder.lock(&resources.accumulation, vk::PipelineStageFlags2::COPY);
-        let resolved_buf = encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COPY);
-
-        encoder.use_buffer_resource(
-            hash_buf,
-            &mut resources.hash_entries_state,
-            Access::CLEAR,
-        );
-        encoder.use_buffer_resource(
-            accum_buf,
-            &mut resources.accumulation_state,
-            Access::CLEAR,
-        );
-        encoder.use_buffer_resource(
-            resolved_buf,
-            &mut resources.resolved_state,
-            Access::CLEAR,
-        );
-        encoder.emit_barriers();
-
         let device = encoder.device().clone();
-        let cmd_buffer = encoder.buffer().vk_handle();
-        unsafe {
-            device.cmd_fill_buffer(cmd_buffer, hash_buf.vk_handle(), 0, hash_buf.size(), 0);
-            device.cmd_fill_buffer(cmd_buffer, accum_buf.vk_handle(), 0, accum_buf.size(), 0);
-            device.cmd_fill_buffer(
-                cmd_buffer,
-                resolved_buf.vk_handle(),
-                0,
-                resolved_buf.size(),
-                0,
+        if full_reset {
+            let hash_buf =
+                encoder.lock(&resources.hash_entries, vk::PipelineStageFlags2::COPY);
+            let accum_buf =
+                encoder.lock(&resources.accumulation, vk::PipelineStageFlags2::COPY);
+            let resolved_buf =
+                encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COPY);
+            let keys_bufs = [
+                encoder.lock(&resources.pool[0].keys, vk::PipelineStageFlags2::COPY),
+                encoder.lock(&resources.pool[1].keys, vk::PipelineStageFlags2::COPY),
+            ];
+            encoder.use_buffer_resource(
+                hash_buf,
+                &mut resources.hash_entries_state,
+                Access::CLEAR,
             );
+            encoder.use_buffer_resource(
+                accum_buf,
+                &mut resources.accumulation_state,
+                Access::CLEAR,
+            );
+            encoder.use_buffer_resource(
+                resolved_buf,
+                &mut resources.resolved_state,
+                Access::CLEAR,
+            );
+            // Clear both pools' keys on reset (the read side might still
+            // carry stale candidates from a previous run).
+            let [pool0, pool1] = &mut resources.pool;
+            encoder.use_buffer_resource(keys_bufs[0], &mut pool0.keys_state, Access::CLEAR);
+            encoder.use_buffer_resource(keys_bufs[1], &mut pool1.keys_state, Access::CLEAR);
+            encoder.emit_barriers();
+            let cmd_buffer = encoder.buffer().vk_handle();
+            unsafe {
+                device.cmd_fill_buffer(cmd_buffer, hash_buf.vk_handle(), 0, hash_buf.size(), 0);
+                device.cmd_fill_buffer(cmd_buffer, accum_buf.vk_handle(), 0, accum_buf.size(), 0);
+                device.cmd_fill_buffer(
+                    cmd_buffer,
+                    resolved_buf.vk_handle(),
+                    0,
+                    resolved_buf.size(),
+                    0,
+                );
+                for kb in &keys_bufs {
+                    device.cmd_fill_buffer(cmd_buffer, kb.vk_handle(), 0, kb.size(), 0);
+                }
+            }
+        } else {
+            // Per-frame: just clear the write side's keys.
+            let keys_buf = encoder.lock(
+                &resources.pool[write_idx].keys,
+                vk::PipelineStageFlags2::COPY,
+            );
+            encoder.use_buffer_resource(
+                keys_buf,
+                &mut resources.pool[write_idx].keys_state,
+                Access::CLEAR,
+            );
+            encoder.emit_barriers();
+            let cmd_buffer = encoder.buffer().vk_handle();
+            unsafe {
+                device.cmd_fill_buffer(cmd_buffer, keys_buf.vk_handle(), 0, keys_buf.size(), 0);
+            }
         }
     });
-    resources.needs_clear = false;
-    config.reset_pending = false;
+    if full_reset {
+        resources.needs_clear = false;
+        config.reset_pending = false;
+    }
 }
 
 // ─── Per-frame constants ───────────────────────────────────────────────────
@@ -374,7 +485,7 @@ pub(crate) fn build_sharc_constants(
         frame_index: frame_state.frame_index,
         downscale_factor: config.downscale_factor,
         debug_mode: config.debug_mode,
-        _pad: 0,
+        pool_capacity: config.pool_capacity,
     }
 }
 
@@ -433,12 +544,11 @@ fn sharc_update_pass(
     let frame_index = frame_state.frame_index;
     frame_state.frame_index = frame_state.frame_index.wrapping_add(1);
 
-    let downscale = config.downscale_factor.max(1);
-    let dispatch = UVec3::new(
-        hdr.extent.x.div_ceil(downscale),
-        hdr.extent.y.div_ceil(downscale),
-        1,
-    );
+    // Pool-driven Update: dispatch is 1D over the candidate pool. Each
+    // invocation reads `keys[slot]`; empty slots no-op. This means the
+    // dispatch is the upper bound on Update ray-tracing work — exactly the
+    // hook we need for adaptive ray budgeting later.
+    let dispatch = UVec3::new(config.pool_capacity, 1, 1);
 
     record_sharc_rt(
         &mut ctx,
@@ -568,6 +678,28 @@ fn record_sharc_rt(
             &resources.resolved,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
+        // Pool ping-pong: pick which physical buffers go to read vs write
+        // bindings based on this frame's parity. Update's raygen consumes
+        // `read`, and its cascade plus any concurrent Query CHS push into
+        // `write` for next frame to consume.
+        let (pool_read_idx, pool_write_idx) =
+            SharcResources::pool_indices(frame_index);
+        let pool_read_candidates_buf = encoder.lock(
+            &resources.pool[pool_read_idx].candidates,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let pool_read_keys_buf = encoder.lock(
+            &resources.pool[pool_read_idx].keys,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let pool_write_candidates_buf = encoder.lock(
+            &resources.pool[pool_write_idx].candidates,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let pool_write_keys_buf = encoder.lock(
+            &resources.pool[pool_write_idx].keys,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
 
         encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, pipeline);
 
@@ -654,9 +786,40 @@ fn record_sharc_rt(
             stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             access: vk::AccessFlags2::SHADER_STORAGE_READ | vk::AccessFlags2::SHADER_STORAGE_WRITE,
         };
+        let rt_read = Access {
+            stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            access: vk::AccessFlags2::SHADER_STORAGE_READ,
+        };
         encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, rt_rw);
         encoder.use_buffer_resource(accum_buf, &mut resources.accumulation_state, rt_rw);
         encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, rt_rw);
+        // Split pool[0]/pool[1] mutably without violating borrow rules.
+        let [pool_a, pool_b] = &mut resources.pool;
+        let (pool_read, pool_write) = if pool_read_idx == 0 {
+            (pool_a, pool_b)
+        } else {
+            (pool_b, pool_a)
+        };
+        encoder.use_buffer_resource(
+            pool_read_candidates_buf,
+            &mut pool_read.candidates_state,
+            rt_read,
+        );
+        encoder.use_buffer_resource(
+            pool_read_keys_buf,
+            &mut pool_read.keys_state,
+            rt_read,
+        );
+        encoder.use_buffer_resource(
+            pool_write_candidates_buf,
+            &mut pool_write.candidates_state,
+            rt_rw,
+        );
+        encoder.use_buffer_resource(
+            pool_write_keys_buf,
+            &mut pool_write.keys_state,
+            rt_rw,
+        );
 
         encoder.memory_barrier(
             Access::COPY_WRITE,
@@ -710,6 +873,26 @@ fn record_sharc_rt(
             offset: constants_buffer.offset(),
             range: constants_buffer.size(),
         }];
+        let pool_read_candidates_info = [vk::DescriptorBufferInfo {
+            buffer: pool_read_candidates_buf.vk_handle(),
+            offset: 0,
+            range: pool_read_candidates_buf.size(),
+        }];
+        let pool_read_keys_info = [vk::DescriptorBufferInfo {
+            buffer: pool_read_keys_buf.vk_handle(),
+            offset: 0,
+            range: pool_read_keys_buf.size(),
+        }];
+        let pool_write_candidates_info = [vk::DescriptorBufferInfo {
+            buffer: pool_write_candidates_buf.vk_handle(),
+            offset: 0,
+            range: pool_write_candidates_buf.size(),
+        }];
+        let pool_write_keys_info = [vk::DescriptorBufferInfo {
+            buffer: pool_write_keys_buf.vk_handle(),
+            offset: 0,
+            range: pool_write_keys_buf.size(),
+        }];
         let mut writes: Vec<vk::WriteDescriptorSet> = params.as_slice().to_vec();
         writes.extend_from_slice(&[
             vk::WriteDescriptorSet {
@@ -740,6 +923,34 @@ fn record_sharc_rt(
                 ..Default::default()
             }
             .buffer_info(&cb_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 18,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_read_candidates_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 19,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_read_keys_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 20,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_write_candidates_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 21,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_write_keys_info),
         ]);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
@@ -906,9 +1117,15 @@ fn sharc_debug_ui(
                     });
                 config.debug_mode = mode;
 
+                // Pool capacity ≡ Update ray-count budget for this frame.
+                // Resizing past the buffer allocation is a no-op (the buffer
+                // is allocated to the value at startup); to grow past that
+                // you'd need to reallocate. Keep the slider range under
+                // SharcConfig::default().pool_capacity for live tuning.
                 ui.add(
-                    egui::Slider::new(&mut config.downscale_factor, 1..=10)
-                        .text("Downscale factor"),
+                    egui::Slider::new(&mut config.pool_capacity, 1024..=(1 << 16))
+                        .logarithmic(true)
+                        .text("Pool capacity (Update rays / frame)"),
                 );
                 ui.add(
                     egui::Slider::new(&mut config.accumulation_frame_num, 0..=128)

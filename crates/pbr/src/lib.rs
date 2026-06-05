@@ -182,7 +182,11 @@ impl Plugin for PbrRenderPlugin {
                     .in_set(DefaultRenderSet)
                     .after(PbrRenderSet)
                     .after(shadow_pass)
-                    .after(create_sbt),
+                    .after(create_sbt)
+                    // SHARC ping-pong: the write pool's keys must be cleared
+                    // to 0 (so the WRS-of-1 atomic_max starts from "empty")
+                    // before vox_final_gather CHS pushes Query misses.
+                    .after(sharc::clear_sharc_buffers),
                 dlss_evaluate
                     .in_set(DefaultRenderSet)
                     .after(ensure_dlss_feature)
@@ -1348,7 +1352,7 @@ fn shadow_pass(
     });
 }
 
-fn final_gather_pass(
+pub(crate) fn final_gather_pass(
     mut ctx: SubmissionState,
     mut state: ResMut<PbrRenderState>,
     tlas: Res<TLAS<PbrInstanceData>>,
@@ -1402,6 +1406,9 @@ fn final_gather_pass(
     };
     let push = sharc::FinalGatherPush::new(*frame_index, &sharc_debug);
     *frame_index = frame_index.wrapping_add(1);
+    // Ping-pong pool indices for this frame.
+    let (sharc_pool_read_idx, sharc_pool_write_idx) =
+        sharc::SharcResources::pool_indices(sharc_frame_state.frame_index);
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, gather_sbt.layout(), |slice| {
@@ -1525,9 +1532,35 @@ fn final_gather_pass(
         let sharc_constants_buf = uniform_ring_buffer
             .create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
 
+        // Pool buffer locks. Query CHS pushes (write side) and Update raygen
+        // dispatches from this same pool next frame (read side); we bind both
+        // physical buffers so the Slang `SharcParams` layout is satisfied
+        // regardless of which is currently the read side.
+        let pool_read_candidates_buf = encoder.lock(
+            &sharc_resources.pool[sharc_pool_read_idx].candidates,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let pool_read_keys_buf = encoder.lock(
+            &sharc_resources.pool[sharc_pool_read_idx].keys,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let pool_write_candidates_buf = encoder.lock(
+            &sharc_resources.pool[sharc_pool_write_idx].candidates,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let pool_write_keys_buf = encoder.lock(
+            &sharc_resources.pool[sharc_pool_write_idx].keys,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+
         let sharc_rt_read = Access {
             stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             access: vk::AccessFlags2::SHADER_STORAGE_READ,
+        };
+        let sharc_rt_write = Access {
+            stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            access: vk::AccessFlags2::SHADER_STORAGE_READ
+                | vk::AccessFlags2::SHADER_STORAGE_WRITE,
         };
         encoder.use_buffer_resource(
             sharc_hash_buf,
@@ -1543,6 +1576,33 @@ fn final_gather_pass(
             sharc_resolved_buf,
             &mut sharc_resources.resolved_state,
             sharc_rt_read,
+        );
+        // Split pool[0]/pool[1] mutably without violating borrow rules.
+        let [pool_a, pool_b] = &mut sharc_resources.pool;
+        let (pool_read, pool_write) = if sharc_pool_read_idx == 0 {
+            (pool_a, pool_b)
+        } else {
+            (pool_b, pool_a)
+        };
+        encoder.use_buffer_resource(
+            pool_read_candidates_buf,
+            &mut pool_read.candidates_state,
+            sharc_rt_read,
+        );
+        encoder.use_buffer_resource(
+            pool_read_keys_buf,
+            &mut pool_read.keys_state,
+            sharc_rt_read,
+        );
+        encoder.use_buffer_resource(
+            pool_write_candidates_buf,
+            &mut pool_write.candidates_state,
+            sharc_rt_write,
+        );
+        encoder.use_buffer_resource(
+            pool_write_keys_buf,
+            &mut pool_write.keys_state,
+            sharc_rt_write,
         );
 
         encoder.memory_barrier(
@@ -1574,6 +1634,26 @@ fn final_gather_pass(
             buffer: sharc_constants_buf.vk_handle(),
             offset: sharc_constants_buf.offset(),
             range: sharc_constants_buf.size(),
+        }];
+        let pool_read_candidates_info = [vk::DescriptorBufferInfo {
+            buffer: pool_read_candidates_buf.vk_handle(),
+            offset: 0,
+            range: pool_read_candidates_buf.size(),
+        }];
+        let pool_read_keys_info = [vk::DescriptorBufferInfo {
+            buffer: pool_read_keys_buf.vk_handle(),
+            offset: 0,
+            range: pool_read_keys_buf.size(),
+        }];
+        let pool_write_candidates_info = [vk::DescriptorBufferInfo {
+            buffer: pool_write_candidates_buf.vk_handle(),
+            offset: 0,
+            range: pool_write_candidates_buf.size(),
+        }];
+        let pool_write_keys_info = [vk::DescriptorBufferInfo {
+            buffer: pool_write_keys_buf.vk_handle(),
+            offset: 0,
+            range: pool_write_keys_buf.size(),
         }];
         let mut params = PbrPipelineParams::new();
         params
@@ -1621,6 +1701,34 @@ fn final_gather_pass(
                 ..Default::default()
             }
             .buffer_info(&sharc_constants_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 18,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_read_candidates_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 19,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_read_keys_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 20,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_write_candidates_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 21,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&pool_write_keys_info),
         ]);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
