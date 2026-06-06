@@ -1,11 +1,10 @@
-// SHARC ray-tracing pipeline layout (Update + Query permutations).
+// SHARC ray-tracing pipeline layout (Update pass).
 //
 // Single descriptor set: bindings 0..13 mirror pbr.playout.ron exactly (the
 // `pbr_common::params` ParameterBlock is pinned to set 0 — see pbr_common.slang),
-// bindings 14..17 are the SHARC working storage. Vulkan permits only one
-// push-descriptor set per pipeline layout, so collapsing everything into one
-// set is the simplest correct choice. AGENTS.md §9: bindings stay stable
-// across Update and Query.
+// bindings 14..17 are the SHARC working storage, 18..21 the ping-ponged
+// candidate pool. Vulkan permits only one push-descriptor set per pipeline
+// layout, so collapsing everything into one set is the simplest correct choice.
 PipelineLayout(
     sets: [
         Inline(
@@ -38,8 +37,8 @@ PipelineLayout(
                     // Read side: consumed by Update raygen.
                     Binding(binding: 18, ty: StorageBuffer,         stages: [RayGen]),                    // candidates_read
                     Binding(binding: 19, ty: StorageBuffer,         stages: [RayGen]),                    // keys_read
-                    // Write side: Query CHS pushes on cache miss; Update
-                    // raygen pushes on cascade miss.
+                    // Write side: final_gather CHS pushes on cache miss;
+                    // Update raygen pushes on cascade miss.
                     Binding(binding: 20, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),        // candidates_write
                     Binding(binding: 21, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),        // keys_write
                 ]

@@ -221,12 +221,9 @@ pub struct VoxRenderState {
     shadow_hitgroup_index: u32,
     final_gather_pipeline: Handle<RayTracingPipelineLibrary>,
     final_gather_hitgroup_index: u32,
-    // One shared closest-hit + intersection serves BOTH SHARC RT pipelines;
-    // we register it twice so each base pipeline gets its own hitgroup index.
+    // Shared closest-hit + intersection attached to the SHARC Update pipeline.
     sharc_update_pipeline: Handle<RayTracingPipelineLibrary>,
     sharc_update_hitgroup_index: u32,
-    sharc_query_pipeline: Handle<RayTracingPipelineLibrary>,
-    sharc_query_hitgroup_index: u32,
 }
 
 fn setup(
@@ -255,17 +252,13 @@ fn setup(
         final_gather_hitgroup_library.clone(),
     );
 
-    // SHARC hit group: one library, attached to both Update and Query base
-    // pipelines. Closest-hit returns hit data via SharcHitPayload — the SHARC
-    // state machine lives in the ray-gen, not here.
+    // SHARC hit group attached to the Update pipeline. Closest-hit returns
+    // hit data via SharcHitPayload — the SHARC state machine lives in the
+    // ray-gen, not here.
     let sharc_hitgroup_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_pt.rtx.pipeline.bin");
     let sharc_update_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
         &sharc_pipelines.update_pipeline,
-        sharc_hitgroup_library.clone(),
-    );
-    let sharc_query_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
-        &sharc_pipelines.query_pipeline,
         sharc_hitgroup_library.clone(),
     );
 
@@ -276,10 +269,8 @@ fn setup(
         shadow_hitgroup_index,
         final_gather_pipeline: final_gather_hitgroup_library,
         final_gather_hitgroup_index,
-        sharc_update_pipeline: sharc_hitgroup_library.clone(),
+        sharc_update_pipeline: sharc_hitgroup_library,
         sharc_update_hitgroup_index,
-        sharc_query_pipeline: sharc_hitgroup_library,
-        sharc_query_hitgroup_index,
     });
 }
 
@@ -320,9 +311,7 @@ fn write_sbt_entries(
         tracing::warn!("Missing SBT");
         return;
     };
-    let (Some(sharc_update_sbt), Some(sharc_query_sbt)) =
-        (sharc_state.update_sbt.as_mut(), sharc_state.query_sbt.as_mut())
-    else {
+    let Some(sharc_update_sbt) = sharc_state.update_sbt.as_mut() else {
         for mut model in models.iter_mut() {
             model.sbt_index = u32::MAX;
         }
@@ -371,7 +360,7 @@ fn write_sbt_entries(
         );
         assert_eq!(final_gather_sbt_index, model.sbt_index);
 
-        // SHARC Update + Query both share the same hit-group library (vox_sharc_pt).
+        // SHARC Update shares the same hit-group library (vox_sharc_pt).
         let sharc_update_idx = sharc_update_sbt.push_hitgroup(
             vox_render_state.sharc_update_hitgroup_index,
             |param_dst| {
@@ -379,13 +368,6 @@ fn write_sbt_entries(
             },
         );
         assert_eq!(sharc_update_idx, model.sbt_index);
-        let sharc_query_idx = sharc_query_sbt.push_hitgroup(
-            vox_render_state.sharc_query_hitgroup_index,
-            |param_dst| {
-                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
-            },
-        );
-        assert_eq!(sharc_query_idx, model.sbt_index);
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;

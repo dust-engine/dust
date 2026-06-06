@@ -1,4 +1,4 @@
-// Voxel hit group for the SHARC path-tracer pipelines (Update + Query).
+// Voxel hit group for the SHARC Update path-tracer pipeline.
 //
 // The closest-hit returns hit data (worldPos via t, world-space face normal,
 // albedo) through the payload; the ray-gen owns the SHARC state machine and

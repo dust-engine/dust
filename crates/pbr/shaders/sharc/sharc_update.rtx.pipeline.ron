@@ -1,5 +1,5 @@
-// SHARC Update permutation: SHARC_UPDATE=1, SHARC_QUERY=0 (see BUILD.bazel).
-// Sparse cache-population pass; writes only to SHARC buffers (AGENTS.md §15).
+// SHARC Update RT pipeline. Sparse cache-population pass; writes only to SHARC
+// buffers (AGENTS.md §15).
 RayTracingPipeline(
     stages: [
         RayGen (

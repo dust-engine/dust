@@ -1,16 +1,15 @@
-//! SHARC integration: hash-grid debug overlay (Phase 1) + Update/Resolve/Query
-//! pipeline (Phase 2/3, AGENTS.md §1).
+//! SHARC integration: hash-grid debug overlay (Phase 1) + Update/Resolve
+//! pipeline (Phase 2, AGENTS.md §1).
 //!
-//! When `SharcConfig::enabled` is true the renderer's indirect-lighting integrator
-//! is replaced by:
+//! When `SharcConfig::enabled` is true the renderer runs the cache-population
+//! passes each frame:
 //!
-//!     SHARC Update (sparse RT)  →  barrier  →
-//!     SHARC Resolve (compute)   →  barrier  →
-//!     SHARC Query  (full-res RT, writes HDR additively)
+//!     SHARC Update (sparse RT)  →  barrier  →  SHARC Resolve (compute)
 //!
-//! When `enabled` is false the original `final_gather_pass` runs as the fallback
-//! (AGENTS.md §1). The Phase 1 colored-hash debug overlay remains painted by
-//! `final_gather` when SHARC is off, controlled by `SharcDebugState`.
+//! Visible indirect light continues to come from `final_gather_pass`; Update
+//! keeps the cache fresh so future work can sample from it. The Phase 1
+//! colored-hash debug overlay is painted by `final_gather` when SHARC is off,
+//! controlled by `SharcDebugState`.
 
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
@@ -90,7 +89,7 @@ impl FinalGatherPush {
     }
 }
 
-// ─── Phase 2/3: SHARC Update / Resolve / Query pipeline ────────────────────
+// ─── Phase 2: SHARC Update / Resolve pipeline ──────────────────────────────
 
 /// Tunable knobs that drive the SHARC passes (AGENTS.md §10).
 #[derive(Resource, Clone, Copy)]
@@ -104,10 +103,9 @@ pub struct SharcConfig {
     pub scene_scale: f32,
     pub roughness_min: f32,
     pub radiance_scale: f32,
-    pub debug_mode: u32,
     /// Size of the candidate pool — each slot is one Update-pass dispatch
-    /// invocation. Query CHS and Update cascade run a per-slot WRS-of-1, so
-    /// this is also the effective Update ray-count budget.
+    /// invocation. The Update cascade runs a per-slot WRS-of-1, so this is
+    /// also the effective Update ray-count budget.
     pub pool_capacity: u32,
 }
 
@@ -123,7 +121,6 @@ impl Default for SharcConfig {
             scene_scale: 32.0,
             roughness_min: 0.4,
             radiance_scale: 1.0e3,
-            debug_mode: 0,
             pool_capacity: 1 << 16, // 64K candidates × 32 B = 2 MiB per pool
         }
     }
@@ -143,7 +140,6 @@ pub(crate) struct SharcConstantsRaw {
     pub entries_num: u32,
     pub frame_index: u32,
     pub downscale_factor: u32,
-    pub debug_mode: u32,
     pub pool_capacity: u32,
 }
 
@@ -275,10 +271,8 @@ fn create_sharc_resources(
 #[derive(Resource)]
 pub struct SharcPipelines {
     pub update_pipeline: Handle<RayTracingPipeline>,
-    pub query_pipeline: Handle<RayTracingPipeline>,
     pub resolve_pipeline: Handle<ComputePipeline>,
     pub update_sbt: Option<pumicite::rtx::ShaderBindingTable>,
-    pub query_sbt: Option<pumicite::rtx::ShaderBindingTable>,
 }
 
 // ─── Plugin / setup ───────────────────────────────────────────────────────
@@ -307,22 +301,14 @@ impl Plugin for SharcDebugPlugin {
                     .after(create_sharc_sbts)
                     // Update consumes this frame's read pool but ALSO writes
                     // cascade entries into the *write* pool — same buffer
-                    // Query CHS is pushing into. Serializing avoids both
-                    // dispatches' atomic_max ops racing on the same shader
-                    // storage in adjacent submissions.
+                    // final_gather's CHS pushes into on cache miss.
+                    // Serializing avoids both dispatches' atomic_max ops
+                    // racing on the same shader storage in adjacent
+                    // submissions.
                     .after(crate::final_gather_pass),
                 sharc_resolve_pass
                     .in_set(DefaultRenderSet)
                     .after(sharc_update_pass),
-                sharc_query_pass
-                    .in_set(DefaultRenderSet)
-                    .after(sharc_resolve_pass)
-                    // Query writes the indirect contribution into the HDR
-                    // target that DLSS reads as `pInColor`. Without this
-                    // ordering Bevy is free to run DLSS first, denoise an
-                    // HDR that hasn't been touched by Query yet, and tonemap
-                    // the result — making Query's writes invisible.
-                    .before(crate::dlss_evaluate),
             ),
         );
     }
@@ -341,18 +327,13 @@ pub fn setup_sharc(
     let update_library: Handle<RayTracingPipelineLibrary> = asset_server.load(
         "bazel://dust/crates/pbr/shaders/sharc/sharc_update.rtx.pipeline.bin",
     );
-    let query_library: Handle<RayTracingPipelineLibrary> = asset_server.load(
-        "bazel://dust/crates/pbr/shaders/sharc/sharc_query.rtx.pipeline.bin",
-    );
     let resolve_pipeline: Handle<ComputePipeline> = asset_server
         .load("bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.comp.pipeline.bin");
 
     commands.insert_resource(SharcPipelines {
         update_pipeline: pipeline_manager.add_pipeline(update_library),
-        query_pipeline: pipeline_manager.add_pipeline(query_library),
         resolve_pipeline,
         update_sbt: None,
-        query_sbt: None,
     });
 }
 
@@ -364,11 +345,6 @@ fn create_sharc_sbts(
         state.update_sbt = Some(pipeline.create_sbt(state.update_sbt.take()));
     } else {
         state.update_sbt = None;
-    }
-    if let Some(pipeline) = pipelines.get(&state.query_pipeline) {
-        state.query_sbt = Some(pipeline.create_sbt(state.query_sbt.take()));
-    } else {
-        state.query_sbt = None;
     }
 }
 
@@ -382,10 +358,10 @@ pub(crate) fn clear_sharc_buffers(
 ) {
     let Some(resources) = resources.as_deref_mut() else { return };
     let full_reset = resources.needs_clear || config.reset_pending;
-    // Per-frame: the side that's about to be *written* (by Query CHS and
-    // Update cascade) needs its reservoir keys zeroed so the WRS-of-1
-    // atomic_max starts from "empty". The candidates buffer doesn't need
-    // clearing — consumers gate on `keys[slot] != 0`.
+    // Per-frame: the side that's about to be *written* (by final_gather's
+    // CHS and Update's cascade) needs its reservoir keys zeroed so the
+    // WRS-of-1 atomic_max starts from "empty". The candidates buffer
+    // doesn't need clearing — consumers gate on `keys[slot] != 0`.
     let (_, write_idx) = SharcResources::pool_indices(frame_state.frame_index);
 
     ctx.record(|encoder| {
@@ -484,12 +460,11 @@ pub(crate) fn build_sharc_constants(
         entries_num: config.entries_num,
         frame_index: frame_state.frame_index,
         downscale_factor: config.downscale_factor,
-        debug_mode: config.debug_mode,
         pool_capacity: config.pool_capacity,
     }
 }
 
-// ─── Update / Query (RT) ───────────────────────────────────────────────────
+// ─── Update (RT) ───────────────────────────────────────────────────────────
 
 fn sharc_update_pass(
     mut ctx: SubmissionState,
@@ -569,69 +544,6 @@ fn sharc_update_pass(
     );
 }
 
-fn sharc_query_pass(
-    mut ctx: SubmissionState,
-    mut sharc_pipelines: ResMut<SharcPipelines>,
-    pipelines: Res<Assets<RayTracingPipeline>>,
-    config: Res<SharcConfig>,
-    frame_state: Res<SharcFrameState>,
-    mut sharc_resources: Option<ResMut<SharcResources>>,
-    tlas: Res<TLAS<PbrInstanceData>>,
-    mut uploader: BufferInitializer,
-    mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
-    mut atmosphere_luts: ResMut<AtmosphereLUTs>,
-    mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-    jitter: Res<crate::JitterState>,
-) {
-    return;
-    let Some(resources) = sharc_resources.as_deref_mut() else { return };
-    let Ok((camera, transform)) = swapchain_images.single() else { return };
-    let Some(pipeline) = pipelines
-        .get(&sharc_pipelines.query_pipeline)
-        .map(|p| p.deref().clone())
-    else {
-        return;
-    };
-    let Some(sbt) = sharc_pipelines.query_sbt.as_mut() else { return };
-    let Some(per_instance_mutex) = tlas.tlas_per_instance_data.as_ref() else { return };
-    let Some(tlas) = tlas.get() else { return };
-    let Some(hdr) = hdr_target.as_mut() else { return };
-
-    sbt.push_raygen(0, |_| {});
-    sbt.push_miss(0, |_| {});
-    sbt.push_miss(1, |_| {});
-
-    let camera_origin = transform.translation();
-    // Same jitter as the primary RT pass — matches the depth G-buffer's ray.
-    let cam_uniform = build_camera_uniform(camera, transform, None, jitter.offset);
-    let sharc_constants = build_sharc_constants(&config, &frame_state, camera_origin);
-    let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
-        return;
-    };
-
-    let dispatch = UVec3::new(hdr.extent.x, hdr.extent.y, 1);
-    let frame_index = frame_state.frame_index.wrapping_sub(1);
-    record_sharc_rt(
-        &mut ctx,
-        pipeline,
-        sbt,
-        cam_uniform,
-        sharc_constants,
-        atmosphere_uniform_buffer,
-        per_instance_mutex,
-        tlas,
-        hdr,
-        resources,
-        atmosphere_luts.as_mut(),
-        &mut uploader,
-        &mut uniform_ring_buffer,
-        frame_index,
-        dispatch,
-    );
-}
-
-// Shared body for the Update and Query passes.
 fn record_sharc_rt(
     ctx: &mut SubmissionState,
     pipeline: std::sync::Arc<pumicite::pipeline::Pipeline>,
@@ -680,8 +592,8 @@ fn record_sharc_rt(
         );
         // Pool ping-pong: pick which physical buffers go to read vs write
         // bindings based on this frame's parity. Update's raygen consumes
-        // `read`, and its cascade plus any concurrent Query CHS push into
-        // `write` for next frame to consume.
+        // `read`, and its cascade pushes into `write` for next frame to
+        // consume.
         let (pool_read_idx, pool_write_idx) =
             SharcResources::pool_indices(frame_index);
         let pool_read_candidates_buf = encoder.lock(
@@ -1091,31 +1003,10 @@ fn sharc_debug_ui(
         .default_width(300.0)
         .show(ctx, |ui| {
             ui.collapsing("Pipeline", |ui| {
-                ui.checkbox(&mut config.enabled, "Enabled (Update / Resolve / Query)");
+                ui.checkbox(&mut config.enabled, "Enabled (Update / Resolve)");
                 if ui.button("Reset cache").clicked() {
                     config.reset_pending = true;
                 }
-
-                // Query-pass diagnostic overlays — mirror the switch in
-                // sharc_pt.slang. Mode 0 is normal rendering.
-                let mut mode = config.debug_mode;
-                egui::ComboBox::from_label("Debug mode")
-                    .selected_text(match mode {
-                        0 => "0: off (normal SHARC render)",
-                        1 => "1: solid red (Query ran?)",
-                        2 => "2: cache occupancy heatmap",
-                        3 => "3: colored hash at primary",
-                        4 => "4: cached radiance at primary",
-                        _ => "?",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut mode, 0, "0: off (normal SHARC render)");
-                        ui.selectable_value(&mut mode, 1, "1: solid red (Query ran?)");
-                        ui.selectable_value(&mut mode, 2, "2: cache occupancy heatmap");
-                        ui.selectable_value(&mut mode, 3, "3: colored hash at primary");
-                        ui.selectable_value(&mut mode, 4, "4: cached radiance at primary");
-                    });
-                config.debug_mode = mode;
 
                 // Pool capacity ≡ Update ray-count budget for this frame.
                 // Resizing past the buffer allocation is a no-op (the buffer

@@ -1,6 +1,5 @@
-// Voxel hit group attached to both SHARC RT pipelines (Update and Query).
-// Same closest-hit + intersection serves both permutations; the SHARC state
-// machine lives in the ray-gen.
+// Voxel hit group attached to the SHARC Update RT pipeline.
+// The SHARC state machine lives in the ray-gen.
 RayTracingPipeline (
     stages: [
         HitGroup (

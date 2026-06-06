@@ -33,7 +33,6 @@ struct SharcResolveConstants {
     uint entriesNum;
     uint frameIndex;
     uint downscaleFactor;
-    uint debugMode;
     uint poolCapacity;
 }
 

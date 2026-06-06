@@ -1532,10 +1532,11 @@ pub(crate) fn final_gather_pass(
         let sharc_constants_buf = uniform_ring_buffer
             .create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
 
-        // Pool buffer locks. Query CHS pushes (write side) and Update raygen
-        // dispatches from this same pool next frame (read side); we bind both
-        // physical buffers so the Slang `SharcParams` layout is satisfied
-        // regardless of which is currently the read side.
+        // Pool buffer locks. final_gather's CHS pushes new candidates on cache
+        // miss (write side); next frame's Update raygen dispatches from the
+        // same pool (read side). Bind both physical buffers so the Slang
+        // `SharcParams` layout is satisfied regardless of which is currently
+        // the read side.
         let pool_read_candidates_buf = encoder.lock(
             &sharc_resources.pool[sharc_pool_read_idx].candidates,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,

@@ -105,8 +105,7 @@ ron2bin(
     type = "raytracing-pipeline"
 )
 
-# Voxel hit group attached to both SHARC RT pipelines (Update + Query). Single
-# closest-hit / intersection pair, no per-permutation variants: the SHARC state
+# Voxel hit group attached to the SHARC Update RT pipeline. The SHARC state
 # machine lives in the ray-gen, not the hit shader.
 slang_shader(
     name = "vox_sharc_pt",

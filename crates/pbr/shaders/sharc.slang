@@ -29,7 +29,6 @@ public struct SharcShaderConstants {
     public uint entriesNum;
     public uint frameIndex;
     public uint downscaleFactor;
-    public uint debugMode;
     public uint poolCapacity;
 }
 
@@ -37,10 +36,10 @@ public struct SharcShaderConstants {
 /// this frame and should be populated by Update on the next frame.
 ///
 /// `albedo` is included so the Update raygen doesn't have to fire a probe
-/// ray to recover it from the voxel palette: both the Query CHS (where the
-/// candidate is born) and the Update cascade (after a bounce) already have
-/// it via vox CHS, so paying 12 B in the buffer is cheaper than 1 ray per
-/// pool slot.
+/// ray to recover it from the voxel palette: both producers (the
+/// final_gather CHS where the candidate is born on cache miss, and the
+/// Update cascade after a bounce) already have it via vox CHS, so paying
+/// 12 B in the buffer is cheaper than 1 ray per pool slot.
 ///
 /// Layout matches `SharcResources::STRIDE_CANDIDATE` (std430 stride 48 B):
 /// each `float3` aligns to 16 with a 4 B trailing pad per field.
@@ -76,9 +75,9 @@ public struct SharcParams {
     RWStructuredBuffer<SharcAccumulationData> g_sharcAccumulation;
     RWStructuredBuffer<SharcPackedData> g_sharcResolved;
     public ConstantBuffer<SharcShaderConstants> g_sharcConstants;
-    // Candidate pool — read side fed Update's primary vertices, write side
-    // accumulated this frame's Query misses and Update cascade pushes for
-    // *next* frame to consume.
+    // Candidate pool — read side feeds Update's primary vertices, write side
+    // accumulates this frame's final_gather CHS misses and Update cascade
+    // pushes for *next* frame to consume.
     public RWStructuredBuffer<Candidate> g_sharcCandidatesRead;
     public RWStructuredBuffer<uint> g_sharcKeysRead;
     RWStructuredBuffer<Candidate> g_sharcCandidatesWrite;

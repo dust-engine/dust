@@ -1,29 +1,16 @@
-// SHARC path tracer (Update + Query permutations).
+// SHARC path tracer — sparse cache-population pass ("Update" in SDK terms).
 //
-// Compiled with one of:
-//   SHARC_UPDATE = 1, SHARC_QUERY = 0  ⇒  sparse cache-population pass
-//   SHARC_UPDATE = 0, SHARC_QUERY = 1  ⇒  full-res render pass with cache early-out
-// Both shaders share this single source so the bounce loop, NEE, and hit
-// classification stay identical across permutations (AGENTS.md §11, §14).
-//
-// The renderer keeps its existing primary-RT + shadow passes; the Query
-// permutation REPLACES the current sky-only final_gather as the indirect
-// integrator. Update writes ONLY into the SHARC buffers (AGENTS.md §15), Query
-// adds its gathered indirect on top of the HDR that the shadow pass produced.
+// Writes ONLY into the SHARC buffers (AGENTS.md §15); the visible indirect
+// bounce is still served by final_gather. Update is what keeps the cache fresh
+// across frames so that downstream gather can sample from it.
 
 import pbr_common;
 import random;
 import sharc;
 
-#ifndef SHARC_UPDATE
-#define SHARC_UPDATE 0
-#endif
-#ifndef SHARC_QUERY
-#define SHARC_QUERY 0
-#endif
-
 // SDK plumbing. AGENTS.md §14.12: for HLSL/Slang, include SharcCommon.h
 // directly — do NOT pull in SharcGlslHelpers.h.
+#define SHARC_UPDATE 1
 #define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
 #define HASH_GRID_COMPACT 0
 #define SHARC_ENABLE_GLSL 0
@@ -42,8 +29,7 @@ import sharc;
 // SHARC bindings co-locate with `params` in descriptor set 0 (see
 // pbr_common.slang for why the ParameterBlock is pinned to set 0). Bindings
 // 14..17 fall after the 14 fields auto-assigned to PbrPipelineParams
-// (0..13) — single push-descriptor set, stable across Update and Query
-// (AGENTS.md §9).
+// (0..13) — single push-descriptor set (AGENTS.md §9).
 [vk::binding(14, 0)] RWStructuredBuffer<HashGridKey> g_sharcHashEntries;
 [vk::binding(15, 0)] RWStructuredBuffer<SharcAccumulationData> g_sharcAccumulation;
 [vk::binding(16, 0)] RWStructuredBuffer<SharcPackedData> g_sharcResolved;
@@ -118,7 +104,6 @@ float3 sampleSky(float3 dir) {
         * params.sky.sampleScatteredTransfer(dir);
 }
 
-#if SHARC_UPDATE
 // Pool-driven, depth-1 Update raygen. Each invocation reads one slot of the
 // candidate pool; empty slots (key == 0) no-op. Multi-bounce light transport
 // is built across frames, not within a single Update call — the cache itself
@@ -229,64 +214,6 @@ void rayGenShader() {
     uint cascadeSeed = seed ^ 0xa5cc1c4du;
     params.sharc.pushCandidate(hitPos, hitNormal, hitAlbedo, w, cascadeSeed);
 }
-#endif
-
-#if SHARC_QUERY
-// Legacy Query raygen — preserved for the debug-mode overlays (1..4). The
-// host's `sharc_query_pass` system early-returns so this pipeline never
-// actually dispatches in production; the path is kept compileable so we can
-// re-enable the overlays via egui without recompiling shaders.
-[shader("raygeneration")]
-void rayGenShader() {
-    uint2 dispatchIndex = DispatchRaysIndex().xy;
-    uint2 dispatchDim = DispatchRaysDimensions().xy;
-    uint2 pixel = dispatchIndex;
-    uint2 screenSize = dispatchDim;
-
-    if (params.gbuffer.albedoSRGB[pixel].a == 0.0) return;
-
-    float3 cameraOrigin = params.uniforms.cameraOrigin();
-    float3 primaryWorldPos = params.pixelPositionWorldSpace(pixel, screenSize);
-    float3 primaryNormal = params.gbuffer.normalTexture[pixel].xyz;
-    float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;
-    float3 incomingDir = normalize(primaryWorldPos - cameraOrigin);
-
-    switch (g_sharcConstants.debugMode) {
-        case 1:
-            params.outputTexture[pixel] = float4(0.4, 0.0, 0.0, 1.0);
-            return;
-        case 2: {
-            SharcParameters sp = buildSharcParameters();
-            float3 occ = HashGridDebugOccupancy(pixel, screenSize, sp.hashGridData);
-            params.outputTexture[pixel] = float4(occ, 1.0);
-            return;
-        }
-        case 3: {
-            HashGridParameters gp;
-            gp.cameraPosition = cameraOrigin;
-            gp.sceneScale = g_sharcConstants.sceneScale;
-            gp.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
-            gp.levelBias = SHARC_GRID_LEVEL_BIAS;
-            float3 col = HashGridDebugColoredHash(primaryWorldPos, primaryNormal, gp);
-            params.outputTexture[pixel] = float4(col, 1.0);
-            return;
-        }
-        case 4: {
-            SharcParameters sp = buildSharcParameters();
-            SharcHitData hd;
-            hd.positionWorld = primaryWorldPos;
-            hd.normalWorld = primaryNormal;
-            float3 cached;
-            if (SharcGetCachedRadiance(sp, hd, cached, false)) {
-                params.outputTexture[pixel] = float4(cached, 1.0);
-            } else {
-                params.outputTexture[pixel] = float4(1.0, 0.0, 1.0, 1.0);
-            }
-            return;
-        }
-    }
-}
-#endif
 
 [shader("miss")]
 void primaryMissShader(inout SharcHitPayload payload) {
