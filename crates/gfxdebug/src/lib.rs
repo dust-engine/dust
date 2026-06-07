@@ -9,8 +9,10 @@
 //! does not register `EguiPlugin` itself.
 
 mod performance;
+mod profiler;
 
 pub use performance::{PerformancePanel, PerformancePanelPlugin};
+pub use profiler::{GpuProfiler, GpuProfilerPlugin, GpuTimerCommands};
 
 use bevy::prelude::*;
 
@@ -22,6 +24,7 @@ pub struct GfxDebugPlugin;
 
 impl Plugin for GfxDebugPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(GpuProfilerPlugin);
         app.add_plugins(PerformancePanelPlugin);
     }
 }

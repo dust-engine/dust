@@ -13,6 +13,8 @@ use pumicite::{
     utils::AsVkHandle,
 };
 
+use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
+
 use crate::{DlssState, HdrRenderTarget, PbrRenderState, camera::Camera};
 
 unsafe extern "C" {
@@ -288,6 +290,7 @@ pub(crate) fn tonemap_pass(
     mut swapchain_images: Query<(&mut SwapchainImage, &Camera), With<bevy::window::PrimaryWindow>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     dlss_state: Option<ResMut<DlssState>>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((mut swapchain_image, camera)) = swapchain_images.single_mut() else {
         return;
@@ -409,10 +412,12 @@ pub(crate) fn tonemap_pass(
             ],
         );
 
-        encoder.dispatch(UVec3::new(
-            hdr.extent.x.div_ceil(8),
-            hdr.extent.y.div_ceil(8),
-            1,
-        ));
+        encoder.timing_scope(profiler.as_deref_mut(), "tonemap", |encoder| {
+            encoder.dispatch(UVec3::new(
+                hdr.extent.x.div_ceil(8),
+                hdr.extent.y.div_ceil(8),
+                1,
+            ));
+        });
     });
 }

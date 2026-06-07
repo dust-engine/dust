@@ -39,6 +39,8 @@ use pumicite::{
 };
 use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
 
+use dust_gfxdebug::{GpuProfiler, GpuTimerCommands, PerformancePanel};
+
 use bevy_pumicite::prelude::ComputePipeline;
 
 use crate::{
@@ -295,6 +297,7 @@ fn render(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut prev_camera: Local<PreviousCameraState>,
     jitter: Res<JitterState>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single_mut() else {
         tracing::warn!("Frame not rendered; missing swapchain image");
@@ -467,16 +470,18 @@ fn render(
                 .per_instance_data(per_instance_buf)
                 .as_slice(),
         );
-        encoder.trace_rays(
-            sbt,
-            0,
-            sbt_buffer,
-            UVec3 {
-                x: hdr.extent.x,
-                y: hdr.extent.y,
-                z: 1,
-            },
-        );
+        encoder.timing_scope(profiler.as_deref_mut(), "primary ray", |encoder| {
+            encoder.trace_rays(
+                sbt,
+                0,
+                sbt_buffer,
+                UVec3 {
+                    x: hdr.extent.x,
+                    y: hdr.extent.y,
+                    z: 1,
+                },
+            );
+        });
     });
 }
 
@@ -727,6 +732,7 @@ pub(crate) fn dlss_evaluate(
     state: Option<ResMut<DlssState>>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut jitter: ResMut<JitterState>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let (Some(mut ngx), Some(mut state), Some(mut hdr_target)) = (ngx, state, hdr_target) else {
         return;
@@ -950,10 +956,12 @@ pub(crate) fn dlss_evaluate(
         // discards its temporal accumulation.
         eval_params.InReset = 0;
 
-        let cmd_buffer = encoder.buffer().vk_handle();
-        if let Err(e) = ngx.evaluate_dlssd(cmd_buffer, feature, &mut eval_params) {
-            tracing::error!(target: "ngx", "DLSS-RR evaluate failed: {e}");
-        }
+        encoder.timing_scope(profiler.as_deref_mut(), "DLSS eval", |encoder| {
+            let cmd_buffer = encoder.buffer().vk_handle();
+            if let Err(e) = ngx.evaluate_dlssd(cmd_buffer, feature, &mut eval_params) {
+                tracing::error!(target: "ngx", "DLSS-RR evaluate failed: {e}");
+            }
+        });
     });
 }
 
@@ -987,6 +995,7 @@ fn ensure_hdr_target(
     hdr_target: Option<Res<HdrRenderTarget>>,
     allocator: Res<Allocator>,
     swapchain_images: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
+    mut perf_panel: Option<ResMut<PerformancePanel>>,
 ) {
     let Ok(swapchain_image) = swapchain_images.single() else {
         return;
@@ -995,6 +1004,10 @@ fn ensure_hdr_target(
         return;
     };
     let extent = UVec2::new(current.extent().x, current.extent().y);
+
+    if let Some(panel) = perf_panel.as_deref_mut() {
+        panel.report_resolution(extent);
+    }
 
     if let Some(hdr) = hdr_target.as_ref() {
         if hdr.extent == extent {
@@ -1175,6 +1188,7 @@ fn shadow_pass(
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<JitterState>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
@@ -1339,16 +1353,18 @@ fn shadow_pass(
                 .per_instance_data(per_instance_buf)
                 .as_slice(),
         );
-        encoder.trace_rays(
-            shadow_sbt,
-            0,
-            sbt_buffer,
-            UVec3 {
-                x: hdr.extent.x,
-                y: hdr.extent.y,
-                z: 1,
-            },
-        );
+        encoder.timing_scope(profiler.as_deref_mut(), "shadow ray", |encoder| {
+            encoder.trace_rays(
+                shadow_sbt,
+                0,
+                sbt_buffer,
+                UVec3 {
+                    x: hdr.extent.x,
+                    y: hdr.extent.y,
+                    z: 1,
+                },
+            );
+        });
     });
 }
 
@@ -1368,6 +1384,7 @@ pub(crate) fn final_gather_pass(
     sharc_config: Res<sharc::SharcConfig>,
     sharc_frame_state: Res<sharc::SharcFrameState>,
     mut sharc_resources: Option<ResMut<sharc::SharcResources>>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
@@ -1745,16 +1762,18 @@ pub(crate) fn final_gather_pass(
             bytemuck::bytes_of(&push),
         );
 
-        encoder.trace_rays(
-            gather_sbt,
-            0,
-            sbt_buffer,
-            UVec3 {
-                x: hdr.extent.x,
-                y: hdr.extent.y,
-                z: 1,
-            },
-        );
+        encoder.timing_scope(profiler.as_deref_mut(), "final gather ray", |encoder| {
+            encoder.trace_rays(
+                gather_sbt,
+                0,
+                sbt_buffer,
+                UVec3 {
+                    x: hdr.extent.x,
+                    y: hdr.extent.y,
+                    z: 1,
+                },
+            );
+        });
     });
 }
 

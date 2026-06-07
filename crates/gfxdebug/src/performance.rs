@@ -5,6 +5,8 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use pumicite_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
+use crate::profiler::GpuProfiler;
+
 /// Number of recent frames retained for statistics and the history graph.
 const HISTORY_LEN: usize = 120;
 
@@ -25,7 +27,13 @@ impl Plugin for PerformancePanelPlugin {
     }
 }
 
-/// Rolling record of recent frame times, used to derive the displayed stats.
+/// Frame-rate history plus renderer-reported figures, shown in the Performance
+/// panel.
+///
+/// Other crates feed it with `Option<ResMut<PerformancePanel>>` and call e.g.
+/// [`PerformancePanel::report_resolution`]; the `Option` makes reporting a
+/// no-op when the `gfxdebug` plugin isn't installed (the resource won't exist),
+/// so it adds no hard dependency on this crate's plugin being present.
 #[derive(Resource)]
 pub struct PerformancePanel {
     /// Whether the window is currently shown. Toggled by the window's close
@@ -34,6 +42,8 @@ pub struct PerformancePanel {
     /// Recent frame durations in seconds, oldest at the front, newest at the
     /// back. Capped at [`HISTORY_LEN`].
     frame_times: VecDeque<f32>,
+    /// Most recently reported render resolution, in pixels.
+    render_resolution: Option<UVec2>,
 }
 
 impl Default for PerformancePanel {
@@ -41,6 +51,7 @@ impl Default for PerformancePanel {
         Self {
             open: true,
             frame_times: VecDeque::with_capacity(HISTORY_LEN),
+            render_resolution: None,
         }
     }
 }
@@ -51,6 +62,11 @@ impl PerformancePanel {
             self.frame_times.pop_front();
         }
         self.frame_times.push_back(dt);
+    }
+
+    /// Report the resolution the scene is rendered at, in pixels.
+    pub fn report_resolution(&mut self, resolution: UVec2) {
+        self.render_resolution = Some(resolution);
     }
 
     /// Duration of the most recent frame, in milliseconds.
@@ -94,7 +110,11 @@ fn record_frame_time(time: Res<Time>, mut panel: ResMut<PerformancePanel>) {
 }
 
 /// Draws the performance window.
-fn performance_panel_ui(mut contexts: EguiContexts, mut panel: ResMut<PerformancePanel>) {
+fn performance_panel_ui(
+    mut contexts: EguiContexts,
+    mut panel: ResMut<PerformancePanel>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
+) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -118,11 +138,104 @@ fn performance_panel_ui(mut contexts: EguiContexts, mut panel: ResMut<Performanc
             ui.label(format!("Average: {:.0} FPS", panel.average_fps()));
             ui.label(format!("Worst: {:.2} ms", panel.max_frame_ms()));
 
+            if let Some(res) = panel.render_resolution {
+                ui.label(format!("Resolution: {} × {}", res.x, res.y));
+            }
+
             ui.add_space(6.0);
             frame_time_graph(ui, &panel);
+
+            if let Some(profiler) = profiler.as_deref_mut() {
+                ui.add_space(6.0);
+                ui.separator();
+                gpu_timings(ui, profiler);
+            }
         });
     panel.open = open;
 }
+
+/// Draws the per-operation GPU timing breakdown.
+fn gpu_timings(ui: &mut egui::Ui, profiler: &mut GpuProfiler) {
+    ui.horizontal(|ui| {
+        ui.heading("GPU");
+        ui.add_enabled(
+            profiler.is_supported(),
+            egui::Checkbox::new(&mut profiler.enabled, "Enabled"),
+        );
+    });
+
+    if !profiler.is_supported() {
+        ui.label("Timestamp queries unsupported on this device.");
+        return;
+    }
+
+    let rows: Vec<(&'static str, f32)> = profiler.timings().collect();
+    if rows.is_empty() {
+        ui.label(if profiler.enabled {
+            "Measuring…"
+        } else {
+            "Disabled"
+        });
+        return;
+    }
+
+    // A single stacked bar of per-stage GPU time. Its full width represents one
+    // 60 fps frame budget — unless the frame ran over budget, in which case the
+    // bar expands to the total so no stage is clipped
+    const BUDGET_MS: f32 = 1000.0 / 60.0;
+    let total: f32 = rows.iter().map(|&(_, ms)| ms).sum();
+    let scale_ms = total.max(BUDGET_MS);
+
+    let (rect, _response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, egui::CornerRadius::ZERO, egui::Color32::from_black_alpha(96));
+
+    let mut x = rect.left();
+    for (i, &(_, ms)) in rows.iter().enumerate() {
+        let seg_w = (ms / scale_ms) * rect.width();
+        if seg_w > 0.0 {
+            let seg = egui::Rect::from_min_max(
+                egui::pos2(x, rect.top()),
+                egui::pos2(x + seg_w, rect.bottom()),
+            );
+            painter.rect_filled(seg, egui::CornerRadius::ZERO, BAR_COLORS[i % BAR_COLORS.len()]);
+        }
+        x += seg_w;
+    }
+
+    // Legend mapping each color back to its stage and time.
+    ui.add_space(4.0);
+    for (i, &(label, ms)) in rows.iter().enumerate() {
+        ui.horizontal(|ui| {
+            let (swatch, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+            ui.painter()
+                .rect_filled(swatch, egui::CornerRadius::same(2), BAR_COLORS[i % BAR_COLORS.len()]);
+            ui.label(format!("{label}: {ms:.3} ms"));
+        });
+    }
+
+    let total_color = if total > BUDGET_MS {
+        egui::Color32::from_rgb(0xff, 0x6b, 0x6b)
+    } else {
+        egui::Color32::GRAY
+    };
+    ui.label(
+        egui::RichText::new(format!("Total: {total:.3} / {BUDGET_MS:.2} ms"))
+            .color(total_color)
+            .strong(),
+    );
+}
+
+/// Distinct colors cycled across stages so each segment is easy to tell apart.
+const BAR_COLORS: [egui::Color32; 6] = [
+    egui::Color32::from_rgb(0x4c, 0x9a, 0xff), // blue
+    egui::Color32::from_rgb(0x42, 0xc9, 0x8a), // green
+    egui::Color32::from_rgb(0xff, 0xc8, 0x4c), // amber
+    egui::Color32::from_rgb(0xff, 0x7a, 0x59), // orange
+    egui::Color32::from_rgb(0xb2, 0x84, 0xff), // purple
+    egui::Color32::from_rgb(0x4c, 0xd6, 0xd6), // teal
+];
 
 /// Renders a simple auto-scaled line graph of the retained frame times so
 /// spikes are visible at a glance.

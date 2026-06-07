@@ -16,9 +16,9 @@ dust_pbr = { path = "crates/pbr" }
 dust_app = { path = "crates/app" }
 dust_denoiser = { path = "crates/denoiser" }
 dust_gfxdebug = { path = "crates/gfxdebug" }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "45cd16d4e4091cb96f4baa6d5099ab08c081d6e7" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "45cd16d4e4091cb96f4baa6d5099ab08c081d6e7" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "45cd16d4e4091cb96f4baa6d5099ab08c081d6e7" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "0adfad4102232230a5fd74fac2c0838e5f732ece" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "0adfad4102232230a5fd74fac2c0838e5f732ece" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "0adfad4102232230a5fd74fac2c0838e5f732ece" }
 
 [dependencies]
 dust_vox.workspace = true

@@ -30,6 +30,7 @@ use bevy_pumicite::rtx::{
 use bevy_pumicite::shader::RayTracingPipelineLibrary;
 use bevy_pumicite::staging::{BufferInitializer, UniformRingBuffer};
 use bevy_pumicite::{CreateDevice, DefaultRenderSet, SubmissionState};
+use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
 use std::ops::Deref;
 
 use crate::camera::Camera;
@@ -480,6 +481,7 @@ fn sharc_update_pass(
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<crate::JitterState>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     if !config.enabled {
         return;
@@ -541,6 +543,7 @@ fn sharc_update_pass(
         &mut uniform_ring_buffer,
         frame_index,
         dispatch,
+        profiler.as_deref_mut(),
     );
 }
 
@@ -560,6 +563,7 @@ fn record_sharc_rt(
     uniform_ring_buffer: &mut UniformRingBuffer,
     frame_index: u32,
     dispatch: UVec3,
+    mut profiler: Option<&mut GpuProfiler>,
 ) {
     ctx.record(|encoder| {
         let sbt_buffer =
@@ -878,7 +882,9 @@ fn record_sharc_rt(
             bytemuck::bytes_of(&frame_index),
         );
 
-        encoder.trace_rays(sbt, 0, sbt_buffer, dispatch);
+        encoder.timing_scope(profiler.as_deref_mut(), "SHARC rays", |encoder| {
+            encoder.trace_rays(sbt, 0, sbt_buffer, dispatch);
+        });
     });
 }
 
@@ -893,6 +899,7 @@ fn sharc_resolve_pass(
     mut sharc_resources: Option<ResMut<SharcResources>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     swapchain_images: Query<&GlobalTransform, With<bevy::window::PrimaryWindow>>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     if !config.enabled {
         return;
@@ -987,7 +994,9 @@ fn sharc_resolve_pass(
             ],
         );
 
-        encoder.dispatch(UVec3::new(entries_num.div_ceil(256), 1, 1));
+        encoder.timing_scope(profiler.as_deref_mut(), "SHARC resolve", |encoder| {
+            encoder.dispatch(UVec3::new(entries_num.div_ceil(256), 1, 1));
+        });
     });
 }
 
