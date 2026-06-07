@@ -1783,6 +1783,7 @@ dependencies = [
  "bevy_pumicite",
  "dust_app",
  "dust_denoiser",
+ "dust_gfxdebug",
  "dust_pbr",
  "dust_vox",
  "pumicite",
@@ -1811,6 +1812,14 @@ dependencies = [
  "pumicite",
  "runfiles",
  "tracing",
+]
+
+[[package]]
+name = "dust_gfxdebug"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pumicite_egui",
 ]
 
 [[package]]

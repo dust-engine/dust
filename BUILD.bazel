@@ -40,6 +40,7 @@ rust_binary(
         "//crates/pbr:dust_pbr",
         "//crates/app:dust_app",
         "//crates/denoiser:dust_denoiser",
+        "//crates/gfxdebug:dust_gfxdebug",
     ],
     rustc_env_files = [":cargo_toml_env_vars"],
     aliases = aliases(),

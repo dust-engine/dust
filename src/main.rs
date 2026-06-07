@@ -62,7 +62,8 @@ fn main() {
 
     // Dust plugins
     app.add_plugins(dust_pbr::PbrRenderPlugin)
-        .add_plugins(dust_vox::VoxPlugin);
+        .add_plugins(dust_vox::VoxPlugin)
+        .add_plugins(dust_gfxdebug::GfxDebugPlugin);
 
     let primary_window = app
         .world_mut()
