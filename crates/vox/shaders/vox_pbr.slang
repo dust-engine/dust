@@ -39,6 +39,29 @@ void closestHitShader(
     // of this hit is p - jitter. DLSS expects MV in unjittered grid.
     float2 currPixel = float2(DispatchRaysIndex().xy) - float2(params.uniforms.jitter_x, params.uniforms.jitter_y);
     params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
+
+    // SHARC debug visualization. When a debug mode is active the shadow and
+    // final-gather passes are skipped (see sharc.rs), so the primary pass owns
+    // the HDR output: paint the requested view straight to it instead of the
+    // black placeholder the ray-gen wrote for surface pixels. G-buffers above
+    // are still written so DLSS/tonemap have valid inputs.
+    uint debugMode = params.sharc.g_sharcConstants.debugMode;
+    if (debugMode != 0u) {
+        float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+        float3 debugColor;
+        if (debugMode == 1u) {
+            // Colored hash of the grid cell this surface point lands in.
+            debugColor = params.sharc.debugColoredHash(worldPos, worldNormal);
+        } else {
+            // Resolved radiance currently cached here; misses paint black.
+            float3 cached;
+            debugColor = params.sharc.getCachedRadiance(worldPos, worldNormal, cached)
+                ? cached
+                : float3(0.0, 0.0, 0.0);
+        }
+        debugColor *= params.sharc.g_sharcConstants.debugBrightness;
+        params.outputTexture[DispatchRaysIndex().xy] = float4(debugColor, 1.0);
+    }
 }
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max, out int8_t3 positionDelta) {

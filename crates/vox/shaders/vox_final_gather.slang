@@ -109,6 +109,12 @@ void closestHitShader(uniform VoxModelParams model,
         params.sharc.pushCandidate(worldPos, worldNormal, hitAlbedo, weight, seed);
         return;
     }
+    // When a SHARC debug view owns the HDR output, the gather pass still runs
+    // to keep the cache seeded (the miss path above still pushes candidates),
+    // but the cache-hit contribution must not touch the visualized color.
+    if (params.sharc.g_sharcConstants.debugMode != 0u) {
+        return;
+    }
     // TODO: premultiply the albedo to make this even faster.
     float4 current = params.outputTexture[pixel];
     params.outputTexture[pixel] =

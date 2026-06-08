@@ -89,7 +89,7 @@ fn main() {
         Startup,
         (startup_system, setup_rainbow_demo).after(CreateDevice),
     )
-    .add_systems(Update, (animate_teapot_system, update_rainbow_demo_system));
+    .add_systems(Update, (animate_teapot_system));
 
     app.run();
 }

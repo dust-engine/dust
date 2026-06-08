@@ -40,42 +40,73 @@ use crate::{
     build_camera_uniform,
 };
 
+// ─── SHARC debug visualization ─────────────────────────────────────────────
+
+/// Which SHARC debug view the primary pass paints. When not `Off`, the primary
+/// ray-tracing pass writes the visualization straight to the HDR output and the
+/// shadow + final-gather passes are skipped (see `render`, `shadow_pass`,
+/// `final_gather_pass`). Encoded into `SharcShaderConstants::debugMode`.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum SharcDebugMode {
+    /// Normal rendering — no overlay.
+    #[default]
+    Off,
+    /// Colored hash of the grid cell each surface point lands in. Verifies grid
+    /// layout / scene scale against geometry.
+    ColoredHash,
+    /// The resolved radiance currently cached at each surface point. Cells with
+    /// no usable entry paint black.
+    CachedRadiance,
+}
+
+impl SharcDebugMode {
+    /// Wire encoding for `SharcShaderConstants::debugMode`.
+    pub(crate) fn as_u32(self) -> u32 {
+        match self {
+            SharcDebugMode::Off => 0,
+            SharcDebugMode::ColoredHash => 1,
+            SharcDebugMode::CachedRadiance => 2,
+        }
+    }
+}
+
+/// Controls for the SHARC debug visualization painted by the primary pass.
 #[derive(Resource, Clone, Copy)]
 pub struct SharcDebugState {
-    pub enabled: bool,
+    pub mode: SharcDebugMode,
+    /// Multiplier applied to the visualized color before tone-mapping.
     pub brightness: f32,
+}
+
+impl SharcDebugState {
+    /// True when a debug view is active. The renderer uses this to skip the
+    /// shadow + final-gather passes and let the primary pass own the output.
+    pub fn is_active(&self) -> bool {
+        self.mode != SharcDebugMode::Off
+    }
 }
 
 impl Default for SharcDebugState {
     fn default() -> Self {
         Self {
-            enabled: false,
+            mode: SharcDebugMode::Off,
             brightness: 1.0,
         }
     }
 }
 
+/// Push constants for the final-gather ray-gen — just the per-frame sampling
+/// seed. (The SHARC debug overlay used to ride along here; it now lives in the
+/// primary pass via `SharcShaderConstants::debugMode`.)
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct FinalGatherPush {
     pub frame_index: u32,
-    pub sharc_debug_enabled: u32,
-    pub sharc_scene_scale: f32,
-    pub sharc_brightness: f32,
 }
 
 impl FinalGatherPush {
-    pub(crate) fn new(
-        frame_index: u32,
-        debug: &SharcDebugState,
-        config: &SharcConfig,
-    ) -> Self {
-        Self {
-            frame_index,
-            sharc_debug_enabled: debug.enabled as u32,
-            sharc_scene_scale: config.scene_scale,
-            sharc_brightness: debug.brightness,
-        }
+    pub(crate) fn new(frame_index: u32) -> Self {
+        Self { frame_index }
     }
 }
 
@@ -131,6 +162,10 @@ pub(crate) struct SharcConstantsRaw {
     pub frame_index: u32,
     pub downscale_factor: u32,
     pub pool_capacity: u32,
+    /// Primary-pass debug view (`SharcDebugMode::as_u32`). The cache passes
+    /// leave this 0; only `render` sets it from `SharcDebugState`.
+    pub debug_mode: u32,
+    pub debug_brightness: f32,
 }
 
 #[derive(Resource, Default)]
@@ -451,6 +486,9 @@ pub(crate) fn build_sharc_constants(
         frame_index: frame_state.frame_index,
         downscale_factor: config.downscale_factor,
         pool_capacity: config.pool_capacity,
+        // Debug-off by default; `render` overrides these for the primary pass.
+        debug_mode: 0,
+        debug_brightness: 1.0,
     }
 }
 
@@ -1048,11 +1086,21 @@ fn sharc_debug_ui(
                 );
             });
 
-            // Debug overlay — replaces the indirect bounce with a colored hash
-            // of the grid above. Visualizes the *live* grid (same scene scale),
-            // so it stays honest about what the cache sees.
-            ui.collapsing("Debug overlay", |ui| {
-                ui.checkbox(&mut debug_state.enabled, "Paint colored hash");
+            // Debug view — painted by the primary pass straight to the HDR
+            // output. While a mode is active the shadow + final-gather passes
+            // are skipped, so the visualization is the whole image.
+            ui.collapsing("Debug view", |ui| {
+                ui.radio_value(&mut debug_state.mode, SharcDebugMode::Off, "Off");
+                ui.radio_value(
+                    &mut debug_state.mode,
+                    SharcDebugMode::ColoredHash,
+                    "Colored hash (grid cells)",
+                );
+                ui.radio_value(
+                    &mut debug_state.mode,
+                    SharcDebugMode::CachedRadiance,
+                    "Cached radiance",
+                );
                 ui.add(
                     egui::Slider::new(&mut debug_state.brightness, 0.0..=10.0).text("Brightness"),
                 );

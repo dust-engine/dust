@@ -1,29 +1,15 @@
 import pbr_common;
 import random;
 
-#define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
-#define HASH_GRID_COMPACT 0
-#define SHARC_ENABLE_GLSL 0
-#define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
-#define SHARC_ENABLE_SH_ENCODING 0
-#define RW_STRUCTURED_BUFFER(name, type) RWStructuredBuffer<type> name
-#define BUFFER_AT_OFFSET(name, offset) name[offset]
-#include "SharcCommon.h"
-
 struct [raypayload] GatherPayload {
     float dummy : read(caller) : write(caller, miss);
 }
 
-// Push constant block shared by the final-gather ray-gen. `frameIndex` drives
-// the per-frame sampling seed; the `sharcDebug*` fields drive the Phase 1
-// hash-grid debug overlay (see PbrPipelineParams / pbr.playout.ron). When
-// `sharcDebugEnabled` is non-zero the ray-gen paints the SHARC colored-hash
-// instead of tracing an indirect bounce.
+// Push constant for the final-gather ray-gen: just the per-frame sampling seed.
+// (The SHARC hash-grid debug overlay used to ride along here; it now lives in
+// the primary pass — see vox_pbr.slang / SharcShaderConstants::debugMode.)
 struct FinalGatherPush {
     uint frameIndex;
-    uint sharcDebugEnabled;
-    float sharcSceneScale;
-    float sharcBrightness;
 }
 [vk::push_constant] uniform FinalGatherPush pc;
 
@@ -50,20 +36,6 @@ void finalGatherRayGenShader() {
     // Reconstruct world position
     float3 worldPos = params.pixelPositionWorldSpace(pixel, DispatchRaysDimensions().xy);
     float3 N = params.gbuffer.normalTexture[pixel].xyz;
-
-    // Phase 1 SHARC debug overlay: replace the indirect bounce with the spatial
-    // hash color so we can verify grid layout / scale against surfaces.
-    if (pc.sharcDebugEnabled != 0) {
-        HashGridParameters gridParameters;
-        gridParameters.cameraPosition = params.uniforms.cameraOrigin();
-        gridParameters.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
-        gridParameters.sceneScale = pc.sharcSceneScale;
-        gridParameters.levelBias = SHARC_GRID_LEVEL_BIAS;
-
-        float3 color = HashGridDebugColoredHash(worldPos, N, gridParameters);
-        params.outputTexture[pixel] = float4(color * pc.sharcBrightness, 1.0);
-        return;
-    }
 
     uint seed = xxhash32(uint3(pixel.x, pixel.y, pc.frameIndex));
     float u0 = rand(seed);
@@ -106,6 +78,11 @@ void finalGatherMissShader() {
     // Ray escaped to sky — compute sky luminance contribution.
     // No sun disk: shadow pass handles direct sun; including it here would cause
     // fireflies at 1 spp.
+    // When a SHARC debug view owns the HDR output, the gather pass still runs to
+    // keep the cache seeded — but it must not add to the visualized color.
+    if (params.sharc.g_sharcConstants.debugMode != 0u) {
+        return;
+    }
     uint2 pixel = DispatchRaysIndex().xy;
     float4 current = params.outputTexture[pixel];
 

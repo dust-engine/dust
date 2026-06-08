@@ -298,6 +298,14 @@ fn render(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut prev_camera: Local<PreviousCameraState>,
     jitter: Res<JitterState>,
+    // SHARC cache, queried by the primary closest hit for the debug
+    // visualization (vox_pbr.slang). Bindings 14..17 are statically referenced
+    // by the primary pipeline, so the resources must be bound every frame —
+    // `SharcDebugPlugin` creates them at startup, so they are always present.
+    mut sharc_resources: Option<ResMut<sharc::SharcResources>>,
+    sharc_config: Res<sharc::SharcConfig>,
+    sharc_frame_state: Res<sharc::SharcFrameState>,
+    sharc_debug: Res<sharc::SharcDebugState>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single_mut() else {
@@ -324,6 +332,10 @@ fn render(
         tracing::warn!("Frame not rendered; missing HDR target");
         return;
     };
+    let Some(sharc_resources) = sharc_resources.as_deref_mut() else {
+        tracing::warn!("Frame not rendered; missing SHARC resources");
+        return;
+    };
     sbt.push_raygen(0, |_| {});
     sbt.push_miss(0, |_| {});
     let uniform = build_camera_uniform(camera, transform, Some(&mut prev_camera), jitter.offset);
@@ -331,6 +343,12 @@ fn render(
         tracing::warn!("Frame not rendered; missing atmosphere uniform buffer");
         return;
     };
+    // SHARC constants for the primary closest hit's debug query. Debug fields
+    // come from `SharcDebugState`; the rest mirrors the cache passes.
+    let mut sharc_constants =
+        sharc::build_sharc_constants(&sharc_config, &sharc_frame_state, transform.translation());
+    sharc_constants.debug_mode = sharc_debug.mode.as_u32();
+    sharc_constants.debug_brightness = sharc_debug.brightness;
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
@@ -448,28 +466,119 @@ fn render(
             },
         );
 
+        // SHARC cache buffers for the primary closest-hit debug query (bindings
+        // 14..17). Read-only here; Update/Resolve declare R/W on the same
+        // buffers, so the tracker inserts a barrier from last frame's Resolve.
+        // The candidate pool (18..21) is not touched by the query, so it is
+        // left unbound.
+        let sharc_hash_buf = encoder.lock(
+            &sharc_resources.hash_entries,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sharc_accum_buf = encoder.lock(
+            &sharc_resources.accumulation,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sharc_resolved_buf = encoder.lock(
+            &sharc_resources.resolved,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let sharc_constants_buf =
+            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
+        let sharc_rt_read = Access {
+            stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            access: vk::AccessFlags2::SHADER_STORAGE_READ,
+        };
+        encoder.use_buffer_resource(
+            sharc_hash_buf,
+            &mut sharc_resources.hash_entries_state,
+            sharc_rt_read,
+        );
+        encoder.use_buffer_resource(
+            sharc_accum_buf,
+            &mut sharc_resources.accumulation_state,
+            sharc_rt_read,
+        );
+        encoder.use_buffer_resource(
+            sharc_resolved_buf,
+            &mut sharc_resources.resolved_state,
+            sharc_rt_read,
+        );
+
         encoder.emit_barriers();
 
+        let mut params = PbrPipelineParams::new();
+        params
+            .scene_bvh(tlas)
+            .uniforms(uniform)
+            .output_texture(&render_target_views.hdr_output)
+            .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
+            .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
+            .gbuffer_normal_texture(&render_target_views.normal)
+            .gbuffer_depth_texture(&render_target_views.depth)
+            .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+            .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
+            .sky_atmosphere_params(atmo_buffer)
+            .sky_transmittance_lut(transmittance_view)
+            .sky_sky_view_lut(sky_view)
+            .sky_linear_sampler(&atmosphere_luts.sampler)
+            .per_instance_data(per_instance_buf);
+        let sharc_hash_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_hash_buf.vk_handle(),
+            offset: 0,
+            range: sharc_hash_buf.size(),
+        }];
+        let sharc_accum_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_accum_buf.vk_handle(),
+            offset: 0,
+            range: sharc_accum_buf.size(),
+        }];
+        let sharc_resolved_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_resolved_buf.vk_handle(),
+            offset: 0,
+            range: sharc_resolved_buf.size(),
+        }];
+        let sharc_constants_info = [vk::DescriptorBufferInfo {
+            buffer: sharc_constants_buf.vk_handle(),
+            offset: sharc_constants_buf.offset(),
+            range: sharc_constants_buf.size(),
+        }];
+        let mut writes: Vec<vk::WriteDescriptorSet> = params.as_slice().to_vec();
+        writes.extend_from_slice(&[
+            vk::WriteDescriptorSet {
+                dst_binding: 14,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_hash_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 15,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_accum_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 16,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_resolved_info),
+            vk::WriteDescriptorSet {
+                dst_binding: 17,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&sharc_constants_info),
+        ]);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
             0,
-            PbrPipelineParams::new()
-                .scene_bvh(tlas)
-                .uniforms(uniform)
-                .output_texture(&render_target_views.hdr_output)
-                .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
-                .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
-                .gbuffer_normal_texture(&render_target_views.normal)
-                .gbuffer_depth_texture(&render_target_views.depth)
-                .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
-                .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
-                .sky_atmosphere_params(atmo_buffer)
-                .sky_transmittance_lut(transmittance_view)
-                .sky_sky_view_lut(sky_view)
-                .sky_linear_sampler(&atmosphere_luts.sampler)
-                .per_instance_data(per_instance_buf)
-                .as_slice(),
+            &writes,
         );
         encoder.timing_scope(profiler.as_deref_mut(), "primary ray", |encoder| {
             encoder.trace_rays(
@@ -1300,8 +1409,15 @@ fn shadow_pass(
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<JitterState>,
+    sharc_debug: Res<sharc::SharcDebugState>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
+    // A SHARC debug view owns the HDR output (painted by the primary pass), so
+    // skip the shadow pass entirely — unlike final-gather it does no cache
+    // seeding, so there is nothing to keep it around for.
+    if sharc_debug.is_active() {
+        return;
+    }
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
     };
@@ -1528,12 +1644,16 @@ pub(crate) fn final_gather_pass(
     // the depth G-buffer via `primaryRayDirWorldSpace` — that depth was
     // written by the jittered primary ray, so we must reuse the same jitter.
     let uniform = build_camera_uniform(camera, transform, None, jitter.offset);
-    let sharc_constants =
+    let mut sharc_constants =
         sharc::build_sharc_constants(&sharc_config, &sharc_frame_state, transform.translation());
+    // Carry the debug mode so the gather CHS/miss suppress their HDR writes
+    // while a debug view owns the output. Final-gather still runs in that case
+    // to keep the cache seeded (its CHS keeps pushing candidates on misses).
+    sharc_constants.debug_mode = sharc_debug.mode.as_u32();
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
-    let push = sharc::FinalGatherPush::new(*frame_index, &sharc_debug, &sharc_config);
+    let push = sharc::FinalGatherPush::new(*frame_index);
     *frame_index = frame_index.wrapping_add(1);
     // Ping-pong pool indices for this frame.
     let (sharc_pool_read_idx, sharc_pool_write_idx) =

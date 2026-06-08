@@ -30,6 +30,12 @@ public struct SharcShaderConstants {
     public uint frameIndex;
     public uint downscaleFactor;
     public uint poolCapacity;
+    // Primary-pass debug visualization (mirrors `SharcDebugMode` in sharc.rs):
+    // 0 = off, 1 = colored hash, 2 = cached radiance. `debugBrightness` scales
+    // the painted color. Only read by the primary pass (vox_pbr); the cache
+    // passes leave these at 0 / 1.
+    public uint debugMode;
+    public float debugBrightness;
 }
 
 /// Candidate-pool entry — one surface point whose cache cell was a miss
