@@ -1,21 +1,14 @@
 import pbr_common;
 import random;
 
-// SHARC reusable hash grid (header-only, @sharc//:sharc_headers). For the debug
-// visualization we only need HashGridCommon, so set up its prefix macros
-// directly rather than pulling the fp16 cache types in via SharcCommon.h. That
-// also means defining the buffer-access macros SharcCommon.h would normally
-// provide. 64-bit keys (not compact) and 64-bit atomics keep HashGridData free
-// of the lock buffer (we never insert here anyway).
+#define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
 #define HASH_GRID_COMPACT 0
 #define SHARC_ENABLE_GLSL 0
-#define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
+#define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
+#define SHARC_ENABLE_SH_ENCODING 0
 #define RW_STRUCTURED_BUFFER(name, type) RWStructuredBuffer<type> name
 #define BUFFER_AT_OFFSET(name, offset) name[offset]
-#define HASH_GRID_PREFIX HashGrid
-#define HASH_GRID_CONST_PREFIX HASH_GRID
-#include "HashGridTypes.h"
-#include "HashGridCommon.h"
+#include "SharcCommon.h"
 
 struct [raypayload] GatherPayload {
     float dummy : read(caller) : write(caller, miss);
@@ -29,9 +22,7 @@ struct [raypayload] GatherPayload {
 struct FinalGatherPush {
     uint frameIndex;
     uint sharcDebugEnabled;
-    float sharcLogarithmBase;
     float sharcSceneScale;
-    float sharcLevelBias;
     float sharcBrightness;
 }
 [vk::push_constant] uniform FinalGatherPush pc;
@@ -65,9 +56,9 @@ void finalGatherRayGenShader() {
     if (pc.sharcDebugEnabled != 0) {
         HashGridParameters gridParameters;
         gridParameters.cameraPosition = params.uniforms.cameraOrigin();
-        gridParameters.logarithmBase = pc.sharcLogarithmBase;
+        gridParameters.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
         gridParameters.sceneScale = pc.sharcSceneScale;
-        gridParameters.levelBias = pc.sharcLevelBias;
+        gridParameters.levelBias = SHARC_GRID_LEVEL_BIAS;
 
         float3 color = HashGridDebugColoredHash(worldPos, N, gridParameters);
         params.outputTexture[pixel] = float4(color * pc.sharcBrightness, 1.0);

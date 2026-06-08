@@ -617,6 +617,28 @@ unsafe extern "C" {
         pInDlssDEvalParams: *mut NVSDK_NGX_VK_DLSSD_Eval_Params,
     ) -> NVSDK_NGX_Result;
 
+    /// C wrapper around the `static inline` `NGX_DLSSD_GET_OPTIMAL_SETTINGS`
+    /// helper from `nvsdk_ngx_helpers_dlssd.h`. Defined in
+    /// `crates/denoiser/src/dlss/dlss_wrapper.c` (target `//crates/denoiser:dlss_helpers`).
+    ///
+    /// `pInParams` must come from [`NVSDK_NGX_VULKAN_GetCapabilityParameters`];
+    /// the optimal-settings callback the helper invokes is only populated in a
+    /// capability parameter map. The `pOut*` render resolutions and sharpness
+    /// are written only on success.
+    pub fn dust_ngx_dlssd_get_optimal_settings(
+        pInParams: *mut NVSDK_NGX_Parameter,
+        InUserSelectedWidth: c_uint,
+        InUserSelectedHeight: c_uint,
+        InPerfQualityValue: NVSDK_NGX_PerfQuality_Value,
+        pOutRenderOptimalWidth: *mut c_uint,
+        pOutRenderOptimalHeight: *mut c_uint,
+        pOutRenderMaxWidth: *mut c_uint,
+        pOutRenderMaxHeight: *mut c_uint,
+        pOutRenderMinWidth: *mut c_uint,
+        pOutRenderMinHeight: *mut c_uint,
+        pOutSharpness: *mut f32,
+    ) -> NVSDK_NGX_Result;
+
     pub fn NVSDK_NGX_VULKAN_EvaluateFeature_C(
         InCmdList: vk::CommandBuffer,
         InFeatureHandle: *const NVSDK_NGX_Handle,

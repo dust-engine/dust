@@ -42,8 +42,12 @@ pub struct PerformancePanel {
     /// Recent frame durations in seconds, oldest at the front, newest at the
     /// back. Capped at [`HISTORY_LEN`].
     frame_times: VecDeque<f32>,
-    /// Most recently reported render resolution, in pixels.
+    /// Most recently reported internal render resolution, in pixels (the
+    /// resolution the scene is ray-traced at, before DLSS upscaling).
     render_resolution: Option<UVec2>,
+    /// Most recently reported display/output resolution, in pixels (the
+    /// swapchain resolution DLSS upscales to).
+    display_resolution: Option<UVec2>,
 }
 
 impl Default for PerformancePanel {
@@ -52,6 +56,7 @@ impl Default for PerformancePanel {
             open: true,
             frame_times: VecDeque::with_capacity(HISTORY_LEN),
             render_resolution: None,
+            display_resolution: None,
         }
     }
 }
@@ -64,9 +69,11 @@ impl PerformancePanel {
         self.frame_times.push_back(dt);
     }
 
-    /// Report the resolution the scene is rendered at, in pixels.
-    pub fn report_resolution(&mut self, resolution: UVec2) {
+    pub fn report_render_resolutions(&mut self, resolution: UVec2) {
         self.render_resolution = Some(resolution);
+    }
+    pub fn report_display_resolutions(&mut self, resolution: UVec2) {
+        self.display_resolution = Some(resolution);
     }
 
     /// Duration of the most recent frame, in milliseconds.
@@ -138,8 +145,15 @@ fn performance_panel_ui(
             ui.label(format!("Average: {:.0} FPS", panel.average_fps()));
             ui.label(format!("Worst: {:.2} ms", panel.max_frame_ms()));
 
+            if let Some(res) = panel.display_resolution {
+                ui.label(format!("Display: {} × {}", res.x, res.y));
+            }
             if let Some(res) = panel.render_resolution {
-                ui.label(format!("Resolution: {} × {}", res.x, res.y));
+                let scale = match panel.display_resolution {
+                    Some(display) if display.x > 0 => res.x as f32 / display.x as f32,
+                    _ => 1.0,
+                };
+                ui.label(format!("Render: {} × {} ({:.0}%)", res.x, res.y, scale * 100.0));
             }
 
             ui.add_space(6.0);

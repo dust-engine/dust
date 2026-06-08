@@ -40,17 +40,9 @@ use crate::{
     build_camera_uniform,
 };
 
-// ─── Phase 1: hash-grid debug overlay (unchanged behavior) ─────────────────
-
-/// Tweakables for the hash-grid colored-hash debug overlay (Phase 1). Painted
-/// by `final_gather` when SHARC is OFF — see `FinalGatherPush` for the wire
-/// format.
 #[derive(Resource, Clone, Copy)]
 pub struct SharcDebugState {
     pub enabled: bool,
-    pub logarithm_base: f32,
-    pub scene_scale: f32,
-    pub level_bias: f32,
     pub brightness: f32,
 }
 
@@ -58,9 +50,6 @@ impl Default for SharcDebugState {
     fn default() -> Self {
         Self {
             enabled: false,
-            logarithm_base: 2.0,
-            scene_scale: 32.0,
-            level_bias: 0.0,
             brightness: 1.0,
         }
     }
@@ -71,21 +60,21 @@ impl Default for SharcDebugState {
 pub(crate) struct FinalGatherPush {
     pub frame_index: u32,
     pub sharc_debug_enabled: u32,
-    pub sharc_logarithm_base: f32,
     pub sharc_scene_scale: f32,
-    pub sharc_level_bias: f32,
     pub sharc_brightness: f32,
 }
 
 impl FinalGatherPush {
-    pub(crate) fn new(frame_index: u32, state: &SharcDebugState) -> Self {
+    pub(crate) fn new(
+        frame_index: u32,
+        debug: &SharcDebugState,
+        config: &SharcConfig,
+    ) -> Self {
         Self {
             frame_index,
-            sharc_debug_enabled: state.enabled as u32,
-            sharc_logarithm_base: state.logarithm_base,
-            sharc_scene_scale: state.scene_scale,
-            sharc_level_bias: state.level_bias,
-            sharc_brightness: state.brightness,
+            sharc_debug_enabled: debug.enabled as u32,
+            sharc_scene_scale: config.scene_scale,
+            sharc_brightness: debug.brightness,
         }
     }
 }
@@ -1011,17 +1000,32 @@ fn sharc_debug_ui(
     egui::Window::new("SHARC")
         .default_width(300.0)
         .show(ctx, |ui| {
-            ui.collapsing("Pipeline", |ui| {
-                ui.checkbox(&mut config.enabled, "Enabled (Update / Resolve)");
+            // Master controls — the two knobs reached for most often.
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut config.enabled, "Cache enabled");
                 if ui.button("Reset cache").clicked() {
                     config.reset_pending = true;
                 }
+            });
 
-                // Pool capacity ≡ Update ray-count budget for this frame.
-                // Resizing past the buffer allocation is a no-op (the buffer
-                // is allocated to the value at startup); to grow past that
-                // you'd need to reallocate. Keep the slider range under
-                // SharcConfig::default().pool_capacity for live tuning.
+            ui.separator();
+
+            // Grid — shared by the live cache and the debug overlay. There is
+            // exactly one scene scale: the Update/Resolve passes and the
+            // colored-hash overlay both key off it. logarithm base / level
+            // bias are compile-time constants (SHARC_GRID_*), shown read-only
+            // so the overlay can't drift from the grid the cache uses.
+            ui.label(egui::RichText::new("Grid").strong());
+            ui.add(egui::Slider::new(&mut config.scene_scale, 1.0..=200.0).text("Scene scale"));
+
+            ui.separator();
+
+            // Cache population (Update / Resolve) knobs.
+            ui.collapsing("Cache population", |ui| {
+                // Pool capacity ≡ Update ray budget. The pool buffers are
+                // sized to SharcConfig::default().pool_capacity at startup, so
+                // keep the slider at/under that — growing past it is a no-op
+                // without a reallocation.
                 ui.add(
                     egui::Slider::new(&mut config.pool_capacity, 1024..=(1 << 16))
                         .logarithmic(true)
@@ -1032,15 +1036,10 @@ fn sharc_debug_ui(
                         .text("Accumulation frames"),
                 );
                 ui.add(
-                    egui::Slider::new(&mut config.stale_frame_num, 0..=256)
-                        .text("Stale frames"),
+                    egui::Slider::new(&mut config.stale_frame_num, 0..=256).text("Stale frames"),
                 );
                 ui.add(
-                    egui::Slider::new(&mut config.scene_scale, 1.0..=200.0).text("Scene scale"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut config.roughness_min, 0.0..=1.0)
-                        .text("Min roughness (Update)"),
+                    egui::Slider::new(&mut config.roughness_min, 0.0..=1.0).text("Min roughness"),
                 );
                 ui.add(
                     egui::Slider::new(&mut config.radiance_scale, 1.0..=1.0e4)
@@ -1049,21 +1048,11 @@ fn sharc_debug_ui(
                 );
             });
 
-            ui.collapsing("Hash-grid debug overlay (off when SHARC enabled)", |ui| {
-                ui.checkbox(&mut debug_state.enabled, "Overlay");
-                ui.add(
-                    egui::Slider::new(&mut debug_state.scene_scale, 1.0..=500.0)
-                        .logarithmic(true)
-                        .text("Scene scale"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut debug_state.logarithm_base, 1.1..=4.0)
-                        .text("Logarithm base"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut debug_state.level_bias, -4.0..=4.0)
-                        .text("Level bias"),
-                );
+            // Debug overlay — replaces the indirect bounce with a colored hash
+            // of the grid above. Visualizes the *live* grid (same scene scale),
+            // so it stays honest about what the cache sees.
+            ui.collapsing("Debug overlay", |ui| {
+                ui.checkbox(&mut debug_state.enabled, "Paint colored hash");
                 ui.add(
                     egui::Slider::new(&mut debug_state.brightness, 0.0..=10.0).text("Brightness"),
                 );

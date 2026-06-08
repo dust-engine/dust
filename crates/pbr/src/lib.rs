@@ -156,6 +156,7 @@ impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup.after(CreateDevice));
         app.init_resource::<JitterState>();
+        app.init_resource::<RenderQualitySettings>();
         app.add_systems(
             PostUpdate,
             (
@@ -476,8 +477,8 @@ fn render(
                 0,
                 sbt_buffer,
                 UVec3 {
-                    x: hdr.extent.x,
-                    y: hdr.extent.y,
+                    x: hdr.render_extent.x,
+                    y: hdr.render_extent.y,
                     z: 1,
                 },
             );
@@ -521,7 +522,58 @@ pub struct HdrRenderTarget {
     pub hdr_denoised_target_state: ResourceState,
     pub motion_vectors_state: ResourceState,
     pub specular_albedo_state: ResourceState,
-    pub extent: UVec2,
+    /// Display/output resolution (matches the swapchain). DLSS *output* targets
+    /// (`hdr_denoised_output`, `sdr_target`) and the tonemap pass use this.
+    pub display_extent: UVec2,
+    /// Internal render resolution (≤ `extent`), resolved from the active
+    /// [`RenderQualitySettings`] via NGX optimal settings. The RT passes and the
+    /// DLSS *input* G-buffers are sized to this; DLSS upscales to `extent`.
+    pub render_extent: UVec2,
+}
+
+/// User-facing DLSS render-quality / upscaling mode. Selects the internal
+/// render resolution relative to the display resolution; the exact render
+/// extent is resolved per display size via NGX's optimal-settings query
+/// (`NgxContext::get_optimal_settings`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UpscalerQualityMode {
+    /// 0.33× render scale.
+    UltraPerformance,
+    /// 0.5× render scale. Matches NVIDIA's published "Performance" timings.
+    #[default]
+    Performance,
+    /// ~0.58× render scale.
+    Balanced,
+    /// ~0.667× render scale.
+    Quality,
+    /// ~0.77× render scale.
+    UltraQuality,
+    /// Native render resolution — antialiasing only, no upscaling.
+    Dlaa,
+}
+
+impl UpscalerQualityMode {
+    /// Maps to the NGX `PerfQuality` value used for both the optimal-settings
+    /// query and DLSS feature creation.
+    pub fn to_ngx(self) -> dust_denoiser::dlss::sys::NVSDK_NGX_PerfQuality_Value {
+        use dust_denoiser::dlss::sys::NVSDK_NGX_PerfQuality_Value as Q;
+        match self {
+            Self::UltraPerformance => Q::UltraPerformance,
+            Self::Performance => Q::MaxPerf,
+            Self::Balanced => Q::Balanced,
+            Self::Quality => Q::MaxQuality,
+            Self::UltraQuality => Q::UltraQuality,
+            Self::Dlaa => Q::DLAA,
+        }
+    }
+}
+
+/// Pure user-controlled render-quality settings. Holds intent only — the
+/// derived render resolution lives on [`HdrRenderTarget::render_extent`], since
+/// it depends on the (non-user-settable) display/swapchain resolution.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct RenderQualitySettings {
+    pub quality: UpscalerQualityMode,
 }
 
 #[derive(Resource)]
@@ -626,12 +678,17 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
     }
 }
 
-/// Holds the active DLSS-RR feature handle and the render extent it was
-/// configured for. Recreated whenever the HDR target's extent changes.
+/// Holds the active DLSS-RR feature handle and the resolutions it was
+/// configured for. Recreated whenever either the render (input) or output
+/// (display) extent changes — i.e. on a swapchain resize or a quality-mode
+/// switch.
 #[derive(Resource, Default)]
 pub struct DlssState {
     pub feature: Option<dust_denoiser::dlss::NgxFeature>,
-    pub configured_extent: UVec2,
+    /// Internal render resolution (`InWidth`/`InHeight`) the feature was built for.
+    pub configured_render_extent: UVec2,
+    /// Display/output resolution (`InTargetWidth`/`InTargetHeight`) it was built for.
+    pub configured_output_extent: UVec2,
 }
 
 fn ensure_dlss_feature(
@@ -639,16 +696,22 @@ fn ensure_dlss_feature(
     mut ngx: ResMut<dust_denoiser::dlss::NgxContext>,
     state: Option<ResMut<DlssState>>,
     hdr_target: Option<Res<HdrRenderTarget>>,
+    quality_settings: Res<RenderQualitySettings>,
     mut commands: Commands,
 ) {
     ngx.check_dlss_rr_available().unwrap();
     let Some(hdr) = hdr_target else { return };
-    if hdr.extent.x == 0 || hdr.extent.y == 0 {
+    if hdr.display_extent.x == 0 || hdr.display_extent.y == 0 || hdr.render_extent.x == 0 || hdr.render_extent.y == 0
+    {
         return;
     }
 
     let needs_create = match state.as_deref() {
-        Some(s) => s.configured_extent != hdr.extent || s.feature.is_none(),
+        Some(s) => {
+            s.configured_render_extent != hdr.render_extent
+                || s.configured_output_extent != hdr.display_extent
+                || s.feature.is_none()
+        }
         None => true,
     };
     if !needs_create {
@@ -667,11 +730,11 @@ fn ensure_dlss_feature(
         InDenoiseMode: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Denoise_Mode::DLUnified, // DL based unified upscaler
         InRoughnessMode: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Roughness_Mode::Packed, // Read roughness from normals.w
         InUseHWDepth: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Depth_Type::HW,
-        InWidth: hdr.extent.x,
-        InHeight: hdr.extent.y,
-        InTargetWidth: hdr.extent.x,
-        InTargetHeight: hdr.extent.y, // No upscaling for now
-        InPerfQualityValue: dust_denoiser::dlss::sys::NVSDK_NGX_PerfQuality_Value::Balanced,
+        InWidth: hdr.render_extent.x,
+        InHeight: hdr.render_extent.y,
+        InTargetWidth: hdr.display_extent.x,
+        InTargetHeight: hdr.display_extent.y,
+        InPerfQualityValue: quality_settings.quality.to_ngx(),
         // MVLowRes is required by DLSS-RR (the SwinDenoiser refuses to
         // initialize without it): motion vectors are sampled at the input /
         // render resolution rather than the output resolution.
@@ -695,23 +758,26 @@ fn ensure_dlss_feature(
         Some(Ok(feature)) => {
             tracing::info!(
                 target: "ngx",
-                extent = ?hdr.extent,
+                render = ?hdr.render_extent,
+                output = ?hdr.display_extent,
                 "Created DLSS-RR feature"
             );
             if let Some(mut s) = state {
                 s.feature = Some(feature);
-                s.configured_extent = hdr.extent;
+                s.configured_render_extent = hdr.render_extent;
+                s.configured_output_extent = hdr.display_extent;
             } else {
                 commands.insert_resource(DlssState {
                     feature: Some(feature),
-                    configured_extent: hdr.extent,
+                    configured_render_extent: hdr.render_extent,
+                    configured_output_extent: hdr.display_extent,
                 });
             }
         }
         Some(Err(e)) => {
             tracing::error!(
                 target: "ngx",
-                extent = ?hdr.extent,
+                extent = ?hdr.display_extent,
                 "DLSS-RR feature creation failed: {e}"
             );
         }
@@ -740,8 +806,9 @@ pub(crate) fn dlss_evaluate(
     if state.feature.is_none() {
         return;
     }
-    let extent = hdr_target.extent;
-    if extent.x == 0 || extent.y == 0 {
+    let extent = hdr_target.display_extent;
+    let render_extent = hdr_target.render_extent;
+    if extent.x == 0 || extent.y == 0 || render_extent.x == 0 || render_extent.y == 0 {
         return;
     }
 
@@ -873,8 +940,8 @@ pub(crate) fn dlss_evaluate(
             render_target_views.hdr_output.image().vk_handle(),
             subres,
             vk::Format::R16G16B16A16_SFLOAT,
-            extent.x,
-            extent.y,
+            render_extent.x,
+            render_extent.y,
             false,
         );
         let mut output_resource = ngx_image_resource(
@@ -891,8 +958,8 @@ pub(crate) fn dlss_evaluate(
             render_target_views.depth.image().vk_handle(),
             subres,
             vk::Format::R32_SFLOAT,
-            extent.x,
-            extent.y,
+            render_extent.x,
+            render_extent.y,
             false,
         );
         let mut normals = ngx_image_resource(
@@ -900,8 +967,8 @@ pub(crate) fn dlss_evaluate(
             render_target_views.normal.image().vk_handle(),
             subres,
             vk::Format::R16G16B16A16_SFLOAT,
-            extent.x,
-            extent.y,
+            render_extent.x,
+            render_extent.y,
             false,
         );
         let mut diffuse_albedo = ngx_image_resource(
@@ -909,8 +976,8 @@ pub(crate) fn dlss_evaluate(
             render_target_views.albedo.image().vk_handle(),
             subres,
             vk::Format::R8G8B8A8_SRGB,
-            extent.x,
-            extent.y,
+            render_extent.x,
+            render_extent.y,
             false,
         );
         let mut motion_vectors = ngx_image_resource(
@@ -918,8 +985,8 @@ pub(crate) fn dlss_evaluate(
             render_target_views.motion_vectors.image().vk_handle(),
             subres,
             vk::Format::R16G16_SFLOAT,
-            extent.x,
-            extent.y,
+            render_extent.x,
+            render_extent.y,
             false,
         );
         let mut specular_albedo = ngx_image_resource(
@@ -927,8 +994,8 @@ pub(crate) fn dlss_evaluate(
             render_target_views.specular_albedo.image().vk_handle(),
             subres,
             vk::Format::R8G8B8A8_UNORM,
-            extent.x,
-            extent.y,
+            render_extent.x,
+            render_extent.y,
             false,
         );
 
@@ -940,9 +1007,11 @@ pub(crate) fn dlss_evaluate(
         eval_params.pInDiffuseAlbedo = &mut diffuse_albedo;
         eval_params.pInSpecularAlbedo = &mut specular_albedo;
         eval_params.pInMotionVectors = &mut motion_vectors;
+        // The valid render subrect is the internal render resolution; DLSS-RR
+        // upscales it into the (display-resolution) output target.
         eval_params.InRenderSubrectDimensions = dust_denoiser::dlss::sys::NVSDK_NGX_Dimensions {
-            Width: extent.x,
-            Height: extent.y,
+            Width: render_extent.x,
+            Height: render_extent.y,
         };
         eval_params.InMVScaleX = 1.0;
         eval_params.InMVScaleY = 1.0;
@@ -996,6 +1065,8 @@ fn ensure_hdr_target(
     allocator: Res<Allocator>,
     swapchain_images: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
     mut perf_panel: Option<ResMut<PerformancePanel>>,
+    quality_settings: Res<RenderQualitySettings>,
+    mut ngx: Option<ResMut<dust_denoiser::dlss::NgxContext>>,
 ) {
     let Ok(swapchain_image) = swapchain_images.single() else {
         return;
@@ -1005,23 +1076,44 @@ fn ensure_hdr_target(
     };
     let extent = UVec2::new(current.extent().x, current.extent().y);
 
-    if let Some(panel) = perf_panel.as_deref_mut() {
-        panel.report_resolution(extent);
+    // Reallocate when the display resolution changes or the user picks a new
+    // quality mode. Both alter the internal render resolution; otherwise the
+    // (relatively expensive) optimal-settings query is skipped entirely.
+    let needs_realloc = match hdr_target.as_ref() {
+        Some(hdr) => hdr.display_extent != extent || quality_settings.is_changed(),
+        None => true,
+    };
+    if !needs_realloc {
+        return;
     }
 
-    if let Some(hdr) = hdr_target.as_ref() {
-        if hdr.extent == extent {
-            return;
-        }
-    }
-
-    let create_info = vk::ImageCreateInfo {
-        image_type: vk::ImageType::TYPE_2D,
-        extent: vk::Extent3D {
-            width: extent.x,
-            height: extent.y,
-            depth: 1,
+    // Resolve the internal render resolution for the active quality mode. Falls
+    // back to native (no upscaling) when DLSS is unavailable (non-NVIDIA GPU)
+    // or the query fails — DLAA also returns render == display here.
+    let quality = quality_settings.quality;
+    let render_extent = match ngx.as_deref_mut() {
+        Some(ngx) => match ngx.get_optimal_settings(quality.to_ngx(), extent.x, extent.y) {
+            Ok(s) => UVec2::new(s.render_extent[0], s.render_extent[1]),
+            Err(e) => {
+                tracing::warn!(
+                    target: "ngx",
+                    "DLSS optimal-settings query failed ({e}); rendering at native resolution"
+                );
+                extent
+            }
         },
+        None => extent,
+    };
+
+    if let Some(panel) = perf_panel.as_deref_mut() {
+        panel.report_display_resolutions(extent);
+        panel.report_render_resolutions(render_extent);
+    }
+
+    // Shared image parameters; only `extent` (and per-image format/usage/flags)
+    // differ between the display-resolution and render-resolution targets.
+    let base_create_info = vk::ImageCreateInfo {
+        image_type: vk::ImageType::TYPE_2D,
         mip_levels: 1,
         array_layers: 1,
         samples: vk::SampleCountFlags::TYPE_1,
@@ -1030,11 +1122,30 @@ fn ensure_hdr_target(
         initial_layout: vk::ImageLayout::UNDEFINED,
         ..Default::default()
     };
+    // Display-resolution targets: DLSS output + the egui overlay + tonemap.
+    let display_create_info = vk::ImageCreateInfo {
+        extent: vk::Extent3D {
+            width: extent.x,
+            height: extent.y,
+            depth: 1,
+        },
+        ..base_create_info
+    };
+    // Render-resolution targets: every RT-pass output / DLSS input G-buffer.
+    let render_create_info = vk::ImageCreateInfo {
+        extent: vk::Extent3D {
+            width: render_extent.x,
+            height: render_extent.y,
+            depth: 1,
+        },
+        ..base_create_info
+    };
+
     let hdr_output = Image::new_private(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16B16A16_SFLOAT,
-            ..create_info
+            ..render_create_info
         },
     )
     .unwrap()
@@ -1047,7 +1158,7 @@ fn ensure_hdr_target(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16B16A16_SFLOAT,
-            ..create_info
+            ..display_create_info
         },
     )
     .unwrap()
@@ -1064,7 +1175,7 @@ fn ensure_hdr_target(
             usage: vk::ImageUsageFlags::STORAGE
                 | vk::ImageUsageFlags::COLOR_ATTACHMENT
                 | vk::ImageUsageFlags::SAMPLED,
-            ..create_info
+            ..display_create_info
         }
         .push(
             &mut vk::ImageFormatListCreateInfo::default()
@@ -1084,7 +1195,7 @@ fn ensure_hdr_target(
         &vk::ImageCreateInfo {
             flags: vk::ImageCreateFlags::MUTABLE_FORMAT,
             format: vk::Format::R8G8B8A8_UNORM,
-            ..create_info
+            ..render_create_info
         }
         .push(
             &mut vk::ImageFormatListCreateInfo::default()
@@ -1100,7 +1211,7 @@ fn ensure_hdr_target(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16B16A16_SFLOAT,
-            ..create_info
+            ..render_create_info
         },
     )
     .unwrap()
@@ -1113,7 +1224,7 @@ fn ensure_hdr_target(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R32_SFLOAT,
-            ..create_info
+            ..render_create_info
         },
     )
     .unwrap()
@@ -1126,7 +1237,7 @@ fn ensure_hdr_target(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16_SFLOAT,
-            ..create_info
+            ..render_create_info
         },
     )
     .unwrap()
@@ -1142,7 +1253,7 @@ fn ensure_hdr_target(
             usage: vk::ImageUsageFlags::STORAGE
                 | vk::ImageUsageFlags::TRANSFER_DST
                 | vk::ImageUsageFlags::SAMPLED,
-            ..create_info
+            ..render_create_info
         },
     )
     .unwrap()
@@ -1172,7 +1283,8 @@ fn ensure_hdr_target(
         hdr_target_state: Default::default(),
         motion_vectors_state: Default::default(),
         specular_albedo_state: Default::default(),
-        extent,
+        display_extent: extent,
+        render_extent,
         hdr_denoised_target_state: Default::default(),
     });
 }
@@ -1359,8 +1471,8 @@ fn shadow_pass(
                 0,
                 sbt_buffer,
                 UVec3 {
-                    x: hdr.extent.x,
-                    y: hdr.extent.y,
+                    x: hdr.render_extent.x,
+                    y: hdr.render_extent.y,
                     z: 1,
                 },
             );
@@ -1421,7 +1533,7 @@ pub(crate) fn final_gather_pass(
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
-    let push = sharc::FinalGatherPush::new(*frame_index, &sharc_debug);
+    let push = sharc::FinalGatherPush::new(*frame_index, &sharc_debug, &sharc_config);
     *frame_index = frame_index.wrapping_add(1);
     // Ping-pong pool indices for this frame.
     let (sharc_pool_read_idx, sharc_pool_write_idx) =
@@ -1768,8 +1880,8 @@ pub(crate) fn final_gather_pass(
                 0,
                 sbt_buffer,
                 UVec3 {
-                    x: hdr.extent.x,
-                    y: hdr.extent.y,
+                    x: hdr.render_extent.x,
+                    y: hdr.render_extent.y,
                     z: 1,
                 },
             );
@@ -1814,7 +1926,7 @@ fn start_occluding_render_pass(
                     .view(render_target_views.sdr_target.linear_view());
                 // Use linear view for egui. egui does all the interpolation in srgb space.
             })
-            .render_area(IVec2::ZERO, UVec2::new(hdr.extent.x, hdr.extent.y))
+            .render_area(IVec2::ZERO, UVec2::new(hdr.display_extent.x, hdr.display_extent.y))
             .begin();
     });
 }

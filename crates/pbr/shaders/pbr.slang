@@ -7,8 +7,16 @@ struct [raypayload] RayPayload {
 
 [shader("raygeneration")]
 void rayGenShader() {
-    // Check swapchain for egui occlusion
-    float4 originalColor = params.gbuffer.occlusionTexture[DispatchRaysIndex().xy];
+    // Check the egui overlay for occlusion. The overlay (occlusionTexture) is
+    // at display resolution, but this pass runs at render resolution, which is
+    // lower whenever DLSS upscaling is active. Map this render-res pixel onto
+    // the overlay via nearest sampling — `(pixel + 0.5) / renderExtent` UVs
+    // scaled by the overlay's own dimensions — instead of indexing it directly.
+    uint2 overlayDim;
+    params.gbuffer.occlusionTexture.GetDimensions(overlayDim.x, overlayDim.y);
+    uint2 overlayPixel = uint2(
+        (float2(DispatchRaysIndex().xy) + 0.5) * float2(overlayDim) / float2(DispatchRaysDimensions().xy));
+    float4 originalColor = params.gbuffer.occlusionTexture[overlayPixel];
     if (originalColor.a == 1.0) {
         // Solid UI pixel. Write transparent to HDR so tonemap skips it.
         params.outputTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);

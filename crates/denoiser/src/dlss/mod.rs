@@ -236,6 +236,21 @@ impl Drop for NgxRuntimeGuard {
     }
 }
 
+/// Recommended render resolution for a given display resolution + quality mode,
+/// as returned by [`NgxContext::get_optimal_settings`].
+///
+/// `render_extent` is the value NVIDIA requires to be passed verbatim as
+/// `InWidth`/`InHeight` to the subsequent DLSS feature-create call. `min_extent`
+/// and `max_extent` bound the dynamic-resolution range (equal to `render_extent`
+/// for fixed-resolution quality modes), and are retained for a future DRS path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OptimalSettings {
+    pub render_extent: [u32; 2],
+    pub min_extent: [u32; 2],
+    pub max_extent: [u32; 2],
+    pub sharpness: f32,
+}
+
 /// Implicitly owns the NGX context. NGX functions are non-threadsafe, so we generally
 /// require the caller to NGX functions to acquire mutable ownership to this struct.
 pub struct NgxContext {
@@ -377,6 +392,63 @@ impl NgxContext {
             sys::NVSDK_NGX_VULKAN_GetCapabilityParameters(&mut parameters).result()?;
         }
         Ok(ParameterMap(NonNull::new(parameters).unwrap()))
+    }
+
+    /// Queries DLSS for the recommended render resolution for a given display
+    /// resolution and quality mode.
+    ///
+    /// Wraps the `NGX_DLSS_GET_OPTIMAL_SETTINGS` helper. The returned
+    /// [`OptimalSettings::render_extent`] must be passed verbatim as
+    /// `InWidth`/`InHeight` to [`Self::create_dlssd_feature`]; per NVIDIA, the
+    /// values may not be recomputed or rounded by the caller.
+    ///
+    /// Uses a freshly-allocated capability parameter map — the optimal-settings
+    /// callback the helper invokes is only populated by
+    /// `GetCapabilityParameters`, not `AllocateParameters`.
+    pub fn get_optimal_settings(
+        &mut self,
+        quality: sys::NVSDK_NGX_PerfQuality_Value,
+        display_width: u32,
+        display_height: u32,
+    ) -> DlssResult<OptimalSettings> {
+        let params = self.get_capability_parameters()?;
+
+        let mut render = [0u32; 2];
+        let mut max = [0u32; 2];
+        let mut min = [0u32; 2];
+        let mut sharpness = 0.0f32;
+
+        unsafe {
+            sys::dust_ngx_dlssd_get_optimal_settings(
+                params.0.as_ptr(),
+                display_width,
+                display_height,
+                quality,
+                &mut render[0],
+                &mut render[1],
+                &mut max[0],
+                &mut max[1],
+                &mut min[0],
+                &mut min[1],
+                &mut sharpness,
+            )
+            .result()?;
+        }
+
+        // A zero optimal render resolution means the quality mode is not
+        // supported for this display resolution (NGX returns Success but leaves
+        // the outputs at zero). Surface that as an explicit failure rather than
+        // handing back a 0×0 extent the renderer would try to allocate.
+        if render[0] == 0 || render[1] == 0 {
+            return Err(sys::NVSDK_NGX_Result::FAIL_UnsupportedParameter);
+        }
+
+        Ok(OptimalSettings {
+            render_extent: render,
+            min_extent: min,
+            max_extent: max,
+            sharpness,
+        })
     }
 
     /// Probes the driver capability map for DLSS-RR (Ray Reconstruction).

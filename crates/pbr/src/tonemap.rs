@@ -414,8 +414,8 @@ pub(crate) fn tonemap_pass(
 
         encoder.timing_scope(profiler.as_deref_mut(), "tonemap", |encoder| {
             encoder.dispatch(UVec3::new(
-                hdr.extent.x.div_ceil(8),
-                hdr.extent.y.div_ceil(8),
+                hdr.display_extent.x.div_ceil(8),
+                hdr.display_extent.y.div_ceil(8),
                 1,
             ));
         });
