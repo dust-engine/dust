@@ -77,11 +77,16 @@ void intersectionShader(uniform VoxModelParams params) {
 // the gather ray is cosine-importance-sampled — same pattern the miss shader
 // uses for sky contribution).
 //
-// Cache miss ⇒ no HDR contribution this frame, but we push (worldPos, normal)
-// into the SHARC candidate pool so next frame's Update populates this cell.
-// Weight = luminance(primaryAlbedo): dark pixels (shadowed cavities) have
-// little visual impact, so they shouldn't outcompete bright pixels for pool
-// slots under contention.
+// We ALWAYS push (worldPos, normal) into the SHARC candidate pool, hit or
+// miss — not only on a miss. Only-on-miss seeding made each cell go dark
+// before it could be re-added: once populated, a cell was never refreshed
+// until Resolve evicted it as stale, at which point the query missed and it
+// got re-seeded — a visible per-cell pulse. By re-seeding every frame the cell
+// stays alive, and we weight the push by 1/(1+sampleNum) so under-sampled /
+// freshly-seen cells still win pool slots over well-converged ones (whose
+// low — but nonzero — weight only refreshes them occasionally). The
+// primary-pixel luminance further modulates by visual impact: dark pixels
+// (shadowed cavities) shouldn't outcompete bright ones for pool slots.
 [shader("closesthit")]
 void closestHitShader(uniform VoxModelParams model,
                       in HitAttribute hitAttr) {
@@ -93,31 +98,31 @@ void closestHitShader(uniform VoxModelParams model,
     uint2 pixel = DispatchRaysIndex().xy;
     float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;
 
+    // Query both the resolved radiance and the cell's current sample count.
     float3 cachedRadiance;
-    if (!params.sharc.getCachedRadiance(worldPos, worldNormal, cachedRadiance)) {
-        // Hit-point's own albedo (sampled from the voxel palette by the same
-        // CHS) — gets stored in the candidate so the Update path next frame
-        // doesn't need a probe ray to recover it.
-        float3 hitAlbedo = model.getColorForVoxel(hitAttr.voxelId).rgb;
-        // Weight by impact on the visible image: primary-pixel albedo is a
-        // proxy for "how much would populating this cell change what the
-        // user sees." Dark primary pixels lose pool slots to bright ones.
-        float weight = dot(primaryAlbedo, float3(0.2126, 0.7152, 0.0722));
-        uint seed = pixel.x
-                    ^ (pixel.y * 0x100u)
-                    ^ (params.sharc.g_sharcConstants.frameIndex * 0x10000u);
-        params.sharc.pushCandidate(worldPos, worldNormal, hitAlbedo, weight, seed);
-        return;
+    float sampleNum;
+    bool hit = params.sharc.getCachedRadiance(worldPos, worldNormal, cachedRadiance, sampleNum);
+
+    // Fold the cached indirect into HDR on a usable hit — but not when a SHARC
+    // debug view owns the HDR output (the cache-hit contribution must not touch
+    // the visualized color; the cell is still re-seeded below).
+    if (hit && params.sharc.g_sharcConstants.debugMode == 0u) {
+        // TODO: premultiply the albedo to make this even faster.
+        float4 current = params.outputTexture[pixel];
+        params.outputTexture[pixel] =
+            float4(current.rgb + primaryAlbedo * cachedRadiance, current.a);
     }
-    // When a SHARC debug view owns the HDR output, the gather pass still runs
-    // to keep the cache seeded (the miss path above still pushes candidates),
-    // but the cache-hit contribution must not touch the visualized color.
-    if (params.sharc.g_sharcConstants.debugMode != 0u) {
-        return;
-    }
-    // TODO: premultiply the albedo to make this even faster.
-    float4 current = params.outputTexture[pixel];
-    params.outputTexture[pixel] =
-        float4(current.rgb + primaryAlbedo * cachedRadiance, current.a);
+
+    // Re-seed this cell every frame, weighted by the inverse of its existing
+    // sample count. Hit-point albedo (sampled from the voxel palette by this
+    // same CHS) rides along in the candidate so the Update path next frame
+    // doesn't need a probe ray to recover it.
+    float3 hitAlbedo = model.getColorForVoxel(hitAttr.voxelId).rgb;
+    float visualImpact = dot(primaryAlbedo, float3(0.2126, 0.7152, 0.0722));
+    float weight = visualImpact / (1.0 + sampleNum);
+    uint seed = pixel.x
+                ^ (pixel.y * 0x100u)
+                ^ (params.sharc.g_sharcConstants.frameIndex * 0x10000u);
+    params.sharc.pushCandidate(worldPos, worldNormal, hitAlbedo, weight, seed);
 }
 

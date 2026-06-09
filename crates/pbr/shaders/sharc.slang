@@ -118,11 +118,45 @@ public struct SharcParams {
     // resolved entry there. `radiance` is left untouched on miss; gate on the
     // return.
     public bool getCachedRadiance(float3 worldPos, float3 normal, out float3 radiance) {
+        float sampleNum;
+        return getCachedRadiance(worldPos, normal, radiance, sampleNum);
+    }
+
+    // Cache query that also reports the entry's accumulated sample count.
+    // `sampleNum` is the number of samples already folded into this cell's
+    // resolved value — 0 on a hard miss (no entry) and for an entry that
+    // hasn't crossed SHARC_SAMPLE_NUM_THRESHOLD yet. The bool return still
+    // gates the usable-radiance case exactly like the 3-arg overload.
+    //
+    // Reimplements `SharcGetCachedRadiance` rather than calling it because the
+    // SDK function hides `accumulatedSampleNum`. The optional SDK paths
+    // (responsive lighting, material demodulation, separate emissive, SH
+    // encoding) are all compiled out in this configuration, so the find +
+    // unpack + decode below is behaviorally identical to the SDK for the
+    // usable case — it just additionally surfaces the sample count, which
+    // callers use to weight a candidate push by 1/(1+sampleNum) and keep the
+    // cell continuously refreshed instead of only re-seeding it on a miss.
+    public bool getCachedRadiance(float3 worldPos, float3 normal,
+                                  out float3 radiance, out float sampleNum) {
         SharcParameters p = buildSharcParameters();
-        SharcHitData hd;
-        hd.positionWorld = worldPos;
-        hd.normalWorld = normal;
-        return SharcGetCachedRadiance(p, hd, radiance, false);
+        radiance = float3(0.0, 0.0, 0.0);
+        sampleNum = 0.0;
+
+        HashGridKey hashGridKey;
+        HashGridIndex hashGridIndex = HashGridFindEntry(
+            p.hashGridData, worldPos, normal, p.hashGridParameters, hashGridKey);
+        if (hashGridIndex == HASH_GRID_INVALID_CACHE_INDEX)
+            return false;
+
+        SharcVoxelData voxelData = SharcGetVoxelData(p.resolvedBuffer, hashGridIndex);
+        sampleNum = voxelData.accumulatedSampleNum;
+        if (sampleNum > SHARC_SAMPLE_NUM_THRESHOLD) {
+            // SH encoding is off, so SharcDecodeRadiance ignores the direction.
+            radiance = SharcDecodeRadiance(voxelData.accumulatedRadiance,
+                                           float3(0.0, 0.0, 1.0));
+            return true;
+        }
+        return false;
     }
 
     // Hash-grid debug overlays. Useful for verifying scene-scale alignment,

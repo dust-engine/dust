@@ -46,22 +46,26 @@ void closestHitShader(
     // black placeholder the ray-gen wrote for surface pixels. G-buffers above
     // are still written so DLSS/tonemap have valid inputs.
     uint debugMode = params.sharc.g_sharcConstants.debugMode;
-    if (debugMode != 0u) {
-        float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-        float3 debugColor;
-        if (debugMode == 1u) {
-            // Colored hash of the grid cell this surface point lands in.
-            debugColor = params.sharc.debugColoredHash(worldPos, worldNormal);
-        } else {
-            // Resolved radiance currently cached here; misses paint black.
-            float3 cached;
-            debugColor = params.sharc.getCachedRadiance(worldPos, worldNormal, cached)
-                ? cached
-                : float3(0.0, 0.0, 0.0);
-        }
-        debugColor *= params.sharc.g_sharcConstants.debugBrightness;
-        params.outputTexture[DispatchRaysIndex().xy] = float4(debugColor, 1.0);
+    if (debugMode == 0) {
+        return;
     }
+    float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3 debugColor;
+    switch (debugMode) {
+    case 1u:
+
+        // Colored hash of the grid cell this surface point lands in.
+        debugColor = params.sharc.debugColoredHash(worldPos, worldNormal);
+        break;
+    case 2u:
+        // Resolved radiance currently cached here; misses paint black.
+        float3 cached;
+        debugColor = params.sharc.getCachedRadiance(worldPos, worldNormal, cached)
+                         ? cached
+                         : float3(0.0, 0.0, 0.0);
+    }
+    debugColor *= params.sharc.g_sharcConstants.debugBrightness;
+    params.outputTexture[DispatchRaysIndex().xy] = float4(debugColor, 1.0);
 }
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max, out int8_t3 positionDelta) {
