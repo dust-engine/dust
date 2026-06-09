@@ -63,6 +63,12 @@ void closestHitShader(
         debugColor = params.sharc.getCachedRadiance(worldPos, worldNormal, cached)
                          ? cached
                          : float3(0.0, 0.0, 0.0);
+        break;
+    case 3u:
+        // Hash-collision heatmap: linear-probe bucket offset at this point
+        // (blue = no collision … red = heavy probing).
+        debugColor = params.sharc.debugHashCollisions(worldPos, worldNormal);
+        break;
     }
     debugColor *= params.sharc.g_sharcConstants.debugBrightness;
     params.outputTexture[DispatchRaysIndex().xy] = float4(debugColor, 1.0);

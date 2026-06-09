@@ -57,6 +57,10 @@ pub enum SharcDebugMode {
     /// The resolved radiance currently cached at each surface point. Cells with
     /// no usable entry paint black.
     CachedRadiance,
+    /// Hash-collision heatmap: the linear-probe bucket offset each surface
+    /// point resolved to (blue = no collision … red = heavy probing). Verifies
+    /// hash-grid load / collision behavior against scene scale.
+    HashCollisions,
 }
 
 impl SharcDebugMode {
@@ -66,6 +70,7 @@ impl SharcDebugMode {
             SharcDebugMode::Off => 0,
             SharcDebugMode::ColoredHash => 1,
             SharcDebugMode::CachedRadiance => 2,
+            SharcDebugMode::HashCollisions => 3,
         }
     }
 }
@@ -1100,6 +1105,11 @@ fn sharc_debug_ui(
                     &mut debug_state.mode,
                     SharcDebugMode::CachedRadiance,
                     "Cached radiance",
+                );
+                ui.radio_value(
+                    &mut debug_state.mode,
+                    SharcDebugMode::HashCollisions,
+                    "Hash collisions",
                 );
                 ui.add(
                     egui::Slider::new(&mut debug_state.brightness, 0.0..=10.0).text("Brightness"),
