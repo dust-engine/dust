@@ -94,8 +94,10 @@ PipelineLayout(
                     // *written* from this side — vox_final_gather CHS pushes
                     // on cache miss); we declare it to keep Slang reflection
                     // slots aligned with sharc.playout.ron.
-                    Binding(binding: 18, ty: StorageBuffer, stages: [RayGen]),             // candidates_read (unused)
-                    Binding(binding: 19, ty: StorageBuffer, stages: [RayGen]),             // keys_read (unused)
+                    // Compute: the candidate-pool splat debug view reads these
+                    // (the host binds the side it wants to visualize here).
+                    Binding(binding: 18, ty: StorageBuffer, stages: [RayGen, Compute]),    // candidates_read
+                    Binding(binding: 19, ty: StorageBuffer, stages: [RayGen, Compute]),    // keys_read
                     Binding(binding: 20, ty: StorageBuffer, stages: [RayGen, ClosestHit]), // candidates_write
                     Binding(binding: 21, ty: StorageBuffer, stages: [RayGen, ClosestHit]), // keys_write
                 ]

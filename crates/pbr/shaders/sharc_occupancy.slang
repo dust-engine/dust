@@ -73,3 +73,38 @@ void main(uint3 threadId: SV_DispatchThreadID) {
     }
     params.gbuffer.occlusionTexture[px] = float4(debugColor * brightness, 1.0);
 }
+
+// Candidate-pool splat (SharcDebugMode::CandidatePool). This is a *scatter*, not
+// a per-pixel pass: one thread per pool slot, dispatched over the pool rather
+// than the screen. Each occupied slot's candidate is projected to the current
+// camera and marked, so you can see where the cache is generating candidates —
+// i.e. where it's currently short on samples. The host binds the side
+// final-gather wrote this frame to the read slots the accessors sample.
+[shader("compute")]
+[numthreads(32, 1, 1)]
+void splatCandidates(uint3 threadId: SV_DispatchThreadID) {
+    uint slot = threadId.x;
+    if (slot >= params.sharc.g_sharcConstants.poolCapacity) {
+        return;
+    }
+    if (params.sharc.keyAt(slot) == 0u) {
+        return; // empty slot
+    }
+    Candidate c = params.sharc.candidateAt(slot);
+
+    uint2 dims;
+    params.gbuffer.occlusionTexture.GetDimensions(dims.x, dims.y);
+    float2 pixelF;
+    if (!params.uniforms.projectToPixel(c.worldPos, dims, pixelF)) {
+        return; // behind the camera
+    }
+    int2 center = int2(floor(pixelF));
+    float3 color = float3(0.1, 1.0, 0.2) * params.sharc.g_sharcConstants.debugBrightness;
+
+    if (any(center >= int2(0, 0)) && any(center < int2(dims))) {
+        if (params.gbuffer.occlusionTexture[uint2(center)].a != 1.0) {
+            // don't paint over egui
+            params.gbuffer.occlusionTexture[uint2(center)] = float4(color, 1.0);
+        }
+    }
+}

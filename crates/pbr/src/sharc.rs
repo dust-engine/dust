@@ -62,6 +62,10 @@ pub enum SharcDebugMode {
     /// hash-grid load / collision behavior against scene scale.
     HashCollisions,
     HashOccupancy,
+    /// Splat every occupied candidate-pool slot's world position onto the
+    /// screen — shows where the cache is generating candidates (i.e. where it's
+    /// short on samples). A scatter pass, not per-pixel.
+    CandidatePool,
 }
 
 impl SharcDebugMode {
@@ -73,6 +77,7 @@ impl SharcDebugMode {
             SharcDebugMode::CachedRadiance => 2,
             SharcDebugMode::HashCollisions => 3,
             SharcDebugMode::HashOccupancy => 4,
+            SharcDebugMode::CandidatePool => 5,
         }
     }
 }
@@ -307,6 +312,9 @@ pub struct SharcPipelines {
     /// same descriptor slots the RT pipelines use. Dispatched before tonemap
     /// when a debug mode is active (`SharcDebugState::is_active`).
     pub debug_overlay_pipeline: Handle<ComputePipeline>,
+    /// Candidate-pool splat debug view — a second entry point of the debug
+    /// shader, dispatched over the pool (scatter) instead of per-pixel.
+    pub candidate_splat_pipeline: Handle<ComputePipeline>,
     pub update_sbt: Option<pumicite::rtx::ShaderBindingTable>,
 }
 
@@ -345,14 +353,15 @@ impl Plugin for SharcDebugPlugin {
                     .in_set(DefaultRenderSet)
                     .after(sharc_update_pass),
                 // Debug overlay writes the visualization into occlusionTexture
-                // (== sdr_target). It runs after the primary pass (G-buffers +
-                // egui ready) and before tonemap, which reads sdr_target and
-                // composites it onto the final swapchain image — the same path
-                // egui rides. Reads the cache as resolved last frame (a frame of
-                // staleness is fine for a debug view).
+                // (== sdr_target), which tonemap then composites onto the
+                // swapchain — the same path egui rides. Ordered after
+                // final-gather and before Update so the candidate-pool splat
+                // reads this frame's final-gather write side (Update would
+                // otherwise add cascade entries and flip the ping-pong index).
                 sharc_debug_overlay_pass
                     .in_set(DefaultRenderSet)
-                    .after(crate::render)
+                    .after(crate::final_gather_pass)
+                    .before(sharc_update_pass)
                     .before(crate::tonemap_pass),
             ),
         );
@@ -376,11 +385,14 @@ pub fn setup_sharc(
         .load("bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.comp.pipeline.bin");
     let debug_overlay_pipeline: Handle<ComputePipeline> = asset_server
         .load("bazel://dust/crates/pbr/shaders/sharc_occupancy.comp.pipeline.bin");
+    let candidate_splat_pipeline: Handle<ComputePipeline> = asset_server
+        .load("bazel://dust/crates/pbr/shaders/sharc_candidate_splat.comp.pipeline.bin");
 
     commands.insert_resource(SharcPipelines {
         update_pipeline: pipeline_manager.add_pipeline(update_library),
         resolve_pipeline,
         debug_overlay_pipeline,
+        candidate_splat_pipeline,
         update_sbt: None,
     });
 }
@@ -1081,10 +1093,6 @@ fn sharc_debug_overlay_pass(
     }
     let Some(resources) = sharc_resources.as_deref_mut() else { return };
     let Some(hdr) = hdr_target.as_mut() else { return };
-    let Some(pipeline) = compute_pipelines.get(&sharc_pipelines.debug_overlay_pipeline) else {
-        return;
-    };
-    let pipeline = pipeline.clone().into_inner();
     let Ok((camera, transform)) = swapchain_images.single() else { return };
 
     // The per-surface views reconstruct worldPos from depth, so the camera
@@ -1094,6 +1102,133 @@ fn sharc_debug_overlay_pass(
         build_sharc_constants(&config, &frame_state, transform.translation());
     constants.debug_mode = debug.mode.as_u32();
     constants.debug_brightness = debug.brightness;
+
+    // Candidate-pool splat is a scatter over the pool (one thread per slot), not
+    // a per-pixel pass, so it has its own entry point + dispatch. It samples
+    // this frame's final-gather *write* side, bound to the read slots (18/19)
+    // the splat shader reads through.
+    if debug.mode == SharcDebugMode::CandidatePool {
+        let Some(splat) = compute_pipelines.get(&sharc_pipelines.candidate_splat_pipeline)
+        else {
+            return;
+        };
+        let splat = splat.clone().into_inner();
+        let (_, write_idx) = SharcResources::pool_indices(frame_state.frame_index);
+        // splatCandidates is numthreads(32, 1, 1).
+        let groups = config.pool_capacity.div_ceil(32);
+        ctx.record(|encoder| {
+            let constants_buffer =
+                uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
+            let cam_buffer =
+                uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&cam_uniform));
+            let render_target_views =
+                encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+            let cand_buf = encoder.lock(
+                &resources.pool[write_idx].candidates,
+                vk::PipelineStageFlags2::COMPUTE_SHADER,
+            );
+            let keys_buf = encoder.lock(
+                &resources.pool[write_idx].keys,
+                vk::PipelineStageFlags2::COMPUTE_SHADER,
+            );
+
+            encoder.use_image_resource(
+                render_target_views.sdr_target.image(),
+                &mut hdr.sdr_target_state,
+                Access {
+                    stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+                    access: vk::AccessFlags2::SHADER_STORAGE_READ
+                        | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                },
+                vk::ImageLayout::GENERAL,
+                0..1,
+                0..1,
+                false,
+            );
+            let read = Access {
+                stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            };
+            {
+                let pool = &mut resources.pool[write_idx];
+                encoder.use_buffer_resource(cand_buf, &mut pool.candidates_state, read);
+                encoder.use_buffer_resource(keys_buf, &mut pool.keys_state, read);
+            }
+            encoder.emit_barriers();
+
+            let splat = encoder.retain(splat.clone());
+            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &splat);
+            encoder.push_descriptor_set(
+                vk::PipelineBindPoint::COMPUTE,
+                splat.layout(),
+                0,
+                &[
+                    vk::WriteDescriptorSet {
+                        dst_binding: 1,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: cam_buffer.vk_handle(),
+                            offset: cam_buffer.offset(),
+                            range: cam_buffer.size(),
+                        },
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_binding: 7,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                        p_image_info: &vk::DescriptorImageInfo {
+                            sampler: vk::Sampler::null(),
+                            image_view: render_target_views.sdr_target.linear_view().vk_handle(),
+                            image_layout: vk::ImageLayout::GENERAL,
+                        },
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_binding: 17,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: constants_buffer.vk_handle(),
+                            offset: constants_buffer.offset(),
+                            range: constants_buffer.size(),
+                        },
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_binding: 18,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: cand_buf.vk_handle(),
+                            offset: cand_buf.offset(),
+                            range: cand_buf.size(),
+                        },
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_binding: 19,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                        p_buffer_info: &vk::DescriptorBufferInfo {
+                            buffer: keys_buf.vk_handle(),
+                            offset: keys_buf.offset(),
+                            range: keys_buf.size(),
+                        },
+                        ..Default::default()
+                    },
+                ],
+            );
+            encoder.dispatch(UVec3::new(groups, 1, 1));
+        });
+        return;
+    }
+
+    let Some(pipeline) = compute_pipelines.get(&sharc_pipelines.debug_overlay_pipeline) else {
+        return;
+    };
+    let pipeline = pipeline.clone().into_inner();
 
     let dispatch = UVec3::new(
         hdr.display_extent.x.div_ceil(8),
@@ -1343,6 +1478,11 @@ fn sharc_debug_ui(
                     &mut debug_state.mode,
                     SharcDebugMode::HashOccupancy,
                     "Hash occupancy",
+                );
+                ui.radio_value(
+                    &mut debug_state.mode,
+                    SharcDebugMode::CandidatePool,
+                    "Candidate pool (splat)",
                 );
                 ui.add(
                     egui::Slider::new(&mut debug_state.brightness, 0.0..=10.0).text("Brightness"),

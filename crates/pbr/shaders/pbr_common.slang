@@ -151,6 +151,28 @@ public struct CameraUniforms {
         float ndcY = -(viewDir.y / negZ) / prev_tan_half_fov * 0.5 + 0.5;
         return float2(ndcX, ndcY) * float2(screenSize) - 0.5;
     }
+
+    // Project a world-space point to a pixel coordinate through the CURRENT
+    // frame's camera. Returns false when the point is behind the camera (the
+    // caller should discard it). Mirrors prevPixelFromWorld but uses this
+    // frame's model / FOV — used by the SHARC candidate-pool splat debug view.
+    public bool projectToPixel(float3 worldPos, uint2 screenSize, out float2 pixel) {
+        matrix<float, 3, 3> rotation =
+            float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+        float3 origin = float3(model[0].w, model[1].w, model[2].w);
+        float3 viewPos = mul(transpose(rotation), worldPos - origin);
+        // -Z is forward, so a point in front of the camera has viewPos.z < 0.
+        if (viewPos.z >= -1e-6) {
+            pixel = float2(0.0, 0.0);
+            return false;
+        }
+        float negZ = -viewPos.z;
+        float aspect = float(screenSize.x) / float(screenSize.y);
+        float ndcX = (viewPos.x / negZ) / (tan_half_fov * aspect) * 0.5 + 0.5;
+        float ndcY = -(viewPos.y / negZ) / tan_half_fov * 0.5 + 0.5;
+        pixel = float2(ndcX, ndcY) * float2(screenSize);
+        return true;
+    }
 }
 
 // Per-TLAS-instance data uploaded by the PBR plugin's `update_prev_transforms`

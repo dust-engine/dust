@@ -111,9 +111,6 @@ ron2bin(
     type = "raytracing-pipeline",
 )
 
-# SHARC occupancy debug overlay: standalone compute pass that shares the RT
-# pipeline layout (pbr.playout) so it can reach occlusionTexture + the SHARC
-# hash buffer through the `params` ParameterBlock.
 slang_shader(
     name = "sharc_occupancy",
     srcs = ["sharc_occupancy.slang"],
@@ -122,11 +119,23 @@ slang_shader(
         ":pbr_module",
     ],
     out = "sharc_occupancy.spv",
-    profile = "cs_6_0",
+    profile = "sm_6_6",
     target = "spirv",
     opts = [
         "-O3",
         "-matrix-layout-row-major",
+        # Emit both compute entry points into one module, keeping their source
+        # names (without -fvk-use-entrypoint-name Slang renames each to `main`,
+        # so they'd collide). Each -stage must follow the -entry it applies to.
+        "-fvk-use-entrypoint-name",
+        "-entry",
+        "main",
+        "-stage",
+        "compute",
+        "-entry",
+        "splatCandidates",
+        "-stage",
+        "compute",
     ],
 )
 
@@ -134,6 +143,13 @@ ron2bin(
     name = "sharc_occupancy_comp_pipeline",
     src = "sharc_occupancy.comp.pipeline.ron",
     out = "sharc_occupancy.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+
+ron2bin(
+    name = "sharc_candidate_splat_comp_pipeline",
+    src = "sharc_candidate_splat.comp.pipeline.ron",
+    out = "sharc_candidate_splat.comp.pipeline.bin",
     type = "compute-pipeline",
 )
 
@@ -173,6 +189,7 @@ filegroup(
         ":final_gather_rtx_pipeline",
         ":sharc_occupancy",
         ":sharc_occupancy_comp_pipeline",
+        ":sharc_candidate_splat_comp_pipeline",
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",

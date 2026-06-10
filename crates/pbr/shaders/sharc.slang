@@ -45,6 +45,7 @@ public enum SharcDebugMode
     CachedRadiance = 2,
     HashCollisions = 3,
     HashOccupancy = 4,
+    CandidatePool = 5,
 }
 
 /// Candidate-pool entry — one surface point whose cache cell was a miss

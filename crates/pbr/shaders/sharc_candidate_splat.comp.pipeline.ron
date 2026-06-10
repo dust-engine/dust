@@ -1,0 +1,8 @@
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/sharc_occupancy.spv",
+        entry_point: "splatCandidates",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+    disable_optimization: false,
+)
