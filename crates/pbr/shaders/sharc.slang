@@ -30,12 +30,21 @@ public struct SharcShaderConstants {
     public uint frameIndex;
     public uint downscaleFactor;
     public uint poolCapacity;
-    // Primary-pass debug visualization (mirrors `SharcDebugMode` in sharc.rs):
-    // 0 = off, 1 = colored hash, 2 = cached radiance. `debugBrightness` scales
-    // the painted color. Only read by the primary pass (vox_pbr); the cache
-    // passes leave these at 0 / 1.
-    public uint debugMode;
+    private uint _debugMode;
     public float debugBrightness;
+    public property SharcDebugMode debugMode {
+        get {
+            return SharcDebugMode(_debugMode);
+        }
+    }
+}
+public enum SharcDebugMode
+{
+    None = 0,
+    ColoredHash = 1,
+    CachedRadiance = 2,
+    HashCollisions = 3,
+    HashOccupancy = 4,
 }
 
 /// Candidate-pool entry — one surface point whose cache cell was a miss
@@ -165,9 +174,11 @@ public struct SharcParams {
     public float3 debugColoredHash(float3 worldPos, float3 normal) {
         return HashGridDebugColoredHash(worldPos, normal, buildHashGridParameters());
     }
-
     public float3 debugOccupancy(uint2 pixel, uint2 screenSize) {
-        return HashGridDebugOccupancy(pixel, screenSize, buildSharcParameters().hashGridData);
+        HashGridData d;
+        d.capacity = g_sharcConstants.entriesNum;
+        d.hashEntriesBuffer = g_sharcHashEntries;
+        return HashGridDebugOccupancy(pixel, screenSize, d);
     }
 
     public float3 debugHashCollisions(float3 worldPos, float3 normal) {

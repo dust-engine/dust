@@ -1,6 +1,6 @@
 import sky_atmosphere;
 module pbr_common;
-import sharc;
+__exported import sharc;
 
 public struct SkyAtmosphereParams {
     public ConstantBuffer<AtmosphereParams> atmosphereParams;

@@ -75,14 +75,6 @@ void finalGatherRayGenShader() {
 
 [shader("miss")]
 void finalGatherMissShader() {
-    // Ray escaped to sky — compute sky luminance contribution.
-    // No sun disk: shadow pass handles direct sun; including it here would cause
-    // fireflies at 1 spp.
-    // When a SHARC debug view owns the HDR output, the gather pass still runs to
-    // keep the cache seeded — but it must not add to the visualized color.
-    if (params.sharc.g_sharcConstants.debugMode != 0u) {
-        return;
-    }
     uint2 pixel = DispatchRaysIndex().xy;
     float4 current = params.outputTexture[pixel];
 

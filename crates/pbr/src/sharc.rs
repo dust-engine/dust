@@ -42,10 +42,10 @@ use crate::{
 
 // ─── SHARC debug visualization ─────────────────────────────────────────────
 
-/// Which SHARC debug view the primary pass paints. When not `Off`, the primary
-/// ray-tracing pass writes the visualization straight to the HDR output and the
-/// shadow + final-gather passes are skipped (see `render`, `shadow_pass`,
-/// `final_gather_pass`). Encoded into `SharcShaderConstants::debugMode`.
+/// Which SHARC debug view to draw. When not `Off`, the SHARC debug compute pass
+/// (`sharc_debug_overlay_pass`) paints the visualization into occlusionTexture,
+/// which tonemap composites over the frame, and the shadow pass is skipped (see
+/// `shadow_pass`). Encoded into `SharcShaderConstants::debugMode`.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum SharcDebugMode {
     /// Normal rendering — no overlay.
@@ -61,6 +61,7 @@ pub enum SharcDebugMode {
     /// point resolved to (blue = no collision … red = heavy probing). Verifies
     /// hash-grid load / collision behavior against scene scale.
     HashCollisions,
+    HashOccupancy,
 }
 
 impl SharcDebugMode {
@@ -71,6 +72,7 @@ impl SharcDebugMode {
             SharcDebugMode::ColoredHash => 1,
             SharcDebugMode::CachedRadiance => 2,
             SharcDebugMode::HashCollisions => 3,
+            SharcDebugMode::HashOccupancy => 4,
         }
     }
 }
@@ -84,8 +86,6 @@ pub struct SharcDebugState {
 }
 
 impl SharcDebugState {
-    /// True when a debug view is active. The renderer uses this to skip the
-    /// shadow + final-gather passes and let the primary pass own the output.
     pub fn is_active(&self) -> bool {
         self.mode != SharcDebugMode::Off
     }
@@ -302,6 +302,11 @@ fn create_sharc_resources(
 pub struct SharcPipelines {
     pub update_pipeline: Handle<RayTracingPipeline>,
     pub resolve_pipeline: Handle<ComputePipeline>,
+    /// SHARC debug overlay (all debug views). Shares the RT pipeline layout
+    /// (pbr.playout) so it can bind the G-buffers + SHARC buffers through the
+    /// same descriptor slots the RT pipelines use. Dispatched before tonemap
+    /// when a debug mode is active (`SharcDebugState::is_active`).
+    pub debug_overlay_pipeline: Handle<ComputePipeline>,
     pub update_sbt: Option<pumicite::rtx::ShaderBindingTable>,
 }
 
@@ -339,6 +344,16 @@ impl Plugin for SharcDebugPlugin {
                 sharc_resolve_pass
                     .in_set(DefaultRenderSet)
                     .after(sharc_update_pass),
+                // Debug overlay writes the visualization into occlusionTexture
+                // (== sdr_target). It runs after the primary pass (G-buffers +
+                // egui ready) and before tonemap, which reads sdr_target and
+                // composites it onto the final swapchain image — the same path
+                // egui rides. Reads the cache as resolved last frame (a frame of
+                // staleness is fine for a debug view).
+                sharc_debug_overlay_pass
+                    .in_set(DefaultRenderSet)
+                    .after(crate::render)
+                    .before(crate::tonemap_pass),
             ),
         );
     }
@@ -359,10 +374,13 @@ pub fn setup_sharc(
     );
     let resolve_pipeline: Handle<ComputePipeline> = asset_server
         .load("bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.comp.pipeline.bin");
+    let debug_overlay_pipeline: Handle<ComputePipeline> = asset_server
+        .load("bazel://dust/crates/pbr/shaders/sharc_occupancy.comp.pipeline.bin");
 
     commands.insert_resource(SharcPipelines {
         update_pipeline: pipeline_manager.add_pipeline(update_library),
         resolve_pipeline,
+        debug_overlay_pipeline,
         update_sbt: None,
     });
 }
@@ -1032,6 +1050,216 @@ fn sharc_resolve_pass(
     });
 }
 
+// ─── Debug overlay (compute) ─────────────────────────────────────────────────
+
+/// All SHARC debug views, in one compute pass. Runs after the RT + tonemap
+/// passes when a debug mode is active, dispatching one thread per display pixel
+/// and writing the visualization straight into `occlusionTexture` (the final
+/// SDR image) — see `sharc_occupancy.slang`. The compute pipeline shares the RT
+/// pipeline layout (pbr.playout), so it binds the G-buffers + SHARC buffers
+/// through the same descriptor slots the RT pipelines use.
+///
+/// Per-surface views (colored hash / cached radiance / hash collisions)
+/// reconstruct worldPos from the depth G-buffer, so this binds the camera
+/// uniform (1), normal (5), depth (6) and the resolved cache (16) in addition
+/// to the occlusion image (7), hash entries (14) and constants (17).
+fn sharc_debug_overlay_pass(
+    mut ctx: SubmissionState,
+    sharc_pipelines: Res<SharcPipelines>,
+    compute_pipelines: Res<Assets<ComputePipeline>>,
+    config: Res<SharcConfig>,
+    debug: Res<SharcDebugState>,
+    frame_state: Res<SharcFrameState>,
+    mut sharc_resources: Option<ResMut<SharcResources>>,
+    mut hdr_target: Option<ResMut<HdrRenderTarget>>,
+    mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
+    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    jitter: Res<crate::JitterState>,
+) {
+    if !debug.is_active() {
+        return;
+    }
+    let Some(resources) = sharc_resources.as_deref_mut() else { return };
+    let Some(hdr) = hdr_target.as_mut() else { return };
+    let Some(pipeline) = compute_pipelines.get(&sharc_pipelines.debug_overlay_pipeline) else {
+        return;
+    };
+    let pipeline = pipeline.clone().into_inner();
+    let Ok((camera, transform)) = swapchain_images.single() else { return };
+
+    // The per-surface views reconstruct worldPos from depth, so the camera
+    // uniform must carry the same jitter the primary pass used to write depth.
+    let cam_uniform = build_camera_uniform(camera, transform, None, jitter.offset);
+    let mut constants =
+        build_sharc_constants(&config, &frame_state, transform.translation());
+    constants.debug_mode = debug.mode.as_u32();
+    constants.debug_brightness = debug.brightness;
+
+    let dispatch = UVec3::new(
+        hdr.display_extent.x.div_ceil(8),
+        hdr.display_extent.y.div_ceil(8),
+        1,
+    );
+
+    ctx.record(|encoder| {
+        let constants_buffer =
+            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
+        let cam_buffer =
+            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&cam_uniform));
+
+        let render_target_views =
+            encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        let hash_buf = encoder.lock(
+            &resources.hash_entries,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+        let resolved_buf = encoder.lock(
+            &resources.resolved,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+
+        // The SDR target (== occlusionTexture) already holds the tonemapped
+        // scene + egui; we overwrite only the visualized pixels, so it's read-
+        // modify-write storage access. Normal + depth G-buffers are read-only.
+        encoder.use_image_resource(
+            render_target_views.sdr_target.image(),
+            &mut hdr.sdr_target_state,
+            Access {
+                stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ
+                    | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            render_target_views.normal.image(),
+            &mut hdr.normal_state,
+            Access {
+                stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            render_target_views.depth.image(),
+            &mut hdr.depth_state,
+            Access {
+                stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        let read = Access {
+            stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+            access: vk::AccessFlags2::SHADER_STORAGE_READ,
+        };
+        encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, read);
+        encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, read);
+        encoder.emit_barriers();
+
+        let pipeline = encoder.retain(pipeline.clone());
+        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+
+        // Manual partial bind of the shared RT layout: only the slots the debug
+        // overlay reads/writes. (The PbrPipelineParams codegen helper emits all
+        // of its writes, so it can't be used for a partial set yet.)
+        encoder.push_descriptor_set(
+            vk::PipelineBindPoint::COMPUTE,
+            pipeline.layout(),
+            0,
+            &[
+                vk::WriteDescriptorSet {
+                    dst_binding: 1,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    p_buffer_info: &vk::DescriptorBufferInfo {
+                        buffer: cam_buffer.vk_handle(),
+                        offset: cam_buffer.offset(),
+                        range: cam_buffer.size(),
+                    },
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 5,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        sampler: vk::Sampler::null(),
+                        image_view: render_target_views.normal.vk_handle(),
+                        image_layout: vk::ImageLayout::GENERAL,
+                    },
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 6,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        sampler: vk::Sampler::null(),
+                        image_view: render_target_views.depth.vk_handle(),
+                        image_layout: vk::ImageLayout::GENERAL,
+                    },
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 7,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    p_image_info: &vk::DescriptorImageInfo {
+                        sampler: vk::Sampler::null(),
+                        image_view: render_target_views.sdr_target.linear_view().vk_handle(),
+                        image_layout: vk::ImageLayout::GENERAL,
+                    },
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 14,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_buffer_info: &vk::DescriptorBufferInfo {
+                        buffer: hash_buf.vk_handle(),
+                        offset: hash_buf.offset(),
+                        range: hash_buf.size(),
+                    },
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 16,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_buffer_info: &vk::DescriptorBufferInfo {
+                        buffer: resolved_buf.vk_handle(),
+                        offset: resolved_buf.offset(),
+                        range: resolved_buf.size(),
+                    },
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_binding: 17,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    p_buffer_info: &vk::DescriptorBufferInfo {
+                        buffer: constants_buffer.vk_handle(),
+                        offset: constants_buffer.offset(),
+                        range: constants_buffer.size(),
+                    },
+                    ..Default::default()
+                },
+            ],
+        );
+        encoder.dispatch(dispatch);
+    });
+}
+
 // ─── egui UI ───────────────────────────────────────────────────────────────
 
 fn sharc_debug_ui(
@@ -1091,9 +1319,9 @@ fn sharc_debug_ui(
                 );
             });
 
-            // Debug view — painted by the primary pass straight to the HDR
-            // output. While a mode is active the shadow + final-gather passes
-            // are skipped, so the visualization is the whole image.
+            // Debug view — painted by the SHARC debug compute pass into
+            // occlusionTexture, composited over the frame by tonemap. While a
+            // mode is active the shadow pass is skipped.
             ui.collapsing("Debug view", |ui| {
                 ui.radio_value(&mut debug_state.mode, SharcDebugMode::Off, "Off");
                 ui.radio_value(
@@ -1110,6 +1338,11 @@ fn sharc_debug_ui(
                     &mut debug_state.mode,
                     SharcDebugMode::HashCollisions,
                     "Hash collisions",
+                );
+                ui.radio_value(
+                    &mut debug_state.mode,
+                    SharcDebugMode::HashOccupancy,
+                    "Hash occupancy",
                 );
                 ui.add(
                     egui::Slider::new(&mut debug_state.brightness, 0.0..=10.0).text("Brightness"),

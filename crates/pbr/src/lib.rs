@@ -1412,12 +1412,6 @@ fn shadow_pass(
     sharc_debug: Res<sharc::SharcDebugState>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
-    // A SHARC debug view owns the HDR output (painted by the primary pass), so
-    // skip the shadow pass entirely — unlike final-gather it does no cache
-    // seeding, so there is nothing to keep it around for.
-    if sharc_debug.is_active() {
-        return;
-    }
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
     };
