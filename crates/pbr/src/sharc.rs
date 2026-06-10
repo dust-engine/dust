@@ -1158,67 +1158,20 @@ fn sharc_debug_overlay_pass(
 
             let splat = encoder.retain(splat.clone());
             encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &splat);
+            // Partial bind: camera (1), occlusion (7), constants (17) and the
+            // pool read slots (18/19) the splat shader samples.
+            let mut params = PbrPipelineParams::new();
+            params
+                .uniforms(cam_buffer)
+                .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+                .sharc_g_sharc_constants(constants_buffer)
+                .sharc_g_sharc_candidates_read(cand_buf)
+                .sharc_g_sharc_keys_read(keys_buf);
             encoder.push_descriptor_set(
                 vk::PipelineBindPoint::COMPUTE,
                 splat.layout(),
                 0,
-                &[
-                    vk::WriteDescriptorSet {
-                        dst_binding: 1,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: &vk::DescriptorBufferInfo {
-                            buffer: cam_buffer.vk_handle(),
-                            offset: cam_buffer.offset(),
-                            range: cam_buffer.size(),
-                        },
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 7,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                        p_image_info: &vk::DescriptorImageInfo {
-                            sampler: vk::Sampler::null(),
-                            image_view: render_target_views.sdr_target.linear_view().vk_handle(),
-                            image_layout: vk::ImageLayout::GENERAL,
-                        },
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 17,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: &vk::DescriptorBufferInfo {
-                            buffer: constants_buffer.vk_handle(),
-                            offset: constants_buffer.offset(),
-                            range: constants_buffer.size(),
-                        },
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 18,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                        p_buffer_info: &vk::DescriptorBufferInfo {
-                            buffer: cand_buf.vk_handle(),
-                            offset: cand_buf.offset(),
-                            range: cand_buf.size(),
-                        },
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_binding: 19,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                        p_buffer_info: &vk::DescriptorBufferInfo {
-                            buffer: keys_buf.vk_handle(),
-                            offset: keys_buf.offset(),
-                            range: keys_buf.size(),
-                        },
-                        ..Default::default()
-                    },
-                ],
+                params.as_slice(),
             );
             encoder.dispatch(UVec3::new(groups, 1, 1));
         });
@@ -1304,92 +1257,25 @@ fn sharc_debug_overlay_pass(
         let pipeline = encoder.retain(pipeline.clone());
         encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
 
-        // Manual partial bind of the shared RT layout: only the slots the debug
-        // overlay reads/writes. (The PbrPipelineParams codegen helper emits all
-        // of its writes, so it can't be used for a partial set yet.)
+        // Partial bind via the generated helper: dirty-bit tracking means
+        // `as_slice` emits writes only for the slots we set — camera (1),
+        // normal/depth/occlusion (5/6/7, coalesced into one range) and the
+        // hash (14) / resolved (16) / constants (17) — leaving 13/15 and the
+        // rest of the layout untouched.
+        let mut params = PbrPipelineParams::new();
+        params
+            .uniforms(cam_buffer)
+            .gbuffer_normal_texture(&render_target_views.normal)
+            .gbuffer_depth_texture(&render_target_views.depth)
+            .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+            .sharc_g_sharc_hash_entries(hash_buf)
+            .sharc_g_sharc_resolved(resolved_buf)
+            .sharc_g_sharc_constants(constants_buffer);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::COMPUTE,
             pipeline.layout(),
             0,
-            &[
-                vk::WriteDescriptorSet {
-                    dst_binding: 1,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    p_buffer_info: &vk::DescriptorBufferInfo {
-                        buffer: cam_buffer.vk_handle(),
-                        offset: cam_buffer.offset(),
-                        range: cam_buffer.size(),
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 5,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        sampler: vk::Sampler::null(),
-                        image_view: render_target_views.normal.vk_handle(),
-                        image_layout: vk::ImageLayout::GENERAL,
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 6,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        sampler: vk::Sampler::null(),
-                        image_view: render_target_views.depth.vk_handle(),
-                        image_layout: vk::ImageLayout::GENERAL,
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 7,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    p_image_info: &vk::DescriptorImageInfo {
-                        sampler: vk::Sampler::null(),
-                        image_view: render_target_views.sdr_target.linear_view().vk_handle(),
-                        image_layout: vk::ImageLayout::GENERAL,
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 14,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_buffer_info: &vk::DescriptorBufferInfo {
-                        buffer: hash_buf.vk_handle(),
-                        offset: hash_buf.offset(),
-                        range: hash_buf.size(),
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 16,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                    p_buffer_info: &vk::DescriptorBufferInfo {
-                        buffer: resolved_buf.vk_handle(),
-                        offset: resolved_buf.offset(),
-                        range: resolved_buf.size(),
-                    },
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_binding: 17,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    p_buffer_info: &vk::DescriptorBufferInfo {
-                        buffer: constants_buffer.vk_handle(),
-                        offset: constants_buffer.offset(),
-                        range: constants_buffer.size(),
-                    },
-                    ..Default::default()
-                },
-            ],
+            params.as_slice(),
         );
         encoder.dispatch(dispatch);
     });

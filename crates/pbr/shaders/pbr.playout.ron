@@ -48,7 +48,7 @@ PipelineLayout(
                     Binding( // Motion vectors (R16G16_SFLOAT)
                         binding: 8,
                         ty: StorageImage,
-                        stages: [RayGen, Miss, ClosestHit]
+                        stages: [RayGen, Miss, ClosestHit, Compute]
                     ),
                     Binding( // Atmosphere Uniform
                         binding: 9,
