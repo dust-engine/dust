@@ -63,7 +63,7 @@ void intersectionShader(uniform VoxModelParams params) {
     Block block = params.getCurrentPrimitive();
     float inv_unit = 1.0 / params.unit_size;
     final_gather_dda(
-        (ObjectRayOrigin() - block.coords * params.unit_size) * inv_unit,
+        (ObjectRayOrigin() - float3(block.coords) * params.unit_size) * inv_unit,
         ObjectRayDirection() * inv_unit,
         block.mask,
         1.0
@@ -77,36 +77,42 @@ void intersectionShader(uniform VoxModelParams params) {
 // the gather ray is cosine-importance-sampled — same pattern the miss shader
 // uses for sky contribution).
 //
-// We ALWAYS push (worldPos, normal) into the SHARC candidate pool, hit or
-// miss — not only on a miss. Only-on-miss seeding made each cell go dark
-// before it could be re-added: once populated, a cell was never refreshed
-// until Resolve evicted it as stale, at which point the query missed and it
-// got re-seeded — a visible per-cell pulse. By re-seeding every frame the cell
-// stays alive, and we weight the push by 1/(1+sampleNum) so under-sampled /
-// freshly-seen cells still win pool slots over well-converged ones (whose
-// low — but nonzero — weight only refreshes them occasionally). The
-// primary-pixel luminance further modulates by visual impact: dark pixels
-// (shadowed cavities) shouldn't outcompete bright ones for pool slots.
+// The cache is addressed by a discrete voxel-identity key (instance, voxel
+// coordinate, face) — never by the hit position — so it's immune to the
+// sub-pixel jitter that flips a position-quantized cell at voxel boundaries.
+//
+// We ALWAYS push the cell into the SHARC candidate pool, hit or miss — not
+// only on a miss. Only-on-miss seeding made each cell go dark before it could
+// be re-added: once populated, a cell was never refreshed until Resolve
+// evicted it as stale, at which point the query missed and it got re-seeded —
+// a visible per-cell pulse. By re-seeding every frame the cell stays alive, and
+// we weight the push by 1/(1+sampleNum) so under-sampled / freshly-seen cells
+// still win pool slots over well-converged ones (whose low — but nonzero —
+// weight only refreshes them occasionally). The primary-pixel luminance further
+// modulates by visual impact: dark pixels (shadowed cavities) shouldn't
+// outcompete bright ones for pool slots.
 [shader("closesthit")]
 void closestHitShader(uniform VoxModelParams model,
                       in HitAttribute hitAttr) {
+    int8_t3 faceNormal = hitAttr.getNormal();
+    // Raw hit point + world normal: used to trace the Update rays from this
+    // surface next frame, not to address the cache, so jitter here is harmless.
     float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
     float3x4 o2w = ObjectToWorld3x4();
     float3 worldNormal = normalize(
-        mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(hitAttr.getNormal())));
+        mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(faceNormal)));
+
+    // Voxel-native cache key — discrete identity, jitter-free.
+    VoxModelCell cell = model.voxelCellInfo(hitAttr.voxelId);
+    uint64_t key = params.sharc.cellKey(InstanceIndex(), cell.coords, hitAttr.normal, cell.centerWorldSpace());
 
     uint2 pixel = DispatchRaysIndex().xy;
     float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;
 
-    // Query both the resolved radiance and the cell's current sample count.
+    // Query the resolved radiance + the cell's current sample count by key.
     float3 cachedRadiance;
     float sampleNum;
-    bool hit = params.sharc.getCachedRadiance(worldPos, worldNormal, cachedRadiance, sampleNum);
-
-    // Fold the cached indirect into HDR on a usable hit — but not when a SHARC
-    // debug view owns the HDR output (the cache-hit contribution must not touch
-    // the visualized color; the cell is still re-seeded below).
-    if (hit) {
+    if (params.sharc.getCachedRadianceByKey(key, cachedRadiance, sampleNum)) {
         // TODO: premultiply the albedo to make this even faster.
         float4 current = params.outputTexture[pixel];
         params.outputTexture[pixel] =
@@ -123,6 +129,6 @@ void closestHitShader(uniform VoxModelParams model,
     uint seed = pixel.x
                 ^ (pixel.y * 0x100u)
                 ^ (params.sharc.g_sharcConstants.frameIndex * 0x10000u);
-    params.sharc.pushCandidate(worldPos, worldNormal, hitAlbedo, weight, seed);
+    params.sharc.pushCandidate(worldPos, worldNormal, hitAlbedo, key, weight, seed);
 }
 

@@ -16,62 +16,23 @@ void main(uint3 threadId: SV_DispatchThreadID) {
     }
 
     SharcDebugMode debugMode = params.sharc.g_sharcConstants.debugMode;
-    if (debugMode == SharcDebugMode::None) {
+    // The per-surface views (colored hash / cached radiance / hash collisions)
+    // key the cache by voxel identity, which only the primary closest-hit can
+    // compute (vox_pbr.slang) — it can't be recovered from the G-buffer here.
+    // So this screen-space pass now owns only the table-occupancy view;
+    // CandidatePool has its own entry point below.
+    if (debugMode != SharcDebugMode::HashOccupancy) {
         return;
     }
     float brightness = params.sharc.g_sharcConstants.debugBrightness;
 
     // Occupancy is a screen-space view of the table itself — no G-buffer needed.
-    if (debugMode == SharcDebugMode::HashOccupancy) {
-        float3 occ = params.sharc.debugOccupancy(px, dims);
-        // Empty cells / inter-cell borders come back black: leave those pixels
-        // as the rendered image so only populated table cells draw on top.
-        if (any(occ != float3(0.0, 0.0, 0.0))) {
-            params.gbuffer.occlusionTexture[px] = float4(occ * brightness, 1.0);
-        }
-        return;
+    float3 occ = params.sharc.debugOccupancy(px, dims);
+    // Empty cells / inter-cell borders come back black: leave those pixels
+    // as the rendered image so only populated table cells draw on top.
+    if (any(occ != float3(0.0, 0.0, 0.0))) {
+        params.gbuffer.occlusionTexture[px] = float4(occ * brightness, 1.0);
     }
-
-    // Per-surface views. The G-buffers are render-resolution while
-    // occlusionTexture is display-resolution (they differ under DLSS
-    // upscaling), so map this display pixel onto its render-res G-buffer texel
-    // with nearest sampling.
-    uint2 renderDims;
-    params.gbuffer.depthTexture.GetDimensions(renderDims.x, renderDims.y);
-    uint2 gpx = min(
-        uint2((float2(px) + 0.5) * float2(renderDims) / float2(dims)),
-        renderDims - uint2(1, 1));
-
-    // depth == 0 ⇒ sky / UI (no surface): leave the rendered pixel untouched, so
-    // the overlay only covers geometry — matching the old closest-hit behavior.
-    if (params.gbuffer.depthTexture[gpx] == 0.0) {
-        return;
-    }
-    float3 worldPos = params.pixelPositionWorldSpace(gpx, renderDims);
-    float3 worldNormal = params.gbuffer.normalTexture[gpx].xyz;
-
-    float3 debugColor = float3(0.0, 0.0, 0.0);
-    switch (debugMode) {
-    case SharcDebugMode::ColoredHash:
-        // Colored hash of the grid cell this surface point lands in.
-        debugColor = params.sharc.debugColoredHash(worldPos, worldNormal);
-        break;
-    case SharcDebugMode::CachedRadiance:
-        // Resolved radiance currently cached here; misses paint black. Written
-        // straight to the SDR target (no tonemap), so use the brightness slider
-        // to bring HDR values into range.
-        float3 cached;
-        debugColor = params.sharc.getCachedRadiance(worldPos, worldNormal, cached)
-                         ? cached
-                         : float3(0.0, 0.0, 0.0);
-        break;
-    case SharcDebugMode::HashCollisions:
-        // Hash-collision heatmap: linear-probe bucket offset at this point
-        // (blue = no collision … red = heavy probing).
-        debugColor = params.sharc.debugHashCollisions(worldPos, worldNormal);
-        break;
-    }
-    params.gbuffer.occlusionTexture[px] = float4(debugColor * brightness, 1.0);
 }
 
 // Candidate-pool splat (SharcDebugMode::CandidatePool). This is a *scatter*, not

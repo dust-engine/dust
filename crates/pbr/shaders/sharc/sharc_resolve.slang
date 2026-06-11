@@ -13,6 +13,11 @@
 #define SHARC_ENABLE_GLSL 0
 #define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
 #define SHARC_ENABLE_SH_ENCODING 0
+// Keys are discrete voxel identities, not a spatial grid, so SharcResolveEntry's
+// adjacent-level reprojection (which reinterprets key bits as grid position /
+// level on camera motion) is meaningless and must be off — cellKey does its own
+// discrete distance coarsening. MUST match the define in sharc.slang.
+#define SHARC_BLEND_ADJACENT_LEVELS 0
 #define RW_STRUCTURED_BUFFER(name, type) RWStructuredBuffer<type> name
 #define BUFFER_AT_OFFSET(name, offset) name[offset]
 #include "SharcCommon.h"

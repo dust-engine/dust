@@ -6,7 +6,7 @@ public struct Block
     private uint32_t coords_packed;
     public uint32_t material_ptr;
 
-    public property float3 coords {
+    public property uint32_t3 coords {
         get {
             static const uint32_t mask = ((1 << 10) - 1);
             uint32_t3 min;
@@ -20,7 +20,7 @@ public struct Block
 
 public struct HitAttribute {
     public uint8_t voxelId;
-    private uint8_t normal;
+    public uint8_t normal;
     [mutating]
     public void setNormal(int8_t3 n) {
         int8_t axis = (n.y & 1) * 2 + (n.z & 1) * 4;
@@ -83,7 +83,6 @@ public struct VoxModelParams {
             return float4(1.0, 0.0, 1.0, 1.0);
         }
         Block currentPrimitive = getCurrentPrimitive();
-        float3 offsetInBox = float3(voxelId >> 4, (voxelId >> 2) & 0b11, voxelId & 0b11);
 
         uint64_t masked = currentPrimitive.mask & ((uint64_t(1) << voxelId) - 1);
         uint32_t voxelMemoryOffset = countbits(masked);
@@ -93,5 +92,39 @@ public struct VoxModelParams {
         // min(x, 255) is a NVIDIA workaround.
         uint8_t4 palette_color = bit_cast<uint8_t4>(palette_info[min(paletteIndex, 255)]);
         return float4(palette_color) / 255.0;
+    }
+
+    // Discrete, jitter-invariant identity of the hit voxel face, for building a
+    // SHARC cell key (see SharcParams::cellKey). All three outputs depend only
+    // on *which* voxel/face the DDA resolved — never on the exact ray hit
+    // point — so sub-pixel camera jitter can't perturb them.
+    //   - `voxelCoord`: integer object-space voxel coordinate (block min corner
+    //      + in-block offset).
+    //   - `faceId`: 0..5, axis*2 + sign — distinguishes all six faces (SHARC's
+    //      3-bit normal octant alone can't separate same-sign axes).
+    //   - `cellCenterWorld`: world-space center of the voxel; used only to pick
+    //      the distance LOD. Using the voxel center (not the hit face) keeps all
+    //      six faces of a voxel on the same LOD, so they coarsen together rather
+    //      than splitting across a level boundary. Must be called from a hit
+    //      shader.
+    public VoxModelCell voxelCellInfo(uint8_t voxelId) {
+        Block block = getCurrentPrimitive();
+        uint32_t3 offsetInBox = uint32_t3(voxelId >> 4, (voxelId >> 2) & 0b11, voxelId & 0b11);
+        VoxModelCell cell;
+        cell.coords = block.coords + offsetInBox;
+        cell.unit_size = unit_size;
+        return cell;
+    }
+}
+
+public struct VoxModelCell {
+    public uint32_t3 coords;
+    public float unit_size;
+    public float3 centerObjectSpace() {
+        return (float3(coords) + 0.5) * unit_size;
+    }
+    public float3 centerWorldSpace() {
+        float3x4 o2w = ObjectToWorld3x4();
+        return mul(o2w, float4(centerObjectSpace(), 1.0));
     }
 }

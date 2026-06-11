@@ -430,11 +430,17 @@ fn render(
             0..1,
             true,
         );
-        // SDR target: read (occlusion check against egui content)
+        // SDR target: read for the occlusion check against egui content, and
+        // written by the primary closest-hit when a SHARC per-surface debug
+        // overlay is active (it paints the visualization into this layer).
         encoder.use_image_resource(
             render_target_views.sdr_target.image(),
             &mut hdr.sdr_target_state,
-            Access::RTX_READ,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ
+                    | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            },
             vk::ImageLayout::GENERAL,
             0..1,
             0..1,

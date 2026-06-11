@@ -8,53 +8,17 @@ import pbr_common;
 import random;
 import sharc;
 
-// SDK plumbing. AGENTS.md §14.12: for HLSL/Slang, include SharcCommon.h
-// directly — do NOT pull in SharcGlslHelpers.h.
-#define SHARC_UPDATE 1
-#define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
-#define HASH_GRID_COMPACT 0
-#define SHARC_ENABLE_GLSL 0
-#define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
-#define SHARC_ENABLE_SH_ENCODING 0
-#define RW_STRUCTURED_BUFFER(name, type) RWStructuredBuffer<type> name
-#define BUFFER_AT_OFFSET(name, offset) name[offset]
-#include "SharcCommon.h"
-
-// SharcShaderConstants now lives in pbr_common.slang as a public struct so
-// that PbrPipelineParams can carry it as a field (its layout still mirrors
-// crates/pbr/src/sharc.rs::SharcConstantsRaw). The standalone `[vk::binding(17,
-// 0)] g_sharcConstants` below is preserved for sharc_pt's own use; it reuses
-// the same descriptor slot.
-
-// SHARC bindings co-locate with `params` in descriptor set 0 (see
-// pbr_common.slang for why the ParameterBlock is pinned to set 0). Bindings
-// 14..17 fall after the 14 fields auto-assigned to PbrPipelineParams
-// (0..13) — single push-descriptor set (AGENTS.md §9).
-[vk::binding(14, 0)] RWStructuredBuffer<HashGridKey> g_sharcHashEntries;
-[vk::binding(15, 0)] RWStructuredBuffer<SharcAccumulationData> g_sharcAccumulation;
-[vk::binding(16, 0)] RWStructuredBuffer<SharcPackedData> g_sharcResolved;
-[vk::binding(17, 0)] ConstantBuffer<SharcShaderConstants> g_sharcConstants;
-
-SharcParameters buildSharcParameters() {
-    SharcParameters p;
-    p.hashGridParameters.cameraPosition = g_sharcConstants.cameraPosition;
-    p.hashGridParameters.sceneScale = g_sharcConstants.sceneScale;
-    p.hashGridParameters.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
-    p.hashGridParameters.levelBias = SHARC_GRID_LEVEL_BIAS;
-    p.hashGridData.capacity = g_sharcConstants.entriesNum;
-    p.hashGridData.hashEntriesBuffer = g_sharcHashEntries;
-    p.accumulationBuffer = g_sharcAccumulation;
-    p.resolvedBuffer = g_sharcResolved;
-    p.radianceScale = g_sharcConstants.radianceScale;
-    return p;
-}
+// The cache is addressed through `params.sharc` key-based helpers
+// (cellKey / updateHitKey / getCachedRadianceByKey / addRadianceToSlot) — see
+// sharc.slang. This pass no longer includes SharcCommon.h or builds its own
+// SharcParameters: candidates carry a precomputed voxel-identity key, so the
+// SDK's position→spatial-hash machinery is bypassed entirely.
 
 struct PushConstants {
     uint frameIndex;
 }
 [vk::push_constant] uniform PushConstants pc;
 
-static const uint kMaxBounces = 4;
 static const float kPi = 3.14159265358979;
 
 void buildTBN(float3 N, out float3 T, out float3 B) {
@@ -112,15 +76,16 @@ float3 sampleSky(float3 dir) {
 //   1 ray  NEE shadow at candidate vertex      (direct light deposit)
 //   1 ray  one cosine-hemisphere bounce        (depth-1 indirect)
 //
-// On bounce hit we read the bounce target's cache:
-//   * populated cell  → SharcUpdateMiss(cached) — back-propagates the cached
-//                       outgoing radiance through the throughput chain into
-//                       the candidate's accumulator. The cache value already
-//                       integrates all bounces beyond, so we're done.
-//   * empty cell      → pushCandidate(...) — schedules an Update path for
-//                       this cell next frame. No terminator: the candidate
-//                       gets only direct light this frame; indirect arrives
-//                       once the cascade-pushed cell converges.
+// On bounce hit we read the bounce target's cache (by its key from the
+// payload):
+//   * populated cell  → addRadianceToSlot(cached) — back-propagates the cached
+//                       outgoing radiance through the throughput into the
+//                       candidate's slot. The cache value already integrates
+//                       all bounces beyond, so we're done.
+//   * empty cell      → pushCandidate(...) — schedules an Update path for this
+//                       cell next frame. No terminator: the candidate gets only
+//                       direct light this frame; indirect arrives once the
+//                       cascade-pushed cell converges.
 //
 // The cache front therefore advances by one bounce per frame from each
 // "anchor" (lit, queried surface). After K frames of stable camera the
@@ -131,7 +96,7 @@ float3 sampleSky(float3 dir) {
 [shader("raygeneration")]
 void rayGenShader() {
     uint slot = DispatchRaysIndex().x;
-    uint cap = g_sharcConstants.poolCapacity;
+    uint cap = params.sharc.g_sharcConstants.poolCapacity;
     if (slot >= cap) return;
     if (params.sharc.keyAt(slot) == 0u) return;
 
@@ -139,30 +104,24 @@ void rayGenShader() {
     float3 candPos = cand.worldPos;
     float3 candNormal = normalize(cand.normal);
     float3 candAlbedo = cand.albedo;
+    uint64_t candKey = cand.key;
 
-    uint seed = xxhash32(uint3(slot, pc.frameIndex, g_sharcConstants.frameIndex));
+    uint seed = xxhash32(uint3(slot, pc.frameIndex, params.sharc.g_sharcConstants.frameIndex));
 
-    SharcParameters sharcParameters = buildSharcParameters();
-    SharcState sharcState;
-    SharcInit(sharcState);
-
-    // ── Vertex 0: candidate ──────────────────────────────────────────────
-    // Sun NEE → direct light deposit at the candidate.
+    // ── Vertex 0: candidate ─ Sun NEE → direct light deposit into its cell. ─
     float3 directIrradiance = sunNEE(candPos, candNormal);
     float3 directLighting = candAlbedo * directIrradiance / kPi;
-    SharcHitData candHd;
-    candHd.positionWorld = candPos;
-    candHd.normalWorld = candNormal;
-    if (!SharcUpdateHit(sharcParameters, sharcState, candHd, directLighting,
-                        rand(seed))) {
-        return;  // accumulator full
+    uint candSlot;
+    if (!params.sharc.updateHitKey(candKey, directLighting, candSlot)) {
+        return;  // probe bucket full
     }
 
     // ── Bounce: one cosine-hemisphere segment ────────────────────────────
+    // Lambertian throughput candidate→bounce is `candAlbedo` (the cos/pdf
+    // cancels under cosine-importance sampling).
     float u0 = rand(seed);
     float u1 = rand(seed);
     float3 nextDir = cosineHemisphereSample(candNormal, u0, u1);
-    SharcSetThroughput(sharcState, candAlbedo);  // Lambertian throughput
 
     RayDesc bounceRay;
     bounceRay.Origin = candPos + candNormal * 0.001;
@@ -173,6 +132,7 @@ void rayGenShader() {
     bp.t = -1.0;
     bp.albedo = float3(0, 0, 0);
     bp.normal = float3(0, 0, 0);
+    bp.key = 0;
     TraceRay(
         params.sceneBVH,
         RAY_FLAG_FORCE_OPAQUE,
@@ -181,38 +141,29 @@ void rayGenShader() {
     );
 
     if (bp.t < 0.0) {
-        // Sky terminator: back-propagate sky luminance to the candidate.
-        float3 skyLight = sampleSky(nextDir);
-        SharcUpdateMiss(sharcParameters, sharcState, skyLight);
+        // Sky terminator: back-propagate sky luminance through the throughput.
+        params.sharc.addRadianceToSlot(candSlot, sampleSky(nextDir), candAlbedo);
         return;
     }
 
-    // Bounce hit. Try the cache as terminator first.
-    float3 hitPos = bounceRay.Origin + nextDir * bp.t;
-    float3 hitNormal = bp.normal;
-    float3 hitAlbedo = bp.albedo;
-
-    SharcHitData targetHd;
-    targetHd.positionWorld = hitPos;
-    targetHd.normalWorld = hitNormal;
+    // Bounce hit. Try the bounce target's cache (by key) as terminator.
     float3 cached;
-    if (SharcGetCachedRadiance(sharcParameters, targetHd, cached, false)) {
-        // Cache hit: the cached value is the bounce target's outgoing
-        // radiance integrated over all further bounces. SharcUpdateMiss
-        // back-propagates this through the throughput chain — candidate's
-        // accumulator gets `directLighting + candAlbedo * cached`.
-        SharcUpdateMiss(sharcParameters, sharcState, cached);
+    float bounceSampleNum;
+    if (params.sharc.getCachedRadianceByKey(bp.key, cached, bounceSampleNum)) {
+        // Cached value already integrates all further bounces — fold it into
+        // the candidate's slot scaled by throughput.
+        params.sharc.addRadianceToSlot(candSlot, cached, candAlbedo);
         return;
     }
 
-    // Cache miss at bounce target. No terminator → candidate gets only
-    // direct light this frame. Schedule the bounce target as a cascade
-    // candidate so next frame's Update populates it; once it has samples,
-    // future Updates at the candidate will close the loop via the cache
-    // terminator branch above.
-    float w = dot(hitAlbedo, float3(0.2126, 0.7152, 0.0722));
+    // Cache miss at bounce target. No terminator → candidate gets only direct
+    // light this frame. Schedule the bounce target as a cascade candidate so
+    // next frame's Update populates it; once it has samples, future Updates at
+    // the candidate close the loop via the terminator branch above.
+    float3 hitPos = bounceRay.Origin + nextDir * bp.t;
+    float w = dot(bp.albedo, float3(0.2126, 0.7152, 0.0722));
     uint cascadeSeed = seed ^ 0xa5cc1c4du;
-    params.sharc.pushCandidate(hitPos, hitNormal, hitAlbedo, w, cascadeSeed);
+    params.sharc.pushCandidate(hitPos, bp.normal, bp.albedo, bp.key, w, cascadeSeed);
 }
 
 [shader("miss")]

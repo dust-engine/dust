@@ -96,15 +96,31 @@ void closestHitShader(
     in HitAttribute hitAttr,
     inout SharcHitPayload payload,
 ) {
+    int8_t3 faceNormal = hitAttr.getNormal();
     float4 color = model.getColorForVoxel(hitAttr.voxelId);
-    float3 normalObj = float3(hitAttr.getNormal());
     float3x4 o2w = ObjectToWorld3x4();
     float3 worldNormal =
-        normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), normalObj));
+        normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(faceNormal)));
+
+    // Voxel-native SHARC cell key for the bounce target — same discrete
+    // identity the visible-pass CHS uses (vox_common::voxelCellInfo), inlined
+    // here since this pipeline keeps its own self-contained voxel structs.
+    Block block = model.getCurrentPrimitive();
+    float3 offsetInBox =
+        float3(hitAttr.voxelId >> 4, (hitAttr.voxelId >> 2) & 0b11, hitAttr.voxelId & 0b11);
+    int3 voxelCoord = int3(block.coords + offsetInBox);
+    int axis = faceNormal.x != 0 ? 0 : (faceNormal.y != 0 ? 1 : 2);
+    int sign = faceNormal[axis] < 0 ? 1 : 0;
+    uint faceId = uint(axis * 2 + sign);
+    // Voxel center (not face center) for the LOD — matches vox_common's
+    // voxelCellInfo so the cascade and the visible query land on the same LOD.
+    float3 centerObj = (float3(voxelCoord) + 0.5) * model.unit_size;
+    float3 cellCenter = mul(o2w, float4(centerObj, 1.0));
 
     payload.t = RayTCurrent();
     payload.albedo = color.xyz;
     payload.normal = worldNormal;
+    payload.key = params.sharc.cellKey(InstanceIndex(), voxelCoord, faceId, cellCenter);
 }
 
 // --- Intersection shader (verbatim DDA from vox_pbr.slang) ---
@@ -162,7 +178,7 @@ void intersectionShader(uniform VoxModelParams params) {
     Block block = params.getCurrentPrimitive();
     float inv_unit = 1.0 / params.unit_size;
     dda(
-        (ObjectRayOrigin() - block.coords * params.unit_size) * inv_unit,
+        (ObjectRayOrigin() - float3(block.coords) * params.unit_size) * inv_unit,
         ObjectRayDirection() * inv_unit,
         block.mask,
         1.0

@@ -82,7 +82,7 @@ void main(uniform ShadowVoxParams params) {
     Block block = params.getCurrentPrimitive();
     float inv_unit = 1.0 / params.unit_size;
     shadow_dda(
-        (ObjectRayOrigin() - block.coords * params.unit_size) * inv_unit,
+        (ObjectRayOrigin() - float3(block.coords) * params.unit_size) * inv_unit,
         ObjectRayDirection() * inv_unit,
         block.mask,
         1.0

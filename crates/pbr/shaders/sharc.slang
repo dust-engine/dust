@@ -9,6 +9,11 @@ module sharc;
 #define SHARC_ENABLE_GLSL 0
 #define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
 #define SHARC_ENABLE_SH_ENCODING 0
+// Our keys are discrete voxel identities, not a spatial grid, so the
+// camera-motion LOD reprojection in SharcResolveEntry (which reinterprets key
+// bits as grid position/level) is meaningless and must be off. `cellKey` does
+// its own discrete distance coarsening instead.
+#define SHARC_BLEND_ADJACENT_LEVELS 0
 #define RW_STRUCTURED_BUFFER(name, type) RWStructuredBuffer<type> name
 #define BUFFER_AT_OFFSET(name, offset) name[offset]
 #include "SharcCommon.h"
@@ -48,21 +53,23 @@ public enum SharcDebugMode
     CandidatePool = 5,
 }
 
-/// Candidate-pool entry — one surface point whose cache cell was a miss
-/// this frame and should be populated by Update on the next frame.
+/// Candidate-pool entry — one surface point the Update pass should populate
+/// next frame.
 ///
-/// `albedo` is included so the Update raygen doesn't have to fire a probe
-/// ray to recover it from the voxel palette: both producers (the
-/// final_gather CHS where the candidate is born on cache miss, and the
-/// Update cascade after a bounce) already have it via vox CHS, so paying
-/// 12 B in the buffer is cheaper than 1 ray per pool slot.
+/// `worldPos`/`normal` are the *raw* hit surface frame, kept for tracing the
+/// Update rays (NEE + bounce) from this point — they don't address the cache,
+/// so sub-pixel jitter in them is harmless. `key` is the precomputed cache
+/// cell key (see `SharcParams::cellKey`); it's what actually addresses the
+/// hash map, decoupled from position. `albedo` rides along so the Update
+/// raygen doesn't fire a probe ray to recover it from the voxel palette.
 ///
-/// Layout matches `SharcResources::STRIDE_CANDIDATE` (std430 stride 48 B):
-/// each `float3` aligns to 16 with a 4 B trailing pad per field.
+/// Layout matches `SharcResources::STRIDE_CANDIDATE` (std430 stride 64 B):
+/// three `float3` at 16 B each + a `uint64_t` key.
 public struct Candidate {
     public float3 worldPos;
     public float3 normal;
     public float3 albedo;
+    public uint64_t key;
 }
 
 // Local hash used by pushCandidate — keeps `sharc.slang` self-contained
@@ -114,51 +121,61 @@ public struct SharcParams {
         return p;
     }
 
-    HashGridParameters buildHashGridParameters() {
-        HashGridParameters g;
-        g.cameraPosition = g_sharcConstants.cameraPosition;
-        g.sceneScale = g_sharcConstants.sceneScale;
-        g.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
-        g.levelBias = SHARC_GRID_LEVEL_BIAS;
-        return g;
-    }
+    // ── Key-based SHARC API (voxel-native) ────────────────────────────────
+    // SHARC's spatial hash exists to quantize a *continuous* surface position
+    // into a discrete cell. Voxels are already discrete, so that round-trip
+    // only adds floating-point boundary flicker (a hit on a voxel face sits on
+    // a cell boundary; sub-pixel camera jitter flips `floor()` to a neighbour).
+    // Instead the caller hands us a precomputed cell key built from stable
+    // integer identity and we address the hash map with it directly.
 
-    // ── Public SHARC API ──────────────────────────────────────────────────
-    // Cache query at a surface point. Returns true if the cache has a usable
-    // resolved entry there. `radiance` is left untouched on miss; gate on the
-    // return.
-    public bool getCachedRadiance(float3 worldPos, float3 normal, out float3 radiance) {
-        float sampleNum;
-        return getCachedRadiance(worldPos, normal, radiance, sampleNum);
-    }
-
-    // Cache query that also reports the entry's accumulated sample count.
-    // `sampleNum` is the number of samples already folded into this cell's
-    // resolved value — 0 on a hard miss (no entry) and for an entry that
-    // hasn't crossed SHARC_SAMPLE_NUM_THRESHOLD yet. The bool return still
-    // gates the usable-radiance case exactly like the 3-arg overload.
+    // Pack a cache-cell key from discrete, jitter-invariant inputs.
+    // `voxelCoord` is the integer (object-space) voxel coordinate, `faceId` in
+    // [0,5], `instanceId` from InstanceIndex(). `cellCenterWorld` is used ONLY
+    // to pick a distance LOD, so it never perturbs the key under jitter.
     //
-    // Reimplements `SharcGetCachedRadiance` rather than calling it because the
-    // SDK function hides `accumulatedSampleNum`. The optional SDK paths
-    // (responsive lighting, material demodulation, separate emissive, SH
-    // encoding) are all compiled out in this configuration, so the find +
-    // unpack + decode below is behaviorally identical to the SDK for the
-    // usable case — it just additionally surfaces the sample count, which
-    // callers use to weight a candidate push by 1/(1+sampleNum) and keep the
-    // cell continuously refreshed instead of only re-seeding it on a miss.
-    public bool getCachedRadiance(float3 worldPos, float3 normal,
-                                  out float3 radiance, out float sampleNum) {
+    // Distance coarsening (discrete, jitter-free LOD): within `sceneScale`
+    // world units of the camera the key is full-resolution (lod 0); every
+    // doubling of distance past that right-shifts the coordinate one more bit,
+    // merging 2^lod voxels per axis so the live-entry count stays bounded —
+    // the discrete replacement for SHARC's disabled adjacent-level blend.
+    //
+    // 64-bit layout — the top bit is forced to 1 so the key can never equal the
+    // HASH_GRID_INVALID_HASH_KEY sentinel (0):
+    //   [0..3) faceId | [3..7) lod | [7..23) x | [23..39) y | [39..55) z
+    //   | [55..63) instanceId | [63] = 1
+    public uint64_t cellKey(uint instanceId, int3 voxelCoord, uint faceId,
+                            float3 cellCenterWorld) {
+        float dist = distance(g_sharcConstants.cameraPosition, cellCenterWorld);
+        float t = max(dist / max(g_sharcConstants.sceneScale, 1e-6), 1.0);
+        uint lod = min(uint(log2(t)), 15u);
+        uint3 c = uint3(voxelCoord) >> lod;
+
+        uint64_t key = uint64_t(faceId & 0x7u);
+        key |= uint64_t(lod & 0xFu) << 3;
+        key |= (uint64_t(c.x) & 0xFFFFu) << 7;
+        key |= (uint64_t(c.y) & 0xFFFFu) << 23;
+        key |= (uint64_t(c.z) & 0xFFFFu) << 39;
+        key |= (uint64_t(instanceId) & 0xFFu) << 55;
+        key |= uint64_t(1) << 63;
+        return key;
+    }
+
+    // Cache query by precomputed key. Returns true with the resolved radiance
+    // when the cell has a usable entry; always reports the entry's accumulated
+    // sample count (0 on miss) so callers can weight a re-seed by 1/(1+n).
+    public bool getCachedRadianceByKey(uint64_t key, out float3 radiance,
+                                       out float sampleNum) {
         SharcParameters p = buildSharcParameters();
         radiance = float3(0.0, 0.0, 0.0);
         sampleNum = 0.0;
-
-        HashGridKey hashGridKey;
-        HashGridIndex hashGridIndex = HashGridFindEntry(
-            p.hashGridData, worldPos, normal, p.hashGridParameters, hashGridKey);
-        if (hashGridIndex == HASH_GRID_INVALID_CACHE_INDEX)
+        uint baseSlot = HashGridGetBaseSlot(key, p.hashGridData.capacity);
+        HashGridIndex idx = HASH_GRID_INVALID_CACHE_INDEX;
+        uint bucketOffset;
+        if (!HashGridFind(p.hashGridData, key, baseSlot,
+                          HASH_GRID_HASH_MAP_BUCKET_SIZE, idx, bucketOffset))
             return false;
-
-        SharcVoxelData voxelData = SharcGetVoxelData(p.resolvedBuffer, hashGridIndex);
+        SharcVoxelData voxelData = SharcGetVoxelData(p.resolvedBuffer, idx);
         sampleNum = voxelData.accumulatedSampleNum;
         if (sampleNum > SHARC_SAMPLE_NUM_THRESHOLD) {
             // SH encoding is off, so SharcDecodeRadiance ignores the direction.
@@ -169,22 +186,65 @@ public struct SharcParams {
         return false;
     }
 
-    // Hash-grid debug overlays. Useful for verifying scene-scale alignment,
-    // occupancy, and collision rate. Cheap — call them in place of an
-    // indirect bounce in a debug pixel shader.
-    public float3 debugColoredHash(float3 worldPos, float3 normal) {
-        return HashGridDebugColoredHash(worldPos, normal, buildHashGridParameters());
+    // Update deposit: insert `key`, add its direct lighting (counts as one
+    // sample) and report the cache `slot` so the bounce result can be folded in
+    // via `addRadianceToSlot`. Returns false (and leaves `slot` invalid) if the
+    // probe bucket is full. Replaces the SDK SharcUpdateHit for our depth-1,
+    // key-driven update — the SDK derives its own spatial key and can't take
+    // ours, but the slot-level accumulation primitives are key-agnostic.
+    public bool updateHitKey(uint64_t key, float3 directLighting, out uint slot) {
+        SharcParameters p = buildSharcParameters();
+        slot = HASH_GRID_INVALID_CACHE_INDEX;
+        uint baseSlot = HashGridGetBaseSlot(key, p.hashGridData.capacity);
+        uint bucketOffset;
+        if (!HashGridInsert(p.hashGridData, key, baseSlot,
+                            HASH_GRID_HASH_MAP_BUCKET_SIZE, slot, bucketOffset))
+            return false;
+        SharcAddVoxelData(p, slot, directLighting, float3(1.0, 1.0, 1.0),
+                          float3(0.0, 0.0, 1.0), 0.0, 1);
+        return true;
     }
+
+    // Fold a terminator/backprop radiance into a slot already opened by
+    // `updateHitKey`, scaled by the path throughput. sampleData 0 — it does not
+    // count as a new independent sample (matches the SDK's backprop pass).
+    public void addRadianceToSlot(uint slot, float3 radiance, float3 throughput) {
+        if (slot == HASH_GRID_INVALID_CACHE_INDEX) return;
+        SharcParameters p = buildSharcParameters();
+        SharcAddVoxelData(p, slot, radiance, throughput, float3(0.0, 0.0, 1.0),
+                          0.0, 0);
+    }
+
+    // ── Debug overlays ────────────────────────────────────────────────────
+    // Stable per-cell color from the key hash (replaces the spatial
+    // HashGridDebugColoredHash — same color-from-hash, fed our voxel key).
+    public float3 debugColoredHashByKey(uint64_t key) {
+        return HashGridGetColorFromHash32(HashGridHash32(key));
+    }
+
+    // Linear-probe bucket offset for `key` (blue = no collision … red = heavy
+    // probing). Mirrors HashGridDebugHashCollisions but key-based.
+    public float3 debugHashCollisionsByKey(uint64_t key) {
+        SharcParameters p = buildSharcParameters();
+        uint baseSlot = HashGridGetBaseSlot(key, p.hashGridData.capacity);
+        HashGridIndex idx = HASH_GRID_INVALID_CACHE_INDEX;
+        uint bucketOffset = 0;
+        HashGridFind(p.hashGridData, key, baseSlot,
+                     HASH_GRID_HASH_MAP_BUCKET_SIZE, idx, bucketOffset);
+        if (bucketOffset == 0) return float3(0.0, 0.0, 1.0);
+        else if (bucketOffset == 1) return float3(0.0, 0.5, 0.5);
+        else if (bucketOffset == 2) return float3(0.0, 1.0, 0.0);
+        else if (bucketOffset == 3) return float3(1.0, 1.0, 0.0);
+        else if (bucketOffset == 4) return float3(0.75, 0.25, 0.0);
+        else return float3(1.0, 0.0, 0.0);
+    }
+
+    // Table-occupancy view — screen-space, key-agnostic, so it stays as-is.
     public float3 debugOccupancy(uint2 pixel, uint2 screenSize) {
         HashGridData d;
         d.capacity = g_sharcConstants.entriesNum;
         d.hashEntriesBuffer = g_sharcHashEntries;
         return HashGridDebugOccupancy(pixel, screenSize, d);
-    }
-
-    public float3 debugHashCollisions(float3 worldPos, float3 normal) {
-        SharcParameters p = buildSharcParameters();
-        return HashGridDebugHashCollisions(worldPos, normal, p.hashGridParameters, p.hashGridData);
     }
 
     // ── Candidate-pool API ────────────────────────────────────────────────
@@ -195,7 +255,7 @@ public struct SharcParams {
     // winner; we accept the inconsistency (the slot still holds a valid push
     // from this frame, just possibly not the strictly-maximum-weight one).
     public void pushCandidate(float3 worldPos, float3 normal, float3 albedo,
-                              float weight, uint seed) {
+                              uint64_t key, float weight, uint seed) {
         if (weight <= 0.0) return;
         uint cap = g_sharcConstants.poolCapacity;
         if (cap == 0) return;
@@ -221,6 +281,7 @@ public struct SharcParams {
             c.worldPos = worldPos;
             c.normal = normal;
             c.albedo = albedo;
+            c.key = key;
             g_sharcCandidatesWrite[slot] = c;
         }
     }

@@ -23,10 +23,12 @@ RayTracingPipeline(
             )
         ),
     ],
-    // SharcHitPayload: float t + float3 albedo + float3 normal = 28 B; round
-    // to 32 with alignment. SharcShadowPayload is 4 B — covered by the same
-    // max.
-    max_ray_payload_size: 32,
+    // SharcHitPayload: float t + float3 albedo + float3 normal + uint64_t key.
+    // The 8-aligned key pushes the block past 32 B, so we size to 64 (also a
+    // safe margin for whatever offsets Slang assigns). MUST match the linked
+    // vox_sharc_pt hit-group library's max_ray_payload_size, or RT pipeline
+    // linking crashes the driver. SharcShadowPayload (4 B) is covered too.
+    max_ray_payload_size: 64,
     max_hit_attribute_size: 4,
 
     layout: Path("bazel://dust/crates/pbr/shaders/sharc/sharc.playout.bin"),

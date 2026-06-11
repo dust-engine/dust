@@ -39,6 +39,54 @@ void closestHitShader(
     // of this hit is p - jitter. DLSS expects MV in unjittered grid.
     float2 currPixel = float2(DispatchRaysIndex().xy) - float2(params.uniforms.jitter_x, params.uniforms.jitter_y);
     params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = prevPixel - currPixel;
+
+    // SHARC per-surface debug overlay. These views key the cache by voxel
+    // identity, which only this primary closest-hit can compute — the
+    // screen-space debug compute pass can't recover voxel identity from the
+    // G-buffer, so it owns only the screen-space views (occupancy / candidate
+    // splat). We paint straight into occlusionTexture (the egui/overlay layer
+    // tonemap composites), so it survives to the final image. The write below
+    // fans each render-res thread across its display-res footprint so the
+    // overlay covers the whole screen under DLSS upscaling.
+    SharcDebugMode dbg = params.sharc.g_sharcConstants.debugMode;
+    if (dbg == SharcDebugMode::ColoredHash
+        || dbg == SharcDebugMode::CachedRadiance
+        || dbg == SharcDebugMode::HashCollisions) {
+        VoxModelCell cell = model.voxelCellInfo(hitAttr.voxelId);
+        uint64_t key = params.sharc.cellKey(InstanceIndex(), cell.coords, hitAttr.normal, cell.centerWorldSpace());
+
+        float3 dbgColor = float3(0.0, 0.0, 0.0);
+        if (dbg == SharcDebugMode::ColoredHash) {
+            dbgColor = params.sharc.debugColoredHashByKey(key);
+        } else if (dbg == SharcDebugMode::CachedRadiance) {
+            float3 cached;
+            float sampleNum;
+            if (params.sharc.getCachedRadianceByKey(key, cached, sampleNum)) {
+                dbgColor = cached;
+            }
+        } else { // HashCollisions
+            dbgColor = params.sharc.debugHashCollisionsByKey(key);
+        }
+        float4 outColor = float4(dbgColor * params.sharc.g_sharcConstants.debugBrightness, 1.0);
+
+        // occlusionTexture is display-resolution but this pass runs at render
+        // resolution (DispatchRaysIndex/Dimensions), so each render-res thread
+        // fills its display-space footprint instead of a single texel — without
+        // this the overlay only covers the render-res region (e.g. 1/4 screen
+        // at 2x DLSS upscaling). Half-open integer intervals over consecutive
+        // render pixels tile the display exactly, with no gaps or overlaps.
+        uint2 renderDims = DispatchRaysDimensions().xy;
+        uint2 dispDims;
+        params.gbuffer.occlusionTexture.GetDimensions(dispDims.x, dispDims.y);
+        uint2 idx = DispatchRaysIndex().xy;
+        uint2 lo = idx * dispDims / renderDims;
+        uint2 hi = (idx + uint2(1, 1)) * dispDims / renderDims;
+        for (uint y = lo.y; y < hi.y; ++y) {
+            for (uint x = lo.x; x < hi.x; ++x) {
+                params.gbuffer.occlusionTexture[uint2(x, y)] = outColor;
+            }
+        }
+    }
 }
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max, out int8_t3 positionDelta) {
@@ -166,7 +214,7 @@ void intersectionShader(
     // are scaled by 1/unit_size, so dda's t parameter equals object-space t.
     float inv_unit = 1.0 / params.unit_size;
     dda(
-        (ObjectRayOrigin() - block.coords * params.unit_size) * inv_unit,
+        (ObjectRayOrigin() - float3(block.coords) * params.unit_size) * inv_unit,
         ObjectRayDirection() * inv_unit,
         block.mask,
         1.0

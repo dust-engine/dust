@@ -17,6 +17,10 @@ RayTracingPipeline (
     ],
 
     layout: Path("bazel://dust/crates/pbr/shaders/sharc/sharc.playout.bin"),
-    max_ray_payload_size: 32,
+    // SharcHitPayload now carries a uint64_t cell key — see pbr_common.slang.
+    // MUST match the base sharc_update.rtx.pipeline.ron's max_ray_payload_size;
+    // a mismatch between linked RT pipeline libraries crashes the driver's
+    // pipeline compiler.
+    max_ray_payload_size: 64,
     max_hit_attribute_size: 4,
 )

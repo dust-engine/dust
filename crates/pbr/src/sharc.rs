@@ -149,7 +149,7 @@ impl Default for SharcConfig {
             downscale_factor: 5,
             accumulation_frame_num: 32,
             stale_frame_num: 64,
-            scene_scale: 32.0,
+            scene_scale: 1.0,
             roughness_min: 0.4,
             radiance_scale: 1.0e3,
             pool_capacity: 1 << 16, // 64K candidates × 32 B = 2 MiB per pool
@@ -221,10 +221,11 @@ impl SharcResources {
     const STRIDE_ACCUMULATION: u64 = 16;
     const STRIDE_RESOLVED: u64 = 16;
     /// Std430 stride for
-    /// `Candidate { vec3 worldPos; vec3 normal; vec3 albedo; }`. Each vec3
-    /// is 16-aligned in std430 (12 B payload + 4 B pad), so the struct sums
-    /// to 48 B with no trailing pad needed.
-    const STRIDE_CANDIDATE: u64 = 48;
+    /// `Candidate { vec3 worldPos; vec3 normal; vec3 albedo; uint64_t key; }`.
+    /// Each vec3 is 16-aligned in std430 (12 B payload + 4 B pad) = 48 B; the
+    /// trailing `uint64_t` key (8-aligned) lands at offset 48, and the struct
+    /// rounds up to its 16 B alignment ⇒ 64 B.
+    const STRIDE_CANDIDATE: u64 = 64;
     const STRIDE_KEY: u64 = 4;
 
     /// Returns `(read_index, write_index)` into `self.pool` based on the
@@ -1064,17 +1065,14 @@ fn sharc_resolve_pass(
 
 // ─── Debug overlay (compute) ─────────────────────────────────────────────────
 
-/// All SHARC debug views, in one compute pass. Runs after the RT + tonemap
-/// passes when a debug mode is active, dispatching one thread per display pixel
-/// and writing the visualization straight into `occlusionTexture` (the final
-/// SDR image) — see `sharc_occupancy.slang`. The compute pipeline shares the RT
-/// pipeline layout (pbr.playout), so it binds the G-buffers + SHARC buffers
-/// through the same descriptor slots the RT pipelines use.
-///
-/// Per-surface views (colored hash / cached radiance / hash collisions)
-/// reconstruct worldPos from the depth G-buffer, so this binds the camera
-/// uniform (1), normal (5), depth (6) and the resolved cache (16) in addition
-/// to the occlusion image (7), hash entries (14) and constants (17).
+/// The screen-space SHARC debug views, painted into `occlusionTexture` (the
+/// overlay layer tonemap composites). The per-surface views (colored hash /
+/// cached radiance / hash collisions) moved to the primary closest-hit
+/// (vox_pbr.slang), where the voxel cell key is available — so this pass only
+/// handles the two views that don't need per-surface voxel identity:
+/// `HashOccupancy` (a per-pixel table view) and `CandidatePool` (a scatter over
+/// the pool, its own entry point). The compute pipeline shares the RT pipeline
+/// layout (pbr.playout) so it binds the SHARC buffers through the same slots.
 fn sharc_debug_overlay_pass(
     mut ctx: SubmissionState,
     sharc_pipelines: Res<SharcPipelines>,
@@ -1095,8 +1093,8 @@ fn sharc_debug_overlay_pass(
     let Some(hdr) = hdr_target.as_mut() else { return };
     let Ok((camera, transform)) = swapchain_images.single() else { return };
 
-    // The per-surface views reconstruct worldPos from depth, so the camera
-    // uniform must carry the same jitter the primary pass used to write depth.
+    // Only the candidate-pool splat uses the camera (it projects candidate
+    // world positions to screen); the occupancy view is camera-independent.
     let cam_uniform = build_camera_uniform(camera, transform, None, jitter.offset);
     let mut constants =
         build_sharc_constants(&config, &frame_state, transform.translation());
@@ -1178,6 +1176,13 @@ fn sharc_debug_overlay_pass(
         return;
     }
 
+    // The only remaining screen-space view is HashOccupancy; the per-surface
+    // views are painted by the primary closest-hit and CandidatePool is handled
+    // above. Skip the dispatch entirely for any other (already-handled) mode.
+    if debug.mode != SharcDebugMode::HashOccupancy {
+        return;
+    }
+
     let Some(pipeline) = compute_pipelines.get(&sharc_pipelines.debug_overlay_pipeline) else {
         return;
     };
@@ -1192,8 +1197,6 @@ fn sharc_debug_overlay_pass(
     ctx.record(|encoder| {
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
-        let cam_buffer =
-            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&cam_uniform));
 
         let render_target_views =
             encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
@@ -1201,14 +1204,10 @@ fn sharc_debug_overlay_pass(
             &resources.hash_entries,
             vk::PipelineStageFlags2::COMPUTE_SHADER,
         );
-        let resolved_buf = encoder.lock(
-            &resources.resolved,
-            vk::PipelineStageFlags2::COMPUTE_SHADER,
-        );
 
         // The SDR target (== occlusionTexture) already holds the tonemapped
-        // scene + egui; we overwrite only the visualized pixels, so it's read-
-        // modify-write storage access. Normal + depth G-buffers are read-only.
+        // scene + egui; we overwrite only the populated-cell pixels, so it's
+        // read-modify-write storage access.
         encoder.use_image_resource(
             render_target_views.sdr_target.image(),
             &mut hdr.sdr_target_state,
@@ -1222,54 +1221,26 @@ fn sharc_debug_overlay_pass(
             0..1,
             false,
         );
-        encoder.use_image_resource(
-            render_target_views.normal.image(),
-            &mut hdr.normal_state,
+        encoder.use_buffer_resource(
+            hash_buf,
+            &mut resources.hash_entries_state,
             Access {
                 stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
                 access: vk::AccessFlags2::SHADER_STORAGE_READ,
             },
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
         );
-        encoder.use_image_resource(
-            render_target_views.depth.image(),
-            &mut hdr.depth_state,
-            Access {
-                stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
-                access: vk::AccessFlags2::SHADER_STORAGE_READ,
-            },
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        let read = Access {
-            stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
-            access: vk::AccessFlags2::SHADER_STORAGE_READ,
-        };
-        encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, read);
-        encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, read);
         encoder.emit_barriers();
 
         let pipeline = encoder.retain(pipeline.clone());
         encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
 
-        // Partial bind via the generated helper: dirty-bit tracking means
-        // `as_slice` emits writes only for the slots we set — camera (1),
-        // normal/depth/occlusion (5/6/7, coalesced into one range) and the
-        // hash (14) / resolved (16) / constants (17) — leaving 13/15 and the
-        // rest of the layout untouched.
+        // Partial bind via the generated helper: the occupancy view reads only
+        // the occlusion image (7), hash entries (14) and constants (17) — the
+        // dirty-bit tracking leaves every other slot in the layout untouched.
         let mut params = PbrPipelineParams::new();
         params
-            .uniforms(cam_buffer)
-            .gbuffer_normal_texture(&render_target_views.normal)
-            .gbuffer_depth_texture(&render_target_views.depth)
             .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
             .sharc_g_sharc_hash_entries(hash_buf)
-            .sharc_g_sharc_resolved(resolved_buf)
             .sharc_g_sharc_constants(constants_buffer);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::COMPUTE,
