@@ -3,7 +3,7 @@
 // buffer through the same `params` ParameterBlock the RT pipelines use.
 ComputePipeline(
     shader: (
-        path: "bazel://dust/crates/pbr/shaders/sharc_occupancy.spv",
+        path: "bazel://dust/crates/pbr/shaders/sharc_debug.spv",
         entry_point: "main",
     ),
     layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),

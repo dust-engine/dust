@@ -112,13 +112,13 @@ ron2bin(
 )
 
 slang_shader(
-    name = "sharc_occupancy",
-    srcs = ["sharc_occupancy.slang"],
+    name = "sharc_debug",
+    srcs = ["sharc_debug.slang"],
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
     ],
-    out = "sharc_occupancy.spv",
+    out = "sharc_debug.spv",
     profile = "sm_6_6",
     target = "spirv",
     opts = [
@@ -140,16 +140,16 @@ slang_shader(
 )
 
 ron2bin(
-    name = "sharc_occupancy_comp_pipeline",
-    src = "sharc_occupancy.comp.pipeline.ron",
-    out = "sharc_occupancy.comp.pipeline.bin",
+    name = "sharc_debug_comp_pipeline",
+    src = "sharc_debug.comp.pipeline.ron",
+    out = "sharc_debug.comp.pipeline.bin",
     type = "compute-pipeline",
 )
 
 ron2bin(
-    name = "sharc_candidate_splat_comp_pipeline",
-    src = "sharc_candidate_splat.comp.pipeline.ron",
-    out = "sharc_candidate_splat.comp.pipeline.bin",
+    name = "sharc_debug_candidate_splat_comp_pipeline",
+    src = "sharc_debug_candidate_splat.comp.pipeline.ron",
+    out = "sharc_debug_candidate_splat.comp.pipeline.bin",
     type = "compute-pipeline",
 )
 
@@ -187,9 +187,9 @@ filegroup(
         ":shadow_rtx_pipeline",
         ":final_gather",
         ":final_gather_rtx_pipeline",
-        ":sharc_occupancy",
-        ":sharc_occupancy_comp_pipeline",
-        ":sharc_candidate_splat_comp_pipeline",
+        ":sharc_debug",
+        ":sharc_debug_comp_pipeline",
+        ":sharc_debug_candidate_splat_comp_pipeline",
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",

@@ -384,9 +384,9 @@ pub fn setup_sharc(
     let resolve_pipeline: Handle<ComputePipeline> = asset_server
         .load("bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.comp.pipeline.bin");
     let debug_overlay_pipeline: Handle<ComputePipeline> = asset_server
-        .load("bazel://dust/crates/pbr/shaders/sharc_occupancy.comp.pipeline.bin");
+        .load("bazel://dust/crates/pbr/shaders/sharc_debug.comp.pipeline.bin");
     let candidate_splat_pipeline: Handle<ComputePipeline> = asset_server
-        .load("bazel://dust/crates/pbr/shaders/sharc_candidate_splat.comp.pipeline.bin");
+        .load("bazel://dust/crates/pbr/shaders/sharc_debug_candidate_splat.comp.pipeline.bin");
 
     commands.insert_resource(SharcPipelines {
         update_pipeline: pipeline_manager.add_pipeline(update_library),

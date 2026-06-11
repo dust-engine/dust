@@ -106,7 +106,7 @@ void closestHitShader(uniform VoxModelParams model,
     // Fold the cached indirect into HDR on a usable hit — but not when a SHARC
     // debug view owns the HDR output (the cache-hit contribution must not touch
     // the visualized color; the cell is still re-seeded below).
-    if (hit && params.sharc.g_sharcConstants.debugMode == 0u) {
+    if (hit) {
         // TODO: premultiply the albedo to make this even faster.
         float4 current = params.outputTexture[pixel];
         params.outputTexture[pixel] =

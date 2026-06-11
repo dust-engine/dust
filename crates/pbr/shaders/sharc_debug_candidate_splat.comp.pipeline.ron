@@ -1,6 +1,6 @@
 ComputePipeline(
     shader: (
-        path: "bazel://dust/crates/pbr/shaders/sharc_occupancy.spv",
+        path: "bazel://dust/crates/pbr/shaders/sharc_debug.spv",
         entry_point: "splatCandidates",
     ),
     layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),

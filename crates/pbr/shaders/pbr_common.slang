@@ -93,11 +93,15 @@ public struct CameraUniforms {
     public float jitter_y;
     float2 _padding2;
 
+    public float2 jitterPixel(uint2 position) {
+        float2 jitter = float2(jitter_x, jitter_y); 
+        return float2(position) + 0.5 - jitter;
+    }
+
     // Camera-space (view-local) primary ray direction for a given pixel.
     // View frame convention: -Z forward, +Y up, +X right.
     public float3 primaryRayDirCameraSpace(uint2 position, uint2 screenSize) {
-        float2 jitter = float2(jitter_x, jitter_y);
-        float2 pixelNDC = (float2(position) + 0.5 - jitter) / float2(screenSize);
+        float2 pixelNDC = jitterPixel(position) / float2(screenSize);
         float2 pixelCamera = 2 * pixelNDC - 1;
         pixelCamera.y *= -1;
         pixelCamera.x *= float(screenSize.x) / float(screenSize.y);
