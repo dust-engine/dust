@@ -81,11 +81,13 @@ float3 sampleSky(float3 dir) {
 //   * populated cell  → addRadianceToSlot(cached) — back-propagates the cached
 //                       outgoing radiance through the throughput into the
 //                       candidate's slot. The cache value already integrates
-//                       all bounces beyond, so we're done.
-//   * empty cell      → pushCandidate(...) — schedules an Update path for this
-//                       cell next frame. No terminator: the candidate gets only
-//                       direct light this frame; indirect arrives once the
-//                       cascade-pushed cell converges.
+//                       all bounces beyond.
+//   * empty cell      → no terminator: the candidate gets only direct light
+//                       this frame; indirect arrives once the cascade-pushed
+//                       cell converges.
+// Either way the bounce target is re-pushed into the candidate pool, weighted
+// by 1 / (1 + sampleNum), so cells only reachable through bounces keep
+// accumulating instead of going stale and getting evicted once populated.
 //
 // The cache front therefore advances by one bounce per frame from each
 // "anchor" (lit, queried surface). After K frames of stable camera the
@@ -153,15 +155,18 @@ void rayGenShader() {
         // Cached value already integrates all further bounces — fold it into
         // the candidate's slot scaled by throughput.
         params.sharc.addRadianceToSlot(candSlot, cached, candAlbedo);
-        return;
     }
 
-    // Cache miss at bounce target. No terminator → candidate gets only direct
-    // light this frame. Schedule the bounce target as a cascade candidate so
-    // next frame's Update populates it; once it has samples, future Updates at
-    // the candidate close the loop via the terminator branch above.
+    // Re-seed the bounce target whether or not it had a usable entry — same
+    // reasoning as the visible-pass seeding (vox_final_gather): push-on-miss
+    // alone starves cells only reachable through bounces. The moment such a
+    // cell converts from miss to hit its pushes stop, accumulation stops,
+    // Resolve evicts it as stale, and every cell whose terminator reads it
+    // oscillates dark. Weighting by 1 / (1 + sampleNum) keeps the unpopulated
+    // case at full priority while converged cells claim pool slots just often
+    // enough to stay alive.
     float3 hitPos = bounceRay.Origin + nextDir * bp.t;
-    float w = dot(bp.albedo, float3(0.2126, 0.7152, 0.0722));
+    float w = dot(bp.albedo, float3(0.2126, 0.7152, 0.0722)) / (1.0 + bounceSampleNum);
     uint cascadeSeed = seed ^ 0xa5cc1c4du;
     params.sharc.pushCandidate(hitPos, bp.normal, bp.albedo, bp.key, w, cascadeSeed);
 }

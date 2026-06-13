@@ -1,5 +1,6 @@
 import pbr_common;
 import vox_common;
+import random;
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max, out int8_t3 positionDelta) {
     float3 tMin = (box_min - origin) / dir;
@@ -126,9 +127,8 @@ void closestHitShader(uniform VoxModelParams model,
     float3 hitAlbedo = model.getColorForVoxel(hitAttr.voxelId).rgb;
     float visualImpact = dot(primaryAlbedo, float3(0.2126, 0.7152, 0.0722));
     float weight = visualImpact / (1.0 + sampleNum);
-    uint seed = pixel.x
-                ^ (pixel.y * 0x100u)
-                ^ (params.sharc.g_sharcConstants.frameIndex * 0x10000u);
+    uint seed = xxhash32(
+        uint3(pixel, params.sharc.g_sharcConstants.frameIndex));
     params.sharc.pushCandidate(worldPos, worldNormal, hitAlbedo, key, weight, seed);
 }
 

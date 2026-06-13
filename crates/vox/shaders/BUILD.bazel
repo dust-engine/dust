@@ -89,6 +89,7 @@ slang_shader(
         ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:random.slang",
     ],
     out = "vox_final_gather.spv",
     profile = "lib_6_3",
