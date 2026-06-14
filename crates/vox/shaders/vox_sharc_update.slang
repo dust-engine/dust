@@ -18,7 +18,7 @@ void closestHitShader(
     inout SharcRayPayload payload,  // carries the source cell slot (set in ray-gen)
 ) {
     int8_t3 faceNormal = hitAttr.getNormal();
-    float4 color = model.getColorForVoxel(hitAttr.voxelId);
+    float4 color = model.getMaterialForVoxel(hitAttr.voxelId).albedo();
     float3x4 o2w = ObjectToWorld3x4();
     float3 worldNormal =
         normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(faceNormal)));

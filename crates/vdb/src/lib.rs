@@ -1,9 +1,6 @@
 #![feature(generic_const_exprs)]
 #![feature(adt_const_params)]
 #![feature(maybe_uninit_array_assume_init)]
-#![feature(alloc_layout_extra)]
-#![feature(mapped_lock_guards)]
-#![feature(let_chains)]
 
 mod accessor;
 mod attributes;

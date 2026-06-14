@@ -2,18 +2,71 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::{
     asset::{AssetLoader, AsyncReadExt},
-    math::Vec3A,
+    math::{U8Vec4, Vec3A},
     prelude::*,
 };
 use bevy_pumicite::rtx::tlas::TLASInstance;
 use dot_vox::{DotVoxData, Rotation, SceneNode};
-use pumicite::{Allocator, ash::vk, buffer::ManagedBuffer};
+use pumicite::{Allocator, ash::vk};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Tree, VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxModelBundle, VoxPalette, geometry::VoxGeometryLeafStorage
+    Tree, VoxGeometry, VoxGpuMaterial, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel,
+    VoxModelBundle, VoxPalette, geometry::VoxGeometryLeafStorage,
 };
+
+impl VoxGpuMaterial {
+    /// Decode a MagicaVoxel `MATL` entry into the packed GPU representation.
+    ///
+    /// Reads the raw `properties` dictionary directly (rather than dot_vox's
+    /// typed accessors) so this stays correct regardless of dot_vox version and
+    /// sidesteps accessor key quirks (e.g. its `specular()` reads `_sp` while
+    /// MagicaVoxel writes `_spec`).
+    fn apply_dot_vox(&mut self, material: &dot_vox::Material) {
+        let get = |key: &str| -> Option<f32> {
+            material
+                .properties
+                .get(key)
+                .and_then(|s| s.parse::<f32>().ok())
+        };
+
+        // MagicaVoxel material types: _diffuse (default), _metal, _glass,
+        // _emit, _media/_cloud.
+        let ty: u32 = match material.properties.get("_type").map(String::as_str) {
+            Some("_metal") => 1,
+            Some("_glass") => 2,
+            Some("_emit") => 3,
+            Some("_media") | Some("_cloud") => 4,
+            _ => 0,
+        };
+
+        let unorm = |x: f32| (x.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
+        let roughness = unorm(get("_rough").unwrap_or(0.5));
+        // MagicaVoxel encodes a metal's metalness via `_weight`; fall back to it.
+        let metalness = unorm(
+            get("_metal")
+                .or_else(|| (ty == 1).then(|| get("_weight").unwrap_or(1.0)))
+                .unwrap_or(0.0),
+        );
+        let specular = unorm(get("_spec").unwrap_or(0.0));
+        self.packed = ty | (roughness << 8) | (metalness << 16) | (specular << 24);
+
+        // Emissive radiance multiplier: base emission scaled by the radiant-flux
+        // exponent. The exact curve is a modeling choice; this is a reasonable
+        // starting point and is only consumed once emissive lighting lands.
+        let emission = if ty == 3 {
+            get("_emit").unwrap_or(0.0) * 10f32.powf(get("_flux").unwrap_or(0.0))
+        } else {
+            0.0
+        };
+        self.emission = self.emission as f16;
+
+        // MagicaVoxel's `_ior` is stored relative to vacuum (real IOR ≈ 1 + _ior).
+        self.ior = (1.0 + get("_ior").unwrap_or(0.0)) as f16;
+        self.transparency = get("_trans").or_else(|| get("_alpha")).unwrap_or(0.0) as f16;
+    }
+}
 
 enum WorldOrParent<'w, 'q> {
     World(&'w mut World),
@@ -226,7 +279,9 @@ impl Default for VoxLoaderSettings {
     fn default() -> Self {
         // The default scale was set up this way because 1 minecraft block has 16x16 texture.
         // so if unit_size is 1.0 / 16.0, we have one voxel for every pixel on a minecraft block.
-        Self { unit_size: 1.0 / 16.0 }
+        Self {
+            unit_size: 1.0 / 16.0,
+        }
     }
 }
 
@@ -272,28 +327,26 @@ impl AssetLoader for VoxLoader {
                 referenced_instances.len()
             );
 
-            let palette_handle = load_context.add_labeled_asset(
-                "Palette".into(),
-                VoxPalette(unsafe {
-                    let arr = std::mem::take(&mut file.palette).into_boxed_slice();
-                    assert_eq!(arr.len(), 256);
-                    let mut buffer = ManagedBuffer::new(
-                        self.allocator.clone(),
-                        256 * 4,
-                        4,
-                        vk::BufferUsageFlags::STORAGE_BUFFER
-                            | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                    )
-                    .map_err(VoxLoadingError::VulkanError)?;
-                    buffer
-                        .as_slice_mut()
-                        .copy_from_slice(std::slice::from_raw_parts::<u8>(
-                            arr.as_ptr() as *const u8,
-                            256 * 4,
-                        ));
-                    buffer
-                }),
-            );
+            let palette_handle = load_context.add_labeled_asset("Palette".into(), {
+                let mut entries = Box::new([VoxGpuMaterial::default(); 256]);
+
+                // Colors: dot_vox exposes the 256-entry RGBA palette as 0-based
+                // slots
+                for (material, color) in entries.iter_mut().zip(file.palette.iter()) {
+                    material.color = U8Vec4::new(color.r, color.g, color.b, color.a);
+                }
+                for material in file.materials.iter() {
+                    let Some(slot) = (material.id as usize).checked_sub(1) else {
+                        continue;
+                    };
+                    if let Some(entry) = entries.get_mut(slot) {
+                        entry.apply_dot_vox(material);
+                    }
+                }
+
+                VoxPalette::new(self.allocator.clone(), &entries)
+                    .map_err(VoxLoadingError::VulkanError)?
+            });
 
             let model_handles = {
                 // Add models

@@ -1,5 +1,5 @@
 #![feature(generic_const_exprs)]
-#![feature(alloc_layout_extra)]
+#![feature(f16)]
 
 use bevy::ecs::entity::{Entity, MapEntities};
 use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
@@ -19,15 +19,14 @@ use bevy_pumicite::shader::RayTracingPipelineLibrary;
 use bevy_pumicite::{CreateDevice, DefaultTransferSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dot_vox::Color;
-use dust_pbr::sharc::SharcPipelines;
 use dust_pbr::PbrRenderState;
+use dust_pbr::sharc::SharcPipelines;
 use dust_vdb::hierarchy;
 use pumicite::ash::{VkResult, vk};
 use pumicite::buffer::{Buffer, BufferLike, ManagedBuffer};
 use pumicite::device::DeviceBuilder;
 use pumicite::{Allocator, Device};
 use std::mem::MaybeUninit;
-use std::ops::{Deref, DerefMut};
 
 mod geometry;
 mod loader;
@@ -44,46 +43,82 @@ pub use loader::*;
 
 pub use geometry::VoxGeometry;
 
+/// A single MagicaVoxel palette entry: the RGBA color plus the per-index PBR
+/// material attributes decoded from a `MATL` chunk. 256 of these form the
+/// palette, addressed by the 0-based palette index (the same index the
+/// per-voxel attribute stores). Uploaded as one GPU storage buffer; the shader
+/// reads color and material together from one fetch. Layout must match the
+/// Slang `VoxMaterial` struct (16 bytes) — `emission`/`ior`/`transparency` are
+/// stored as IEEE-754 half-precision bit patterns (read as `half` on the GPU).
+#[derive(Pod, Clone, Copy, Zeroable)]
+#[repr(C)]
+pub struct VoxGpuMaterial {
+    /// Packed bytes, low → high: material type, roughness, metalness, specular.
+    /// Type: 0 = diffuse, 1 = metal, 2 = glass, 3 = emit, 4 = media/cloud.
+    /// Roughness / metalness / specular are unorm (byte / 255).
+    pub packed: u32,
+    /// sRGB color packed RGBA8, little-endian (`r | g<<8 | b<<16 | a<<24`).
+    pub color: U8Vec4,
+    /// Emissive radiance multiplier applied to albedo (f16 bits). 0 if not emissive.
+    pub emission: f16,
+    /// Index of refraction (f16 bits). 1.0 = vacuum. Relevant to glass.
+    pub ior: f16,
+    /// Transparency in [0, 1] (f16 bits). Relevant to glass.
+    pub transparency: f16,
+    /// Padding to 16 bytes (mirrors the Slang struct's trailing `half`).
+    pub _padding: u16,
+}
+impl Default for VoxGpuMaterial {
+    fn default() -> Self {
+        Self {
+            packed: 0,
+            color: U8Vec4::ZERO,
+            emission: 0.0,
+            ior: 1.0,
+            transparency: 0.0,
+            _padding: 0,
+        }
+    }
+}
+
+/// A MagicaVoxel palette: 256 [`VoxGpuMaterial`] entries (color + PBR material)
+/// in a single GPU storage buffer, addressed by the 0-based palette index.
+/// Built once per `.vox` file and shared by every model in it.
 #[derive(Asset, TypePath)]
 pub struct VoxPalette(ManagedBuffer);
 
-impl Deref for VoxPalette {
-    type Target = [U8Vec4];
-    fn deref(&self) -> &Self::Target {
-        bytemuck::cast_slice(self.0.as_slice())
-    }
-}
-impl DerefMut for VoxPalette {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        bytemuck::cast_slice_mut(self.0.as_slice_mut())
-    }
-}
 impl VoxPalette {
+    /// Build a palette from 256 entries, uploading them to one GPU buffer.
+    pub fn new(allocator: pumicite::Allocator, entries: &[VoxGpuMaterial; 256]) -> VkResult<Self> {
+        let usage =
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
+        let mut buffer = ManagedBuffer::new(
+            allocator,
+            256 * size_of::<VoxGpuMaterial>() as u64,
+            4,
+            usage,
+        )?;
+        buffer
+            .as_slice_mut()
+            .copy_from_slice(bytemuck::cast_slice(entries));
+        Ok(Self(buffer))
+    }
+
     pub fn colorful(allocator: pumicite::Allocator) -> VkResult<Self> {
         use bevy::color::{Hsva, Srgba};
         let mut hue = 0.0;
         let saturation = 0.8;
         let value = 0.9;
 
-        let mut arr: Box<[U8Vec4; 256]> = Box::new([U8Vec4::ZERO; 256]);
-        for x in 0..256 {
+        let mut entries = Box::new([VoxGpuMaterial::default(); 256]);
+        for entry in entries.iter_mut() {
             let color = Hsva::new(hue, saturation, value, 1.0);
             let rgb_color: Srgba = color.into();
             let rgb_color: [u8; 4] = rgb_color.to_u8_array();
-            arr[x] = U8Vec4::from_array(rgb_color);
+            entry.color = U8Vec4::from_array(rgb_color);
             hue += 360.0 / 256.0;
         }
-
-        let mut buffer = ManagedBuffer::new(
-            allocator,
-            256 * 4,
-            4,
-            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-        )?;
-        buffer
-            .as_slice_mut()
-            .copy_from_slice(bytemuck::cast_slice(&*arr));
-        Ok(Self(buffer))
+        Self::new(allocator, &entries)
     }
 }
 
@@ -188,6 +223,16 @@ impl Plugin for VoxPlugin {
                 device_builder
                     .enable_feature(|features: &mut vk::PhysicalDevice8BitStorageFeatures| {
                         &mut features.storage_buffer8_bit_access
+                    })
+                    .unwrap();
+                device_builder
+                    .enable_feature(|features: &mut vk::PhysicalDeviceFloat16Int8FeaturesKHR| {
+                        &mut features.shader_float16
+                    })
+                    .unwrap();
+                device_builder
+                    .enable_feature(|features: &mut vk::PhysicalDevice16BitStorageFeatures| {
+                        &mut features.uniform_and_storage_buffer16_bit_access
                     })
                     .unwrap();
             })

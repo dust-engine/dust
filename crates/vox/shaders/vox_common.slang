@@ -29,13 +29,13 @@ public struct HitAttribute {
     }
 
     public int8_t3 getNormal() {
-        int axis = this.normal >> 1;            // 0, 1, or 2
-        int val = 1 - ((this.normal & 1) << 1); // sign bit: 0 -> +1, 1 -> -1
+        uint8_t axis = this.normal >> 1;               // 0, 1, or 2
+        int8_t val = 1 - ((this.normal & 1) << 1); // sign bit: 0 -> +1, 1 -> -1
 
         int8_t3 d;
-        d.x = axis == 0 ? int8_t(val) : 0;
-        d.y = axis == 1 ? int8_t(val) : 0;
-        d.z = axis == 2 ? int8_t(val) : 0;
+        d.x = (axis == 0) ? val : int8_t(0);
+        d.y = (axis == 1) ? val : int8_t(0);
+        d.z = (axis == 2) ? val : int8_t(0);
         return d;
     }
 }
@@ -67,10 +67,47 @@ bool ReportHitWithAMDWorkaround(float tHit, uint hitKind, A attributes)
     }
 }
 
+public struct VoxMaterial {
+    // Packed bytes, low → high: type, roughness, metalness, specular.
+    private uint32_t packed;
+    // sRGB color, packed RGBA8 (little-endian).
+    private uint32_t _albedo;
+    public half emission;
+    public half ior;
+    public half transparency;
+    public half _padding;
+
+    // 0 = diffuse, 1 = metal, 2 = glass, 3 = emit, 4 = media/cloud.
+    public uint8_t materialType() { return uint8_t(packed & 0xFFu); }
+    public float roughness() { return float((packed >> 8) & 0xFFu) / 255.0; }
+    public float metalness() { return float((packed >> 16) & 0xFFu) / 255.0; }
+    public float specular() { return float((packed >> 24) & 0xFFu) / 255.0; }
+
+    // Decoded sRGB albedo (the palette color) as 0..1 RGBA
+    public float4 albedo() {
+        uint8_t4 c = bit_cast<uint8_t4>(_albedo);
+        return float4(c) / 255.0;
+    }
+
+    // Default opaque diffuse (black), matching the Rust `VoxGpuMaterial::DEFAULT`.
+    public static VoxMaterial diffuse() {
+        VoxMaterial m;
+        m.packed = 0u;
+        m._albedo = 0u;
+        m.emission = half(0.0);
+        m.ior = half(1.0);
+        m.transparency = half(0.0);
+        m._padding = half(0.0);
+        return m;
+    }
+}
+
 public struct VoxModelParams {
     private Block *geometry_info;
     private uint32_t *material_info;
-    private uint32_t *palette_info;
+    // Merged 256-entry palette table (color + material), addressed by palette
+    // index. Mirrors the Rust `VoxModelParams::palette`.
+    private VoxMaterial *palette;
     public float unit_size;
     private uint32_t _pad;
 
@@ -78,9 +115,9 @@ public struct VoxModelParams {
         return geometry_info[PrimitiveIndex()];
     }
 
-    public float4 getColorForVoxel(uint8_t voxelId) {
-        if (!material_info || !palette_info) {
-            return float4(1.0, 0.0, 1.0, 1.0);
+    public VoxMaterial getMaterialForVoxel(uint8_t voxelId) {
+        if (!material_info || !palette) {
+            return VoxMaterial::diffuse();
         }
         Block currentPrimitive = getCurrentPrimitive();
 
@@ -90,8 +127,7 @@ public struct VoxModelParams {
         uint8_t paletteIndex = (uint8_t)(paletteIndexPacked >> (((voxelMemoryOffset + currentPrimitive.material_ptr) & 3) * 8));
 
         // min(x, 255) is a NVIDIA workaround.
-        uint8_t4 palette_color = bit_cast<uint8_t4>(palette_info[min(paletteIndex, 255)]);
-        return float4(palette_color) / 255.0;
+        return palette[min(paletteIndex, 255)];
     }
 
     // Discrete, jitter-invariant identity of the hit voxel face, for building a

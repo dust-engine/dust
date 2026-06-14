@@ -5,7 +5,9 @@ use bevy::{
     ecs::system::lifetimeless::{SRes, SResMut},
     prelude::*,
 };
-use bevy_pumicite::{rtx::blas::BLAS, shader::compute::ComputePipeline, staging::DeviceLocalRingBuffer};
+use bevy_pumicite::{
+    rtx::blas::BLAS, shader::compute::ComputePipeline, staging::DeviceLocalRingBuffer,
+};
 use dust_vdb::pool::PoolStorage;
 use pumicite::{
     Allocator,
@@ -122,8 +124,7 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
         &mut self,
         _params: &mut bevy::ecs::system::SystemParamItem<Self::Params>,
         model: &bevy::ecs::query::QueryItem<Self::QueryData>,
-    ) -> vk::BuildAccelerationStructureFlagsKHR
-    {
+    ) -> vk::BuildAccelerationStructureFlagsKHR {
         let mut flags = vk::BuildAccelerationStructureFlagsKHR::empty();
         if model.enable_compaction {
             flags |= vk::BuildAccelerationStructureFlagsKHR::ALLOW_COMPACTION;
@@ -234,7 +235,10 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
         }
     }
 
-    fn batch_size(&self, _params: &mut bevy::ecs::system::SystemParamItem<'_, '_, Self::Params>) -> usize {
+    fn batch_size(
+        &self,
+        _params: &mut bevy::ecs::system::SystemParamItem<'_, '_, Self::Params>,
+    ) -> usize {
         128
     }
 }
