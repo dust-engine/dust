@@ -18,7 +18,6 @@ void closestHitShader(
     inout SharcRayPayload payload,  // carries the source cell slot (set in ray-gen)
 ) {
     int8_t3 faceNormal = hitAttr.getNormal();
-    float4 color = model.getMaterialForVoxel(hitAttr.voxelId).albedo();
     float3x4 o2w = ObjectToWorld3x4();
     float3 worldNormal =
         normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(faceNormal)));
@@ -46,17 +45,27 @@ void closestHitShader(
     // seed the cascade.
     uint launchSlot = DispatchRaysIndex().x;
 
-    // Terminator: fold the bounce target's cached outgoing radiance into the
-    // source cell, scaled by the source's Lambertian throughput. The source's
-    // per-frame sample was already counted in the ray-gen, so a cache miss simply
-    // deposits nothing.
-    float3 cached;
+    // The source cell's Lambertian throughput — its own albedo, carried in the
+    // candidate pool. Scales every radiance deposited into the source this
+    // bounce (emissive area light + cached terminator), so fetch it once.
+    float3 candAlbedo = params.sharc.candidateAt(launchSlot).albedo;
+
+    VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);
+    float4 color = mat.albedo();
+
+    float3 incoming = color.xyz * float(mat.emission); // Accumulate emission
+
+
+    float3 cached = float3(0.0, 0.0, 0.0);
     float bounceSampleNum;
-    bool hasCache =
-        params.sharc.getCachedRadianceByKey(bounceKey, cached, bounceSampleNum);
-    if (hasCache) {
-        float3 candAlbedo = params.sharc.candidateAt(launchSlot).albedo;
-        params.sharc.addRadianceToSlot(payload.cacheSlot, cached, candAlbedo);
+    params.sharc.getCachedRadianceByKey(bounceKey, cached, bounceSampleNum);
+    incoming += cached; // Accumulate reflected from radiance cache
+
+    // The source's per-frame sample was already counted in the ray-gen, so this
+    // is purely additive; skip the deposit entirely when nothing landed (the
+    // common non-emissive cache-miss bounce).
+    if (any(incoming > 0.0)) {
+        params.sharc.addRadianceToSlot(payload.cacheSlot, incoming, candAlbedo);
     }
 
     // Re-seed the bounce target into the candidate pool (cascade), weighted by

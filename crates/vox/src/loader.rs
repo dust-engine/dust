@@ -60,7 +60,7 @@ impl VoxGpuMaterial {
         } else {
             0.0
         };
-        self.emission = self.emission as f16;
+        self.emission = emission as f16;
 
         // MagicaVoxel's `_ior` is stored relative to vacuum (real IOR ≈ 1 + _ior).
         self.ior = (1.0 + get("_ior").unwrap_or(0.0)) as f16;

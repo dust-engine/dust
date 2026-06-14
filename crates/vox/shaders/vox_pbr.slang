@@ -8,8 +8,14 @@ void closestHitShader(
     uniform VoxModelParams model,
     in HitAttribute hitAttr,
 ) {
-    float4 color = model.getMaterialForVoxel(hitAttr.voxelId).albedo();                                // Colors sampled from the palette are sRGB
+    VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);                          // Color + PBR material in one fetch
+    float4 color = mat.albedo();                                                            // Colors sampled from the palette are sRGB
     params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(color.xyz, 1.0); //Directly write sRGB.
+
+    // Directly-visible emissive surfaces
+    if (mat.emission > 0.0) {
+        params.outputTexture[DispatchRaysIndex().xy] = float4(color.xyz * mat.emission, 1.0);
+    }
 
     // The face the ray entered is whichever axis the dda last stepped across;
     // the normal points opposite the ray direction on that axis.

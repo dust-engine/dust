@@ -120,11 +120,24 @@ void closestHitShader(uniform VoxModelParams model,
             float4(current.rgb + primaryAlbedo * cachedRadiance, current.a);
     }
 
+    // Emissive surface seen by the gather ray contributes its emitted radiance
+    // L_e = albedo * emission directly to HDR, scaled by the primary surface's
+    // albedo — the same one-bounce Lambertian throughput cancellation
+    // finalGatherMissShader applies to sky. This is the *direct* illumination of
+    // the shaded pixel by the emitter; the cached-radiance term above carries
+    // only its reflected light, so the two don't overlap.
+    VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);
+    if (mat.emission > 0.0) {
+        float4 current = params.outputTexture[pixel];
+        params.outputTexture[pixel] =
+            float4(current.rgb + primaryAlbedo * mat.albedo().rgb * mat.emission, current.a);
+    }
+
     // Re-seed this cell every frame, weighted by the inverse of its existing
     // sample count. Hit-point albedo (sampled from the voxel palette by this
     // same CHS) rides along in the candidate so the Update path next frame
     // doesn't need a probe ray to recover it.
-    float3 hitAlbedo = model.getMaterialForVoxel(hitAttr.voxelId).albedo().rgb;
+    float3 hitAlbedo = mat.albedo().rgb;
     float visualImpact = dot(primaryAlbedo, float3(0.2126, 0.7152, 0.0722));
     float weight = visualImpact / (1.0 + sampleNum);
     uint seed = xxhash32(
