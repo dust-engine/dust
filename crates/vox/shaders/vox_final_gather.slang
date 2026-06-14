@@ -108,29 +108,33 @@ void closestHitShader(uniform VoxModelParams model,
     uint64_t key = params.sharc.cellKey(InstanceIndex(), cell.coords, hitAttr.normal, cell.centerWorldSpace());
 
     uint2 pixel = DispatchRaysIndex().xy;
-    float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;
+    float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;   // diffuse (metalness removed)
+    VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);
 
-    // Query the resolved radiance + the cell's current sample count by key.
+    // Radiance arriving along this gather ray = cached reflected radiance at the
+    // hit cell (zero on a cache miss) + the hit surface's own emission (Phase 2,
+    // the *direct* illumination of the shaded pixel by an emitter). The query
+    // also reports the cell's sample count for the re-seed weight below.
     float3 cachedRadiance;
     float sampleNum;
-    if (params.sharc.getCachedRadianceByKey(key, cachedRadiance, sampleNum)) {
-        // TODO: premultiply the albedo to make this even faster.
-        float4 current = params.outputTexture[pixel];
-        params.outputTexture[pixel] =
-            float4(current.rgb + primaryAlbedo * cachedRadiance, current.a);
+    params.sharc.getCachedRadianceByKey(key, cachedRadiance, sampleNum);
+    float3 Li = cachedRadiance;
+    if (mat.emission > 0.0) {
+        Li += mat.albedo().rgb * mat.emission;
     }
 
-    // Emissive surface seen by the gather ray contributes its emitted radiance
-    // L_e = albedo * emission directly to HDR, scaled by the primary surface's
-    // albedo — the same one-bounce Lambertian throughput cancellation
-    // finalGatherMissShader applies to sky. This is the *direct* illumination of
-    // the shaded pixel by the emitter; the cached-radiance term above carries
-    // only its reflected light, so the two don't overlap.
-    VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);
-    if (mat.emission > 0.0) {
+    // Reflect that radiance off the PRIMARY surface through its full BRDF via the
+    // single-sample estimator weight = diffuseAlbedo + π·f_spec — the cosine pdf
+    // cancels the integrand cosine, and the same gather ray serves both the
+    // diffuse and specular lobes (no extra trace). See cosineSpecularWeight.
+    if (any(Li > 0.0)) {
+        float3 N = params.gbuffer.normalTexture[pixel].xyz;
+        float roughness = params.gbuffer.normalTexture[pixel].w;
+        float3 F0 = params.gbuffer.specularAlbedo[pixel].rgb;
+        float3 V = -params.uniforms.primaryRayDirWorldSpace(pixel, DispatchRaysDimensions().xy);
+        float3 weight = primaryAlbedo + cosineSpecularWeight(N, V, WorldRayDirection(), roughness, F0);
         float4 current = params.outputTexture[pixel];
-        params.outputTexture[pixel] =
-            float4(current.rgb + primaryAlbedo * mat.albedo().rgb * mat.emission, current.a);
+        params.outputTexture[pixel] = float4(current.rgb + weight * Li, current.a);
     }
 
     // Re-seed this cell every frame, weighted by the inverse of its existing

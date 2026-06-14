@@ -10,7 +10,21 @@ void closestHitShader(
 ) {
     VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);                          // Color + PBR material in one fetch
     float4 color = mat.albedo();                                                            // Colors sampled from the palette are sRGB
-    params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(color.xyz, 1.0); //Directly write sRGB.
+    float metalness = mat.metalness();
+
+    // Calculate the diffuse albedo.
+    // When metalness = 1.0, store (0.0, 0.0, 0.0). For metal, the entire transmitted fraction is absorbed,
+    // meaning that there's no diffuse reflection for metals. Setting diffuse albedo = 0 clears the diffuse
+    // contribution. 
+    params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(color.xyz * (1.0 - metalness), 1.0);
+
+
+    
+    float ior = float(mat.ior);
+    float dielF0 = (ior - 1.0) / (ior + 1.0);
+    dielF0 *= dielF0;                                              // ((n−1)/(n+1))²; 0 when ior=1 → pure diffuse
+    float3 F0 = lerp(float3(dielF0), srgbToLinear(color.xyz), metalness);
+    params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(F0, 1.0);
 
     // Directly-visible emissive surfaces
     if (mat.emission > 0.0) {
@@ -24,7 +38,7 @@ void closestHitShader(
     // Transform to world space
     float3x4 o2w = ObjectToWorld3x4();
     float3 worldNormal = normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), normal));
-    params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, 1.0);
+    params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, mat.roughness());
 
     // Encode reverse-infinite-Z hardware depth: `near / linearViewZ`, where
     // linearViewZ is the perpendicular distance from the camera plane to the

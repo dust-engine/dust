@@ -112,10 +112,10 @@ fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetSe
         GlobalTransform::default(),
         MovingTeapot {
             origin: teapot_origin,
-            radius: 56.0,
+            radius: 18.0,
             height: 18.0,
-            angular_speed: 0.6,
-            spin_speed: 1.4,
+            angular_speed: 0.001,
+            spin_speed: 0.001,
         },
     ));
     return;
