@@ -114,6 +114,7 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:random.slang",
     ],
     out = "vox_sharc_pt.spv",
     profile = "lib_6_3",

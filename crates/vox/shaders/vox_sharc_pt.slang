@@ -6,7 +6,9 @@
 // vox_pbr.slang — we keep it self-contained so this pipeline doesn't depend on
 // G-buffer outputs.
 
-import pbr_common;  // SharcHitPayload
+import pbr_common;
+import random;
+import sharc;
 
 struct Block {
     uint64_t mask;
@@ -94,7 +96,7 @@ struct VoxModelParams {
 void closestHitShader(
     uniform VoxModelParams model,
     in HitAttribute hitAttr,
-    inout SharcHitPayload payload,
+    inout SharcRayPayload payload,  // carries the source cell slot (set in ray-gen)
 ) {
     int8_t3 faceNormal = hitAttr.getNormal();
     float4 color = model.getColorForVoxel(hitAttr.voxelId);
@@ -116,11 +118,37 @@ void closestHitShader(
     // voxelCellInfo so the cascade and the visible query land on the same LOD.
     float3 centerObj = (float3(voxelCoord) + 0.5) * model.unit_size;
     float3 cellCenter = mul(o2w, float4(centerObj, 1.0));
+    uint64_t bounceKey =
+        params.sharc.cellKey(InstanceIndex(), voxelCoord, faceId, cellCenter);
 
-    payload.t = RayTCurrent();
-    payload.albedo = color.xyz;
-    payload.normal = worldNormal;
-    payload.key = params.sharc.cellKey(InstanceIndex(), voxelCoord, faceId, cellCenter);
+    // The source cell — opened and counted once in the ray-gen — is addressed by
+    // the slot carried in the payload, so no hash lookup here. The launch slot is
+    // reloaded only to fetch the source albedo (throughput) on a cache hit and to
+    // seed the cascade.
+    uint launchSlot = DispatchRaysIndex().x;
+
+    // Terminator: fold the bounce target's cached outgoing radiance into the
+    // source cell, scaled by the source's Lambertian throughput. The source's
+    // per-frame sample was already counted in the ray-gen, so a cache miss simply
+    // deposits nothing.
+    float3 cached;
+    float bounceSampleNum;
+    bool hasCache =
+        params.sharc.getCachedRadianceByKey(bounceKey, cached, bounceSampleNum);
+    if (hasCache) {
+        float3 candAlbedo = params.sharc.candidateAt(launchSlot).albedo;
+        params.sharc.addRadianceToSlot(payload.cacheSlot, cached, candAlbedo);
+    }
+
+    // Re-seed the bounce target into the candidate pool (cascade), weighted by
+    // 1/(1+sampleNum) so under-converged cells keep priority. Hit-point albedo
+    // rides along so next frame's Update needs no probe ray to recover it.
+    float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3 hitAlbedo = color.xyz;
+    float w = dot(hitAlbedo, float3(0.2126, 0.7152, 0.0722)) / (1.0 + bounceSampleNum);
+    uint seed = xxhash32(
+        uint3(launchSlot, params.sharc.g_sharcConstants.frameIndex, 0xa5cc1c4du));
+    params.sharc.pushCandidate(hitPos, worldNormal, hitAlbedo, bounceKey, w, seed);
 }
 
 // --- Intersection shader (verbatim DDA from vox_pbr.slang) ---

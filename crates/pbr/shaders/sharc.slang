@@ -186,13 +186,10 @@ public struct SharcParams {
         return false;
     }
 
-    // Update deposit: insert `key`, add its direct lighting (counts as one
-    // sample) and report the cache `slot` so the bounce result can be folded in
-    // via `addRadianceToSlot`. Returns false (and leaves `slot` invalid) if the
-    // probe bucket is full. Replaces the SDK SharcUpdateHit for our depth-1,
-    // key-driven update — the SDK derives its own spatial key and can't take
-    // ours, but the slot-level accumulation primitives are key-agnostic.
-    public bool updateHitKey(uint64_t key, float3 directLighting, out uint slot) {
+    // Open this candidate's cache cell for the frame.
+    // Returns true if the cache cell was successfully opened;
+    // Returns false if the bucket was full and the cache cell cannot be opened.
+    public bool openCellForUpdate(uint64_t key, out uint slot) {
         SharcParameters p = buildSharcParameters();
         slot = HASH_GRID_INVALID_CACHE_INDEX;
         uint baseSlot = HashGridGetBaseSlot(key, p.hashGridData.capacity);
@@ -200,14 +197,16 @@ public struct SharcParams {
         if (!HashGridInsert(p.hashGridData, key, baseSlot,
                             HASH_GRID_HASH_MAP_BUCKET_SIZE, slot, bucketOffset))
             return false;
-        SharcAddVoxelData(p, slot, directLighting, float3(1.0, 1.0, 1.0),
+        SharcAddVoxelData(p, slot, float3(0.0, 0.0, 0.0), float3(1.0, 1.0, 1.0),
                           float3(0.0, 0.0, 1.0), 0.0, 1);
         return true;
     }
 
-    // Fold a terminator/backprop radiance into a slot already opened by
-    // `updateHitKey`, scaled by the path throughput. sampleData 0 — it does not
-    // count as a new independent sample (matches the SDK's backprop pass).
+    // Fold a lighting contribution into a cell already opened by
+    // `openCellForUpdate`, scaled by the path throughput. sampleData 0 — the
+    // sample was already counted when the cell was opened, so this only adds
+    // radiance. No hash lookup: `slot` was resolved once in the ray-gen and
+    // carried here via the payload. No-ops on an invalid slot (bucket was full).
     public void addRadianceToSlot(uint slot, float3 radiance, float3 throughput) {
         if (slot == HASH_GRID_INVALID_CACHE_INDEX) return;
         SharcParameters p = buildSharcParameters();

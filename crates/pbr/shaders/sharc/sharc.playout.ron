@@ -30,12 +30,10 @@ PipelineLayout(
                     // SHARC additions.
                     Binding(binding: 14, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // hashEntries
                     Binding(binding: 15, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // accumulation
-                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),        // resolved
-                    Binding(binding: 17, ty: UniformBuffer,         stages: [RayGen, ClosestHit]),        // SHARC constants
-                    // Candidate pool (ping-ponged each frame). RW because
-                    // Slang declares them as RWStructuredBuffer.
-                    // Read side: consumed by Update raygen.
-                    Binding(binding: 18, ty: StorageBuffer,         stages: [RayGen]),                    // candidates_read
+                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // resolved
+                    Binding(binding: 17, ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit]),  // SHARC constants
+                    // Candidate pool (ping-ponged each frame).
+                    Binding(binding: 18, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // candidates_read
                     Binding(binding: 19, ty: StorageBuffer,         stages: [RayGen]),                    // keys_read
                     // Write side: final_gather CHS pushes on cache miss;
                     // Update raygen pushes on cascade miss.

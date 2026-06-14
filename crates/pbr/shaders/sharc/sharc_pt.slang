@@ -1,18 +1,34 @@
 // SHARC path tracer — sparse cache-population pass ("Update" in SDK terms).
 //
-// Writes ONLY into the SHARC buffers (AGENTS.md §15); the visible indirect
-// bounce is still served by final_gather. Update is what keeps the cache fresh
-// across frames so that downstream gather can sample from it.
+// Writes ONLY into the SHARC buffers; the visible indirect bounce is still
+// served by final_gather. Update keeps the cache fresh across frames so the
+// downstream gather can sample from it.
+//
+// Minimal-payload design (Intel RTRT best practice — keep payloads as small as
+// possible, recompute what you can): the only thing on the ray is the source
+// candidate's resolved cache slot (4 B). The ray-gen opens the cell once (a
+// hash-grid find-or-insert) and counts the candidate's single per-frame sample,
+// then hands the slot down so each deposit stage folds its contribution in with
+// a direct indexed atomic add instead of repeating the bucket walk:
+//
+//   ray-gen            open cell (find-or-insert + count 1); slot → payload;
+//                      trace 1 shadow + 1 bounce ray
+//   shadow miss        sun visible → deposit direct lighting    (into slot)
+//   bounce miss        ray escaped → deposit sky                (into slot)
+//   bounce closesthit  (vox_sharc_pt) deposit cached terminator + re-seed
+//                      cascade                                  (into slot)
+//
+// The sample count is owned by the ray-gen — unconditional, so every candidate
+// counts exactly one sample regardless of sun visibility or bounce outcome,
+// including fully shadowed cells whose shadow-miss deposit never runs. All
+// lighting deposits are additive (count 0). Each stage reloads albedo/normal/pos
+// from the candidate pool by DispatchRaysIndex().x — cheap, so it stays off the
+// payload; only the slot, costly to recompute, rides it. See openCellForUpdate /
+// addRadianceToSlot in sharc.slang.
 
 import pbr_common;
 import random;
 import sharc;
-
-// The cache is addressed through `params.sharc` key-based helpers
-// (cellKey / updateHitKey / getCachedRadianceByKey / addRadianceToSlot) — see
-// sharc.slang. This pass no longer includes SharcCommon.h or builds its own
-// SharcParameters: candidates carry a precomputed voxel-identity key, so the
-// SDK's position→spatial-hash machinery is bypassed entirely.
 
 struct PushConstants {
     uint frameIndex;
@@ -35,66 +51,11 @@ float3 cosineHemisphereSample(float3 N, float u0, float u1) {
     return normalize(T * local.x + B * local.y + N * local.z);
 }
 
-// Sun-direct lighting at the supplied shading point. Returns
-// `sun_illuminance * transmittance * cos(N·L) * visibility` (irradiance), so
-// the caller multiplies by `albedo / pi` to get the Lambertian outgoing
-// radiance. Uses miss index 1 (the shadow miss) and skips the closest hit.
-float3 sunNEE(float3 worldPos, float3 N) {
-    float3 sunDir = params.sky.atmosphereParams.sun_direction;
-    float ndotL = max(0.0, dot(N, sunDir));
-    if (ndotL <= 0.0) return float3(0, 0, 0);
-
-    RayDesc shadow;
-    shadow.Origin = worldPos + N * 0.01;
-    shadow.Direction = sunDir;
-    shadow.TMin = 0.0;
-    shadow.TMax = params.uniforms.far;
-
-    SharcShadowPayload sp;
-    sp.occluded = 1;
-    TraceRay(
-        params.sceneBVH,
-        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_FORCE_OPAQUE,
-        ~0, 0, 1, 1, shadow, sp
-    );
-    if (sp.occluded != 0) return float3(0, 0, 0);
-
-    float3 transmittance = params.sky.sampleTransmittanceAt(worldPos);
-    return params.sky.atmosphereParams.solar_illuminance * transmittance * ndotL;
-}
-
 float3 sampleSky(float3 dir) {
     return params.sky.atmosphereParams.solar_illuminance
         * params.sky.sampleScatteredTransfer(dir);
 }
 
-// Pool-driven, depth-1 Update raygen. Each invocation reads one slot of the
-// candidate pool; empty slots (key == 0) no-op. Multi-bounce light transport
-// is built across frames, not within a single Update call — the cache itself
-// closes the loop via its terminator value, so each frame we only need:
-//
-//   1 ray  NEE shadow at candidate vertex      (direct light deposit)
-//   1 ray  one cosine-hemisphere bounce        (depth-1 indirect)
-//
-// On bounce hit we read the bounce target's cache (by its key from the
-// payload):
-//   * populated cell  → addRadianceToSlot(cached) — back-propagates the cached
-//                       outgoing radiance through the throughput into the
-//                       candidate's slot. The cache value already integrates
-//                       all bounces beyond.
-//   * empty cell      → no terminator: the candidate gets only direct light
-//                       this frame; indirect arrives once the cascade-pushed
-//                       cell converges.
-// Either way the bounce target is re-pushed into the candidate pool, weighted
-// by 1 / (1 + sampleNum), so cells only reachable through bounces keep
-// accumulating instead of going stale and getting evicted once populated.
-//
-// The cache front therefore advances by one bounce per frame from each
-// "anchor" (lit, queried surface). After K frames of stable camera the
-// cache is correct out to depth K.
-//
-// Per pool slot ray count: 2. Total Update rays per frame ≤ 2 ×
-// `pool_capacity`, exactly the budget knob the host wants.
 [shader("raygeneration")]
 void rayGenShader() {
     uint slot = DispatchRaysIndex().x;
@@ -105,22 +66,37 @@ void rayGenShader() {
     Candidate cand = params.sharc.candidateAt(slot);
     float3 candPos = cand.worldPos;
     float3 candNormal = normalize(cand.normal);
-    float3 candAlbedo = cand.albedo;
-    uint64_t candKey = cand.key;
 
-    uint seed = xxhash32(uint3(slot, pc.frameIndex, params.sharc.g_sharcConstants.frameIndex));
+    // Open the cell once. If the probe bucket is full there's nowhere to
+    // deposit — drop the candidate.
+    SharcRayPayload pl;
+    if (!params.sharc.openCellForUpdate(cand.key, pl.cacheSlot)) return;
 
-    // ── Vertex 0: candidate ─ Sun NEE → direct light deposit into its cell. ─
-    float3 directIrradiance = sunNEE(candPos, candNormal);
-    float3 directLighting = candAlbedo * directIrradiance / kPi;
-    uint candSlot;
-    if (!params.sharc.updateHitKey(candKey, directLighting, candSlot)) {
-        return;  // probe bucket full
+    // ── Sun NEE shadow ray ───────────────────────────────────────────────
+    // shadowMissShader deposits the direct lighting when the sun is visible
+    // (miss). On occlusion the ACCEPT_FIRST_HIT | SKIP_CLOSEST_HIT flags run no
+    // shader at all → nothing is deposited. Skip the trace on back-facing normals.
+    float3 sunDir = params.sky.atmosphereParams.sun_direction;
+    if (dot(candNormal, sunDir) > 0.0) {
+        RayDesc shadow;
+        shadow.Origin = candPos + candNormal * 0.01;
+        shadow.Direction = sunDir;
+        shadow.TMin = 0.0;
+        shadow.TMax = params.uniforms.far;
+        TraceRay(
+            params.sceneBVH,
+            RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
+                | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_FORCE_OPAQUE,
+            ~0, 0, 1, 1, shadow, pl
+        );
     }
 
-    // ── Bounce: one cosine-hemisphere segment ────────────────────────────
-    // Lambertian throughput candidate→bounce is `candAlbedo` (the cos/pdf
-    // cancels under cosine-importance sampling).
+    // ── One cosine-hemisphere bounce ─────────────────────────────────────
+    // bounceMissShader (sky) or vox_sharc_pt's closest-hit (cached terminator)
+    // deposits the indirect contribution into pl.cacheSlot. The Lambertian
+    // throughput (cand.albedo) is applied at the deposit site.
+    uint seed = xxhash32(uint3(slot, pc.frameIndex,
+                               params.sharc.g_sharcConstants.frameIndex));
     float u0 = rand(seed);
     float u1 = rand(seed);
     float3 nextDir = cosineHemisphereSample(candNormal, u0, u1);
@@ -130,53 +106,34 @@ void rayGenShader() {
     bounceRay.Direction = nextDir;
     bounceRay.TMin = 0.0;
     bounceRay.TMax = params.uniforms.far;
-    SharcHitPayload bp;
-    bp.t = -1.0;
-    bp.albedo = float3(0, 0, 0);
-    bp.normal = float3(0, 0, 0);
-    bp.key = 0;
-    TraceRay(
-        params.sceneBVH,
-        RAY_FLAG_FORCE_OPAQUE,
-        ~0, 0, 1, 0,
-        bounceRay, bp
-    );
-
-    if (bp.t < 0.0) {
-        // Sky terminator: back-propagate sky luminance through the throughput.
-        params.sharc.addRadianceToSlot(candSlot, sampleSky(nextDir), candAlbedo);
-        return;
-    }
-
-    // Bounce hit. Try the bounce target's cache (by key) as terminator.
-    float3 cached;
-    float bounceSampleNum;
-    if (params.sharc.getCachedRadianceByKey(bp.key, cached, bounceSampleNum)) {
-        // Cached value already integrates all further bounces — fold it into
-        // the candidate's slot scaled by throughput.
-        params.sharc.addRadianceToSlot(candSlot, cached, candAlbedo);
-    }
-
-    // Re-seed the bounce target whether or not it had a usable entry — same
-    // reasoning as the visible-pass seeding (vox_final_gather): push-on-miss
-    // alone starves cells only reachable through bounces. The moment such a
-    // cell converts from miss to hit its pushes stop, accumulation stops,
-    // Resolve evicts it as stale, and every cell whose terminator reads it
-    // oscillates dark. Weighting by 1 / (1 + sampleNum) keeps the unpopulated
-    // case at full priority while converged cells claim pool slots just often
-    // enough to stay alive.
-    float3 hitPos = bounceRay.Origin + nextDir * bp.t;
-    float w = dot(bp.albedo, float3(0.2126, 0.7152, 0.0722)) / (1.0 + bounceSampleNum);
-    uint cascadeSeed = seed ^ 0xa5cc1c4du;
-    params.sharc.pushCandidate(hitPos, bp.normal, bp.albedo, bp.key, w, cascadeSeed);
+    TraceRay(params.sceneBVH, RAY_FLAG_FORCE_OPAQUE, ~0, 0, 1, 0, bounceRay, pl);
 }
 
+// Bounce miss — the bounce ray escaped to sky. Deposit sky luminance into the
+// candidate's cell (slot from the payload), scaled by its Lambertian throughput.
 [shader("miss")]
-void primaryMissShader(inout SharcHitPayload payload) {
-    payload.t = -1.0;
+void bounceMissShader(inout SharcRayPayload payload) {
+    uint slot = DispatchRaysIndex().x;
+    Candidate cand = params.sharc.candidateAt(slot);
+    float3 sky = sampleSky(WorldRayDirection());
+    params.sharc.addRadianceToSlot(payload.cacheSlot, sky, cand.albedo);
 }
 
+// Shadow miss — the sun is visible from the candidate. Deposit direct Lambertian
+// outgoing radiance into the candidate's cell (slot from the payload). The
+// sample was already counted in the ray-gen, so this is purely additive.
 [shader("miss")]
-void shadowMissShader(inout SharcShadowPayload payload) {
-    payload.occluded = 0;
+void shadowMissShader(inout SharcRayPayload payload) {
+    uint slot = DispatchRaysIndex().x;
+    Candidate cand = params.sharc.candidateAt(slot);
+    float3 N = normalize(cand.normal);
+    float3 sunDir = params.sky.atmosphereParams.sun_direction;
+    float ndotL = max(0.0, dot(N, sunDir));
+    if (ndotL <= 0.0) return;
+    float3 transmittance = params.sky.sampleTransmittanceAt(cand.worldPos);
+    float3 irradiance =
+        params.sky.atmosphereParams.solar_illuminance * transmittance * ndotL;
+    float3 directLighting = cand.albedo * irradiance / kPi;
+    params.sharc.addRadianceToSlot(payload.cacheSlot, directLighting,
+                                   float3(1.0, 1.0, 1.0));
 }

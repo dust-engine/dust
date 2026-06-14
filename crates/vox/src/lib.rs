@@ -252,9 +252,6 @@ fn setup(
         final_gather_hitgroup_library.clone(),
     );
 
-    // SHARC hit group attached to the Update pipeline. Closest-hit returns
-    // hit data via SharcHitPayload — the SHARC state machine lives in the
-    // ray-gen, not here.
     let sharc_hitgroup_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_pt.rtx.pipeline.bin");
     let sharc_update_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
