@@ -1,44 +1,39 @@
 // SHARC ray-tracing pipeline layout (Update pass).
 //
-// Single descriptor set: bindings 0..13 mirror pbr.playout.ron exactly (the
-// `pbr_common::params` ParameterBlock is pinned to set 0 — see pbr_common.slang),
-// bindings 14..17 are the SHARC working storage, 18..21 the ping-ponged
-// candidate pool. Vulkan permits only one push-descriptor set per pipeline
-// layout, so collapsing everything into one set is the simplest correct choice.
+// Same shared ParameterBlock as pbr.playout.ron, so the binding stages are
+// IDENTICAL here — the per-binding union of stages across the engine's pipelines,
+// mirroring the [Stages(...)] attribute in pbr_common.slang / sharc.slang. The
+// codegen coalesces consecutive same-type bindings only within a matching-stage
+// run, keeping every coalesced VkWriteDescriptorSet stage-uniform.
 PipelineLayout(
     sets: [
         Inline(
             DescriptorSetLayout(
                 push_descriptor: true,
                 bindings: [
-                    // PbrPipelineParams (mirrors pbr.playout.ron set 0).
                     Binding(binding: 0,  ty: AccelerationStructure, stages: [RayGen]),
-                    Binding(binding: 1,  ty: UniformBuffer,         stages: [Miss, ClosestHit, RayGen]),
-                    Binding(binding: 2,  ty: StorageImage,          stages: [Miss, ClosestHit, RayGen]),
-                    Binding(binding: 3,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
-                    Binding(binding: 4,  ty: SampledImage,          stages: [Miss, ClosestHit, RayGen]),
-                    Binding(binding: 5,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
-                    Binding(binding: 6,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
-                    Binding(binding: 7,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
-                    Binding(binding: 8,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),
-                    Binding(binding: 9,  ty: UniformBuffer,         stages: [RayGen, Miss]),
-                    Binding(binding: 10, ty: SampledImage,          stages: [Miss, RayGen]),
-                    Binding(binding: 11, ty: SampledImage,          stages: [Miss, RayGen]),
-                    Binding(binding: 12, ty: Sampler,               stages: [Miss, RayGen]),
-                    Binding(binding: 13, ty: StorageBuffer,         stages: [ClosestHit]),
-
-                    // SHARC additions.
-                    Binding(binding: 14, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // hashEntries
-                    Binding(binding: 15, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // accumulation
-                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // resolved
-                    Binding(binding: 17, ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit]),  // SHARC constants
-                    // Candidate pool (ping-ponged each frame).
-                    Binding(binding: 18, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),  // candidates_read
-                    Binding(binding: 19, ty: StorageBuffer,         stages: [RayGen]),                    // keys_read
-                    // Write side: final_gather CHS pushes on cache miss;
-                    // Update raygen pushes on cascade miss.
-                    Binding(binding: 20, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),        // candidates_write
-                    Binding(binding: 21, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),        // keys_write
+                    Binding(binding: 1,  ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // camera uniforms
+                    Binding(binding: 2,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // output
+                    Binding(binding: 3,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (linear view)
+                    Binding(binding: 4,  ty: SampledImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (sRGB view)
+                    Binding(binding: 5,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // normal
+                    Binding(binding: 6,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // depth
+                    Binding(binding: 7,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // occlusion
+                    Binding(binding: 8,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // motion vectors
+                    Binding(binding: 9,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // specular albedo (unused here)
+                    Binding(binding: 10, ty: UniformBuffer,         stages: [RayGen, Miss]),                       // atmosphere
+                    Binding(binding: 11, ty: SampledImage,          stages: [RayGen, Miss]),                       // transmittance LUT
+                    Binding(binding: 12, ty: SampledImage,          stages: [RayGen, Miss]),                       // sky-view LUT
+                    Binding(binding: 13, ty: Sampler,               stages: [RayGen, Miss]),                       // linear sampler
+                    Binding(binding: 14, ty: StorageBuffer,         stages: [ClosestHit]),                         // per-instance transforms
+                    Binding(binding: 15, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC hashEntries
+                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),           // SHARC accumulation
+                    Binding(binding: 17, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC resolved
+                    Binding(binding: 18, ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC constants
+                    Binding(binding: 19, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // candidates_read
+                    Binding(binding: 20, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // keys_read
+                    Binding(binding: 21, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // candidates_write
+                    Binding(binding: 22, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // keys_write
                 ]
             )
         ),

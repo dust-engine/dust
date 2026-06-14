@@ -22,6 +22,7 @@ void rayGenShader() {
         params.outputTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+        params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         // UI occludes the world: treat it as a screen-locked surface stuck to
         // the near plane. depth = 1 in reverse-infinite-Z (closest), and MV = 0
         // because UI is fixed in screen space — last frame the same screen
@@ -60,6 +61,7 @@ void missShader() {
     params.outputTexture[DispatchRaysIndex().xy] = float4(finalColor, 1.0);
     params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+    params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 0.0;
     // Sky is at infinity — reproject the view direction through the previous
     // camera (rotation only) so DLSS sees motion from camera turn/FOV change.

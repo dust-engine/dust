@@ -798,11 +798,6 @@ fn record_sharc_rt(
 
         encoder.emit_barriers();
 
-        // Single push descriptor set: bindings 0..13 via the PbrPipelineParams
-        // codegen helper, 14..17 SHARC bindings appended. Vulkan permits only
-        // one push-descriptor set per pipeline layout (see sharc.playout.ron),
-        // and `params` is pinned to set 0 in pbr_common.slang so this lines up
-        // with what Slang emits.
         let mut params = PbrPipelineParams::new();
         params
             .scene_bvh(tlas_locked)
@@ -814,116 +809,27 @@ fn record_sharc_rt(
             .gbuffer_depth_texture(&render_target_views.depth)
             .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
             .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
+            .gbuffer_specular_albedo(&render_target_views.specular_albedo)
             .sky_atmosphere_params(atmo_buffer)
             .sky_transmittance_lut(transmittance_view)
             .sky_sky_view_lut(sky_view)
             .sky_linear_sampler(&atmosphere_luts.sampler)
-            .per_instance_data(per_instance_buf);
-
-        let hash_info = [vk::DescriptorBufferInfo {
-            buffer: hash_buf.vk_handle(),
-            offset: 0,
-            range: hash_buf.size(),
-        }];
-        let accum_info = [vk::DescriptorBufferInfo {
-            buffer: accum_buf.vk_handle(),
-            offset: 0,
-            range: accum_buf.size(),
-        }];
-        let resolved_info = [vk::DescriptorBufferInfo {
-            buffer: resolved_buf.vk_handle(),
-            offset: 0,
-            range: resolved_buf.size(),
-        }];
-        let cb_info = [vk::DescriptorBufferInfo {
-            buffer: constants_buffer.vk_handle(),
-            offset: constants_buffer.offset(),
-            range: constants_buffer.size(),
-        }];
-        let pool_read_candidates_info = [vk::DescriptorBufferInfo {
-            buffer: pool_read_candidates_buf.vk_handle(),
-            offset: 0,
-            range: pool_read_candidates_buf.size(),
-        }];
-        let pool_read_keys_info = [vk::DescriptorBufferInfo {
-            buffer: pool_read_keys_buf.vk_handle(),
-            offset: 0,
-            range: pool_read_keys_buf.size(),
-        }];
-        let pool_write_candidates_info = [vk::DescriptorBufferInfo {
-            buffer: pool_write_candidates_buf.vk_handle(),
-            offset: 0,
-            range: pool_write_candidates_buf.size(),
-        }];
-        let pool_write_keys_info = [vk::DescriptorBufferInfo {
-            buffer: pool_write_keys_buf.vk_handle(),
-            offset: 0,
-            range: pool_write_keys_buf.size(),
-        }];
-        let mut writes: Vec<vk::WriteDescriptorSet> = params.as_slice().to_vec();
-        writes.extend_from_slice(&[
-            vk::WriteDescriptorSet {
-                dst_binding: 14,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&hash_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 15,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&accum_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 16,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&resolved_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 17,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&cb_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 18,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_read_candidates_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 19,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_read_keys_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 20,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_write_candidates_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 21,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_write_keys_info),
-        ]);
+            .per_instance_data(per_instance_buf)
+            // SHARC working storage + candidate pool via the generated helper, so
+            // their binding numbers track the shader reflection automatically.
+            .sharc_g_sharc_hash_entries(hash_buf)
+            .sharc_g_sharc_accumulation(accum_buf)
+            .sharc_g_sharc_resolved(resolved_buf)
+            .sharc_g_sharc_constants(constants_buffer)
+            .sharc_g_sharc_candidates_read(pool_read_candidates_buf)
+            .sharc_g_sharc_keys_read(pool_read_keys_buf)
+            .sharc_g_sharc_candidates_write(pool_write_candidates_buf)
+            .sharc_g_sharc_keys_write(pool_write_keys_buf);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
             0,
-            &writes,
+            params.as_slice(),
         );
 
         encoder.push_constants(
@@ -1156,8 +1062,8 @@ fn sharc_debug_overlay_pass(
 
             let splat = encoder.retain(splat.clone());
             encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &splat);
-            // Partial bind: camera (1), occlusion (7), constants (17) and the
-            // pool read slots (18/19) the splat shader samples.
+            // Partial bind: camera (1), occlusion (7), constants (18) and the
+            // pool read slots (19/20) the splat shader samples.
             let mut params = PbrPipelineParams::new();
             params
                 .uniforms(cam_buffer)
@@ -1234,7 +1140,7 @@ fn sharc_debug_overlay_pass(
         encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
 
         // Partial bind via the generated helper: the occupancy view reads only
-        // the occlusion image (7), hash entries (14) and constants (17) — the
+        // the occlusion image (7), hash entries (15) and constants (18) — the
         // dirty-bit tracking leaves every other slot in the layout untouched.
         let mut params = PbrPipelineParams::new();
         params

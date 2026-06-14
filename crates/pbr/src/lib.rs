@@ -410,6 +410,16 @@ fn render(
             0..1,
             true,
         );
+        // Specular-albedo G-buffer: write (discard previous contents)
+        encoder.use_image_resource(
+            render_target_views.specular_albedo.image(),
+            &mut hdr.specular_albedo_state,
+            Access::RTX_WRITE,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            true,
+        );
         // Depth G-buffer: write (discard previous contents)
         encoder.use_image_resource(
             render_target_views.depth.image(),
@@ -472,11 +482,10 @@ fn render(
             },
         );
 
-        // SHARC cache buffers for the primary closest-hit debug query (bindings
-        // 14..17). Read-only here; Update/Resolve declare R/W on the same
-        // buffers, so the tracker inserts a barrier from last frame's Resolve.
-        // The candidate pool (18..21) is not touched by the query, so it is
-        // left unbound.
+        // SHARC cache buffers for the primary closest-hit debug query. Read-only
+        // here; Update/Resolve declare R/W on the same buffers, so the tracker
+        // inserts a barrier from last frame's Resolve. The candidate pool is not
+        // touched by the query, so it is left unbound.
         let sharc_hash_buf = encoder.lock(
             &sharc_resources.hash_entries,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -524,67 +533,24 @@ fn render(
             .gbuffer_depth_texture(&render_target_views.depth)
             .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
             .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
+            .gbuffer_specular_albedo(&render_target_views.specular_albedo)
             .sky_atmosphere_params(atmo_buffer)
             .sky_transmittance_lut(transmittance_view)
             .sky_sky_view_lut(sky_view)
             .sky_linear_sampler(&atmosphere_luts.sampler)
-            .per_instance_data(per_instance_buf);
-        let sharc_hash_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_hash_buf.vk_handle(),
-            offset: 0,
-            range: sharc_hash_buf.size(),
-        }];
-        let sharc_accum_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_accum_buf.vk_handle(),
-            offset: 0,
-            range: sharc_accum_buf.size(),
-        }];
-        let sharc_resolved_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_resolved_buf.vk_handle(),
-            offset: 0,
-            range: sharc_resolved_buf.size(),
-        }];
-        let sharc_constants_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_constants_buf.vk_handle(),
-            offset: sharc_constants_buf.offset(),
-            range: sharc_constants_buf.size(),
-        }];
-        let mut writes: Vec<vk::WriteDescriptorSet> = params.as_slice().to_vec();
-        writes.extend_from_slice(&[
-            vk::WriteDescriptorSet {
-                dst_binding: 14,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_hash_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 15,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_accum_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 16,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_resolved_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 17,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_constants_info),
-        ]);
+            .per_instance_data(per_instance_buf)
+            // Bind the SHARC buffers through the generated helper too, so their
+            // binding numbers track the shader reflection automatically instead of
+            // hand-numbered WriteDescriptorSets.
+            .sharc_g_sharc_hash_entries(sharc_hash_buf)
+            .sharc_g_sharc_accumulation(sharc_accum_buf)
+            .sharc_g_sharc_resolved(sharc_resolved_buf)
+            .sharc_g_sharc_constants(sharc_constants_buf);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
             0,
-            &writes,
+            params.as_slice(),
         );
         encoder.timing_scope(profiler.as_deref_mut(), "primary ray", |encoder| {
             encoder.trace_rays(
@@ -991,16 +957,6 @@ pub(crate) fn dlss_evaluate(
             0..1,
             false,
         );
-        // Specular albedo stand-in: clear to black this frame, then read.
-        encoder.use_image_resource(
-            render_target_views.specular_albedo.image(),
-            &mut hdr.specular_albedo_state,
-            Access::CLEAR,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            0..1,
-            0..1,
-            true,
-        );
         encoder.use_image_resource(
             render_target_views.hdr_denoised_output.image(),
             &mut hdr.hdr_denoised_target_state,
@@ -1012,28 +968,6 @@ pub(crate) fn dlss_evaluate(
         );
         encoder.emit_barriers();
 
-        // Zero-fill the specular albedo stand-in.
-        let device = encoder.device().clone();
-        let cmd_buffer = encoder.buffer().vk_handle();
-        unsafe {
-            device.cmd_clear_color_image(
-                cmd_buffer,
-                render_target_views.specular_albedo.image().vk_handle(),
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 0.0],
-                },
-                &[vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                }],
-            );
-        }
-
-        // Transition specular to GENERAL for the NGX read.
         encoder.use_image_resource(
             render_target_views.specular_albedo.image(),
             &mut hdr.specular_albedo_state,
@@ -1512,6 +1446,19 @@ fn shadow_pass(
             0..1,
             false,
         );
+        // Specular albedo: read (written by primary pass)
+        encoder.use_image_resource(
+            render_target_views.specular_albedo.image(),
+            &mut hdr.specular_albedo_state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
         // Depth: read (written by primary pass)
         encoder.use_image_resource(
             render_target_views.depth.image(),
@@ -1577,6 +1524,7 @@ fn shadow_pass(
                 .gbuffer_depth_texture(&render_target_views.depth)
                 .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
                 .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
+                .gbuffer_specular_albedo(&render_target_views.specular_albedo)
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view)
                 .sky_sky_view_lut(sky_view)
@@ -1712,6 +1660,19 @@ pub(crate) fn final_gather_pass(
         encoder.use_image_resource(
             render_target_views.normal.image(),
             &mut hdr.normal_state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Specular albedo: read
+        encoder.use_image_resource(
+            render_target_views.specular_albedo.image(),
+            &mut hdr.specular_albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                 access: vk::AccessFlags2::SHADER_STORAGE_READ,
@@ -1863,46 +1824,6 @@ pub(crate) fn final_gather_pass(
 
         encoder.emit_barriers();
 
-        let sharc_hash_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_hash_buf.vk_handle(),
-            offset: 0,
-            range: sharc_hash_buf.size(),
-        }];
-        let sharc_accum_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_accum_buf.vk_handle(),
-            offset: 0,
-            range: sharc_accum_buf.size(),
-        }];
-        let sharc_resolved_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_resolved_buf.vk_handle(),
-            offset: 0,
-            range: sharc_resolved_buf.size(),
-        }];
-        let sharc_constants_info = [vk::DescriptorBufferInfo {
-            buffer: sharc_constants_buf.vk_handle(),
-            offset: sharc_constants_buf.offset(),
-            range: sharc_constants_buf.size(),
-        }];
-        let pool_read_candidates_info = [vk::DescriptorBufferInfo {
-            buffer: pool_read_candidates_buf.vk_handle(),
-            offset: 0,
-            range: pool_read_candidates_buf.size(),
-        }];
-        let pool_read_keys_info = [vk::DescriptorBufferInfo {
-            buffer: pool_read_keys_buf.vk_handle(),
-            offset: 0,
-            range: pool_read_keys_buf.size(),
-        }];
-        let pool_write_candidates_info = [vk::DescriptorBufferInfo {
-            buffer: pool_write_candidates_buf.vk_handle(),
-            offset: 0,
-            range: pool_write_candidates_buf.size(),
-        }];
-        let pool_write_keys_info = [vk::DescriptorBufferInfo {
-            buffer: pool_write_keys_buf.vk_handle(),
-            offset: 0,
-            range: pool_write_keys_buf.size(),
-        }];
         let mut params = PbrPipelineParams::new();
         params
             .scene_bvh(tlas)
@@ -1914,75 +1835,27 @@ pub(crate) fn final_gather_pass(
             .gbuffer_depth_texture(&render_target_views.depth)
             .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
             .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
+            .gbuffer_specular_albedo(&render_target_views.specular_albedo)
             .sky_atmosphere_params(atmo_buffer)
             .sky_transmittance_lut(transmittance_view)
             .sky_sky_view_lut(sky_view)
             .sky_linear_sampler(&atmosphere_luts.sampler)
-            .per_instance_data(per_instance_buf);
-        let mut writes: Vec<vk::WriteDescriptorSet> = params.as_slice().to_vec();
-        writes.extend_from_slice(&[
-            vk::WriteDescriptorSet {
-                dst_binding: 14,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_hash_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 15,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_accum_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 16,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_resolved_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 17,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&sharc_constants_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 18,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_read_candidates_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 19,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_read_keys_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 20,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_write_candidates_info),
-            vk::WriteDescriptorSet {
-                dst_binding: 21,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                ..Default::default()
-            }
-            .buffer_info(&pool_write_keys_info),
-        ]);
+            .per_instance_data(per_instance_buf)
+            // SHARC working storage + candidate pool via the generated helper, so
+            // their binding numbers track the shader reflection automatically.
+            .sharc_g_sharc_hash_entries(sharc_hash_buf)
+            .sharc_g_sharc_accumulation(sharc_accum_buf)
+            .sharc_g_sharc_resolved(sharc_resolved_buf)
+            .sharc_g_sharc_constants(sharc_constants_buf)
+            .sharc_g_sharc_candidates_read(pool_read_candidates_buf)
+            .sharc_g_sharc_keys_read(pool_read_keys_buf)
+            .sharc_g_sharc_candidates_write(pool_write_candidates_buf)
+            .sharc_g_sharc_keys_write(pool_write_keys_buf);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
             0,
-            &writes,
+            params.as_slice(),
         );
 
         encoder.push_constants(

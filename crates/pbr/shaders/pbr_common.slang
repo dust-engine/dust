@@ -3,9 +3,13 @@ module pbr_common;
 __exported import sharc;
 
 public struct SkyAtmosphereParams {
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public ConstantBuffer<AtmosphereParams> atmosphereParams;
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public Texture2D<float4> transmittanceLUT;
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public Texture2D<float4> skyViewLUT;
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public SamplerState linearSampler;
 
     // Sample the atmosphere's scattered-light contribution along `worldDir` from
@@ -188,25 +192,47 @@ public struct PbrInstanceData {
 }
 
 public struct PbrPipelineGbuffer {
+// [Stages] lists every shader stage that touches each binding across the
+    // engine's pipelines (the gbuffer is also read by a SHARC debug compute pass,
+    // hence Compute on several). The codegen coalesces descriptor writes only
+    // within a matching-stage run, so these must mirror the stages in
+    // pbr.playout.ron / sharc.playout.ron.
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public RWTexture2D<float4> albedoLinear;
+[Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public Texture2D<float4> albedoSRGB;
+[Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float4> normalTexture;
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float> depthTexture;
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float4> occlusionTexture;
     // Screen-space motion (in pixels): currentPixel - prevPixel. Consumed by
     // DLSS-RR; set to (0, 0) for sky/miss pixels.
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float2> motionVectorTexture;
+    // Specular albedo (F0 reflectance) for the deferred specular lobe and
+    // DLSS-RR's specular guide buffer. Written by the primary pass (metalness
+    // split: dielectric F0 from IOR, lerped to albedo by metalness), read by the
+    // shadow + final-gather passes. Perceptual roughness rides in
+    // normalTexture.w (DLSS reads it there — RoughnessMode::Packed).
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
+    public RWTexture2D<float4> specularAlbedo;
 }
 
 public struct PbrPipelineParams {
+    [Stages(STAGE_RAYGEN)]
     public RaytracingAccelerationStructure sceneBVH;
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public ConstantBuffer<CameraUniforms> uniforms;
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public RWTexture2D outputTexture;
     public PbrPipelineGbuffer gbuffer;
     public SkyAtmosphereParams sky;
     // Per-TLAS-instance data, indexed by InstanceIndex(). Uploaded once per
     // frame after the TLAS instance buffer; each entry holds the previous
     // frame's world-from-object transform.
+    [Stages(STAGE_CLOSEST_HIT)]
     public StructuredBuffer<PbrInstanceData> perInstanceData;
     public SharcParams sharc;
 

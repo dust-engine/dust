@@ -13,6 +13,7 @@
 #define SHARC_ENABLE_GLSL 0
 #define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
 #define SHARC_ENABLE_SH_ENCODING 0
+#define SHARC_UPDATE 0
 // Keys are discrete voxel identities, not a spatial grid, so SharcResolveEntry's
 // adjacent-level reprojection (which reinterprets key bits as grid position /
 // level on camera motion) is meaningless and must be off — cellKey does its own

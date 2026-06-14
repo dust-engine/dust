@@ -9,6 +9,7 @@ module sharc;
 #define SHARC_ENABLE_GLSL 0
 #define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
 #define SHARC_ENABLE_SH_ENCODING 0
+#define SHARC_UPDATE 0
 // Our keys are discrete voxel identities, not a spatial grid, so the
 // camera-motion LOD reprojection in SharcResolveEntry (which reinterprets key
 // bits as grid position/level) is meaningless and must be off. `cellKey` does
@@ -80,30 +81,41 @@ uint pcgHash(uint x) {
     return (word >> 22u) ^ word;
 }
 
-public struct SharcParams {
+// Generic pumicite shader-stage flags for the `[Stages(...)]` attribute. The
+// pumicite codegen reads this mask off every ParameterBlock binding and only
+// coalesces consecutive descriptor writes that share it, so each emitted
+// VkWriteDescriptorSet stays stage-uniform. Values mirror VkShaderStageFlagBits.
+// Declared in this base module so importers (e.g. pbr_common) can annotate their
+// own bindings via `__exported import sharc`.
+public static const int STAGE_COMPUTE = 0x20;
+public static const int STAGE_RAYGEN = 0x100;
+public static const int STAGE_ANY_HIT = 0x200;
+public static const int STAGE_CLOSEST_HIT = 0x400;
+public static const int STAGE_MISS = 0x800;
+public static const int STAGE_INTERSECTION = 0x1000;
 
-    // SHARC working storage. Private because the SDK types are #include'd
-    // from C headers and therefore module-private — making the fields public
-    // would force their types to be public too, which Slang rejects. The
-    // public accessor methods further down expose what callers actually need
-    // (query, debug overlays) via public input/output types only.
-    //
-    // Slang auto-assigns these to set 0 bindings 14..16 once any accessor is
-    // referenced; the constants UBO lands at binding 17. Bindings 18..21 are
-    // the ping-ponged candidate pool. All match pbr.playout.ron and
-    // sharc.playout.ron exactly. Importers of this module (e.g. sharc_pt.slang)
-    // do NOT see these private fields, so their own standalone
-    // `[vk::binding(14..17, 0)]` globals don't collide.
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct StagesAttribute { int stages; }
+
+public struct SharcParams {
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     RWStructuredBuffer<HashGridKey> g_sharcHashEntries;
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     RWStructuredBuffer<SharcAccumulationData> g_sharcAccumulation;
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     RWStructuredBuffer<SharcPackedData> g_sharcResolved;
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public ConstantBuffer<SharcShaderConstants> g_sharcConstants;
     // Candidate pool — read side feeds Update's primary vertices, write side
     // accumulates this frame's final_gather CHS misses and Update cascade
     // pushes for *next* frame to consume.
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWStructuredBuffer<Candidate> g_sharcCandidatesRead;
+    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
     public RWStructuredBuffer<uint> g_sharcKeysRead;
+    [Stages(STAGE_RAYGEN | STAGE_CLOSEST_HIT)]
     RWStructuredBuffer<Candidate> g_sharcCandidatesWrite;
+    [Stages(STAGE_RAYGEN | STAGE_CLOSEST_HIT)]
     RWStructuredBuffer<uint> g_sharcKeysWrite;
 
     // Private helpers used by the public accessor methods below.
