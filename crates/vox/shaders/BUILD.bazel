@@ -5,7 +5,7 @@ package(default_visibility = ["//visibility:public"])
 
 # Shared voxel types (Block, HitAttribute, VoxModelParams,
 # ReportHitWithAMDWorkaround). Compiled to a Slang IR module so the voxel hit
-# groups (vox_pbr, vox_shadow, vox_final_gather, vox_sharc_pt) can import it.
+# groups (vox_pbr, vox_shadow, vox_final_gather, vox_sharc_update) can import it.
 slang_shader(
     name = "vox_common_module",
     srcs = ["vox_common.slang"],
@@ -109,14 +109,14 @@ ron2bin(
 # Voxel hit group attached to the SHARC Update RT pipeline. The SHARC state
 # machine lives in the ray-gen, not the hit shader.
 slang_shader(
-    name = "vox_sharc_pt",
-    srcs = ["vox_sharc_pt.slang"],
+    name = "vox_sharc_update",
+    srcs = ["vox_sharc_update.slang"],
     hdrs = [
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",
     ],
-    out = "vox_sharc_pt.spv",
+    out = "vox_sharc_update.spv",
     profile = "lib_6_3",
     target = "spirv",
     opts = [
@@ -125,9 +125,9 @@ slang_shader(
     ],
 )
 ron2bin(
-    name = "vox_sharc_pt_pipeline_library",
-    src = "vox_sharc_pt.rtx.pipeline.ron",
-    out = "vox_sharc_pt.rtx.pipeline.bin",
+    name = "vox_sharc_update_pipeline_library",
+    src = "vox_sharc_update.rtx.pipeline.ron",
+    out = "vox_sharc_update.rtx.pipeline.bin",
     type = "raytracing-pipeline",
 )
 
@@ -143,7 +143,7 @@ filegroup(
         ":vox_shadow",
         ":vox_final_gather",
         ":vox_final_gather_pipeline_library",
-        ":vox_sharc_pt",
-        ":vox_sharc_pt_pipeline_library",
+        ":vox_sharc_update",
+        ":vox_sharc_update_pipeline_library",
     ],
 )

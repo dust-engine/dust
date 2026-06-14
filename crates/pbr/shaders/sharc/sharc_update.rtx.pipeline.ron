@@ -4,27 +4,27 @@ RayTracingPipeline(
     stages: [
         RayGen (
             shader: (
-                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_update.spv",
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_update.spv",
                 entry_point: "rayGenShader"
             )
         ),
         // Miss index 0: bounce-ray miss (deposits sky radiance into the cache).
         Miss (
             shader: (
-                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_update.spv",
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_update.spv",
                 entry_point: "bounceMissShader",
             )
         ),
         // Miss index 1: shadow-ray miss (sun visible).
         Miss (
             shader: (
-                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_pt_update.spv",
+                path: "bazel://dust/crates/pbr/shaders/sharc/sharc_update.spv",
                 entry_point: "shadowMissShader",
             )
         ),
     ],
     // SharcRayPayload is a single uint — the source candidate's cache slot
-    // MUST match the linked vox_sharc_pt hit-group library's
+    // MUST match the linked vox_sharc_update hit-group library's
     // max_ray_payload_size, or RT pipeline linking crashes the driver.
     max_ray_payload_size: 4,
     max_hit_attribute_size: 4,

@@ -253,7 +253,7 @@ fn setup(
     );
 
     let sharc_hitgroup_library: Handle<RayTracingPipelineLibrary> =
-        asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_pt.rtx.pipeline.bin");
+        asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_update.rtx.pipeline.bin");
     let sharc_update_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
         &sharc_pipelines.update_pipeline,
         sharc_hitgroup_library.clone(),
@@ -357,7 +357,6 @@ fn write_sbt_entries(
         );
         assert_eq!(final_gather_sbt_index, model.sbt_index);
 
-        // SHARC Update shares the same hit-group library (vox_sharc_pt).
         let sharc_update_idx = sharc_update_sbt.push_hitgroup(
             vox_render_state.sharc_update_hitgroup_index,
             |param_dst| {

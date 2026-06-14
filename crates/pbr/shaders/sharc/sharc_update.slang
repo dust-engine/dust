@@ -15,7 +15,7 @@
 //                      trace 1 shadow + 1 bounce ray
 //   shadow miss        sun visible → deposit direct lighting    (into slot)
 //   bounce miss        ray escaped → deposit sky                (into slot)
-//   bounce closesthit  (vox_sharc_pt) deposit cached terminator + re-seed
+//   bounce closesthit  (vox_sharc_update) deposit cached terminator + re-seed
 //                      cascade                                  (into slot)
 //
 // The sample count is owned by the ray-gen — unconditional, so every candidate
@@ -92,7 +92,7 @@ void rayGenShader() {
     }
 
     // ── One cosine-hemisphere bounce ─────────────────────────────────────
-    // bounceMissShader (sky) or vox_sharc_pt's closest-hit (cached terminator)
+    // bounceMissShader (sky) or vox_sharc_update's closest-hit (cached terminator)
     // deposits the indirect contribution into pl.cacheSlot. The Lambertian
     // throughput (cand.albedo) is applied at the deposit site.
     uint seed = xxhash32(uint3(slot, pc.frameIndex,

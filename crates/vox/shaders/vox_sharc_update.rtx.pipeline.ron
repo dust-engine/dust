@@ -5,11 +5,11 @@ RayTracingPipeline (
         HitGroup (
             ty: Aabbs,
             closest_hit: (
-                path: "bazel://dust/crates/vox/shaders/vox_sharc_pt.spv",
+                path: "bazel://dust/crates/vox/shaders/vox_sharc_update.spv",
                 entry_point: "closestHitShader",
             ),
             intersection: (
-                path: "bazel://dust/crates/vox/shaders/vox_sharc_pt.spv",
+                path: "bazel://dust/crates/vox/shaders/vox_sharc_update.spv",
                 entry_point: "intersectionShader",
             ),
             param_size: 32  // VoxModelParams: 3×u64 + f32 + u32 pad = 32 B

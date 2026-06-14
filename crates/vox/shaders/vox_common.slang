@@ -33,9 +33,9 @@ public struct HitAttribute {
         int val = 1 - ((this.normal & 1) << 1); // sign bit: 0 -> +1, 1 -> -1
 
         int8_t3 d;
-        d.x = axis == 0 ? val : 0;
-        d.y = axis == 1 ? val : 0;
-        d.z = axis == 2 ? val : 0;
+        d.x = axis == 0 ? int8_t(val) : 0;
+        d.y = axis == 1 ? int8_t(val) : 0;
+        d.z = axis == 2 ? int8_t(val) : 0;
         return d;
     }
 }

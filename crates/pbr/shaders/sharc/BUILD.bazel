@@ -10,8 +10,8 @@ _SLANG_BASE_OPTS = [
 
 # SHARC Update raygen: sparse cache-population pass (AGENTS.md §11, §14).
 slang_shader(
-    name = "sharc_pt_update",
-    srcs = ["sharc_pt.slang"],
+    name = "sharc_update",
+    srcs = ["sharc_update.slang"],
     hdrs = [
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders:sharc_module",
@@ -19,7 +19,7 @@ slang_shader(
         "//crates/pbr/shaders:random.slang",
         "@sharc//:sharc_headers",
     ],
-    out = "sharc_pt_update.spv",
+    out = "sharc_update.spv",
     profile = "lib_6_3",
     target = "spirv",
     opts = _SLANG_BASE_OPTS,
@@ -68,7 +68,7 @@ ron2bin(
 filegroup(
     name = "runtime",
     srcs = [
-        ":sharc_pt_update",
+        ":sharc_update",
         ":sharc_playout",
         ":sharc_update_rtx_pipeline",
         ":sharc_resolve",
