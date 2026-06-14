@@ -23,10 +23,7 @@ use pumicite::{Allocator, HasDevice};
 use pumicite_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use bevy_pumicite::prelude::ComputePipeline;
-use bevy_pumicite::rtx::{
-    RayTracingPipeline, RtxPipelineManager,
-    tlas::TLAS,
-};
+use bevy_pumicite::rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS};
 use bevy_pumicite::shader::RayTracingPipelineLibrary;
 use bevy_pumicite::staging::{BufferInitializer, UniformRingBuffer};
 use bevy_pumicite::{CreateDevice, DefaultRenderSet, SubmissionState};
@@ -36,8 +33,7 @@ use std::ops::Deref;
 use crate::camera::Camera;
 use crate::sky::AtmosphereLUTs;
 use crate::{
-    HdrRenderTarget, PbrInstanceData, PbrPipelineParams, PbrRenderSet,
-    build_camera_uniform,
+    HdrRenderTarget, PbrInstanceData, PbrPipelineParams, PbrRenderSet, build_camera_uniform,
 };
 
 // ─── SHARC debug visualization ─────────────────────────────────────────────
@@ -379,13 +375,12 @@ pub fn setup_sharc(
     let resources = create_sharc_resources(&allocator, config.entries_num, config.pool_capacity);
     commands.insert_resource(resources);
 
-    let update_library: Handle<RayTracingPipelineLibrary> = asset_server.load(
-        "bazel://dust/crates/pbr/shaders/sharc/sharc_update.rtx.pipeline.bin",
-    );
-    let resolve_pipeline: Handle<ComputePipeline> = asset_server
-        .load("bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.comp.pipeline.bin");
-    let debug_overlay_pipeline: Handle<ComputePipeline> = asset_server
-        .load("bazel://dust/crates/pbr/shaders/sharc_debug.comp.pipeline.bin");
+    let update_library: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://dust/crates/pbr/shaders/sharc/sharc_update.rtx.pipeline.bin");
+    let resolve_pipeline: Handle<ComputePipeline> =
+        asset_server.load("bazel://dust/crates/pbr/shaders/sharc/sharc_resolve.comp.pipeline.bin");
+    let debug_overlay_pipeline: Handle<ComputePipeline> =
+        asset_server.load("bazel://dust/crates/pbr/shaders/sharc_debug.comp.pipeline.bin");
     let candidate_splat_pipeline: Handle<ComputePipeline> = asset_server
         .load("bazel://dust/crates/pbr/shaders/sharc_debug_candidate_splat.comp.pipeline.bin");
 
@@ -417,7 +412,9 @@ pub(crate) fn clear_sharc_buffers(
     mut config: ResMut<SharcConfig>,
     frame_state: Res<SharcFrameState>,
 ) {
-    let Some(resources) = resources.as_deref_mut() else { return };
+    let Some(resources) = resources.as_deref_mut() else {
+        return;
+    };
     let full_reset = resources.needs_clear || config.reset_pending;
     // Per-frame: the side that's about to be *written* (by final_gather's
     // CHS and Update's cascade) needs its reservoir keys zeroed so the
@@ -428,31 +425,20 @@ pub(crate) fn clear_sharc_buffers(
     ctx.record(|encoder| {
         let device = encoder.device().clone();
         if full_reset {
-            let hash_buf =
-                encoder.lock(&resources.hash_entries, vk::PipelineStageFlags2::COPY);
-            let accum_buf =
-                encoder.lock(&resources.accumulation, vk::PipelineStageFlags2::COPY);
-            let resolved_buf =
-                encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COPY);
+            let hash_buf = encoder.lock(&resources.hash_entries, vk::PipelineStageFlags2::COPY);
+            let accum_buf = encoder.lock(&resources.accumulation, vk::PipelineStageFlags2::COPY);
+            let resolved_buf = encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COPY);
             let keys_bufs = [
                 encoder.lock(&resources.pool[0].keys, vk::PipelineStageFlags2::COPY),
                 encoder.lock(&resources.pool[1].keys, vk::PipelineStageFlags2::COPY),
             ];
-            encoder.use_buffer_resource(
-                hash_buf,
-                &mut resources.hash_entries_state,
-                Access::CLEAR,
-            );
+            encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, Access::CLEAR);
             encoder.use_buffer_resource(
                 accum_buf,
                 &mut resources.accumulation_state,
                 Access::CLEAR,
             );
-            encoder.use_buffer_resource(
-                resolved_buf,
-                &mut resources.resolved_state,
-                Access::CLEAR,
-            );
+            encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, Access::CLEAR);
             // Clear both pools' keys on reset (the read side might still
             // carry stale candidates from a previous run).
             let [pool0, pool1] = &mut resources.pool;
@@ -549,18 +535,28 @@ fn sharc_update_pass(
     if !config.enabled {
         return;
     }
-    let Some(resources) = sharc_resources.as_deref_mut() else { return };
-    let Ok((camera, transform)) = swapchain_images.single() else { return };
+    let Some(resources) = sharc_resources.as_deref_mut() else {
+        return;
+    };
+    let Ok((camera, transform)) = swapchain_images.single() else {
+        return;
+    };
     let Some(pipeline) = pipelines
         .get(&sharc_pipelines.update_pipeline)
         .map(|p| p.deref().clone())
     else {
         return;
     };
-    let Some(sbt) = sharc_pipelines.update_sbt.as_mut() else { return };
-    let Some(per_instance_mutex) = tlas.tlas_per_instance_data.as_ref() else { return };
+    let Some(sbt) = sharc_pipelines.update_sbt.as_mut() else {
+        return;
+    };
+    let Some(per_instance_mutex) = tlas.tlas_per_instance_data.as_ref() else {
+        return;
+    };
     let Some(tlas) = tlas.get() else { return };
-    let Some(hdr) = hdr_target.as_mut() else { return };
+    let Some(hdr) = hdr_target.as_mut() else {
+        return;
+    };
 
     sbt.push_raygen(0, |_| {});
     sbt.push_miss(0, |_| {});
@@ -661,8 +657,7 @@ fn record_sharc_rt(
         // bindings based on this frame's parity. Update's raygen consumes
         // `read`, and its cascade pushes into `write` for next frame to
         // consume.
-        let (pool_read_idx, pool_write_idx) =
-            SharcResources::pool_indices(frame_index);
+        let (pool_read_idx, pool_write_idx) = SharcResources::pool_indices(frame_index);
         let pool_read_candidates_buf = encoder.lock(
             &resources.pool[pool_read_idx].candidates,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -690,7 +685,8 @@ fn record_sharc_rt(
             &mut hdr.state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                access: vk::AccessFlags2::SHADER_STORAGE_READ | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ
+                    | vk::AccessFlags2::SHADER_STORAGE_WRITE,
             },
             vk::ImageLayout::GENERAL,
             0..1,
@@ -784,21 +780,13 @@ fn record_sharc_rt(
             &mut pool_read.candidates_state,
             rt_read,
         );
-        encoder.use_buffer_resource(
-            pool_read_keys_buf,
-            &mut pool_read.keys_state,
-            rt_read,
-        );
+        encoder.use_buffer_resource(pool_read_keys_buf, &mut pool_read.keys_state, rt_read);
         encoder.use_buffer_resource(
             pool_write_candidates_buf,
             &mut pool_write.candidates_state,
             rt_rw,
         );
-        encoder.use_buffer_resource(
-            pool_write_keys_buf,
-            &mut pool_write.keys_state,
-            rt_rw,
-        );
+        encoder.use_buffer_resource(pool_write_keys_buf, &mut pool_write.keys_state, rt_rw);
 
         encoder.memory_barrier(
             Access::COPY_WRITE,
@@ -967,8 +955,12 @@ fn sharc_resolve_pass(
     if !config.enabled {
         return;
     }
-    let Some(resources) = sharc_resources.as_deref_mut() else { return };
-    let Ok(transform) = swapchain_images.single() else { return };
+    let Some(resources) = sharc_resources.as_deref_mut() else {
+        return;
+    };
+    let Ok(transform) = swapchain_images.single() else {
+        return;
+    };
     let Some(pipeline) = compute_pipelines.get(&sharc_pipelines.resolve_pipeline) else {
         return;
     };
@@ -982,10 +974,14 @@ fn sharc_resolve_pass(
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
 
-        let hash_buf =
-            encoder.lock(&resources.hash_entries, vk::PipelineStageFlags2::COMPUTE_SHADER);
-        let accum_buf =
-            encoder.lock(&resources.accumulation, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        let hash_buf = encoder.lock(
+            &resources.hash_entries,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+        let accum_buf = encoder.lock(
+            &resources.accumulation,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
         let resolved_buf =
             encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
@@ -1089,15 +1085,20 @@ fn sharc_debug_overlay_pass(
     if !debug.is_active() {
         return;
     }
-    let Some(resources) = sharc_resources.as_deref_mut() else { return };
-    let Some(hdr) = hdr_target.as_mut() else { return };
-    let Ok((camera, transform)) = swapchain_images.single() else { return };
+    let Some(resources) = sharc_resources.as_deref_mut() else {
+        return;
+    };
+    let Some(hdr) = hdr_target.as_mut() else {
+        return;
+    };
+    let Ok((camera, transform)) = swapchain_images.single() else {
+        return;
+    };
 
     // Only the candidate-pool splat uses the camera (it projects candidate
     // world positions to screen); the occupancy view is camera-independent.
     let cam_uniform = build_camera_uniform(camera, transform, None, jitter.offset);
-    let mut constants =
-        build_sharc_constants(&config, &frame_state, transform.translation());
+    let mut constants = build_sharc_constants(&config, &frame_state, transform.translation());
     constants.debug_mode = debug.mode.as_u32();
     constants.debug_brightness = debug.brightness;
 
@@ -1106,8 +1107,7 @@ fn sharc_debug_overlay_pass(
     // this frame's final-gather *write* side, bound to the read slots (18/19)
     // the splat shader reads through.
     if debug.mode == SharcDebugMode::CandidatePool {
-        let Some(splat) = compute_pipelines.get(&sharc_pipelines.candidate_splat_pipeline)
-        else {
+        let Some(splat) = compute_pipelines.get(&sharc_pipelines.candidate_splat_pipeline) else {
             return;
         };
         let splat = splat.clone().into_inner();
@@ -1198,8 +1198,7 @@ fn sharc_debug_overlay_pass(
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
 
-        let render_target_views =
-            encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
         let hash_buf = encoder.lock(
             &resources.hash_entries,
             vk::PipelineStageFlags2::COMPUTE_SHADER,

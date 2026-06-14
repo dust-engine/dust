@@ -153,7 +153,12 @@ fn performance_panel_ui(
                     Some(display) if display.x > 0 => res.x as f32 / display.x as f32,
                     _ => 1.0,
                 };
-                ui.label(format!("Render: {} × {} ({:.0}%)", res.x, res.y, scale * 100.0));
+                ui.label(format!(
+                    "Render: {} × {} ({:.0}%)",
+                    res.x,
+                    res.y,
+                    scale * 100.0
+                ));
             }
 
             ui.add_space(6.0);
@@ -203,7 +208,11 @@ fn gpu_timings(ui: &mut egui::Ui, profiler: &mut GpuProfiler) {
     let (rect, _response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, egui::Color32::from_black_alpha(96));
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::ZERO,
+        egui::Color32::from_black_alpha(96),
+    );
 
     let mut x = rect.left();
     for (i, &(_, ms)) in rows.iter().enumerate() {
@@ -213,7 +222,11 @@ fn gpu_timings(ui: &mut egui::Ui, profiler: &mut GpuProfiler) {
                 egui::pos2(x, rect.top()),
                 egui::pos2(x + seg_w, rect.bottom()),
             );
-            painter.rect_filled(seg, egui::CornerRadius::ZERO, BAR_COLORS[i % BAR_COLORS.len()]);
+            painter.rect_filled(
+                seg,
+                egui::CornerRadius::ZERO,
+                BAR_COLORS[i % BAR_COLORS.len()],
+            );
         }
         x += seg_w;
     }
@@ -223,8 +236,11 @@ fn gpu_timings(ui: &mut egui::Ui, profiler: &mut GpuProfiler) {
     for (i, &(label, ms)) in rows.iter().enumerate() {
         ui.horizontal(|ui| {
             let (swatch, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-            ui.painter()
-                .rect_filled(swatch, egui::CornerRadius::same(2), BAR_COLORS[i % BAR_COLORS.len()]);
+            ui.painter().rect_filled(
+                swatch,
+                egui::CornerRadius::same(2),
+                BAR_COLORS[i % BAR_COLORS.len()],
+            );
             ui.label(format!("{label}: {ms:.3} ms"));
         });
     }
@@ -263,7 +279,11 @@ fn frame_time_graph(ui: &mut egui::Ui, panel: &PerformancePanel) {
     let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
     let painter = ui.painter_at(rect);
 
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, egui::Color32::from_black_alpha(96));
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::ZERO,
+        egui::Color32::from_black_alpha(96),
+    );
 
     // Scale to the worst frame time in the window (with a small floor so a run
     // of identical frames doesn't divide by ~zero).

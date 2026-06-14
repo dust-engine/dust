@@ -8,7 +8,10 @@ use bevy::prelude::*;
 use bevy_pumicite::CreateDevice;
 use bevy_pumicite::rtx::blas::BLAS;
 use bevy_pumicite::rtx::tlas::TLASInstance;
-use dust_vox::{VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxModelBLASRebuild, VoxModelBundle, VoxPalette};
+use dust_vox::{
+    VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxModelBLASRebuild,
+    VoxModelBundle, VoxPalette,
+};
 use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
@@ -196,7 +199,7 @@ fn update_rainbow_demo_system(
     mut geometries: ResMut<Assets<VoxGeometry>>,
     mut materials: ResMut<Assets<VoxMaterial>>,
 
-    mut requesting_blas_rebuilds: Query<&mut VoxModelBLASRebuild>
+    mut requesting_blas_rebuilds: Query<&mut VoxModelBLASRebuild>,
 ) {
     if !demo.timer.tick(time.delta()).just_finished() {
         return;
@@ -275,5 +278,8 @@ fn update_rainbow_demo_system(
 
     // BLASBuilderPlugin only builds for entities `Without<BLAS>`; removing the
     // component is the way to request a rebuild after mutating the geometry.
-    requesting_blas_rebuilds.get_mut(demo.model_entity).unwrap().request_rebuild();
+    requesting_blas_rebuilds
+        .get_mut(demo.model_entity)
+        .unwrap()
+        .request_rebuild();
 }

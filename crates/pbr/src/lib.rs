@@ -816,7 +816,10 @@ fn ensure_dlss_feature(
 ) {
     ngx.check_dlss_rr_available().unwrap();
     let Some(hdr) = hdr_target else { return };
-    if hdr.display_extent.x == 0 || hdr.display_extent.y == 0 || hdr.render_extent.x == 0 || hdr.render_extent.y == 0
+    if hdr.display_extent.x == 0
+        || hdr.display_extent.y == 0
+        || hdr.render_extent.x == 0
+        || hdr.render_extent.y == 0
     {
         return;
     }
@@ -1778,8 +1781,8 @@ pub(crate) fn final_gather_pass(
             &sharc_resources.resolved,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
-        let sharc_constants_buf = uniform_ring_buffer
-            .create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
+        let sharc_constants_buf =
+            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
 
         // Pool buffer locks. final_gather's CHS pushes new candidates on cache
         // miss (write side); next frame's Update raygen dispatches from the
@@ -1809,8 +1812,7 @@ pub(crate) fn final_gather_pass(
         };
         let sharc_rt_write = Access {
             stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            access: vk::AccessFlags2::SHADER_STORAGE_READ
-                | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            access: vk::AccessFlags2::SHADER_STORAGE_READ | vk::AccessFlags2::SHADER_STORAGE_WRITE,
         };
         encoder.use_buffer_resource(
             sharc_hash_buf,
@@ -1839,11 +1841,7 @@ pub(crate) fn final_gather_pass(
             &mut pool_read.candidates_state,
             sharc_rt_read,
         );
-        encoder.use_buffer_resource(
-            pool_read_keys_buf,
-            &mut pool_read.keys_state,
-            sharc_rt_read,
-        );
+        encoder.use_buffer_resource(pool_read_keys_buf, &mut pool_read.keys_state, sharc_rt_read);
         encoder.use_buffer_resource(
             pool_write_candidates_buf,
             &mut pool_write.candidates_state,
@@ -2046,7 +2044,10 @@ fn start_occluding_render_pass(
                     .view(render_target_views.sdr_target.linear_view());
                 // Use linear view for egui. egui does all the interpolation in srgb space.
             })
-            .render_area(IVec2::ZERO, UVec2::new(hdr.display_extent.x, hdr.display_extent.y))
+            .render_area(
+                IVec2::ZERO,
+                UVec2::new(hdr.display_extent.x, hdr.display_extent.y),
+            )
             .begin();
     });
 }

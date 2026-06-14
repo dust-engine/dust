@@ -43,13 +43,8 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use bevy_pumicite::{CreateDevice, DefaultRenderSet};
 use pumicite::{
-    Device, Instance,
-    ash::vk,
-    command::CommandEncoder,
-    physical_device::PhysicalDevice,
-    query::QueryPool,
-    sync::GPUMutex,
-    utils::AsVkHandle,
+    Device, Instance, ash::vk, command::CommandEncoder, physical_device::PhysicalDevice,
+    query::QueryPool, sync::GPUMutex, utils::AsVkHandle,
 };
 
 /// Initial pool size in timestamp slots. Grows on demand.
@@ -156,7 +151,9 @@ impl GpuProfiler {
         // the whole pool once up front. After that, slots are recycled on
         // readback (see `free_frame`), keeping resets off the hot path.
         let pool = timestamps_ok
-            .then(|| QueryPool::new(device.clone(), vk::QueryType::TIMESTAMP, INITIAL_CAPACITY).ok())
+            .then(|| {
+                QueryPool::new(device.clone(), vk::QueryType::TIMESTAMP, INITIAL_CAPACITY).ok()
+            })
             .flatten()
             .map(|qp| {
                 qp.host_reset(0..INITIAL_CAPACITY);
@@ -283,7 +280,9 @@ impl GpuProfiler {
         } else {
             self.capacity.saturating_mul(2).min(MAX_CAPACITY)
         };
-        if let Ok(pool) = QueryPool::new(self.device.clone(), vk::QueryType::TIMESTAMP, new_capacity) {
+        if let Ok(pool) =
+            QueryPool::new(self.device.clone(), vk::QueryType::TIMESTAMP, new_capacity)
+        {
             // Reset every query once before first use. The old pool (and its
             // pending readbacks) is retired via the GPUMutex drop.
             pool.host_reset(0..new_capacity);
@@ -366,7 +365,7 @@ impl GpuTimerCommands for CommandEncoder<'_> {
         label: &'static str,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let start =  profiler.as_mut().and_then(|x| x.scope_begin(self, label));
+        let start = profiler.as_mut().and_then(|x| x.scope_begin(self, label));
         let result = f(self);
         if let Some(start) = start {
             if let Some(profiler) = profiler {
