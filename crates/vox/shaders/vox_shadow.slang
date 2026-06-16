@@ -1,32 +1,4 @@
-struct Block
-{
-    uint64_t mask;
-    private uint32_t coords_packed;
-    uint32_t material_ptr;
-
-    property float3 coords {
-        get {
-            static const uint32_t mask = ((1 << 10) - 1);
-            uint32_t3 min;
-            min.x = coords_packed >> 20;
-            min.y = (coords_packed >> 10) & mask;
-            min.z = coords_packed & mask;
-            return min << 2;
-        }
-    }
-};
-
-struct ShadowVoxParams {
-    Block* geometry_info;
-    uint64_t _pad0;
-    uint64_t _pad1;
-    float unit_size;
-    uint32_t _pad2;
-
-    Block getCurrentPrimitive() {
-        return geometry_info[PrimitiveIndex()];
-    }
-};
+import vox_common;
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {
     float3 tMin = (box_min - origin) / dir;
@@ -78,7 +50,7 @@ void shadow_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
 }
 
 [shader("intersection")]
-void main(uniform ShadowVoxParams params) {
+void main(uniform VoxModelParams params) {
     Block block = params.getCurrentPrimitive();
     float inv_unit = 1.0 / params.unit_size;
     shadow_dda(

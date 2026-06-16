@@ -18,7 +18,6 @@ use bevy_pumicite::rtx::tlas::TLASInstance;
 use bevy_pumicite::shader::RayTracingPipelineLibrary;
 use bevy_pumicite::{CreateDevice, DefaultTransferSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
-use dot_vox::Color;
 use dust_pbr::PbrRenderState;
 use dust_pbr::sharc::SharcPipelines;
 use dust_vdb::hierarchy;
@@ -261,14 +260,14 @@ impl Plugin for VoxPlugin {
 #[derive(Resource)]
 pub struct VoxRenderState {
     pipeline: Handle<RayTracingPipelineLibrary>,
-    hitgroup_index: u32,
     shadow_pipeline: Handle<RayTracingPipelineLibrary>,
-    shadow_hitgroup_index: u32,
     final_gather_pipeline: Handle<RayTracingPipelineLibrary>,
-    final_gather_hitgroup_index: u32,
     // Shared closest-hit + intersection attached to the SHARC Update pipeline.
     sharc_update_pipeline: Handle<RayTracingPipelineLibrary>,
-    sharc_update_hitgroup_index: u32,
+    hitgroup_index: u16,
+    shadow_hitgroup_index: u16,
+    final_gather_hitgroup_index: u16,
+    sharc_update_hitgroup_index: u16,
 }
 
 fn setup(
@@ -281,25 +280,25 @@ fn setup(
     let hitgroup_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_pbr.rtx.pipeline.bin");
     let hitgroup_index = pipeline_manager
-        .add_hitgroup_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
+        .add_library_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
 
     let shadow_hitgroup_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_shadow.rtx.pipeline.bin");
-    let shadow_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
+    let shadow_hitgroup_index = pipeline_manager.add_library_for_pipeline(
         &pbr_render_state.shadow_pipeline,
         shadow_hitgroup_library.clone(),
     );
 
     let final_gather_hitgroup_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_final_gather.rtx.pipeline.bin");
-    let final_gather_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
+    let final_gather_hitgroup_index = pipeline_manager.add_library_for_pipeline(
         &pbr_render_state.final_gather_pipeline,
         final_gather_hitgroup_library.clone(),
     );
 
     let sharc_hitgroup_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_update.rtx.pipeline.bin");
-    let sharc_update_hitgroup_index = pipeline_manager.add_hitgroup_for_pipeline(
+    let sharc_update_hitgroup_index = pipeline_manager.add_library_for_pipeline(
         &sharc_pipelines.update_pipeline,
         sharc_hitgroup_library.clone(),
     );
@@ -384,18 +383,19 @@ fn write_sbt_entries(
             unit_size: geometry.unit_size,
             _pad: 0,
         };
-        model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, |param_dst| {
+        model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, 0, |param_dst| {
             param_dst.copy_from_slice(bytemuck::bytes_of(&params));
         });
         // Push same geometry to shadow SBT (same order ensures matching sbt_offsets)
         let shadow_sbt_index =
-            shadow_sbt.push_hitgroup(vox_render_state.shadow_hitgroup_index, |param_dst| {
+            shadow_sbt.push_hitgroup(vox_render_state.shadow_hitgroup_index, 0, |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
         // Push same geometry to final gather SBT
         let final_gather_sbt_index = final_gather_sbt.push_hitgroup(
             vox_render_state.final_gather_hitgroup_index,
+            0,
             |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             },
@@ -404,6 +404,7 @@ fn write_sbt_entries(
 
         let sharc_update_idx = sharc_update_sbt.push_hitgroup(
             vox_render_state.sharc_update_hitgroup_index,
+            0,
             |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             },

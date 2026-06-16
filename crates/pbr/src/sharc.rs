@@ -384,13 +384,16 @@ pub fn setup_sharc(
     let candidate_splat_pipeline: Handle<ComputePipeline> = asset_server
         .load("bazel://dust/crates/pbr/shaders/sharc_debug_candidate_splat.comp.pipeline.bin");
 
-    commands.insert_resource(SharcPipelines {
-        update_pipeline: pipeline_manager.add_pipeline(update_library),
+    let res = SharcPipelines {
+        update_pipeline: pipeline_manager.add_pipeline(),
         resolve_pipeline,
         debug_overlay_pipeline,
         candidate_splat_pipeline,
         update_sbt: None,
-    });
+    };
+    pipeline_manager.add_library_for_pipeline(&res.update_pipeline, update_library);
+
+    commands.insert_resource(res);
 }
 
 fn create_sharc_sbts(
@@ -558,9 +561,9 @@ fn sharc_update_pass(
         return;
     };
 
-    sbt.push_raygen(0, |_| {});
-    sbt.push_miss(0, |_| {});
-    sbt.push_miss(1, |_| {});
+    sbt.push_raygen(0, 0, |_| {});
+    sbt.push_miss(0, 1, |_| {});
+    sbt.push_miss(0, 2, |_| {});
 
     let camera_origin = transform.translation();
     // Reuse the frame's primary-RT jitter for worldPos reconstruction — the
@@ -627,7 +630,7 @@ fn record_sharc_rt(
     ctx.record(|encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
-                slice.copy_from_slice(sbt.buffer())
+                sbt.write_buffer(slice);
             });
         let cam_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&cam_uniform));

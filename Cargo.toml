@@ -16,9 +16,9 @@ dust_pbr = { path = "crates/pbr" }
 dust_app = { path = "crates/app" }
 dust_denoiser = { path = "crates/denoiser" }
 dust_gfxdebug = { path = "crates/gfxdebug" }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "5d509e7698851af14763a725842914c9838496e3" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "5d509e7698851af14763a725842914c9838496e3" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "5d509e7698851af14763a725842914c9838496e3" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "5b4e4a00e43638902f156c27d7f7b89bc58e4b7c" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "5b4e4a00e43638902f156c27d7f7b89bc58e4b7c" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "5b4e4a00e43638902f156c27d7f7b89bc58e4b7c" }
 
 [dependencies]
 dust_vox.workspace = true
@@ -83,3 +83,6 @@ debug = true
 
 [profile.dev.package.dust_vdb]
 opt-level = 3
+
+[profile.dev]
+panic = "abort"

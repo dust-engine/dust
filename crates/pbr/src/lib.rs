@@ -336,8 +336,8 @@ fn render(
         tracing::warn!("Frame not rendered; missing SHARC resources");
         return;
     };
-    sbt.push_raygen(0, |_| {});
-    sbt.push_miss(0, |_| {});
+    sbt.push_raygen(0, 0, |_| {});
+    sbt.push_miss(0, 1, |_| {});
     let uniform = build_camera_uniform(camera, transform, Some(&mut prev_camera), jitter.offset);
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         tracing::warn!("Frame not rendered; missing atmosphere uniform buffer");
@@ -352,7 +352,7 @@ fn render(
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
-                slice.copy_from_slice(sbt.buffer())
+                sbt.write_buffer(slice);
             });
 
         let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
@@ -730,15 +730,21 @@ pub fn setup(
     let tonemap_pipeline: Handle<ComputePipeline> =
         asset_server.load("bazel://dust/crates/pbr/shaders/tonemap.comp.pipeline.bin");
 
-    commands.insert_resource(PbrRenderState {
-        pipeline: pipeline_manager.add_pipeline(base_library),
-        shadow_pipeline: pipeline_manager.add_pipeline(shadow_base_library),
-        final_gather_pipeline: pipeline_manager.add_pipeline(final_gather_base_library),
+    let res = PbrRenderState {
+        pipeline: pipeline_manager.add_pipeline(),
+        shadow_pipeline: pipeline_manager.add_pipeline(),
+        final_gather_pipeline: pipeline_manager.add_pipeline(),
         tonemap_pipeline,
         sbt: None,
         shadow_sbt: None,
         final_gather_sbt: None,
-    });
+    };
+    pipeline_manager.add_library_for_pipeline(&res.pipeline, base_library);
+    pipeline_manager.add_library_for_pipeline(&res.shadow_pipeline, shadow_base_library);
+    pipeline_manager
+        .add_library_for_pipeline(&res.final_gather_pipeline, final_gather_base_library);
+
+    commands.insert_resource(res);
 }
 
 pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTracingPipeline>>) {
@@ -1376,8 +1382,8 @@ fn shadow_pass(
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
-    shadow_sbt.push_raygen(0, |_| {});
-    shadow_sbt.push_miss(0, |_| {});
+    shadow_sbt.push_raygen(0, 0, |_| {});
+    shadow_sbt.push_miss(0, 1, |_| {});
     // Shadow pass doesn't reproject, but its ray-gen reconstructs world
     // position from the depth G-buffer via `primaryRayDirWorldSpace` — that
     // depth was written by the jittered primary ray, so we must reuse the
@@ -1389,7 +1395,7 @@ fn shadow_pass(
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, shadow_sbt.layout(), |slice| {
-                slice.copy_from_slice(shadow_sbt.buffer())
+                shadow_sbt.write_buffer(slice);
             });
 
         let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
@@ -1589,8 +1595,8 @@ pub(crate) fn final_gather_pass(
     let Some(sharc_resources) = sharc_resources.as_deref_mut() else {
         return;
     };
-    gather_sbt.push_raygen(0, |_| {});
-    gather_sbt.push_miss(0, |_| {});
+    gather_sbt.push_raygen(0, 0, |_| {});
+    gather_sbt.push_miss(0, 1, |_| {});
     // Final-gather doesn't reproject, but it reconstructs world position from
     // the depth G-buffer via `primaryRayDirWorldSpace` — that depth was
     // written by the jittered primary ray, so we must reuse the same jitter.
@@ -1612,7 +1618,7 @@ pub(crate) fn final_gather_pass(
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, gather_sbt.layout(), |slice| {
-                slice.copy_from_slice(gather_sbt.buffer())
+                gather_sbt.write_buffer(slice);
             });
 
         let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
