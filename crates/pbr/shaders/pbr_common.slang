@@ -201,6 +201,15 @@ public struct PbrPipelineGbuffer {
     public RWTexture2D<float4> albedoLinear;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public Texture2D<float4> albedoSRGB;
+    // Uint (R8G8B8A8_UINT) view aliasing `albedoLinear`'s storage. The .a (w)
+    // channel is a per-pixel miss shader index: the primary pass records which
+    // miss shader the shadow / final-gather passes feed into TraceRay's
+    // MissShaderIndex (real hits store 0; sky/UI store 0xFF as a "no surface"
+    // sentinel those passes skip). Must be uint32_t4, not uint8_t4 — Vulkan
+    // storage images require a 32-bit sampled type even for an 8-bit format; an
+    // 8-bit image sampled type is invalid SPIR-V and spirv-val rejects it.
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
+    public RWTexture2D<uint32_t4> albedoUint;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float4> normalTexture;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]

@@ -684,7 +684,7 @@ fn record_sharc_rt(
             encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         encoder.use_image_resource(
-            render_target_views.hdr_output.image(),
+            &render_target_views.hdr_output,
             &mut hdr.state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -697,7 +697,7 @@ fn record_sharc_rt(
             false,
         );
         encoder.use_image_resource(
-            render_target_views.albedo.image(),
+            &render_target_views.albedo,
             &mut hdr.albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -709,7 +709,7 @@ fn record_sharc_rt(
             false,
         );
         encoder.use_image_resource(
-            render_target_views.normal.image(),
+            &render_target_views.normal,
             &mut hdr.normal_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -721,7 +721,7 @@ fn record_sharc_rt(
             false,
         );
         encoder.use_image_resource(
-            render_target_views.depth.image(),
+            &render_target_views.depth,
             &mut hdr.depth_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -742,7 +742,7 @@ fn record_sharc_rt(
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         encoder.use_image_resource(
-            transmittance_view.image(),
+            transmittance_view,
             &mut atmosphere_luts.transmittance.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -751,7 +751,7 @@ fn record_sharc_rt(
             false,
         );
         encoder.use_image_resource(
-            sky_view.image(),
+            sky_view,
             &mut atmosphere_luts.sky_view.state,
             Access::RTX_READ,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -805,17 +805,17 @@ fn record_sharc_rt(
         params
             .scene_bvh(tlas_locked)
             .uniforms(cam_buffer)
-            .output_texture(&render_target_views.hdr_output)
+            .output_texture(render_target_views.hdr_output.full_view())
             .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
             .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
-            .gbuffer_normal_texture(&render_target_views.normal)
-            .gbuffer_depth_texture(&render_target_views.depth)
+            .gbuffer_normal_texture(render_target_views.normal.full_view())
+            .gbuffer_depth_texture(render_target_views.depth.full_view())
             .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
-            .gbuffer_motion_vector_texture(&render_target_views.motion_vectors)
-            .gbuffer_specular_albedo(&render_target_views.specular_albedo)
+            .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
+            .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
             .sky_atmosphere_params(atmo_buffer)
-            .sky_transmittance_lut(transmittance_view)
-            .sky_sky_view_lut(sky_view)
+            .sky_transmittance_lut(transmittance_view.full_view())
+            .sky_sky_view_lut(sky_view.full_view())
             .sky_linear_sampler(&atmosphere_luts.sampler)
             .per_instance_data(per_instance_buf)
             // SHARC working storage + candidate pool via the generated helper, so
@@ -1040,7 +1040,7 @@ fn sharc_debug_overlay_pass(
             );
 
             encoder.use_image_resource(
-                render_target_views.sdr_target.image(),
+                &render_target_views.sdr_target,
                 &mut hdr.sdr_target_state,
                 Access {
                     stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -1117,7 +1117,7 @@ fn sharc_debug_overlay_pass(
         // scene + egui; we overwrite only the populated-cell pixels, so it's
         // read-modify-write storage access.
         encoder.use_image_resource(
-            render_target_views.sdr_target.image(),
+            &render_target_views.sdr_target,
             &mut hdr.sdr_target_state,
             Access {
                 stage: vk::PipelineStageFlags2::COMPUTE_SHADER,

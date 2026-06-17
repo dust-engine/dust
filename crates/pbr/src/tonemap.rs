@@ -339,7 +339,7 @@ pub(crate) fn tonemap_pass(
 
         // HDR intermediary: read
         encoder.use_image_resource(
-            render_target_views.hdr_denoised_output.image(),
+            &render_target_views.hdr_denoised_output,
             &mut hdr.hdr_denoised_target_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
@@ -349,7 +349,7 @@ pub(crate) fn tonemap_pass(
         );
         // SDR target: read (egui / occluding content)
         encoder.use_image_resource(
-            render_target_views.sdr_target.image(),
+            &render_target_views.sdr_target,
             &mut hdr.sdr_target_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
@@ -385,7 +385,7 @@ pub(crate) fn tonemap_pass(
                 .image_info(&[
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: render_target_views.hdr_denoised_output.vk_handle(),
+                        image_view: render_target_views.hdr_denoised_output.full_view().vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
                     vk::DescriptorImageInfo {

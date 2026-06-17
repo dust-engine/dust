@@ -15,8 +15,9 @@ void closestHitShader(
     // Calculate the diffuse albedo.
     // When metalness = 1.0, store (0.0, 0.0, 0.0). For metal, the entire transmitted fraction is absorbed,
     // meaning that there's no diffuse reflection for metals. Setting diffuse albedo = 0 clears the diffuse
-    // contribution. 
-    params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(color.xyz * (1.0 - metalness), 1.0);
+    // contribution.
+    params.gbuffer.albedoLinear[DispatchRaysIndex().xy].xyz = color.xyz * (1.0 - metalness);
+    params.gbuffer.albedoUint[DispatchRaysIndex().xy].w = 0; // miss shader index for the shadow pass
 
 
     

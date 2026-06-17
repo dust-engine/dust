@@ -16,24 +16,25 @@ PipelineLayout(
                     Binding(binding: 2,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // output
                     Binding(binding: 3,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (linear view)
                     Binding(binding: 4,  ty: SampledImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (sRGB view)
-                    Binding(binding: 5,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // normal
-                    Binding(binding: 6,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // depth
-                    Binding(binding: 7,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // occlusion
-                    Binding(binding: 8,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // motion vectors
-                    Binding(binding: 9,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // specular albedo (unused here)
-                    Binding(binding: 10, ty: UniformBuffer,         stages: [RayGen, Miss]),                       // atmosphere
-                    Binding(binding: 11, ty: SampledImage,          stages: [RayGen, Miss]),                       // transmittance LUT
-                    Binding(binding: 12, ty: SampledImage,          stages: [RayGen, Miss]),                       // sky-view LUT
-                    Binding(binding: 13, ty: Sampler,               stages: [RayGen, Miss]),                       // linear sampler
-                    Binding(binding: 14, ty: StorageBuffer,         stages: [ClosestHit]),                         // per-instance transforms
-                    Binding(binding: 15, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC hashEntries
-                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),           // SHARC accumulation
-                    Binding(binding: 17, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC resolved
-                    Binding(binding: 18, ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC constants
-                    Binding(binding: 19, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // candidates_read
-                    Binding(binding: 20, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // keys_read
-                    Binding(binding: 21, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // candidates_write
-                    Binding(binding: 22, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // keys_write
+                    Binding(binding: 5,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (Uint view) (unused here)
+                    Binding(binding: 6,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // normal
+                    Binding(binding: 7,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // depth
+                    Binding(binding: 8,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // occlusion
+                    Binding(binding: 9,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // motion vectors
+                    Binding(binding: 10, ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // specular albedo (unused here)
+                    Binding(binding: 11, ty: UniformBuffer,         stages: [RayGen, Miss]),                       // atmosphere
+                    Binding(binding: 12, ty: SampledImage,          stages: [RayGen, Miss]),                       // transmittance LUT
+                    Binding(binding: 13, ty: SampledImage,          stages: [RayGen, Miss]),                       // sky-view LUT
+                    Binding(binding: 14, ty: Sampler,               stages: [RayGen, Miss]),                       // linear sampler
+                    Binding(binding: 15, ty: StorageBuffer,         stages: [ClosestHit]),                         // per-instance transforms
+                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC hashEntries
+                    Binding(binding: 17, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),           // SHARC accumulation
+                    Binding(binding: 18, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC resolved
+                    Binding(binding: 19, ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC constants
+                    Binding(binding: 20, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // candidates_read
+                    Binding(binding: 21, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // keys_read
+                    Binding(binding: 22, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // candidates_write
+                    Binding(binding: 23, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // keys_write
                 ]
             )
         ),

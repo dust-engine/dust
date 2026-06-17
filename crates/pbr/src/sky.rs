@@ -506,7 +506,7 @@ fn compute_luts(
         // Transmittance LUT
         {
             encoder.use_image_resource(
-                transmittance_view.image(),
+                transmittance_view,
                 &mut atmosphere_luts.transmittance.state,
                 Access::COMPUTE_WRITE,
                 vk::ImageLayout::GENERAL,
@@ -540,7 +540,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: transmittance_view.vk_handle(),
+                            image_view: transmittance_view.full_view().vk_handle(),
                             image_layout: vk::ImageLayout::GENERAL,
                             sampler: vk::Sampler::null(),
                         },
@@ -564,7 +564,7 @@ fn compute_luts(
         // Multi-scattering LUT (depends on transmittance)
         {
             encoder.use_image_resource(
-                transmittance_view.image(),
+                transmittance_view,
                 &mut atmosphere_luts.transmittance.state,
                 Access::COMPUTE_READ,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -573,7 +573,7 @@ fn compute_luts(
                 false,
             );
             encoder.use_image_resource(
-                multi_scattering_view.image(),
+                multi_scattering_view,
                 &mut atmosphere_luts.multi_scattering.state,
                 Access::COMPUTE_WRITE,
                 vk::ImageLayout::GENERAL,
@@ -617,7 +617,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: transmittance_view.vk_handle(),
+                            image_view: transmittance_view.full_view().vk_handle(),
                             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                             sampler: vk::Sampler::null(),
                         },
@@ -628,7 +628,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: multi_scattering_view.vk_handle(),
+                            image_view: multi_scattering_view.full_view().vk_handle(),
                             image_layout: vk::ImageLayout::GENERAL,
                             sampler: vk::Sampler::null(),
                         },
@@ -649,7 +649,7 @@ fn compute_luts(
         // Sky View LUT
         {
             encoder.use_image_resource(
-                transmittance_view.image(),
+                transmittance_view,
                 &mut atmosphere_luts.transmittance.state,
                 Access::COMPUTE_READ,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -658,7 +658,7 @@ fn compute_luts(
                 false,
             );
             encoder.use_image_resource(
-                multi_scattering_view.image(),
+                multi_scattering_view,
                 &mut atmosphere_luts.multi_scattering.state,
                 Access::COMPUTE_READ,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -667,7 +667,7 @@ fn compute_luts(
                 false,
             );
             encoder.use_image_resource(
-                sky_view.image(),
+                sky_view,
                 &mut atmosphere_luts.sky_view.state,
                 Access::COMPUTE_WRITE,
                 vk::ImageLayout::GENERAL,
@@ -681,12 +681,12 @@ fn compute_luts(
             encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
 
             let multi_scattering_image_info = vk::DescriptorImageInfo {
-                image_view: multi_scattering_view.vk_handle(),
+                image_view: multi_scattering_view.full_view().vk_handle(),
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 sampler: vk::Sampler::null(),
             };
             let sky_view_image_info = vk::DescriptorImageInfo {
-                image_view: sky_view.vk_handle(),
+                image_view: sky_view.full_view().vk_handle(),
                 image_layout: vk::ImageLayout::GENERAL,
                 sampler: vk::Sampler::null(),
             };
@@ -722,7 +722,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: transmittance_view.vk_handle(),
+                            image_view: transmittance_view.full_view().vk_handle(),
                             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                             sampler: vk::Sampler::null(),
                         },

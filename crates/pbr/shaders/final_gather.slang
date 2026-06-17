@@ -26,10 +26,12 @@ static const uint XXH_PRIME32_5 = 374761393u;
 [shader("raygeneration")]
 void finalGatherRayGenShader() {
     uint2 pixel = DispatchRaysIndex().xy;
+    uint missShaderIndex = params.gbuffer.albedoUint[pixel].a;
 
-    // Skip pixels with no opaque surface to shade. The primary RT pass writes
-    // albedo.a = 1 only for real hits; sky and UI both write 0.
-    if (params.gbuffer.albedoSRGB[pixel].a == 0.0) {
+    // albedoUint.a is a per-pixel miss shader index written by the primary pass:
+    // real hits store 0; sky/UI store 0xFF as a "no surface" sentinel. Skip the
+    // sentinel pixels; the rest is passed straight to TraceRay's MissShaderIndex.
+    if (missShaderIndex == 0xFF) {
         return;
     }
 
@@ -68,7 +70,7 @@ void finalGatherRayGenShader() {
         params.sceneBVH,
         RAY_FLAG_FORCE_OPAQUE,
         ~0,
-        0, 1, 0,
+        0, 1, missShaderIndex,
         ray, payload
     );
 

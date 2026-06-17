@@ -20,7 +20,7 @@ void rayGenShader() {
     if (originalColor.a == 1.0) {
         // Solid UI pixel. Write transparent to HDR so tonemap skips it.
         params.outputTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
-        params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+        params.gbuffer.albedoUint[DispatchRaysIndex().xy] = uint4(0, 0, 0, 0xFF);
         params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
         // UI occludes the world: treat it as a screen-locked surface stuck to
@@ -59,7 +59,7 @@ void missShader() {
 
     // Write linear HDR (tonemapping happens in dedicated compute pass)
     params.outputTexture[DispatchRaysIndex().xy] = float4(finalColor, 1.0);
-    params.gbuffer.albedoLinear[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
+    params.gbuffer.albedoUint[DispatchRaysIndex().xy] = uint4(0, 0, 0, 0xFF);
     params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
     params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 0.0;
