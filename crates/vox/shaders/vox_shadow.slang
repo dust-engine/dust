@@ -1,4 +1,7 @@
 import vox_common;
+import pbr_common;
+
+static const float kPi = 3.14159265358979;
 
 float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max) {
     float3 tMin = (box_min - origin) / dir;
@@ -50,7 +53,7 @@ void shadow_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
 }
 
 [shader("intersection")]
-void main(uniform VoxModelParams params) {
+void shadowIntersectionShader(uniform VoxModelParams params) {
     Block block = params.getCurrentPrimitive();
     float inv_unit = 1.0 / params.unit_size;
     shadow_dda(
@@ -59,4 +62,40 @@ void main(uniform VoxModelParams params) {
         block.mask,
         1.0
     );
+}
+
+[shader("miss")]
+void shadowMissShader() {
+    uint2 pixel = DispatchRaysIndex().xy;
+    float4 current = params.outputTexture[pixel];
+
+    // Shadow ray missed — no blocker between surface and sun.
+    // Compute direct sunlight contribution and add to render target.
+    float3 samplePosFromCamera = params.pixelPositionWorldSpace(pixel, DispatchRaysDimensions().xy)
+                               - params.uniforms.cameraOrigin();
+
+    float3 transmittanceToSun = params.sky.sampleTransmittanceAt(samplePosFromCamera);
+
+    // Sample albedo through sRGB view — hardware applies sRGB-to-linear conversion
+    float2 uv = (float2(pixel) + 0.5) / float2(DispatchRaysDimensions().xy);
+    float3 worldNormal = params.gbuffer.normalTexture[pixel].xyz;
+
+    // Direct sun = (diffuse Lambertian + specular GGX) · E_incident.
+    //   E_incident = solar_illuminance · transmittanceToSun · NdotL
+    // The 1/π is the Lambertian normalization. specularGGX folds in the
+    // 1/(4·NoV·NoL) microfacet denominator, so multiplying by NdotL leaves a
+    // finite specular term. solar_illuminance is multiplied in explicitly
+    // because transmittanceToSun is a unitless LUT lookup (see sky_view_lut).
+    float3 sunDir = params.sky.atmosphereParams.sun_direction;
+    float NdotL = max(0.0, dot(worldNormal, sunDir));
+    float3 albedo = params.gbuffer.albedoSRGB[pixel].rgb; // diffuse (metalness removed in the primary pass)
+    float3 E_perp = params.sky.atmosphereParams.solar_illuminance * transmittanceToSun;
+
+    // Primary-surface view vector + packed material for the specular lobe.
+    float3 V = -params.uniforms.primaryRayDirWorldSpace(pixel, DispatchRaysDimensions().xy);
+    float roughness = params.gbuffer.normalTexture[pixel].w;
+    float3 F0 = params.gbuffer.specularAlbedo[pixel].rgb;
+    float3 brdf = albedo / kPi + specularGGX(worldNormal, V, sunDir, roughness, F0);
+
+    params.outputTexture[pixel] = float4(current.rgb + brdf * E_perp * NdotL, current.a);
 }

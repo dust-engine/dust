@@ -1389,7 +1389,6 @@ fn shadow_pass(
         return;
     };
     shadow_sbt.push_raygen(0, 0, |_| {});
-    shadow_sbt.push_miss(0, 1, |_| {});
     // Shadow pass doesn't reproject, but its ray-gen reconstructs world
     // position from the depth G-buffer via `primaryRayDirWorldSpace` — that
     // depth was written by the jittered primary ray, so we must reuse the

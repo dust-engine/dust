@@ -3,13 +3,7 @@ RayTracingPipeline(
         RayGen (
             shader: (
                 path: "bazel://dust/crates/pbr/shaders/shadow.spv",
-                entry_point: "shadowRayGenShader"
-            )
-        ),
-        Miss (
-            shader: (
-                path: "bazel://dust/crates/pbr/shaders/shadow.spv",
-                entry_point: "shadowMissShader",
+                entry_point: "main"
             )
         ),
     ],

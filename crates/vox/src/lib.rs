@@ -259,15 +259,15 @@ impl Plugin for VoxPlugin {
 
 #[derive(Resource)]
 pub struct VoxRenderState {
-    pipeline: Handle<RayTracingPipelineLibrary>,
+    primary_pipeline: Handle<RayTracingPipelineLibrary>,
     shadow_pipeline: Handle<RayTracingPipelineLibrary>,
     final_gather_pipeline: Handle<RayTracingPipelineLibrary>,
     // Shared closest-hit + intersection attached to the SHARC Update pipeline.
     sharc_update_pipeline: Handle<RayTracingPipelineLibrary>,
-    hitgroup_index: u16,
-    shadow_hitgroup_index: u16,
-    final_gather_hitgroup_index: u16,
-    sharc_update_hitgroup_index: u16,
+    primary_library_index: u16,
+    shadow_library_index: u16,
+    final_gather_library_index: u16,
+    sharc_update_library_index: u16,
 }
 
 fn setup(
@@ -277,41 +277,41 @@ fn setup(
     pbr_render_state: Res<PbrRenderState>,
     sharc_pipelines: Res<SharcPipelines>,
 ) {
-    let hitgroup_library: Handle<RayTracingPipelineLibrary> =
+    let primary_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_pbr.rtx.pipeline.bin");
-    let hitgroup_index = pipeline_manager
-        .add_library_for_pipeline(&pbr_render_state.pipeline, hitgroup_library.clone());
+    let primary_library_index = pipeline_manager
+        .add_library_for_pipeline(&pbr_render_state.pipeline, primary_pipeline.clone());
 
-    let shadow_hitgroup_library: Handle<RayTracingPipelineLibrary> =
+    let shadow_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_shadow.rtx.pipeline.bin");
-    let shadow_hitgroup_index = pipeline_manager.add_library_for_pipeline(
+    let shadow_library_index = pipeline_manager.add_library_for_pipeline(
         &pbr_render_state.shadow_pipeline,
-        shadow_hitgroup_library.clone(),
+        shadow_pipeline.clone(),
     );
 
-    let final_gather_hitgroup_library: Handle<RayTracingPipelineLibrary> =
+    let final_gather_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_final_gather.rtx.pipeline.bin");
-    let final_gather_hitgroup_index = pipeline_manager.add_library_for_pipeline(
+    let final_gather_library_index = pipeline_manager.add_library_for_pipeline(
         &pbr_render_state.final_gather_pipeline,
-        final_gather_hitgroup_library.clone(),
+        final_gather_pipeline.clone(),
     );
 
-    let sharc_hitgroup_library: Handle<RayTracingPipelineLibrary> =
+    let sharc_update_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_update.rtx.pipeline.bin");
-    let sharc_update_hitgroup_index = pipeline_manager.add_library_for_pipeline(
+    let sharc_update_library_index = pipeline_manager.add_library_for_pipeline(
         &sharc_pipelines.update_pipeline,
-        sharc_hitgroup_library.clone(),
+        sharc_update_pipeline.clone(),
     );
 
     commands.insert_resource(VoxRenderState {
-        pipeline: hitgroup_library,
-        hitgroup_index,
-        shadow_pipeline: shadow_hitgroup_library,
-        shadow_hitgroup_index,
-        final_gather_pipeline: final_gather_hitgroup_library,
-        final_gather_hitgroup_index,
-        sharc_update_pipeline: sharc_hitgroup_library,
-        sharc_update_hitgroup_index,
+        primary_pipeline,
+        primary_library_index,
+        shadow_pipeline,
+        shadow_library_index,
+        final_gather_pipeline,
+        final_gather_library_index,
+        sharc_update_pipeline,
+        sharc_update_library_index,
     });
 }
 
@@ -362,6 +362,8 @@ fn write_sbt_entries(
         tracing::warn!("Missing SHARC SBT");
         return;
     };
+    let miss_index = shadow_sbt.push_miss(vox_render_state.shadow_library_index, 1, |_| {});
+    assert_eq!(miss_index, 0); // Miss SBT index assumed to be 0 in the shader. If this assumption no longer holds true, update the shader.
     for mut model in models.iter_mut() {
         model.sbt_index = u32::MAX;
         let Some(geometry) = geometry_assets.get(&model.geometry) else {
@@ -383,18 +385,18 @@ fn write_sbt_entries(
             unit_size: geometry.unit_size,
             _pad: 0,
         };
-        model.sbt_index = sbt.push_hitgroup(vox_render_state.hitgroup_index, 0, |param_dst| {
+        model.sbt_index = sbt.push_hitgroup(vox_render_state.primary_library_index, 0, |param_dst| {
             param_dst.copy_from_slice(bytemuck::bytes_of(&params));
         });
         // Push same geometry to shadow SBT (same order ensures matching sbt_offsets)
         let shadow_sbt_index =
-            shadow_sbt.push_hitgroup(vox_render_state.shadow_hitgroup_index, 0, |param_dst| {
+            shadow_sbt.push_hitgroup(vox_render_state.shadow_library_index, 0, |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
         // Push same geometry to final gather SBT
         let final_gather_sbt_index = final_gather_sbt.push_hitgroup(
-            vox_render_state.final_gather_hitgroup_index,
+            vox_render_state.final_gather_library_index,
             0,
             |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
@@ -403,7 +405,7 @@ fn write_sbt_entries(
         assert_eq!(final_gather_sbt_index, model.sbt_index);
 
         let sharc_update_idx = sharc_update_sbt.push_hitgroup(
-            vox_render_state.sharc_update_hitgroup_index,
+            vox_render_state.sharc_update_library_index,
             0,
             |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));

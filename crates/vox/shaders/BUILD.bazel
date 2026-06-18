@@ -67,6 +67,11 @@ ron2bin(
 slang_shader(
     name = "vox_shadow",
     srcs = ["vox_shadow.slang"],
+    hdrs = [
+        ":vox_common_module",
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        "//crates/pbr/shaders:pbr_module",
+    ],
     out = "vox_shadow.spv",
     profile = "lib_6_3",
     target = "spirv",
