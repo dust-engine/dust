@@ -1681,15 +1681,13 @@ pub(crate) fn final_gather_pass(
             0..1,
             false,
         );
-        // Specular albedo: read F0 (specular lobe) + write — the final-gather
-        // ray-gen demodulates F0 to EnvBRDF in place afterward for DLSS-RR.
+        // Specular albedo: read
         encoder.use_image_resource(
             &render_target_views.specular_albedo,
             &mut hdr.specular_albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-                access: vk::AccessFlags2::SHADER_STORAGE_READ
-                    | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
             },
             vk::ImageLayout::GENERAL,
             0..1,

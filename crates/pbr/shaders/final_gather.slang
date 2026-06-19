@@ -73,18 +73,6 @@ void finalGatherRayGenShader() {
         0, 1, missShaderIndex,
         ray, payload
     );
-
-    // Demodulate the specular-albedo G-buffer for DLSS-RR. The shading passes
-    // (shadow + this gather's CHS/miss) consume the stored F0; this ray-gen is
-    // the last G-buffer reader before DLSS, so once the trace above returns we
-    // overwrite F0 in place with the pre-integrated environment BRDF
-    // EnvBRDFApprox2(F0, roughness², NoV) — the specular "albedo" DLSS-RR expects
-    // for demodulation. Per-pixel, same-thread read-before-write: no hazard.
-    float3 F0 = params.gbuffer.specularAlbedo[pixel].rgb;
-    float roughness = params.gbuffer.normalTexture[pixel].w;
-    float3 V = -params.uniforms.primaryRayDirWorldSpace(pixel, DispatchRaysDimensions().xy);
-    params.gbuffer.specularAlbedo[pixel] =
-        float4(EnvBRDFApprox2(F0, roughness * roughness, dot(N, V)), 1.0);
 }
 
 [shader("miss")]
@@ -96,16 +84,9 @@ void finalGatherMissShader() {
     float3 skyLuminance = params.sky.atmosphereParams.solar_illuminance
         * params.sky.sampleScatteredTransfer(worldDir);
 
-    // Single-sample BRDF estimator over the cosine-sampled gather ray:
-    //   weight = f·cos/pdf = diffuseAlbedo + π·f_spec   (pdf = cos/π cancels cos)
-    // The diffuse term is the original Lambertian cancellation; the specular term
-    // evaluates GGX for the primary surface (N, V) toward this sky sample wi,
-    // reusing the same ray — no extra trace. See pbr_common::cosineSpecularWeight.
+    // Cosine-weighted importance sampling of Lambertian BRDF:
+    //   L_indirect = albedo * (1/π) * L_i * cos(θ) / pdf = albedo * L_i
+    // The 1/π (BRDF) and cos(θ) (integrand) cancel against pdf(ω) = cos(θ)/π.
     float3 albedo = params.gbuffer.albedoSRGB[pixel].rgb;
-    float3 N = params.gbuffer.normalTexture[pixel].xyz;
-    float roughness = params.gbuffer.normalTexture[pixel].w;
-    float3 F0 = params.gbuffer.specularAlbedo[pixel].rgb;
-    float3 V = -params.uniforms.primaryRayDirWorldSpace(pixel, DispatchRaysDimensions().xy);
-    float3 weight = albedo + cosineSpecularWeight(N, V, worldDir, roughness, F0);
-    params.outputTexture[pixel] = float4(current.rgb + weight * skyLuminance, current.a);
+    params.outputTexture[pixel] = float4(current.rgb + albedo * skyLuminance, current.a);
 }

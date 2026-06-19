@@ -3,13 +3,13 @@ module pbr_common;
 __exported import sharc;
 
 public struct SkyAtmosphereParams {
-    [Stages(STAGE_RAYGEN | STAGE_MISS)]
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public ConstantBuffer<AtmosphereParams> atmosphereParams;
-    [Stages(STAGE_RAYGEN | STAGE_MISS)]
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public Texture2D<float4> transmittanceLUT;
-    [Stages(STAGE_RAYGEN | STAGE_MISS)]
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public Texture2D<float4> skyViewLUT;
-    [Stages(STAGE_RAYGEN | STAGE_MISS)]
+[Stages(STAGE_RAYGEN | STAGE_MISS)]
     public SamplerState linearSampler;
 
     // Sample the atmosphere's scattered-light contribution along `worldDir` from
@@ -192,14 +192,14 @@ public struct PbrInstanceData {
 }
 
 public struct PbrPipelineGbuffer {
-    // [Stages] lists every shader stage that touches each binding across the
+// [Stages] lists every shader stage that touches each binding across the
     // engine's pipelines (the gbuffer is also read by a SHARC debug compute pass,
     // hence Compute on several). The codegen coalesces descriptor writes only
     // within a matching-stage run, so these must mirror the stages in
     // pbr.playout.ron / sharc.playout.ron.
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public RWTexture2D<float4> albedoLinear;
-    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
+[Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public Texture2D<float4> albedoSRGB;
     // Uint (R8G8B8A8_UINT) view aliasing `albedoLinear`'s storage. The .a (w)
     // channel is a per-pixel miss shader index: the primary pass records which
@@ -287,89 +287,4 @@ public struct PbrPipelineParams {
 
 public struct [raypayload] SharcRayPayload {
     public uint cacheSlot : read(closesthit, miss) : write(caller);
-}
-
-// ── PBR shading helpers (metalness/roughness GGX) ─────────────────────────────
-static const float kBrdfPi = 3.14159265358979;
-
-// sRGB electro-optical transfer (gamma decode). The palette colors are authored
-// in sRGB; a metal's F0 reflectance is its *linear* albedo, so the metal tint
-// must be decoded before it enters the (linear) specular-albedo G-buffer.
-public float3 srgbToLinear(float3 c) {
-    float3 hi = pow(max(c + 0.055, 0.0) / 1.055, float3(2.4));
-    float3 lo = c / 12.92;
-    float3 useLo = step(c, float3(0.04045)); // 1 where c <= 0.04045
-    return lerp(hi, lo, useLo);
-}
-
-// Trowbridge-Reitz (GGX) normal distribution. `a` is the GGX alpha (= perceptual
-// roughness squared).
-float D_GGX(float NoH, float a) {
-    float a2 = a * a;
-    float d = NoH * NoH * (a2 - 1.0) + 1.0;
-    return a2 / max(kBrdfPi * d * d, 1e-7);
-}
-
-// Height-correlated Smith visibility — already folds in the 1/(4·NoV·NoL) of the
-// Cook-Torrance denominator, so `specularGGX` returns f_spec directly.
-float V_SmithGGXCorrelated(float NoV, float NoL, float a) {
-    float a2 = a * a;
-    float ggxV = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
-    float ggxL = NoV * sqrt(NoL * NoL * (1.0 - a2) + a2);
-    return 0.5 / max(ggxV + ggxL, 1e-5);
-}
-
-float3 F_Schlick(float3 F0, float VoH) {
-    float f = pow(saturate(1.0 - VoH), 5.0);
-    return F0 + (1.0 - F0) * f;
-}
-
-// Cook-Torrance GGX specular BRDF value f_spec(V, L) for a surface frame N.
-// `roughness` is perceptual (alpha = roughness²). The result includes the
-// 1/(4·NoV·NoL) microfacet denominator via the visibility term.
-public float3 specularGGX(float3 N, float3 V, float3 L, float roughness, float3 F0) {
-    float3 H = normalize(V + L);
-    float NoV = max(dot(N, V), 1e-4);
-    float NoL = max(dot(N, L), 1e-4);
-    float NoH = saturate(dot(N, H));
-    float VoH = saturate(dot(V, H));
-    float a = max(roughness * roughness, 1e-4);
-    return D_GGX(NoH, a) * V_SmithGGXCorrelated(NoV, NoL, a) * F_Schlick(F0, VoH);
-}
-
-// Monte-Carlo specular weight for a radiance sample carried by a COSINE-sampled
-// indirect ray (the final-gather ray). The estimator weight is f·cos/pdf with
-// pdf = cos/π, so the cosine cancels and only π·f_spec remains — evaluated for
-// the *primary* surface (N, V) and the gather direction wi. No extra ray: this
-// reuses the existing diffuse gather sample.
-public float3 cosineSpecularWeight(float3 N, float3 V, float3 wi, float roughness, float3 F0) {
-    return kBrdfPi * specularGGX(N, V, wi, roughness, F0);
-}
-
-// Pre-integrated (environment) specular BRDF — the directional-hemispherical
-// reflectance of the GGX specular lobe. This is the "specular albedo" DLSS-RR
-// expects as its demodulation guide (NOT the raw F0): outSpecularAlbedo =
-// EnvBRDFApprox2(F0, roughness², NoV). Analytic fit from Ray Tracing Gems
-// ch. 32, as documented in the DLSS-RR integration guide.
-public float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV) {
-    NoV = abs(NoV);
-    float4 X;
-    X.x = 1.0;
-    X.y = NoV;
-    X.z = NoV * NoV;
-    X.w = NoV * X.z;
-    float4 Y;
-    Y.x = 1.0;
-    Y.y = alpha;
-    Y.z = alpha * alpha;
-    Y.w = alpha * Y.z;
-    float2x2 M1 = float2x2(0.99044, -1.28514, 1.29678, -0.755907);
-    float3x3 M2 = float3x3(1.0, 2.92338, 59.4188, 20.3225, -27.0302, 222.592, 121.563, 626.13, 316.627);
-    float2x2 M3 = float2x2(0.0365463, 3.32707, 9.0632, -9.04756);
-    float3x3 M4 = float3x3(1.0, 3.59685, -1.36772, 9.04401, -16.3174, 9.22949, 5.56589, 19.7886, -20.2123);
-    float bias = dot(mul(M1, X.xy), Y.xy) * rcp(dot(mul(M2, X.xyw), Y.xyw));
-    float scale = dot(mul(M3, X.xy), Y.xy) * rcp(dot(mul(M4, X.xzw), Y.xyw));
-    // Hack for specular reflectance of 0 (kills the bias for unlit/black F0).
-    bias *= saturate(SpecularColor.g * 50.0);
-    return SpecularColor * max(0.0, scale) + max(0.0, bias);
 }

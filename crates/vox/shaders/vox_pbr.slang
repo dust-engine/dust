@@ -9,23 +9,14 @@ void closestHitShader(
     in HitAttribute hitAttr,
 ) {
     VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);                          // Color + PBR material in one fetch
-    float4 color = mat.albedo();                                                            // Colors sampled from the palette are sRGB
-    float metalness = mat.metalness();
+    float4 color = mat.albedo();                                                           // Colors sampled from the palette are sRGB
 
     // Calculate the diffuse albedo.
     // When metalness = 1.0, store (0.0, 0.0, 0.0). For metal, the entire transmitted fraction is absorbed,
     // meaning that there's no diffuse reflection for metals. Setting diffuse albedo = 0 clears the diffuse
     // contribution.
-    params.gbuffer.albedoLinear[DispatchRaysIndex().xy].xyz = color.xyz * (1.0 - metalness);
+    params.gbuffer.albedoLinear[DispatchRaysIndex().xy].xyz = color.xyz;
     params.gbuffer.albedoUint[DispatchRaysIndex().xy].w = 0; // miss shader index for the shadow pass
-
-
-    
-    float ior = float(mat.ior);
-    float dielF0 = (ior - 1.0) / (ior + 1.0);
-    dielF0 *= dielF0;                                              // ((n−1)/(n+1))²; 0 when ior=1 → pure diffuse
-    float3 F0 = lerp(float3(dielF0), srgbToLinear(color.xyz), metalness);
-    params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(F0, 1.0);
 
     // Directly-visible emissive surfaces
     if (mat.emission > 0.0) {
@@ -39,7 +30,7 @@ void closestHitShader(
     // Transform to world space
     float3x4 o2w = ObjectToWorld3x4();
     float3 worldNormal = normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), normal));
-    params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, mat.roughness());
+    params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(worldNormal, 1.0);
 
     // Encode reverse-infinite-Z hardware depth: `near / linearViewZ`, where
     // linearViewZ is the perpendicular distance from the camera plane to the
