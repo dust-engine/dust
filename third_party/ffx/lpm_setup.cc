@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define A_CPU 1
 #include "ffx_a.h"

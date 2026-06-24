@@ -46,6 +46,9 @@ slang_shader(
     hdrs = [
         ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
+        # pbr_common does `__exported import sharc`; the precompiled module is
+        # needed on the include path to resolve that transitive import.
+        "//crates/pbr/shaders:sharc_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
     ],
     out = "vox_pbr.spv",
@@ -71,6 +74,7 @@ slang_shader(
         ":vox_common_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders:sharc_module",
     ],
     out = "vox_shadow.spv",
     profile = "lib_6_3",
@@ -93,6 +97,7 @@ slang_shader(
     hdrs = [
         ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders:sharc_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",
     ],
@@ -117,7 +122,9 @@ slang_shader(
     name = "vox_sharc_update",
     srcs = ["vox_sharc_update.slang"],
     hdrs = [
+        ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders:sharc_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",
     ],

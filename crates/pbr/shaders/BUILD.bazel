@@ -39,6 +39,10 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
+        # pbr_common.slang does `__exported import sharc`, so consuming its
+        # precompiled module requires sharc's module on the include path too.
+        # Without it, sandboxed builds fail to resolve the transitive import.
+        ":sharc_module",
     ],
     out = "pbr.spv",
     profile = "lib_6_3",
@@ -55,6 +59,7 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
+        ":sharc_module",
     ],
     out = "shadow.spv",
     profile = "lib_6_3",
@@ -92,6 +97,7 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
+        ":sharc_module",
         ":random.slang",
         "@sharc//:sharc_headers",
     ],
@@ -117,6 +123,7 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
+        ":sharc_module",
     ],
     out = "sharc_debug.spv",
     profile = "sm_6_6",
