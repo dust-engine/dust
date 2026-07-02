@@ -124,4 +124,10 @@ new_git_repository(
     remote = "https://github.com/NVIDIA-RTX/SHARC.git",
     commit = "5a976dc60d3a035a63a3f1959c77f1adaa1ec23c",
     build_file = "//third_party:SHARC.BUILD.bazel",
+    # Apple GPUs (Metal) lack 64-bit atomics, so SHARC runs the lock-buffer
+    # insert path (HASH_GRID_ENABLE_64_BIT_ATOMICS 0). This patch adds an
+    # optional wait-free 32-bit-CAS claim (HASH_GRID_CLAIM_VIA_32BIT_CAS) and the
+    # eviction-time flag reset it needs.
+    patches = ["//third_party:sharc_lock_claim.patch"],
+    patch_args = ["-p1"],
 )

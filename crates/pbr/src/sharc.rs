@@ -203,9 +203,15 @@ pub struct SharcResources {
     pub hash_entries: GPUMutex<Buffer>,
     pub accumulation: GPUMutex<Buffer>,
     pub resolved: GPUMutex<Buffer>,
+    /// Per-slot lock/occupancy flag (one u32 per hash entry) for the insert path
+    /// on hardware without 64-bit atomics. Used by SHARC's spinlock and by the
+    /// 32-bit-CAS claim (HASH_GRID_CLAIM_VIA_32BIT_CAS); resolve resets evicted
+    /// slots. Sized `entries_num`, not `pool_capacity`.
+    pub lock: GPUMutex<Buffer>,
     pub hash_entries_state: ResourceState,
     pub accumulation_state: ResourceState,
     pub resolved_state: ResourceState,
+    pub lock_state: ResourceState,
     pub pool_capacity: u32,
     /// Ping-ponged. `frame_index & 1 == 0` ⇒ pool[0] = read, pool[1] = write.
     pub pool: [CandidatePool; 2],
@@ -263,6 +269,14 @@ fn create_sharc_resources(
         usage,
     )
     .expect("SHARC resolved buffer");
+    // One u32 lock/occupancy flag per hash entry (no-64-bit-atomics insert path).
+    let lock = Buffer::new_private(
+        allocator.clone(),
+        n * SharcResources::STRIDE_KEY,
+        16,
+        usage,
+    )
+    .expect("SHARC lock buffer");
     let pool = [(); 2].map(|_| {
         let cap = pool_capacity as u64;
         let candidates = Buffer::new_private(
@@ -291,9 +305,11 @@ fn create_sharc_resources(
         hash_entries: GPUMutex::new(hash_entries),
         accumulation: GPUMutex::new(accumulation),
         resolved: GPUMutex::new(resolved),
+        lock: GPUMutex::new(lock),
         hash_entries_state: ResourceState::default(),
         accumulation_state: ResourceState::default(),
         resolved_state: ResourceState::default(),
+        lock_state: ResourceState::default(),
         pool_capacity,
         pool,
         needs_clear: true,
@@ -431,6 +447,7 @@ pub(crate) fn clear_sharc_buffers(
             let hash_buf = encoder.lock(&resources.hash_entries, vk::PipelineStageFlags2::COPY);
             let accum_buf = encoder.lock(&resources.accumulation, vk::PipelineStageFlags2::COPY);
             let resolved_buf = encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COPY);
+            let lock_buf = encoder.lock(&resources.lock, vk::PipelineStageFlags2::COPY);
             let keys_bufs = [
                 encoder.lock(&resources.pool[0].keys, vk::PipelineStageFlags2::COPY),
                 encoder.lock(&resources.pool[1].keys, vk::PipelineStageFlags2::COPY),
@@ -442,6 +459,7 @@ pub(crate) fn clear_sharc_buffers(
                 Access::CLEAR,
             );
             encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, Access::CLEAR);
+            encoder.use_buffer_resource(lock_buf, &mut resources.lock_state, Access::CLEAR);
             // Clear both pools' keys on reset (the read side might still
             // carry stale candidates from a previous run).
             let [pool0, pool1] = &mut resources.pool;
@@ -459,6 +477,7 @@ pub(crate) fn clear_sharc_buffers(
                     resolved_buf.size(),
                     0,
                 );
+                device.cmd_fill_buffer(cmd_buffer, lock_buf.vk_handle(), 0, lock_buf.size(), 0);
                 for kb in &keys_bufs {
                     device.cmd_fill_buffer(cmd_buffer, kb.vk_handle(), 0, kb.size(), 0);
                 }
@@ -656,6 +675,10 @@ fn record_sharc_rt(
             &resources.resolved,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
+        let lock_buf = encoder.lock(
+            &resources.lock,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
         // Pool ping-pong: pick which physical buffers go to read vs write
         // bindings based on this frame's parity. Update's raygen consumes
         // `read`, and its cascade pushes into `write` for next frame to
@@ -771,6 +794,7 @@ fn record_sharc_rt(
         encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, rt_rw);
         encoder.use_buffer_resource(accum_buf, &mut resources.accumulation_state, rt_rw);
         encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, rt_rw);
+        encoder.use_buffer_resource(lock_buf, &mut resources.lock_state, rt_rw);
         // Split pool[0]/pool[1] mutably without violating borrow rules.
         let [pool_a, pool_b] = &mut resources.pool;
         let (pool_read, pool_write) = if pool_read_idx == 0 {
@@ -827,7 +851,8 @@ fn record_sharc_rt(
             .sharc_g_sharc_candidates_read(pool_read_candidates_buf)
             .sharc_g_sharc_keys_read(pool_read_keys_buf)
             .sharc_g_sharc_candidates_write(pool_write_candidates_buf)
-            .sharc_g_sharc_keys_write(pool_write_keys_buf);
+            .sharc_g_sharc_keys_write(pool_write_keys_buf)
+            .sharc_g_sharc_lock(lock_buf);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
@@ -893,6 +918,7 @@ fn sharc_resolve_pass(
         );
         let resolved_buf =
             encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        let lock_buf = encoder.lock(&resources.lock, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
         let rw = Access {
             stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -901,6 +927,7 @@ fn sharc_resolve_pass(
         encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, rw);
         encoder.use_buffer_resource(accum_buf, &mut resources.accumulation_state, rw);
         encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, rw);
+        encoder.use_buffer_resource(lock_buf, &mut resources.lock_state, rw);
         encoder.emit_barriers();
 
         let pipeline = encoder.retain(pipeline.clone());
@@ -925,6 +952,11 @@ fn sharc_resolve_pass(
             buffer: resolved_buf.vk_handle(),
             offset: 0,
             range: resolved_buf.size(),
+        }];
+        let lock_info = [vk::DescriptorBufferInfo {
+            buffer: lock_buf.vk_handle(),
+            offset: 0,
+            range: lock_buf.size(),
         }];
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::COMPUTE,
@@ -959,6 +991,13 @@ fn sharc_resolve_pass(
                     ..Default::default()
                 }
                 .buffer_info(&resolved_info),
+                vk::WriteDescriptorSet {
+                    dst_binding: 4,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&lock_info),
             ],
         );
 

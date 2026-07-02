@@ -35,6 +35,7 @@ PipelineLayout(
                     Binding(binding: 21, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // keys_read
                     Binding(binding: 22, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // candidates_write
                     Binding(binding: 23, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // keys_write
+                    Binding(binding: 24, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC lock/occupancy (no-64-bit-atomics insert path)
                 ]
             )
         ),

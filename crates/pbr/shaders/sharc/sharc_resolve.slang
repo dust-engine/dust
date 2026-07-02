@@ -8,7 +8,7 @@
 // Has its own playout (set 0 binds: 3 SHARC buffers + a small constants UBO);
 // the layout is auto-derived by slang_playout from this single source.
 
-#define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
+#define HASH_GRID_ENABLE_64_BIT_ATOMICS 0
 #define HASH_GRID_COMPACT 0
 #define SHARC_ENABLE_GLSL 0
 #define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
@@ -50,6 +50,10 @@ void main(
     uniform RWStructuredBuffer<HashGridKey> hashEntries,
     uniform RWStructuredBuffer<SharcAccumulationData> accumulation,
     uniform RWStructuredBuffer<SharcPackedData> resolved,
+    // Per-slot lock/occupancy buffer (binding 4). SharcResolveEntry resets the
+    // flag when it evicts a stale entry so the slot can be reclaimed by the
+    // 32-bit-CAS insert path; a harmless no-op for the spinlock path.
+    uniform RWStructuredBuffer<uint> lockBuffer,
 ) {
     uint entryIndex = dispatchThreadId.x;
     if (entryIndex >= cb.entriesNum) return;
@@ -61,6 +65,9 @@ void main(
     sharc.hashGridParameters.levelBias = SHARC_GRID_LEVEL_BIAS;
     sharc.hashGridData.capacity = cb.entriesNum;
     sharc.hashGridData.hashEntriesBuffer = hashEntries;
+#if !HASH_GRID_ENABLE_64_BIT_ATOMICS && !HASH_GRID_COMPACT
+    sharc.hashGridData.lockBuffer = lockBuffer;
+#endif
     sharc.accumulationBuffer = accumulation;
     sharc.resolvedBuffer = resolved;
     sharc.radianceScale = cb.radianceScale;

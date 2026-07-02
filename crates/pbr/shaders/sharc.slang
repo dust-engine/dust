@@ -4,7 +4,14 @@ module sharc;
 // types (HashGridKey, SharcAccumulationData, SharcPackedData, SharcParameters,
 // SharcHitData, …) resolve when this module is compiled. Headers come from
 // @sharc//:sharc_headers — see crates/pbr/shaders/BUILD.bazel.
-#define HASH_GRID_ENABLE_64_BIT_ATOMICS 1
+#define HASH_GRID_ENABLE_64_BIT_ATOMICS 0
+// Insert-path claim strategy for the no-64-bit-atomics build:
+//   0 = SHARC's stock bounded spinlock (default; drops inserts under heavy
+//       contention but is the faithful, single-source-of-truth path)
+//   1 = wait-free single 32-bit-CAS occupancy claim (no spin; may create a few
+//       duplicate entries under contention, merged at resolve). Requires the
+//       lock buffer to be wired (it is) and the resolve eviction reset (it is).
+#define HASH_GRID_CLAIM_VIA_32BIT_CAS 1
 #define HASH_GRID_COMPACT 0
 #define SHARC_ENABLE_GLSL 0
 #define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
@@ -117,6 +124,13 @@ public struct SharcParams {
     RWStructuredBuffer<Candidate> g_sharcCandidatesWrite;
     [Stages(STAGE_RAYGEN | STAGE_CLOSEST_HIT)]
     RWStructuredBuffer<uint> g_sharcKeysWrite;
+    // Per-slot lock/occupancy buffer for the hash-grid insert path on hardware
+    // without 64-bit atomics (HASH_GRID_ENABLE_64_BIT_ATOMICS 0). One uint per
+    // hash entry (sized entriesNum, not poolCapacity). Used by the spinlock and
+    // by the 32-bit-CAS claim (HASH_GRID_CLAIM_VIA_32BIT_CAS); the resolve pass
+    // resets the flag at eviction. Only openCellForUpdate touches it.
+    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
+    RWStructuredBuffer<uint> g_sharcLock;
 
     // Private helpers used by the public accessor methods below.
     SharcParameters buildSharcParameters() {
@@ -127,6 +141,12 @@ public struct SharcParams {
         p.hashGridParameters.levelBias = SHARC_GRID_LEVEL_BIAS;
         p.hashGridData.capacity = g_sharcConstants.entriesNum;
         p.hashGridData.hashEntriesBuffer = g_sharcHashEntries;
+        // Lock/occupancy buffer for the no-64-bit-atomics insert path. The
+        // HashGrid_(Data) struct only declares this field when
+        // HASH_GRID_ENABLE_64_BIT_ATOMICS == 0, so guard the assignment to match.
+#if !HASH_GRID_ENABLE_64_BIT_ATOMICS && !HASH_GRID_COMPACT
+        p.hashGridData.lockBuffer = g_sharcLock;
+#endif
         p.accumulationBuffer = g_sharcAccumulation;
         p.resolvedBuffer = g_sharcResolved;
         p.radianceScale = g_sharcConstants.radianceScale;

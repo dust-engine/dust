@@ -3,6 +3,9 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
+# Patch applied to the @sharc repository (see MODULE.bazel).
+exports_files(["sharc_lock_claim.patch"])
+
 cc_import(
     name = "slang_windows",
     interface_library = "@vulkan_sdk_1.4.341.1//:sdk/Lib/slang.lib",

@@ -1,0 +1,61 @@
+diff --git a/include/HashGridCommon.h b/include/HashGridCommon.h
+index b5042b3..6ef015e 100644
+--- a/include/HashGridCommon.h
++++ b/include/HashGridCommon.h
+@@ -72,6 +72,10 @@ static const uint HASH_GRID_(NORMAL_BIT_OFFSET)     = HASH_GRID_(LEVEL_BIT_OFFSE
+ #define HASH_GRID_ENABLE_64_BIT_ATOMICS     1       // use 64-bit atomics for hash key insertion; if not available, a lock buffer will be used for synchronization
+ #endif
+ 
++#ifndef HASH_GRID_CLAIM_VIA_32BIT_CAS
++#define HASH_GRID_CLAIM_VIA_32BIT_CAS       0       // when the lock buffer is used (no 64-bit atomics), claim slots with a single 32-bit CAS occupancy flag instead of the spinlock. Requires SharcResolveEntry to reset the flag at eviction.
++#endif
++
+ #ifndef HASH_GRID_USE_NORMALS
+ #define HASH_GRID_USE_NORMALS               1       // account for the normal data in the hash key
+ #endif
+@@ -224,6 +228,31 @@ void HashGrid_(AtomicCompareExchange)(in HashGrid_(Data) hashData, in uint dstOf
+ #else // !SHARC_ENABLE_GLSL
+     InterlockedCompareExchange(BUFFER_AT_OFFSET(hashData.hashEntriesBuffer, dstOffset), compareValue, value, originalValue);
+ #endif // SHARC_ENABLE_GLSL
++#elif HASH_GRID_CLAIM_VIA_32BIT_CAS
++    // Wait-free claim. lockBuffer is repurposed as a persistent per-slot
++    // occupancy flag (0 = empty, 1 = claimed); a single 32-bit CAS claims an
++    // empty slot and the 64-bit key is published by the winner. Valid only for
++    // compareValue == HASH_GRID_INVALID_HASH_KEY, which is the hash grid's only
++    // use. Slots are reclaimed by resetting the flag at eviction time in
++    // SharcResolveEntry (see SharcCommon.h).
++    uint prevState;
++    InterlockedCompareExchange(hashData.lockBuffer[dstOffset], 0u, 1u, prevState);
++    if (prevState == 0u)
++    {
++        // Won the empty slot -- publish the key.
++        BUFFER_AT_OFFSET(hashData.hashEntriesBuffer, dstOffset) = value;
++        originalValue = HASH_GRID_INVALID_HASH_KEY;
++    }
++    else
++    {
++        // Already claimed. Read the published key (INVALID if the winner has not
++        // stored it yet -> report a non-matching, non-empty sentinel so the
++        // caller probes onward; the stray entry is merged at resolve time).
++        HashGrid_(Key) stored = BUFFER_AT_OFFSET(hashData.hashEntriesBuffer, dstOffset);
++        originalValue = (stored == value)
++            ? value
++            : (stored == HASH_GRID_INVALID_HASH_KEY ? (value ^ HashGrid_(Key)(1)) : stored);
++    }
+ #else // !HASH_GRID_ENABLE_64_BIT_ATOMICS
+     // ANY rearangments to the code below lead to device hang if fuse is unlimited
+     const uint cLock = 0xAAAAAAAA;
+diff --git a/include/SharcCommon.h b/include/SharcCommon.h
+index 2a95481..a4f0881 100644
+--- a/include/SharcCommon.h
++++ b/include/SharcCommon.h
+@@ -853,6 +853,9 @@ void SharcResolveEntry(uint entryIndex, SharcParameters sharcParameters, SharcRe
+         SharcPackedData zeroPackedData = SharcZeroPackedData();
+ 
+         BUFFER_AT_OFFSET(sharcParameters.hashGridData.hashEntriesBuffer, entryIndex) = HASH_GRID_INVALID_HASH_KEY;
++#if !HASH_GRID_ENABLE_64_BIT_ATOMICS && !HASH_GRID_COMPACT
++        sharcParameters.hashGridData.lockBuffer[entryIndex] = 0u; // reclaim the slot for the 32-bit-CAS claim path (no-op for the spinlock)
++#endif
+         BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, entryIndex) = zeroAccumulationData;
+         BUFFER_AT_OFFSET(sharcParameters.resolvedBuffer, entryIndex) = zeroPackedData;
+         return;
