@@ -35,8 +35,7 @@ Cargo also works for code-only builds (`cargo build`, `cargo test`), but Bazel i
 | --- | --- |
 | `crates/vdb` (`dust_vdb`) | Hierarchical voxel spatial index. Generic tree with configurable depth via the `hierarchy!` macro. Bit-packed node storage and pooling. Compiled at `opt-level = 3` even in dev. |
 | `crates/vox` (`dust_vox`) | Voxel geometry, materials, palettes, and `.vox` loading. Defines the tree as `hierarchy!(3, 3, 2, VoxLeafNode)` and provides hit-group shaders for ray intersection. |
-| `crates/pbr` (`dust_pbr`) | PBR ray-tracing renderer: pipeline, Shader Binding Table, camera, sky atmosphere. Shaders in `crates/pbr/shaders/` (Slang). |
-| `crates/denoiser` (`dust_denoiser`) | Pluggable denoiser/upscaler backends. Currently DLSS via NVIDIA NGX. |
+| `crates/pbr` (`dust_pbr`) | PBR ray-tracing renderer: pipeline, Shader Binding Table, camera, sky atmosphere, and super-resolution (denoise + upscale) through the external `pumicite_super_resolution` crate (DLSS-RR backend). Shaders in `crates/pbr/shaders/` (Slang). |
 | `crates/app` (`dust_app`) | Application-level Bevy plugin glue. |
 | `src/main.rs` | Demo entry point — loads a castle scene, an orbiting teapot, and an animated rainbow. |
 

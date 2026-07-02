@@ -179,6 +179,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1631,6 +1640,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "curl"
+version = "0.4.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a45ee8994e5307cb4c60cfc1c20bf7263ffb771ddc135c9f768a14bcbc15b09"
+dependencies = [
+ "curl-sys",
+ "libc",
+ "openssl-probe",
+ "openssl-sys",
+ "schannel",
+ "socket2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "curl-sys"
+version = "0.4.90+curl-8.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97799a0d220bfb3361e0fe4936966ff8c4b24d65c3f06dfc70d7b680b44e7897"
+dependencies = [
+ "cc",
+ "libc",
+ "libz-sys",
+ "openssl-sys",
+ "pkg-config",
+ "vcpkg",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1782,7 +1821,6 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "dust_app",
- "dust_denoiser",
  "dust_gfxdebug",
  "dust_pbr",
  "dust_vox",
@@ -1803,18 +1841,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dust_denoiser"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_pumicite",
- "dust_app",
- "pumicite",
- "runfiles",
- "tracing",
-]
-
-[[package]]
 name = "dust_gfxdebug"
 version = "0.1.0"
 dependencies = [
@@ -1831,11 +1857,12 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "bytemuck",
- "dust_denoiser",
+ "dust_app",
  "dust_gfxdebug",
  "glam",
  "pumicite",
  "pumicite_egui",
+ "pumicite_super_resolution",
  "tracing",
 ]
 
@@ -2071,6 +2098,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
+]
+
+[[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -2729,6 +2766,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "libz-sys"
+version = "1.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2981,6 +3030,83 @@ dependencies = [
 ]
 
 [[package]]
+name = "nyquest"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c54715182b0e7fb868e03ca248e7ce988db1c3539448e2e89172e464c46fc63d"
+dependencies = [
+ "nyquest-interface",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "nyquest-backend-curl"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a929439f135ed0b3944a6f7a881f9712c7d102ec89520eb3b6fc9a90f75c77ce"
+dependencies = [
+ "curl",
+ "curl-sys",
+ "libc",
+ "memchr",
+ "nyquest-interface",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "nyquest-backend-nsurlsession"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "737f41a546c5fef3466f809bfb44ec2bbef6bd01ba39214bf8ffc1f331452e07"
+dependencies = [
+ "arc-swap",
+ "block2 0.6.2",
+ "cfg-if",
+ "nyquest-interface",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "objc2-security",
+]
+
+[[package]]
+name = "nyquest-backend-winrt"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7dd1a2bde71ed7e8bf33bcf5f56669aa3dea0f6d4a8b4b9c6557dd9766813ef"
+dependencies = [
+ "cfg-if",
+ "nyquest-interface",
+ "windows 0.61.3",
+ "windows-collections",
+ "windows-core 0.61.2",
+ "windows-future",
+]
+
+[[package]]
+name = "nyquest-interface"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb05f2ed2f66e1ebe9135ebac41d17e00588841502c4fad99ed57476c13147ca"
+dependencies = [
+ "cfg-if",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "nyquest-preset"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea35ac70869718aceb64b004e507fd5644f58b574ff84ac5e936912a37ef2c54"
+dependencies = [
+ "cfg-if",
+ "nyquest",
+ "nyquest-backend-curl",
+ "nyquest-backend-nsurlsession",
+ "nyquest-backend-winrt",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3111,7 +3237,7 @@ dependencies = [
  "block2 0.5.1",
  "objc2 0.5.2",
  "objc2-foundation 0.2.2",
- "objc2-metal",
+ "objc2-metal 0.2.2",
 ]
 
 [[package]]
@@ -3152,6 +3278,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.11.1",
+ "block2 0.6.2",
  "objc2 0.6.4",
  "objc2-core-foundation",
 ]
@@ -3192,6 +3319,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-metal"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0125f776a10d00af4152d74616409f0d4a2053a6f57fa5b7d6aa2854ac04794"
+dependencies = [
+ "bitflags 2.11.1",
+ "block2 0.6.2",
+ "dispatch2",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-metal-fx"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2db6f3a9d3b07481d9e5884f592aff6fd3f99e155423d1d1af3977e77a90ea0e"
+dependencies = [
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+]
+
+[[package]]
 name = "objc2-quartz-core"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3201,7 +3353,18 @@ dependencies = [
  "block2 0.5.1",
  "objc2 0.5.2",
  "objc2-foundation 0.2.2",
- "objc2-metal",
+ "objc2-metal 0.2.2",
+]
+
+[[package]]
+name = "objc2-security"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "709fe137109bd1e8b5a99390f77a7d8b2961dafc1a1c5db8f2e60329ad6d895a"
+dependencies = [
+ "bitflags 2.11.1",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
 ]
 
 [[package]]
@@ -3274,6 +3437,24 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "openssl-probe"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
+
+[[package]]
+name = "openssl-sys"
+version = "0.9.117"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
 
 [[package]]
 name = "option-ext"
@@ -3559,6 +3740,25 @@ dependencies = [
  "bytemuck",
  "glam",
  "pumicite",
+ "tracing",
+]
+
+[[package]]
+name = "pumicite_super_resolution"
+version = "0.1.0"
+source = "git+https://github.com/dust-engine/pumicite_super_resolution.git?rev=bd8b542e15657f49190ca33877591ef6fb5b5f31#bd8b542e15657f49190ca33877591ef6fb5b5f31"
+dependencies = [
+ "ash",
+ "cc",
+ "flate2",
+ "nyquest",
+ "nyquest-preset",
+ "objc2 0.6.4",
+ "objc2-metal 0.3.2",
+ "objc2-metal-fx",
+ "pumicite",
+ "runfiles",
+ "tar",
  "tracing",
 ]
 
@@ -3893,6 +4093,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "schannel"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4021,6 +4230,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket2"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4112,6 +4331,17 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
 
 [[package]]
 name = "termcolor"
@@ -4433,6 +4663,12 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version_check"
@@ -5300,6 +5536,16 @@ name = "x11rb-protocol"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix 1.1.4",
+]
 
 [[package]]
 name = "xkbcommon-dl"

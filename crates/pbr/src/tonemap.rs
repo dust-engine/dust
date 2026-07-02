@@ -15,7 +15,7 @@ use pumicite::{
 
 use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
 
-use crate::{DlssState, HdrRenderTarget, PbrRenderState, camera::Camera};
+use crate::{HdrRenderTarget, PbrRenderState, camera::Camera};
 
 unsafe extern "C" {
     fn dust_lpm_setup(
@@ -289,7 +289,6 @@ pub(crate) fn tonemap_pass(
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     mut swapchain_images: Query<(&mut SwapchainImage, &Camera), With<bevy::window::PrimaryWindow>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-    dlss_state: Option<ResMut<DlssState>>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((mut swapchain_image, camera)) = swapchain_images.single_mut() else {

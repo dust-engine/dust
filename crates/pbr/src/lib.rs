@@ -1,6 +1,7 @@
 pub mod camera;
 pub mod sharc;
 pub mod sky;
+pub mod super_resolution;
 pub mod tonemap;
 
 include!(concat!(
@@ -27,17 +28,26 @@ use bevy_pumicite::{
 use bytemuck::{Pod, Zeroable};
 use pumicite::{device::DeviceBuilder, image::UintImageView};
 use pumicite::{
-    Allocator, HasDevice,
+    Allocator, Device, HasDevice,
     ash::vk::{self, TaggedStructure},
     buffer::BufferLike,
     debug::DebugObject,
     image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView},
+    physical_device::PhysicalDevice,
+    pipeline::PipelineCache,
     rtx::ShaderBindingTable,
     sync::GPUMutex,
     tracking::{Access, ResourceState},
     utils::{AsVkHandle, glam_to_vk_transform},
 };
 use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
+use pumicite_super_resolution::{
+    ScalingFactor, SuperResolutionCameraInfo, SuperResolutionCommandEncoder,
+    SuperResolutionDispatchDenoiseInfo, SuperResolutionDispatchFlags, SuperResolutionDispatchInfo,
+    SuperResolutionDispatchMotionInfo, SuperResolutionEngine, SuperResolutionImageInfo,
+    SuperResolutionPhysicalDevice, SuperResolutionQualityFocusFlags, SuperResolutionSession,
+    SuperResolutionSessionCreateFlags, SuperResolutionSessionCreateInfo,
+};
 
 use dust_gfxdebug::{GpuProfiler, GpuTimerCommands, PerformancePanel};
 
@@ -46,6 +56,7 @@ use bevy_pumicite::prelude::ComputePipeline;
 use crate::{
     camera::Camera,
     sky::{AtmosphereLUTs, SkyAtmosphereLUTRenderSet},
+    super_resolution::SuperResolutionIdentity,
 };
 
 #[repr(C)]
@@ -155,16 +166,22 @@ pub struct PbrRenderPlugin;
 impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup.after(CreateDevice));
+        app.add_systems(Startup, setup_upscaler.after(CreateDevice));
         app.init_resource::<JitterState>();
         app.init_resource::<RenderQualitySettings>();
+        app.init_resource::<UpscalerSessionState>();
         app.add_systems(
             PostUpdate,
             (
                 create_sbt.before(PbrRenderSet),
                 ensure_hdr_target.in_set(SwapchainSet).before(render),
-                ensure_dlss_feature
+                ensure_upscaler_session
                     .in_set(DefaultRenderSet)
                     .after(ensure_hdr_target)
+                    .before(render),
+                advance_jitter
+                    .in_set(DefaultRenderSet)
+                    .after(ensure_upscaler_session)
                     .before(render),
                 update_prev_transforms
                     .in_set(DefaultRenderSet)
@@ -190,16 +207,16 @@ impl Plugin for PbrRenderPlugin {
                     // to 0 (so the WRS-of-1 atomic_max starts from "empty")
                     // before vox_final_gather CHS pushes Query misses.
                     .after(sharc::clear_sharc_buffers),
-                dlss_evaluate
+                upscaler_evaluate
                     .in_set(DefaultRenderSet)
-                    .after(ensure_dlss_feature)
+                    .after(ensure_upscaler_session)
                     .after(final_gather_pass),
                 tonemap_pass
                     .in_set(DefaultRenderSet)
                     .after(render)
                     .after(shadow_pass)
                     .after(final_gather_pass)
-                    .after(dlss_evaluate),
+                    .after(upscaler_evaluate),
             ),
         );
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
@@ -583,7 +600,7 @@ pub struct HdrRenderTargetViews {
     /// (currentPixel - prevPixel). Written by the primary RT pass.
     pub motion_vectors: FullImageView<Image>,
     /// R8G8B8A8_UNORM. Stand-in specular albedo for DLSS-RR. Cleared to 0
-    /// each frame in `dlss_evaluate` until the renderer produces a real
+    /// each frame in `upscaler_evaluate` until the renderer produces a real
     /// specular term — voxel materials are matte today, so black is a
     /// physically reasonable placeholder.
     pub specular_albedo: FullImageView<Image>,
@@ -635,17 +652,22 @@ pub enum UpscalerQualityMode {
 }
 
 impl UpscalerQualityMode {
-    /// Maps to the NGX `PerfQuality` value used for both the optimal-settings
-    /// query and DLSS feature creation.
-    pub fn to_ngx(self) -> dust_denoiser::dlss::sys::NVSDK_NGX_PerfQuality_Value {
-        use dust_denoiser::dlss::sys::NVSDK_NGX_PerfQuality_Value as Q;
+    /// Output-over-input render-scale for this mode, as an exact ratio. The
+    /// internal render resolution is the display resolution divided by this
+    /// factor; the super-resolution engine upscales back to display resolution.
+    ///
+    /// The ratios match NVIDIA's published DLSS quality modes (and the scaling
+    /// factors `pumicite_super_resolution` reports for DLSS-RR), so the backend
+    /// resolves the same internal quality it would from an optimal-settings
+    /// query.
+    pub fn scaling_factor(self) -> ScalingFactor {
         match self {
-            Self::UltraPerformance => Q::UltraPerformance,
-            Self::Performance => Q::MaxPerf,
-            Self::Balanced => Q::Balanced,
-            Self::Quality => Q::MaxQuality,
-            Self::UltraQuality => Q::UltraQuality,
-            Self::Dlaa => Q::DLAA,
+            Self::Dlaa => ScalingFactor { numerator: 1, denominator: 1 },
+            Self::UltraQuality => ScalingFactor { numerator: 13, denominator: 10 },
+            Self::Quality => ScalingFactor { numerator: 3, denominator: 2 },
+            Self::Balanced => ScalingFactor { numerator: 12, denominator: 7 },
+            Self::Performance => ScalingFactor { numerator: 2, denominator: 1 },
+            Self::UltraPerformance => ScalingFactor { numerator: 3, denominator: 1 },
         }
     }
 }
@@ -672,48 +694,30 @@ pub struct PbrRenderState {
 #[derive(Default)]
 struct FrameCounter(u32);
 
-/// Sub-pixel jitter for the current frame, in pixels. Refreshed once per
-/// frame by `advance_jitter` and read by `render`, `final_gather_pass` (kept
-/// at zero — final gather doesn't reproject), and `dlss_evaluate`.
-#[derive(Resource)]
+/// Sub-pixel jitter for the current frame, in texels. Refreshed once per frame
+/// by [`advance_jitter`] and read by `render`, `shadow_pass`,
+/// `final_gather_pass`, and `upscaler_evaluate`. All passes that sample the
+/// jittered camera must use the same value, and it must match the
+/// `texel_jitter` handed to the upscaler dispatch.
+#[derive(Resource, Default)]
 pub(crate) struct JitterState {
     pub(crate) frame_count: u32,
     pub(crate) offset: Vec2,
 }
-impl Default for JitterState {
-    fn default() -> Self {
-        let mut state = JitterState {
-            frame_count: 0,
-            offset: Vec2::ZERO,
-        };
-        state.advance_jitter();
-        state
-    }
-}
-impl JitterState {
-    /// Length of the jitter window. NVIDIA recommends ≥ 32 jitter positions; we
-    /// use 64 to match the codebase's existing 64-layer blue-noise convention.
-    const JITTER_SAMPLE_COUNT: u32 = 256;
 
-    pub fn advance_jitter(&mut self) {
-        /// Radical-inverse / van der Corput sample for the Halton sequence at `index`
-        /// in the given `base`. Returns a value in `[0, 1)`.
-        fn halton(mut index: u32, base: u32) -> f32 {
-            let mut f = 1.0_f32;
-            let mut r = 0.0_f32;
-            let inv_base = 1.0_f32 / base as f32;
-            while index > 0 {
-                f *= inv_base;
-                r += f * (index % base) as f32;
-                index /= base;
-            }
-            r
-        }
-
-        let i = self.frame_count % Self::JITTER_SAMPLE_COUNT;
-        self.offset = Vec2::new(halton(i, 2) - 0.5, halton(i, 3) - 0.5);
-        self.frame_count = self.frame_count.wrapping_add(1);
+/// Advances the temporal jitter for the frame by indexing the active session's
+/// recommended jitter pattern (see
+/// [`SuperResolutionSession::recommended_jitter_pattern`], surfaced via
+/// [`UpscalerSessionState::jitter_pattern`]). Falls back to no jitter when no
+/// session is active. Runs before every pass that reads [`JitterState`].
+fn advance_jitter(mut jitter: ResMut<JitterState>, state: Res<UpscalerSessionState>) {
+    if state.jitter_pattern.is_empty() {
+        jitter.offset = Vec2::ZERO;
+        return;
     }
+    let index = jitter.frame_count as usize % state.jitter_pattern.len();
+    jitter.offset = state.jitter_pattern[index];
+    jitter.frame_count = jitter.frame_count.wrapping_add(1);
 }
 
 pub fn setup(
@@ -766,28 +770,69 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
     }
 }
 
-/// Holds the active DLSS-RR feature handle and the resolutions it was
-/// configured for. Recreated whenever either the render (input) or output
+/// The active super-resolution engine, resolved once after device creation.
+///
+/// Absent when no upscaler is available (`enumerate_super_resolution_engines`
+/// returned empty — e.g. a non-NVIDIA GPU), in which case rendering runs at
+/// native resolution and the denoise/upscale pass is skipped.
+#[derive(Resource)]
+pub struct Upscaler {
+    engine: SuperResolutionEngine,
+    /// Pipeline cache handed to [`SuperResolutionSession::new`]. The backend uses
+    /// it only to reach the device, so a null cache is sufficient.
+    pipeline_cache: PipelineCache,
+}
+
+/// Resolves the available super-resolution engine once the logical device
+/// exists and inserts the [`Upscaler`] resource. Runs at `Startup` after
+/// [`CreateDevice`]; leaves the resource absent when no engine is available.
+fn setup_upscaler(
+    mut commands: Commands,
+    physical_device: Res<PhysicalDevice>,
+    device: Res<Device>,
+    identity: Res<SuperResolutionIdentity>,
+) {
+    let engines = physical_device
+        .enumerate_super_resolution_engines(&identity.info())
+        .unwrap_or_default();
+    let Some(&engine) = engines.first() else {
+        tracing::info!(
+            target: "ngx",
+            "No super-resolution engine available; rendering at native resolution"
+        );
+        return;
+    };
+    commands.insert_resource(Upscaler {
+        engine,
+        pipeline_cache: PipelineCache::null((*device).clone()),
+    });
+}
+
+/// Holds the active super-resolution session and the resolutions it was created
+/// for. The session is recreated whenever either the render (input) or output
 /// (display) extent changes — i.e. on a swapchain resize or a quality-mode
 /// switch.
 #[derive(Resource, Default)]
-pub struct DlssState {
-    pub feature: Option<dust_denoiser::dlss::NgxFeature>,
-    /// Internal render resolution (`InWidth`/`InHeight`) the feature was built for.
-    pub configured_render_extent: UVec2,
-    /// Display/output resolution (`InTargetWidth`/`InTargetHeight`) it was built for.
-    pub configured_output_extent: UVec2,
+pub struct UpscalerSessionState {
+    session: Option<SuperResolutionSession>,
+    /// The engine's recommended per-frame jitter pattern (texel offsets in
+    /// `[-0.5, 0.5]`), queried from the session at creation. Empty when no
+    /// session is active (no jitter). `advance_jitter` cycles through it.
+    jitter_pattern: Vec<Vec2>,
+    /// Internal render (source) resolution the session was created for.
+    configured_render_extent: UVec2,
+    /// Display/output (destination) resolution the session was created for.
+    configured_output_extent: UVec2,
 }
 
-fn ensure_dlss_feature(
+fn ensure_upscaler_session(
     mut ctx: SubmissionState,
-    mut ngx: ResMut<dust_denoiser::dlss::NgxContext>,
-    state: Option<ResMut<DlssState>>,
+    upscaler: Option<Res<Upscaler>>,
+    mut state: ResMut<UpscalerSessionState>,
     hdr_target: Option<Res<HdrRenderTarget>>,
-    quality_settings: Res<RenderQualitySettings>,
-    mut commands: Commands,
+    identity: Res<SuperResolutionIdentity>,
 ) {
-    ngx.check_dlss_rr_available().unwrap();
+    let Some(upscaler) = upscaler else { return };
     let Some(hdr) = hdr_target else { return };
     if hdr.display_extent.x == 0
         || hdr.display_extent.y == 0
@@ -797,118 +842,154 @@ fn ensure_dlss_feature(
         return;
     }
 
-    let needs_create = match state.as_deref() {
-        Some(s) => {
-            s.configured_render_extent != hdr.render_extent
-                || s.configured_output_extent != hdr.display_extent
-                || s.feature.is_none()
-        }
-        None => true,
-    };
+    let needs_create = state.session.is_none()
+        || state.configured_render_extent != hdr.render_extent
+        || state.configured_output_extent != hdr.display_extent;
     if !needs_create {
         return;
     }
 
-    // Drop any previous feature before recording the new one. NGX records
-    // initialization commands into the active command buffer, so this must
-    // happen during a SubmissionState::record callback.
-    let mut state = state;
-    if let Some(s) = state.as_mut() {
-        s.feature = None;
-    }
+    // Drop the previous session before recording the new one's initialization.
+    state.session = None;
 
-    let create_params = dust_denoiser::dlss::sys::NVSDK_NGX_DLSSD_Create_Params {
-        InDenoiseMode: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Denoise_Mode::DLUnified, // DL based unified upscaler
-        InRoughnessMode: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Roughness_Mode::Packed, // Read roughness from normals.w
-        InUseHWDepth: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Depth_Type::HW,
-        InWidth: hdr.render_extent.x,
-        InHeight: hdr.render_extent.y,
-        InTargetWidth: hdr.display_extent.x,
-        InTargetHeight: hdr.display_extent.y,
-        InPerfQualityValue: quality_settings.quality.to_ngx(),
-        // MVLowRes is required by DLSS-RR (the SwinDenoiser refuses to
-        // initialize without it): motion vectors are sampled at the input /
-        // render resolution rather than the output resolution.
-        // DepthInverted matches the reverse-infinite-Z encoding written by the
-        // RT closest-hit shader (depth = near / linearViewZ, so 0 = far,
-        // 1 = near plane).
-        InFeatureCreateFlags: dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::IsHDR
-            | dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::MVLowRes
-            | dust_denoiser::dlss::sys::NVSDK_NGX_DLSS_Feature_Flags::DepthInverted,
-        InEnableOutputSubrects: false,
+    let create_info = SuperResolutionSessionCreateInfo {
+        engine: upscaler.engine,
+        // Reverse-infinite-Z: the depth G-buffer stores `near / linearViewZ`
+        // (0 = far, 1 = near), matching the RT closest-hit encoding.
+        flags: SuperResolutionSessionCreateFlags::INVERTED_DEPTH,
+        required_quality_focuses: SuperResolutionQualityFocusFlags::BALANCED,
+        destination_format: vk::Format::R16G16B16A16_SFLOAT,
+        source_format: vk::Format::R16G16B16A16_SFLOAT,
+        source_depth_format: vk::Format::R32_SFLOAT,
+        motion_vector_format: vk::Format::R16G16_SFLOAT,
+        reactive_mask_format: vk::Format::UNDEFINED,
+        ignore_history_mask_format: vk::Format::UNDEFINED,
+        exposure_scale_format: vk::Format::UNDEFINED,
+        diffuse_albedo_format: vk::Format::R8G8B8A8_SRGB,
+        specular_albedo_format: vk::Format::R8G8B8A8_UNORM,
+        normal_format: vk::Format::R16G16B16A16_SFLOAT,
+        // Roughness is packed into `normal.w`; no separate roughness image.
+        roughness_format: vk::Format::UNDEFINED,
+        specular_hit_distance_format: vk::Format::UNDEFINED,
+        denoise_strength_mask_format: vk::Format::UNDEFINED,
+        transparency_overlay_format: vk::Format::UNDEFINED,
+        destination_region_size: vk::Extent2D {
+            width: hdr.display_extent.x,
+            height: hdr.display_extent.y,
+        },
+        max_source_region_size: vk::Extent2D {
+            width: hdr.render_extent.x,
+            height: hdr.render_extent.y,
+        },
+        motion_vector_scale_x: 1.0,
+        motion_vector_scale_y: 1.0,
+        max_concurrent_dispatches: 1,
     };
 
-    let mut result = None;
-    ctx.record(|encoder| {
-        encoder.emit_barriers();
-        let cmd_buffer = encoder.buffer().vk_handle();
-        result = Some(ngx.create_dlssd_feature(cmd_buffer, &create_params));
-    });
-
-    match result {
-        Some(Ok(feature)) => {
-            tracing::info!(
+    let session = match SuperResolutionSession::new(
+        &upscaler.pipeline_cache,
+        &create_info,
+        &identity.info(),
+    ) {
+        Ok(session) => session,
+        Err(e) => {
+            tracing::error!(
                 target: "ngx",
                 render = ?hdr.render_extent,
                 output = ?hdr.display_extent,
-                "Created DLSS-RR feature"
+                "Super-resolution session creation failed: {e:?}"
             );
-            if let Some(mut s) = state {
-                s.feature = Some(feature);
-                s.configured_render_extent = hdr.render_extent;
-                s.configured_output_extent = hdr.display_extent;
-            } else {
-                commands.insert_resource(DlssState {
-                    feature: Some(feature),
-                    configured_render_extent: hdr.render_extent,
-                    configured_output_extent: hdr.display_extent,
-                });
-            }
+            return;
         }
-        Some(Err(e)) => {
-            tracing::error!(
-                target: "ngx",
-                extent = ?hdr.display_extent,
-                "DLSS-RR feature creation failed: {e}"
-            );
-        }
-        None => {}
-    }
+    };
+
+    // Record session initialization (backend feature creation) into the active
+    // command buffer, then keep the session for subsequent dispatches.
+    ctx.record(|encoder| {
+        encoder.emit_barriers();
+        encoder.initialize_super_resolution_session(&session);
+    });
+
+    // Query the engine's recommended per-frame jitter pattern for these extents
+    // (empty for a non-temporal engine; DLSS-RR is temporal, so it returns one).
+    let jitter_pattern: Vec<Vec2> = session
+        .recommended_jitter_pattern(
+            create_info.destination_region_size,
+            create_info.max_source_region_size,
+        )
+        .map(|pattern| pattern.into_iter().map(|(x, y)| Vec2::new(x, y)).collect())
+        .unwrap_or_default();
+
+    tracing::info!(
+        target: "ngx",
+        render = ?hdr.render_extent,
+        output = ?hdr.display_extent,
+        jitter_phases = jitter_pattern.len(),
+        "Created super-resolution session"
+    );
+    state.session = Some(session);
+    state.jitter_pattern = jitter_pattern;
+    state.configured_render_extent = hdr.render_extent;
+    state.configured_output_extent = hdr.display_extent;
 }
 
-/// Records a DLSS-RR evaluate dispatch for the current frame.
-///
-/// Wraps the existing G-buffers as `NVSDK_NGX_Resource_VK` descriptors and
-/// drives the denoiser into [`DlssState::output`]. Required inputs that the
-/// engine does not yet produce (motion vectors, specular albedo, roughness,
-/// hit distances, jitter) are left as their NGX-default null/zero values —
-/// NGX will return `FAIL_MissingInput` until those are wired up.
-pub(crate) fn dlss_evaluate(
+/// Records a super-resolution (denoise + upscale) dispatch for the current
+/// frame: the noisy render-resolution radiance + G-buffers in, the denoised
+/// display-resolution image out ([`HdrRenderTargetViews::hdr_denoised_output`]).
+fn upscaler_evaluate(
     mut ctx: SubmissionState,
-    ngx: Option<ResMut<dust_denoiser::dlss::NgxContext>>,
-    state: Option<ResMut<DlssState>>,
+    state: ResMut<UpscalerSessionState>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
-    mut jitter: ResMut<JitterState>,
+    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    jitter: Res<JitterState>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
-    let (Some(mut ngx), Some(mut state), Some(mut hdr_target)) = (ngx, state, hdr_target) else {
-        return;
-    };
-    if state.feature.is_none() {
+    if state.session.is_none() {
         return;
     }
+    let Some(mut hdr_target) = hdr_target else {
+        return;
+    };
+    let Ok((camera, transform)) = swapchain_images.single() else {
+        return;
+    };
     let extent = hdr_target.display_extent;
     let render_extent = hdr_target.render_extent;
     if extent.x == 0 || extent.y == 0 || render_extent.x == 0 || render_extent.y == 0 {
         return;
     }
 
+    // Camera matrices for the denoiser's reprojection. dust renders with a
+    // matrix-free, reverse-infinite-Z camera (rays from `tan_half_fov`, depth =
+    // `near / linearViewZ`), so reconstruct the equivalent matrices here. The
+    // DLSS backend ignores `camera_info`; it is filled for backend portability.
+    let view_from_world = transform.affine().inverse();
+    let world_to_view = Mat4::from(view_from_world).to_cols_array_2d();
+    let t = camera.tan_half_fov();
+    let aspect = render_extent.x as f32 / render_extent.y as f32;
+    let near = camera.depth.start;
+    // Reverse-Z, infinite far plane: clip.w = -z_view (= linearViewZ) and
+    // clip.z = near, so ndc_z = near / linearViewZ, matching the depth buffer.
+    // Column-major (array of columns).
+    let view_to_clip = [
+        [1.0 / (t * aspect), 0.0, 0.0, 0.0],
+        [0.0, 1.0 / t, 0.0, 0.0],
+        [0.0, 0.0, 0.0, -1.0],
+        [0.0, 0.0, near, 0.0],
+    ];
+    let view_projection_matrix =
+        (Mat4::from_cols_array_2d(&view_to_clip) * Mat4::from(view_from_world)).to_cols_array_2d();
+    let camera_near = camera.depth.start;
+    let camera_far = camera.depth.end;
+    let camera_fov = camera.fov();
+
+    let jitter_offset = jitter.offset;
+
     ctx.record(move |encoder| {
-        let DlssState { feature, .. } = &mut *state;
-        let feature = feature.as_ref().unwrap();
+        let session = state.session.as_ref().unwrap();
         let hdr = &mut *hdr_target;
 
-        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
         let read_access = Access {
             stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -920,7 +1001,7 @@ pub(crate) fn dlss_evaluate(
         };
 
         encoder.use_image_resource(
-            &render_target_views.hdr_output,
+            &views.hdr_output,
             &mut hdr.state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -929,7 +1010,7 @@ pub(crate) fn dlss_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.albedo,
+            &views.albedo,
             &mut hdr.albedo_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -938,7 +1019,7 @@ pub(crate) fn dlss_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.normal,
+            &views.normal,
             &mut hdr.normal_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -947,7 +1028,7 @@ pub(crate) fn dlss_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.depth,
+            &views.depth,
             &mut hdr.depth_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -956,7 +1037,7 @@ pub(crate) fn dlss_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.motion_vectors,
+            &views.motion_vectors,
             &mut hdr.motion_vectors_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -965,7 +1046,16 @@ pub(crate) fn dlss_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.hdr_denoised_output,
+            &views.specular_albedo,
+            &mut hdr.specular_albedo_state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            &views.hdr_denoised_output,
             &mut hdr.hdr_denoised_target_state,
             write_access,
             vk::ImageLayout::GENERAL,
@@ -975,146 +1065,107 @@ pub(crate) fn dlss_evaluate(
         );
         encoder.emit_barriers();
 
-        encoder.use_image_resource(
-            &render_target_views.specular_albedo,
-            &mut hdr.specular_albedo_state,
-            read_access,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
+        // Transient view create-infos; the backend creates (and later destroys)
+        // a view per image from each. Sizes/layouts come from the create-infos'
+        // images, which are already tracked into `GENERAL` above.
+        let color_ci = sr_view_ci(views.hdr_output.vk_handle(), vk::Format::R16G16B16A16_SFLOAT);
+        let output_ci = sr_view_ci(
+            views.hdr_denoised_output.vk_handle(),
+            vk::Format::R16G16B16A16_SFLOAT,
         );
-        encoder.emit_barriers();
+        let depth_ci = sr_view_ci(views.depth.vk_handle(), vk::Format::R32_SFLOAT);
+        let motion_ci = sr_view_ci(views.motion_vectors.vk_handle(), vk::Format::R16G16_SFLOAT);
+        let normal_ci = sr_view_ci(views.normal.vk_handle(), vk::Format::R16G16B16A16_SFLOAT);
+        let diffuse_ci = sr_view_ci(views.albedo.vk_handle(), vk::Format::R8G8B8A8_SRGB);
+        let specular_ci =
+            sr_view_ci(views.specular_albedo.vk_handle(), vk::Format::R8G8B8A8_UNORM);
 
-        let subres = vk::ImageSubresourceRange {
+        let color_info = sr_image_info(&color_ci);
+        let output_info = sr_image_info(&output_ci);
+        let depth_info = sr_image_info(&depth_ci);
+        let motion_img_info = sr_image_info(&motion_ci);
+        let normal_info = sr_image_info(&normal_ci);
+        let diffuse_info = sr_image_info(&diffuse_ci);
+        let specular_info = sr_image_info(&specular_ci);
+
+        let motion = SuperResolutionDispatchMotionInfo {
+            motion_vectors_image_info: Some(&motion_img_info),
+            reactive_mask_image_info: None,
+            ignore_history_mask_image_info: None,
+            camera_info: SuperResolutionCameraInfo {
+                view_projection_matrix,
+                near: camera_near,
+                far: camera_far,
+                fov: camera_fov,
+            },
+            texel_jitter_x: jitter_offset.x,
+            texel_jitter_y: jitter_offset.y,
+        };
+        let denoise = SuperResolutionDispatchDenoiseInfo {
+            diffuse_albedo_image_info: &diffuse_info,
+            specular_albedo_image_info: &specular_info,
+            normal_image_info: &normal_info,
+            // Roughness is packed in `normal.w` (roughness_format UNDEFINED), so
+            // the backend ignores this; point it at any valid image.
+            roughness_image_info: &normal_info,
+            specular_hit_distance_image_info: None,
+            denoise_strength_mask_image_info: None,
+            transparency_overlay_image_info: None,
+            world_to_view_matrix: world_to_view,
+            view_to_clip_matrix: view_to_clip,
+        };
+        let dispatch_info = SuperResolutionDispatchInfo {
+            dispatch_index: 0,
+            flags: SuperResolutionDispatchFlags::empty(),
+            quality_focus: SuperResolutionQualityFocusFlags::BALANCED,
+            destination_image_info: &output_info,
+            source_image_info: &color_info,
+            source_depth_image_info: Some(&depth_info),
+            source_size: vk::Extent2D {
+                width: render_extent.x,
+                height: render_extent.y,
+            },
+            sharpness: 0.0,
+            motion_info: Some(&motion),
+            exposure_info: None,
+            denoise_info: Some(&denoise),
+            resource_descriptor_heap_offset: 0,
+            sampler_descriptor_heap_offset: 0,
+        };
+
+        encoder.timing_scope(profiler.as_deref_mut(), "super-resolution", |encoder| {
+            encoder.dispatch_super_resolution(session, &dispatch_info);
+        });
+    });
+}
+
+/// Builds a 2D color image-view create-info for a super-resolution dispatch
+/// image. The subresource covers the single color mip/layer of every G-buffer.
+fn sr_view_ci(image: vk::Image, format: vk::Format) -> vk::ImageViewCreateInfo<'static> {
+    vk::ImageViewCreateInfo {
+        image,
+        view_type: vk::ImageViewType::TYPE_2D,
+        format,
+        subresource_range: vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
             base_mip_level: 0,
             level_count: 1,
             base_array_layer: 0,
             layer_count: 1,
-        };
-
-        let mut color = ngx_image_resource(
-            render_target_views.hdr_output.full_view().vk_handle(),
-            render_target_views.hdr_output.vk_handle(),
-            subres,
-            vk::Format::R16G16B16A16_SFLOAT,
-            render_extent.x,
-            render_extent.y,
-            false,
-        );
-        let mut output_resource = ngx_image_resource(
-            render_target_views.hdr_denoised_output.full_view().vk_handle(),
-            render_target_views.hdr_denoised_output.vk_handle(),
-            subres,
-            vk::Format::R16G16B16A16_SFLOAT,
-            extent.x,
-            extent.y,
-            true,
-        );
-        let mut depth = ngx_image_resource(
-            render_target_views.depth.full_view().vk_handle(),
-            render_target_views.depth.vk_handle(),
-            subres,
-            vk::Format::R32_SFLOAT,
-            render_extent.x,
-            render_extent.y,
-            false,
-        );
-        let mut normals = ngx_image_resource(
-            render_target_views.normal.full_view().vk_handle(),
-            render_target_views.normal.vk_handle(),
-            subres,
-            vk::Format::R16G16B16A16_SFLOAT,
-            render_extent.x,
-            render_extent.y,
-            false,
-        );
-        let mut diffuse_albedo = ngx_image_resource(
-            render_target_views.albedo.srgb_view().vk_handle(),
-            render_target_views.albedo.vk_handle(),
-            subres,
-            vk::Format::R8G8B8A8_SRGB,
-            render_extent.x,
-            render_extent.y,
-            false,
-        );
-        let mut motion_vectors = ngx_image_resource(
-            render_target_views.motion_vectors.full_view().vk_handle(),
-            render_target_views.motion_vectors.vk_handle(),
-            subres,
-            vk::Format::R16G16_SFLOAT,
-            render_extent.x,
-            render_extent.y,
-            false,
-        );
-        let mut specular_albedo = ngx_image_resource(
-            render_target_views.specular_albedo.full_view().vk_handle(),
-            render_target_views.specular_albedo.vk_handle(),
-            subres,
-            vk::Format::R8G8B8A8_UNORM,
-            render_extent.x,
-            render_extent.y,
-            false,
-        );
-
-        let mut eval_params = dust_denoiser::dlss::sys::NVSDK_NGX_VK_DLSSD_Eval_Params::zeroed();
-        eval_params.pInColor = &mut color;
-        eval_params.pInOutput = &mut output_resource;
-        eval_params.pInDepth = &mut depth;
-        eval_params.pInNormals = &mut normals;
-        eval_params.pInDiffuseAlbedo = &mut diffuse_albedo;
-        eval_params.pInSpecularAlbedo = &mut specular_albedo;
-        eval_params.pInMotionVectors = &mut motion_vectors;
-        // The valid render subrect is the internal render resolution; DLSS-RR
-        // upscales it into the (display-resolution) output target.
-        eval_params.InRenderSubrectDimensions = dust_denoiser::dlss::sys::NVSDK_NGX_Dimensions {
-            Width: render_extent.x,
-            Height: render_extent.y,
-        };
-        eval_params.InMVScaleX = 1.0;
-        eval_params.InMVScaleY = 1.0;
-        // Sub-pixel jitter applied to this frame's primary ray, in pixels.
-        // Must match the value baked into the camera uniform consumed by the
-        // RT pass (see `advance_jitter`).
-        eval_params.InJitterOffsetX = jitter.offset.x;
-        eval_params.InJitterOffsetY = jitter.offset.y;
-        jitter.advance_jitter();
-        // No history yet — flag every frame as a teleport so DLSS-RR
-        // discards its temporal accumulation.
-        eval_params.InReset = 0;
-
-        encoder.timing_scope(profiler.as_deref_mut(), "DLSS eval", |encoder| {
-            let cmd_buffer = encoder.buffer().vk_handle();
-            if let Err(e) = ngx.evaluate_dlssd(cmd_buffer, feature, &mut eval_params) {
-                tracing::error!(target: "ngx", "DLSS-RR evaluate failed: {e}");
-            }
-        });
-    });
+        },
+        ..Default::default()
+    }
 }
 
-fn ngx_image_resource(
-    image_view: vk::ImageView,
-    image: vk::Image,
-    subresource_range: vk::ImageSubresourceRange,
-    format: vk::Format,
-    width: u32,
-    height: u32,
-    read_write: bool,
-) -> dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK {
-    dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK {
-        Resource: dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK_Resource {
-            ImageViewInfo: dust_denoiser::dlss::sys::NVSDK_NGX_ImageViewInfo_VK {
-                ImageView: image_view,
-                Image: image,
-                SubresourceRange: subresource_range,
-                Format: format,
-                Width: width,
-                Height: height,
-            },
-        },
-        Type: dust_denoiser::dlss::sys::NVSDK_NGX_Resource_VK_Type::ImageView,
-        ReadWrite: read_write,
+/// Wraps an image-view create-info as a full-image `SuperResolutionImageInfo`.
+/// dust keeps every super-resolution G-buffer in `GENERAL` layout with no
+/// sub-region offset.
+fn sr_image_info<'a>(ci: &'a vk::ImageViewCreateInfo<'a>) -> SuperResolutionImageInfo<'a> {
+    SuperResolutionImageInfo {
+        view: ci,
+        view_offset: vk::Offset2D { x: 0, y: 0 },
+        initial_layout: vk::ImageLayout::GENERAL,
+        final_layout: vk::ImageLayout::GENERAL,
     }
 }
 
@@ -1125,7 +1176,7 @@ fn ensure_hdr_target(
     swapchain_images: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
     mut perf_panel: Option<ResMut<PerformancePanel>>,
     quality_settings: Res<RenderQualitySettings>,
-    mut ngx: Option<ResMut<dust_denoiser::dlss::NgxContext>>,
+    upscaler: Option<Res<Upscaler>>,
 ) {
     let Ok(swapchain_image) = swapchain_images.single() else {
         return;
@@ -1147,20 +1198,21 @@ fn ensure_hdr_target(
     }
 
     // Resolve the internal render resolution for the active quality mode. Falls
-    // back to native (no upscaling) when DLSS is unavailable (non-NVIDIA GPU)
-    // or the query fails — DLAA also returns render == display here.
+    // back to native (no upscaling) when no upscaler is available (e.g. a
+    // non-NVIDIA GPU); DLAA also yields render == display (1:1 factor).
     let quality = quality_settings.quality;
-    let render_extent = match ngx.as_deref_mut() {
-        Some(ngx) => match ngx.get_optimal_settings(quality.to_ngx(), extent.x, extent.y) {
-            Ok(s) => UVec2::new(s.render_extent[0], s.render_extent[1]),
-            Err(e) => {
-                tracing::warn!(
-                    target: "ngx",
-                    "DLSS optimal-settings query failed ({e}); rendering at native resolution"
-                );
-                extent
-            }
-        },
+    let render_extent = match upscaler.as_ref() {
+        Some(_) => {
+            let factor = quality.scaling_factor();
+            // Round-to-nearest of value * denominator / numerator, clamped to
+            // >= 1 — the vendor's optimal render size for this quality mode.
+            let scale = |value: u32| -> u32 {
+                (((value as u64 * factor.denominator as u64) + factor.numerator as u64 / 2)
+                    / factor.numerator as u64)
+                    .max(1) as u32
+            };
+            UVec2::new(scale(extent.x), scale(extent.y))
+        }
         None => extent,
     };
 

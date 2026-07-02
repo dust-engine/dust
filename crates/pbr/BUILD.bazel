@@ -24,7 +24,7 @@ rust_library(
     aliases = aliases(),
     deps = all_crate_deps(normal = True) + [
         "//third_party/ffx:ffx_lpm_cpu",
-        "//crates/denoiser:dust_denoiser",
+        "//crates/app:dust_app",
         "//crates/gfxdebug:dust_gfxdebug",
     ],
     rustc_env_files = [
