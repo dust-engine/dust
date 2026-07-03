@@ -384,7 +384,10 @@ pub(crate) fn tonemap_pass(
                 .image_info(&[
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: render_target_views.hdr_denoised_output.full_view().vk_handle(),
+                        image_view: render_target_views
+                            .hdr_denoised_output
+                            .full_view()
+                            .vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
                     vk::DescriptorImageInfo {

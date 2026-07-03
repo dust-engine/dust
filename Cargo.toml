@@ -15,10 +15,10 @@ dust_vox = { path = "crates/vox" }
 dust_pbr = { path = "crates/pbr" }
 dust_app = { path = "crates/app" }
 dust_gfxdebug = { path = "crates/gfxdebug" }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "4cb2612d84bcb80c851eb0f316afb47688ad40a3" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "4cb2612d84bcb80c851eb0f316afb47688ad40a3" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "4cb2612d84bcb80c851eb0f316afb47688ad40a3" }
-pumicite_super_resolution = { git = "https://github.com/dust-engine/pumicite_super_resolution.git", rev = "3d7760c2eafe3cb0ea5453ab10312b620c7e3abf" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "cada751879618a2390c81227b27a8174896152d0" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "cada751879618a2390c81227b27a8174896152d0" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "cada751879618a2390c81227b27a8174896152d0" }
+pumicite_super_resolution = { git = "https://github.com/dust-engine/pumicite_super_resolution.git", rev = "0e7e8cbd5ac1b1da21c3b73c5eee3ce0e8378d77" }
 
 [dependencies]
 dust_vox.workspace = true

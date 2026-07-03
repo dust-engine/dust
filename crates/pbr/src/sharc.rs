@@ -270,13 +270,8 @@ fn create_sharc_resources(
     )
     .expect("SHARC resolved buffer");
     // One u32 lock/occupancy flag per hash entry (no-64-bit-atomics insert path).
-    let lock = Buffer::new_private(
-        allocator.clone(),
-        n * SharcResources::STRIDE_KEY,
-        16,
-        usage,
-    )
-    .expect("SHARC lock buffer");
+    let lock = Buffer::new_private(allocator.clone(), n * SharcResources::STRIDE_KEY, 16, usage)
+        .expect("SHARC lock buffer");
     let pool = [(); 2].map(|_| {
         let cap = pool_capacity as u64;
         let candidates = Buffer::new_private(

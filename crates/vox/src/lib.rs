@@ -284,10 +284,8 @@ fn setup(
 
     let shadow_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_shadow.rtx.pipeline.bin");
-    let shadow_library_index = pipeline_manager.add_library_for_pipeline(
-        &pbr_render_state.shadow_pipeline,
-        shadow_pipeline.clone(),
-    );
+    let shadow_library_index = pipeline_manager
+        .add_library_for_pipeline(&pbr_render_state.shadow_pipeline, shadow_pipeline.clone());
 
     let final_gather_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_final_gather.rtx.pipeline.bin");
@@ -385,9 +383,10 @@ fn write_sbt_entries(
             unit_size: geometry.unit_size,
             _pad: 0,
         };
-        model.sbt_index = sbt.push_hitgroup(vox_render_state.primary_library_index, 0, |param_dst| {
-            param_dst.copy_from_slice(bytemuck::bytes_of(&params));
-        });
+        model.sbt_index =
+            sbt.push_hitgroup(vox_render_state.primary_library_index, 0, |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            });
         // Push same geometry to shadow SBT (same order ensures matching sbt_offsets)
         let shadow_sbt_index =
             shadow_sbt.push_hitgroup(vox_render_state.shadow_library_index, 0, |param_dst| {

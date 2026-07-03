@@ -83,11 +83,13 @@ impl Plugin for SuperResolutionSetupPlugin {
         };
 
         // Register instance extensions before the instance is created.
-        for ext in super_resolution_required_instance_extensions(&identity.info()) {
-            app.add_instance_extension_named(ext).unwrap_or_else(|e| {
-                panic!("super-resolution instance extension {ext:?} unavailable: {e:?}")
-            });
-        }
+        super_resolution_required_instance_extensions(
+            app.world_mut()
+                .get_resource_or_init::<pumicite::instance::InstanceBuilder>()
+                .into_inner(),
+            &identity.info(),
+        )
+        .expect("Missing instance extensions required by super resolution engine");
 
         app.insert_resource(identity);
 
@@ -96,16 +98,10 @@ impl Plugin for SuperResolutionSetupPlugin {
         // adapter internally, so on an unsupported GPU this loop is empty.
         app.add_systems(
             Startup,
-            (|mut device_builder: ResMut<DeviceBuilder>,
-              physical_device: Res<PhysicalDevice>,
+            (|device_builder: ResMut<DeviceBuilder>,
               identity: Res<SuperResolutionIdentity>| {
-                for ext in
-                    physical_device.super_resolution_required_device_extensions(&identity.info())
-                {
-                    device_builder.enable_extension_named(ext).unwrap_or_else(|e| {
-                        panic!("super-resolution device extension {ext:?} unavailable: {e:?}")
-                    });
-                }
+                pumicite::physical_device::PhysicalDevice::super_resolution_required_device_extensions(
+                    device_builder.into_inner(), &identity.info()).expect("device extensions required by super-resolution engine unavailable");
             })
             .before(CreateDevice),
         );

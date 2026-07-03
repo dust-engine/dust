@@ -26,7 +26,6 @@ use bevy_pumicite::{
     swapchain::{SwapchainImage, SwapchainSet},
 };
 use bytemuck::{Pod, Zeroable};
-use pumicite::{device::DeviceBuilder, image::UintImageView};
 use pumicite::{
     Allocator, Device, HasDevice,
     ash::vk::{self, TaggedStructure},
@@ -40,6 +39,7 @@ use pumicite::{
     tracking::{Access, ResourceState},
     utils::{AsVkHandle, glam_to_vk_transform},
 };
+use pumicite::{device::DeviceBuilder, image::UintImageView};
 use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
 use pumicite_super_resolution::{
     ScalingFactor, SuperResolutionCameraInfo, SuperResolutionCommandEncoder,
@@ -662,12 +662,30 @@ impl UpscalerQualityMode {
     /// query.
     pub fn scaling_factor(self) -> ScalingFactor {
         match self {
-            Self::Dlaa => ScalingFactor { numerator: 1, denominator: 1 },
-            Self::UltraQuality => ScalingFactor { numerator: 13, denominator: 10 },
-            Self::Quality => ScalingFactor { numerator: 3, denominator: 2 },
-            Self::Balanced => ScalingFactor { numerator: 12, denominator: 7 },
-            Self::Performance => ScalingFactor { numerator: 2, denominator: 1 },
-            Self::UltraPerformance => ScalingFactor { numerator: 3, denominator: 1 },
+            Self::Dlaa => ScalingFactor {
+                numerator: 1,
+                denominator: 1,
+            },
+            Self::UltraQuality => ScalingFactor {
+                numerator: 13,
+                denominator: 10,
+            },
+            Self::Quality => ScalingFactor {
+                numerator: 3,
+                denominator: 2,
+            },
+            Self::Balanced => ScalingFactor {
+                numerator: 12,
+                denominator: 7,
+            },
+            Self::Performance => ScalingFactor {
+                numerator: 2,
+                denominator: 1,
+            },
+            Self::UltraPerformance => ScalingFactor {
+                numerator: 3,
+                denominator: 1,
+            },
         }
     }
 }
@@ -886,22 +904,20 @@ fn ensure_upscaler_session(
         max_concurrent_dispatches: 1,
     };
 
-    let session = match SuperResolutionSession::new(
-        &upscaler.pipeline_cache,
-        &create_info,
-        &identity.info(),
-    ) {
-        Ok(session) => session,
-        Err(e) => {
-            tracing::error!(
-                target: "ngx",
-                render = ?hdr.render_extent,
-                output = ?hdr.display_extent,
-                "Super-resolution session creation failed: {e:?}"
-            );
-            return;
-        }
-    };
+    let session =
+        match SuperResolutionSession::new(&upscaler.pipeline_cache, &create_info, &identity.info())
+        {
+            Ok(session) => session,
+            Err(e) => {
+                tracing::error!(
+                    target: "ngx",
+                    render = ?hdr.render_extent,
+                    output = ?hdr.display_extent,
+                    "Super-resolution session creation failed: {e:?}"
+                );
+                return;
+            }
+        };
 
     // Record session initialization (backend feature creation) into the active
     // command buffer, then keep the session for subsequent dispatches.
@@ -1068,7 +1084,10 @@ fn upscaler_evaluate(
         // Transient view create-infos; the backend creates (and later destroys)
         // a view per image from each. Sizes/layouts come from the create-infos'
         // images, which are already tracked into `GENERAL` above.
-        let color_ci = sr_view_ci(views.hdr_output.vk_handle(), vk::Format::R16G16B16A16_SFLOAT);
+        let color_ci = sr_view_ci(
+            views.hdr_output.vk_handle(),
+            vk::Format::R16G16B16A16_SFLOAT,
+        );
         let output_ci = sr_view_ci(
             views.hdr_denoised_output.vk_handle(),
             vk::Format::R16G16B16A16_SFLOAT,
@@ -1077,8 +1096,10 @@ fn upscaler_evaluate(
         let motion_ci = sr_view_ci(views.motion_vectors.vk_handle(), vk::Format::R16G16_SFLOAT);
         let normal_ci = sr_view_ci(views.normal.vk_handle(), vk::Format::R16G16B16A16_SFLOAT);
         let diffuse_ci = sr_view_ci(views.albedo.vk_handle(), vk::Format::R8G8B8A8_SRGB);
-        let specular_ci =
-            sr_view_ci(views.specular_albedo.vk_handle(), vk::Format::R8G8B8A8_UNORM);
+        let specular_ci = sr_view_ci(
+            views.specular_albedo.vk_handle(),
+            vk::Format::R8G8B8A8_UNORM,
+        );
 
         let color_info = sr_image_info(&color_ci);
         let output_info = sr_image_info(&output_ci);

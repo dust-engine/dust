@@ -7,8 +7,9 @@ module(
 # Vulkan SDK
 # -----------------------------------------------------------------------------
 bazel_dep(name = "apple_support", version = "2.6.1", repo_name = "build_bazel_apple_support")
+bazel_dep(name = "rules_apple", version = "4.5.3", repo_name = "build_bazel_rules_apple")
 bazel_dep(name = "rules_cc", version = "0.2.20")
-bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_vulkan", version = "0.7.0")
 
 VULKAN_SDK_VERSION = "1.4.341.1"
@@ -30,7 +31,7 @@ bazel_dep(name = "pumicite_super_resolution", version = "0.1.0")
 git_override(
     module_name = "pumicite_super_resolution",
     remote = "https://github.com/dust-engine/pumicite_super_resolution.git",
-    commit = "3d7760c2eafe3cb0ea5453ab10312b620c7e3abf",
+    commit = "0e7e8cbd5ac1b1da21c3b73c5eee3ce0e8378d77",
 )
 
 # -----------------------------------------------------------------------------
@@ -112,7 +113,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "4cb2612d84bcb80c851eb0f316afb47688ad40a3")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "cada751879618a2390c81227b27a8174896152d0")
 crate.annotation(
     crate = "pumicite_cli",
     repositories = ["bindeps"],
