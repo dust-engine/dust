@@ -15,6 +15,7 @@ rust_library(
     crate_root = "src/lib.rs",
     srcs = glob(["src/**/*.rs"]),
     edition = "2024",
+    compile_data = ["Cargo.toml"],
     aliases = aliases(),
     deps = all_crate_deps(normal = True),
     rustc_env_files = [":cargo_toml_env_vars"],

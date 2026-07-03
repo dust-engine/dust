@@ -1,4 +1,3 @@
-load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -6,33 +5,9 @@ package(default_visibility = ["//visibility:public"])
 # Patch applied to the @sharc repository (see MODULE.bazel).
 exports_files(["sharc_lock_claim.patch"])
 
-cc_import(
-    name = "slang_windows",
-    interface_library = "@vulkan_sdk_1.4.341.1//:sdk/Lib/slang.lib",
-    shared_library = "@vulkan_sdk_1.4.341.1//:sdk/Bin/slang.dll",
-    target_compatible_with = ["@platforms//os:windows"],
-)
-
-cc_import(
-    name = "slang_macos",
-    shared_library = "@vulkan_sdk_1.4.341.1//:sdk/lib/libslang-compiler.dylib",
-    target_compatible_with = ["@platforms//os:macos"],
-)
-
-cc_import(
-    name = "slang_linux",
-    shared_library = "@vulkan_sdk_1.4.341.1//:sdk/lib/libslang.so",
-    target_compatible_with = ["@platforms//os:linux"],
-)
-
-cc_library(
+alias(
     name = "slang",
-    deps = select({
-        "@platforms//os:windows": [":slang_windows"],
-        "@platforms//os:macos": [":slang_macos"],
-        "@platforms//os:linux": [":slang_linux"],
-        "//conditions:default": [],
-    }),
+    actual = "@vulkan_sdk//:slang",
 )
 
 cc_library(
@@ -40,6 +15,12 @@ cc_library(
     srcs = ["vma_wrapper.cpp"],
     deps = [
         "@vma//:vma_headers",
-        "@vulkan_sdk_1.4.341.1//:vulkan_headers",
+        "@vulkan_sdk//:vulkan_headers",
     ],
+)
+
+# Visibility bridge for the pumicite_super_resolution crate's backend link deps.
+alias(
+    name = "super_resolution_backend",
+    actual = "@pumicite_super_resolution//:backend",
 )

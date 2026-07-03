@@ -6,29 +6,31 @@ module(
 # -----------------------------------------------------------------------------
 # Vulkan SDK
 # -----------------------------------------------------------------------------
-
-bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "apple_support", version = "2.6.1", repo_name = "build_bazel_apple_support")
+bazel_dep(name = "rules_cc", version = "0.2.20")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_vulkan", version = "0.7.0")
 
+VULKAN_SDK_VERSION = "1.4.341.1"
+
 vulkan_sdk = use_extension("@rules_vulkan//vulkan:extensions.bzl", "vulkan_sdk")
 
-vulkan_sdk.toolchain(version = "1.4.341.1")
-use_repo(vulkan_sdk, "vulkan_sdk_1.4.341.1")
+vulkan_sdk.toolchain(version = VULKAN_SDK_VERSION)
+use_repo(vulkan_sdk, vulkan_sdk = "vulkan_sdk_" + VULKAN_SDK_VERSION)
 
-register_toolchains("@vulkan_sdk_1.4.341.1//:all")
+register_toolchains("@vulkan_sdk//:all")
 
 git_override(
     module_name = "rules_vulkan",
-    remote = "https://github.com/0xbeefd1ed/rules_vulkan",
-    commit = "85c6ca71e2cecede88985ac89568230e772a4f34",
+    remote = "https://github.com/mxpv/rules_vulkan.git",
+    commit = "91b9e9a26615000f86322c2798f0e06ecf11219a",
 )
 
 bazel_dep(name = "pumicite_super_resolution", version = "0.1.0")
 git_override(
     module_name = "pumicite_super_resolution",
     remote = "https://github.com/dust-engine/pumicite_super_resolution.git",
-    commit = "bd8b542e15657f49190ca33877591ef6fb5b5f31",
+    commit = "3d7760c2eafe3cb0ea5453ab10312b620c7e3abf",
 )
 
 # -----------------------------------------------------------------------------
@@ -60,8 +62,21 @@ new_git_repository(
 
 bazel_dep(name = "rules_rust", version = "0.70.0")
 
+# Backport bazelbuild/rules_rust#3953: when transform_sources relocates a crate
+# with mixed generated/source files into bazel-out (here: crates/pbr, whose
+# compile_data includes the generated shader layout), CARGO_MANIFEST_DIR still
+# pointed at the original source dir. Bevy's derive macros read Cargo.toml from
+# there at expansion time and panic ("Cargo manifest does not exist") under the
+# macOS/Linux sandbox. The patch derives CARGO_MANIFEST_DIR from the relocated
+# crate root. Drop once the fix is released.
+single_version_override(
+    module_name = "rules_rust",
+    patches = ["//third_party:patches/rules_rust_cargo_manifest_dir.patch"],
+    patch_strip = 1,
+)
+
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(edition = "2024", versions = ["nightly/2026-04-03"])
+rust.toolchain(edition = "2024", versions = ["nightly/2026-06-27"])
 use_repo(rust, "rust_toolchains")
 register_toolchains("@rust_toolchains//:all")
 
@@ -80,17 +95,13 @@ crate.annotation(
     repositories = ["crates"],
     override_target_lib = "@rules_rust//rust/runfiles",
 )
-# Build pumicite_super_resolution's Rust library here (in dust's crate universe,
-# so it shares dust's ash/pumicite). Attach the DLSS C shim + NGX import library
-# from the @pumicite_super_resolution module and turn off the crate's standalone
-# build.rs (which would otherwise compile the shim and download the SDK).
+
 crate.annotation(
     crate = "pumicite_super_resolution",
     repositories = ["crates"],
     gen_build_script = "off",
     deps = [
-        "@pumicite_super_resolution//:dlss_helpers",
-        "@pumicite_super_resolution//:dlss",
+        "@@//third_party:super_resolution_backend",
     ],
 )
 crate.from_cargo(
@@ -101,7 +112,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "ee3c41179c414dc20b0085ac58627d72e71f8011")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "4cb2612d84bcb80c851eb0f316afb47688ad40a3")
 crate.annotation(
     crate = "pumicite_cli",
     repositories = ["bindeps"],

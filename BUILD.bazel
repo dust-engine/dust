@@ -12,7 +12,7 @@ filegroup(
         "//crates/pbr/shaders/sky_atmosphere:runtime",
         "//crates/pbr/shaders/sharc:runtime",
         "//crates/vox/shaders:runtime",
-        "@pumicite_super_resolution//:dlssd_runtime",
+        "@pumicite_super_resolution//:backend_runtime",
     ],
 )
 
@@ -40,7 +40,12 @@ rust_binary(
         "//crates/pbr:dust_pbr",
         "//crates/app:dust_app",
         "//crates/gfxdebug:dust_gfxdebug",
-    ],
+    ] + select({
+        # macOS has no system Vulkan loader; link the SDK's so ash's runtime
+        # dlopen("libvulkan.dylib") resolves to the bundled, rpath-staged loader.
+        "@platforms//os:macos": ["@vulkan_sdk//:vulkan"],
+        "//conditions:default": [],
+    }),
     rustc_env_files = [":cargo_toml_env_vars"],
     aliases = aliases(),
     data = [":runtime_assets"],
