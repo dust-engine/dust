@@ -1,0 +1,23 @@
+load("@build_bazel_rules_apple//apple:macos.bzl", "macos_application")
+
+package(default_visibility = ["//visibility:public"])
+
+macos_application(
+    name = "Dust",
+    bundle_id = "rs.dust.viewer",
+    bundle_name = "Dust",
+    infoplists = ["Info.plist"],
+    minimum_os_version = "26.0",
+    minimum_deployment_os_version = "26.0",
+    linkopts = [
+        # A Rust staticlib cannot carry the #[link] directives recorded in its
+        # rlibs, so the frameworks rustc links into //:dust are repeated here.
+        "-framework",
+        "Carbon",
+        "-framework",
+        "CoreVideo",
+        "-framework",
+        "Metal",
+    ],
+    deps = ["//:dust_entry"],
+)

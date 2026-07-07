@@ -1,5 +1,5 @@
 load("@crates//:defs.bzl", "all_crate_deps", "aliases")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_static_library")
 load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 
 package(default_visibility = ["//visibility:public"])
@@ -28,11 +28,17 @@ genrule(
     cmd_bat = "@echo BAZEL_BIN=%cd%/$(BINDIR)> $@",
 )
 
-rust_binary(
-    name = "dust",
+rust_library(
+    name = "dust_lib",
     crate_name = "dust",
-    crate_root = "src/main.rs",
-    srcs = glob(["src/**/*.rs"]),
+    crate_root = "src/lib.rs",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = [
+            "src/main.rs",
+            "src/entry.rs",
+        ],
+    ),
     compile_data = ["Cargo.toml"],
     edition = "2024",
     deps = all_crate_deps(normal = True) + [
@@ -48,5 +54,25 @@ rust_binary(
     }),
     rustc_env_files = [":cargo_toml_env_vars"],
     aliases = aliases(),
+)
+
+rust_binary(
+    name = "dust",
+    crate_name = "dust",
+    crate_root = "src/main.rs",
+    srcs = ["src/main.rs"],
+    edition = "2024",
+    deps = [":dust_lib"],
     data = [":runtime_assets"],
+)
+
+rust_static_library(
+    name = "dust_entry",
+    crate_name = "dust_entry",
+    crate_root = "src/entry.rs",
+    srcs = ["src/entry.rs"],
+    edition = "2024",
+    deps = [":dust_lib"],
+    data = [":runtime_assets"],
+    aspect_hints = ["@build_bazel_rules_apple//apple:use_runfiles"],
 )

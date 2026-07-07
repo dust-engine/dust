@@ -11,3 +11,6 @@ runfiles = "0.2"
 atomicow = "1"
 futures-lite = "2"
 directories = "6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = "0.3"

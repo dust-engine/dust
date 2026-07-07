@@ -50,7 +50,7 @@ struct RainbowDemo {
     timer: Timer,
 }
 
-fn main() {
+pub fn run() {
     let mut app = bevy::app::App::new();
 
     app.add_plugins(dust_app::DustApp)
