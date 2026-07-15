@@ -11,6 +11,13 @@ A Rust-based 3D voxel rendering engine using physically-based ray tracing. Built
 - DLSS upscaling on supported NVIDIA GPUs
 - egui debug overlay
 
+
+
+https://github.com/user-attachments/assets/4a6a7edf-1892-488c-a13a-6c7565d06251
+
+
+
+
 ## Requirements
 
 - A GPU and driver supporting `VK_KHR_ray_tracing_pipeline` and `VK_KHR_acceleration_structure`
