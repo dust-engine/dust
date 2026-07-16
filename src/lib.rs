@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_pumicite::CreateDevice;
-use bevy_pumicite::rtx::blas::BLAS;
 use bevy_pumicite::rtx::tlas::TLASInstance;
 use dust_vox::{
     VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxModelBLASRebuild,
@@ -144,6 +143,46 @@ fn rainbow_origin_offset() -> f32 {
     rainbow_max_radius() + 1.0
 }
 
+/// Paint one wedge of the rainbow (all stripes) into `geometry`/`material` at
+/// the given progress index. The caller is responsible for triggering the BLAS
+/// rebuild afterwards.
+fn paint_rainbow_wedge(geometry: &mut VoxGeometry, material: &mut VoxMaterial, progress: u32) {
+    let theta_lo = (progress as f32) * std::f32::consts::PI / RAINBOW_WEDGES as f32;
+    let theta_hi = (progress as f32 + 1.0) * std::f32::consts::PI / RAINBOW_WEDGES as f32;
+    let origin_x = rainbow_origin_offset();
+
+    let mut accessor = geometry.tree.accessor_mut(material);
+    for stripe in 0..RAINBOW_NUM_STRIPES {
+        let r_inner = RAINBOW_INNER_RADIUS + stripe as f32 * RAINBOW_STRIPE_THICKNESS;
+        let r_outer = r_inner + RAINBOW_STRIPE_THICKNESS;
+        let value = RAINBOW_STRIPE_VALUES[stripe as usize];
+
+        // Step at <= 0.5 voxel along the outermost arc so the stripe fills solid.
+        let arc_len = r_outer * (theta_hi - theta_lo);
+        let n_angle = (arc_len * 2.0).ceil().max(1.0) as u32;
+
+        for ai in 0..=n_angle {
+            let t = ai as f32 / n_angle as f32;
+            let theta = theta_lo + (theta_hi - theta_lo) * t;
+            let (sin_t, cos_t) = theta.sin_cos();
+
+            let r_steps = (r_outer - r_inner).ceil() as u32 + 1;
+            for ri in 0..r_steps {
+                let r = r_inner + ri as f32 * (r_outer - r_inner) / r_steps.max(1) as f32;
+                let x = (origin_x + r * cos_t).round() as i32;
+                let y = (r * sin_t).round() as i32;
+                if x < 0 || y < 0 {
+                    continue;
+                }
+                for z in 0..RAINBOW_DEPTH {
+                    accessor.set(UVec3::new(x as u32, y as u32, z), value);
+                }
+            }
+        }
+    }
+    accessor.end();
+}
+
 fn setup_rainbow_demo(
     mut commands: Commands,
     allocator: Res<Allocator>,
@@ -151,8 +190,13 @@ fn setup_rainbow_demo(
     mut materials: ResMut<Assets<VoxMaterial>>,
     mut palettes: ResMut<Assets<VoxPalette>>,
 ) {
-    let geometry = geometries.add(VoxGeometry::new(allocator.clone(), 1.0));
-    let material = materials.add(VoxMaterial::new(allocator.clone()));
+    // Paint the first wedge before the model is spawned so the BLAS builder
+    // never sees empty geometry.
+    let mut geometry = VoxGeometry::new(allocator.clone(), 1.0);
+    let mut material = VoxMaterial::new(allocator.clone());
+    paint_rainbow_wedge(&mut geometry, &mut material, 0);
+    let geometry = geometries.add(geometry);
+    let material = materials.add(material);
     let palette =
         palettes.add(VoxPalette::colorful(allocator.clone()).expect("rainbow palette allocation"));
 
@@ -182,7 +226,8 @@ fn setup_rainbow_demo(
         geometry,
         material,
         palette,
-        progress: 0,
+        // Wedge 0 was painted above before spawning.
+        progress: 1,
         hold_remaining: 0,
         timer: Timer::new(
             Duration::from_secs_f32(RAINBOW_TICK_SECONDS),
@@ -210,11 +255,17 @@ fn update_rainbow_demo_system(
             demo.hold_remaining -= 1;
             return;
         }
-        let new_geometry = geometries.add(VoxGeometry::new(allocator.clone(), 1.0));
-        let new_material = materials.add(VoxMaterial::new(allocator.clone()));
+        // Start a new pass. Paint the first wedge before swapping the geometry
+        // in so the rebuilt BLAS is never empty, then drive the rebuild through
+        // `request_rebuild()` (below) like every other wedge does.
+        let mut new_geometry = VoxGeometry::new(allocator.clone(), 1.0);
+        let mut new_material = VoxMaterial::new(allocator.clone());
+        paint_rainbow_wedge(&mut new_geometry, &mut new_material, 0);
+        let new_geometry = geometries.add(new_geometry);
+        let new_material = materials.add(new_material);
         demo.geometry = new_geometry.clone();
         demo.material = new_material.clone();
-        demo.progress = 0;
+        demo.progress = 1;
         commands.entity(demo.model_entity).insert(VoxModel {
             geometry: new_geometry,
             material: new_material,
@@ -223,7 +274,10 @@ fn update_rainbow_demo_system(
             prefer_fast_build: true,
             enable_compaction: false,
         });
-        commands.entity(demo.model_entity).remove::<BLAS>();
+        requesting_blas_rebuilds
+            .get_mut(demo.model_entity)
+            .unwrap()
+            .request_rebuild();
         return;
     }
 
@@ -234,50 +288,15 @@ fn update_rainbow_demo_system(
         return;
     };
 
-    let theta_lo = (demo.progress as f32) * std::f32::consts::PI / RAINBOW_WEDGES as f32;
-    let theta_hi = (demo.progress as f32 + 1.0) * std::f32::consts::PI / RAINBOW_WEDGES as f32;
-    let origin_x = rainbow_origin_offset();
-
-    {
-        let mut accessor = geometry.tree.accessor_mut(material);
-        for stripe in 0..RAINBOW_NUM_STRIPES {
-            let r_inner = RAINBOW_INNER_RADIUS + stripe as f32 * RAINBOW_STRIPE_THICKNESS;
-            let r_outer = r_inner + RAINBOW_STRIPE_THICKNESS;
-            let value = RAINBOW_STRIPE_VALUES[stripe as usize];
-
-            // Step at <= 0.5 voxel along the outermost arc so the stripe fills solid.
-            let arc_len = r_outer * (theta_hi - theta_lo);
-            let n_angle = (arc_len * 2.0).ceil().max(1.0) as u32;
-
-            for ai in 0..=n_angle {
-                let t = ai as f32 / n_angle as f32;
-                let theta = theta_lo + (theta_hi - theta_lo) * t;
-                let (sin_t, cos_t) = theta.sin_cos();
-
-                let r_steps = (r_outer - r_inner).ceil() as u32 + 1;
-                for ri in 0..r_steps {
-                    let r = r_inner + ri as f32 * (r_outer - r_inner) / r_steps.max(1) as f32;
-                    let x = (origin_x + r * cos_t).round() as i32;
-                    let y = (r * sin_t).round() as i32;
-                    if x < 0 || y < 0 {
-                        continue;
-                    }
-                    for z in 0..RAINBOW_DEPTH {
-                        accessor.set(UVec3::new(x as u32, y as u32, z), value);
-                    }
-                }
-            }
-        }
-        accessor.end();
-    }
+    paint_rainbow_wedge(geometry, material, demo.progress);
 
     demo.progress += 1;
     if demo.progress >= RAINBOW_WEDGES {
         demo.hold_remaining = RAINBOW_HOLD_TICKS;
     }
 
-    // BLASBuilderPlugin only builds for entities `Without<BLAS>`; removing the
-    // component is the way to request a rebuild after mutating the geometry.
+    // Request a BLAS rebuild now that this wedge has been painted into the
+    // geometry.
     requesting_blas_rebuilds
         .get_mut(demo.model_entity)
         .unwrap()

@@ -16,5 +16,7 @@
 	<string>1</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>LSSupportsGameMode</key>
+	<true/>
 </dict>
 </plist>

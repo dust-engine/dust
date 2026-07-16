@@ -96,6 +96,7 @@ impl VoxGeometry {
 #[derive(Resource)]
 pub struct BlasBuilder {
     copy_coords_pipeline: Handle<ComputePipeline>,
+    coords_buffer_alignment: u64,
 }
 impl FromWorld for BlasBuilder {
     fn from_world(world: &mut World) -> Self {
@@ -103,6 +104,11 @@ impl FromWorld for BlasBuilder {
             copy_coords_pipeline: world.load_asset(
                 "bazel://dust/crates/vox/shaders/blas_builder_copy_coords.comp.pipeline.bin",
             ),
+            coords_buffer_alignment: world.resource::<pumicite::physical_device::PhysicalDevice>()
+                .properties()
+                .limits
+                .min_storage_buffer_offset_alignment
+                .max(8), // VUID-vkCmdBuildAccelerationStructuresKHR-pInfos-03714
         }
     }
 }
@@ -167,10 +173,9 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
         // TODO: This buffer may not be device-local. Test perf when everything was pre-copied to device.
         let device_buffer = leaf_storage.buffer.as_ref().map(Arc::clone);
         let coords_buffer = if device_buffer.is_some() {
-            // TODO: query the alignment using minStorageBufferOffsetAlignment.
             Some(device_local_ring_buffer.allocate_buffer(
                 primitive_count as u64 * size_of::<vk::AabbPositionsKHR>() as u64,
-                16,
+                self.coords_buffer_alignment,
             ))
         } else {
             None
