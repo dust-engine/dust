@@ -9,7 +9,7 @@ include!(concat!(
     "/crates/pbr/shaders/pbr_module_layout.rs"
 ));
 
-use std::ops::Deref;
+use std::{ffi::CStr, ops::Deref};
 
 use tonemap::tonemap_pass;
 
@@ -810,16 +810,43 @@ fn setup_upscaler(
     device: Res<Device>,
     identity: Res<SuperResolutionIdentity>,
 ) {
-    let engines = physical_device
+    let mut selected_engine: Option<(SuperResolutionEngine, _)> = None;
+    for engine in physical_device
         .enumerate_super_resolution_engines(&identity.info())
-        .unwrap_or_default();
-    let Some(&engine) = engines.first() else {
+        .unwrap_or_default()
+    {
+        let properties = physical_device.get_super_resolution_engine_properties(engine);
+
+        #[cfg(target_vendor = "apple")]
+        {
+            let name =
+                CStr::from_bytes_until_nul(bytemuck::cast_slice(&properties.engine_name)).unwrap();
+            if name == c"MetalFX Denoised Scaler" {
+                selected_engine = Some((engine, properties));
+            }
+        }
+
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            selected_engine = Some((engine, properties));
+            break;
+        }
+    }
+
+    let Some((engine, selected_engine_properties)) = selected_engine else {
         tracing::info!(
             target: "ngx",
             "No super-resolution engine available; rendering at native resolution"
         );
         return;
     };
+
+    tracing::info!(
+        "Using super-resolution engine {:?}",
+        CStr::from_bytes_until_nul(bytemuck::cast_slice(
+            &selected_engine_properties.engine_name
+        ))
+    );
     commands.insert_resource(Upscaler {
         engine,
         pipeline_cache: PipelineCache::null((*device).clone()),
@@ -1137,7 +1164,7 @@ fn upscaler_evaluate(
         };
         let dispatch_info = SuperResolutionDispatchInfo {
             dispatch_index: 0,
-            flags: SuperResolutionDispatchFlags::empty(),
+            flags: SuperResolutionDispatchFlags::INVERTED_DEPTH_RANGE,
             quality_focus: SuperResolutionQualityFocusFlags::BALANCED,
             destination_image_info: &output_info,
             source_image_info: &color_info,

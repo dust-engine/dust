@@ -104,7 +104,8 @@ impl FromWorld for BlasBuilder {
             copy_coords_pipeline: world.load_asset(
                 "bazel://dust/crates/vox/shaders/blas_builder_copy_coords.comp.pipeline.bin",
             ),
-            coords_buffer_alignment: world.resource::<pumicite::physical_device::PhysicalDevice>()
+            coords_buffer_alignment: world
+                .resource::<pumicite::physical_device::PhysicalDevice>()
                 .properties()
                 .limits
                 .min_storage_buffer_offset_alignment
