@@ -31,13 +31,13 @@ use pumicite::{
     ash::vk::{self, TaggedStructure},
     buffer::BufferLike,
     debug::DebugObject,
-    image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView},
+    image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView, SwizzledImageView},
     physical_device::PhysicalDevice,
     pipeline::PipelineCache,
     rtx::ShaderBindingTable,
     sync::GPUMutex,
     tracking::{Access, ResourceState},
-    utils::{AsVkHandle, glam_to_vk_transform},
+    utils::glam_to_vk_transform,
 };
 use pumicite::{device::DeviceBuilder, image::UintImageView};
 use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
@@ -544,12 +544,12 @@ fn render(
             .scene_bvh(tlas)
             .uniforms(uniform)
             .output_texture(render_target_views.hdr_output.full_view())
-            .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
+            .gbuffer_albedo_linear(render_target_views.albedo.full_view())
             .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
             .gbuffer_albedo_uint(render_target_views.albedo.uint_view())
             .gbuffer_normal_texture(render_target_views.normal.full_view())
             .gbuffer_depth_texture(render_target_views.depth.full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
             .sky_atmosphere_params(atmo_buffer)
@@ -588,12 +588,14 @@ fn render(
 pub struct HdrRenderTargetViews {
     // R16G16B16A16_SFLOAT. Stores noisy raw light.
     pub hdr_output: FullImageView<Image>,
-    // R8G8B8A8_UNORM. Stores sRGB UI elements.
-    pub sdr_target: SrgbImageView<Image>,
-    /// R8G8B8A8_SRGB. Stores albedo.
-    pub albedo: UintImageView<SrgbImageView<Image>>,
-    /// R16G16B16A16_SFLOAT
-    pub normal: FullImageView<Image>,
+    // R8G8B8A8_UNORM. Stores sRGB UI elements. Full view = linear, sRGB view = decoded.
+    pub sdr_target: SrgbImageView<FullImageView<Image>>,
+    /// R8G8B8A8_UNORM image with linear (full), sRGB, and UINT views of albedo.
+    pub albedo: UintImageView<SrgbImageView<FullImageView<Image>>>,
+    /// R16G16B16A16_SFLOAT. World-space normal in `.xyz`, roughness in `.w`. The
+    /// full view feeds the normal G-buffer; the alpha-broadcast swizzle view
+    /// feeds the roughness G-buffer.
+    pub normal: SwizzledImageView<FullImageView<Image>>,
     /// R32_SFLOAQT
     pub depth: FullImageView<Image>,
     /// R16G16_SFLOAT. Screen-space motion vectors in pixels
@@ -913,7 +915,11 @@ fn ensure_upscaler_session(
         diffuse_albedo_format: vk::Format::R8G8B8A8_SRGB,
         specular_albedo_format: vk::Format::R8G8B8A8_UNORM,
         normal_format: vk::Format::R16G16B16A16_SFLOAT,
-        // Roughness is packed into `normal.w`; no separate roughness image.
+        // Roughness lives in `normal.w`. UNDEFINED = "packed": DLSS reads it from
+        // `normals.w` via its native packed mode (ignoring `roughness_image_info`),
+        // while MetalFX (no packed mode) binds the alpha-broadcast swizzle view of
+        // the normal image supplied as `roughness_image_info` (see
+        // `HdrRenderTargetViews::normal`).
         roughness_format: vk::Format::UNDEFINED,
         specular_hit_distance_format: vk::Format::UNDEFINED,
         denoise_strength_mask_format: vk::Format::UNDEFINED,
@@ -1108,33 +1114,24 @@ fn upscaler_evaluate(
         );
         encoder.emit_barriers();
 
-        // Transient view create-infos; the backend creates (and later destroys)
-        // a view per image from each. Sizes/layouts come from the create-infos'
-        // images, which are already tracked into `GENERAL` above.
-        let color_ci = sr_view_ci(
-            views.hdr_output.vk_handle(),
-            vk::Format::R16G16B16A16_SFLOAT,
+        // Each G-buffer is passed as its image plus the view to sample it
+        // through; the image's layout is already tracked into `GENERAL` above.
+        // Every view is the full-image view except the albedo, sampled through
+        // its sRGB view to match the diffuse-albedo format the denoiser expects.
+        let color_info = sr_image_info(&views.hdr_output, views.hdr_output.full_view());
+        let output_info = sr_image_info(
+            &views.hdr_denoised_output,
+            views.hdr_denoised_output.full_view(),
         );
-        let output_ci = sr_view_ci(
-            views.hdr_denoised_output.vk_handle(),
-            vk::Format::R16G16B16A16_SFLOAT,
-        );
-        let depth_ci = sr_view_ci(views.depth.vk_handle(), vk::Format::R32_SFLOAT);
-        let motion_ci = sr_view_ci(views.motion_vectors.vk_handle(), vk::Format::R16G16_SFLOAT);
-        let normal_ci = sr_view_ci(views.normal.vk_handle(), vk::Format::R16G16B16A16_SFLOAT);
-        let diffuse_ci = sr_view_ci(views.albedo.vk_handle(), vk::Format::R8G8B8A8_SRGB);
-        let specular_ci = sr_view_ci(
-            views.specular_albedo.vk_handle(),
-            vk::Format::R8G8B8A8_UNORM,
-        );
-
-        let color_info = sr_image_info(&color_ci);
-        let output_info = sr_image_info(&output_ci);
-        let depth_info = sr_image_info(&depth_ci);
-        let motion_img_info = sr_image_info(&motion_ci);
-        let normal_info = sr_image_info(&normal_ci);
-        let diffuse_info = sr_image_info(&diffuse_ci);
-        let specular_info = sr_image_info(&specular_ci);
+        let depth_info = sr_image_info(&views.depth, views.depth.full_view());
+        let motion_img_info = sr_image_info(&views.motion_vectors, views.motion_vectors.full_view());
+        let normal_info = sr_image_info(&views.normal, views.normal.full_view());
+        // Roughness is packed in `normal.w`; feed it via the normal image's
+        // alpha-broadcast swizzle view so every channel reads the packed value.
+        let roughness_info = sr_image_info(&views.normal, views.normal.swizzled_view());
+        let diffuse_info = sr_image_info(&views.albedo, views.albedo.srgb_view());
+        let specular_info =
+            sr_image_info(&views.specular_albedo, views.specular_albedo.full_view());
 
         let motion = SuperResolutionDispatchMotionInfo {
             motion_vectors_image_info: Some(&motion_img_info),
@@ -1153,9 +1150,9 @@ fn upscaler_evaluate(
             diffuse_albedo_image_info: &diffuse_info,
             specular_albedo_image_info: &specular_info,
             normal_image_info: &normal_info,
-            // Roughness is packed in `normal.w` (roughness_format UNDEFINED), so
-            // the backend ignores this; point it at any valid image.
-            roughness_image_info: &normal_info,
+            // Roughness packed in `normal.w`, surfaced via the alpha-broadcast
+            // swizzle view of the normal image.
+            roughness_image_info: &roughness_info,
             specular_hit_distance_image_info: None,
             denoise_strength_mask_image_info: None,
             transparency_overlay_image_info: None,
@@ -1187,30 +1184,16 @@ fn upscaler_evaluate(
     });
 }
 
-/// Builds a 2D color image-view create-info for a super-resolution dispatch
-/// image. The subresource covers the single color mip/layer of every G-buffer.
-fn sr_view_ci(image: vk::Image, format: vk::Format) -> vk::ImageViewCreateInfo<'static> {
-    vk::ImageViewCreateInfo {
-        image,
-        view_type: vk::ImageViewType::TYPE_2D,
-        format,
-        subresource_range: vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        },
-        ..Default::default()
-    }
-}
-
-/// Wraps an image-view create-info as a full-image `SuperResolutionImageInfo`.
+/// Pairs an image with the view to sample it through as a `SuperResolutionImageInfo`.
 /// dust keeps every super-resolution G-buffer in `GENERAL` layout with no
 /// sub-region offset.
-fn sr_image_info<'a>(ci: &'a vk::ImageViewCreateInfo<'a>) -> SuperResolutionImageInfo<'a> {
+fn sr_image_info<'a>(
+    image: &'a dyn pumicite::image::ImageLike,
+    view: &'a dyn pumicite::image::ImageViewLike,
+) -> SuperResolutionImageInfo<'a> {
     SuperResolutionImageInfo {
-        view: ci,
+        image,
+        view,
         view_offset: vk::Offset2D { x: 0, y: 0 },
         initial_layout: vk::ImageLayout::GENERAL,
         final_layout: vk::ImageLayout::GENERAL,
@@ -1343,10 +1326,9 @@ fn ensure_hdr_target(
     )
     .unwrap()
     .with_name(c"SDR Render Target")
-    .create_srgb_view(
-        vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
-        vk::ImageUsageFlags::SAMPLED,
-    )
+    .create_full_view()
+    .unwrap()
+    .create_srgb_view(vk::ImageUsageFlags::SAMPLED)
     .unwrap();
 
     let albedo = Image::new_private(
@@ -1366,11 +1348,17 @@ fn ensure_hdr_target(
     )
     .unwrap()
     .with_name(c"G-Buffer Albedo Image")
-    .create_srgb_view(vk::ImageUsageFlags::STORAGE, vk::ImageUsageFlags::SAMPLED)
+    .create_full_view()
+    .unwrap()
+    .create_srgb_view(vk::ImageUsageFlags::SAMPLED)
     .unwrap()
     .create_uint_view(vk::ImageUsageFlags::STORAGE)
     .unwrap();
 
+    // The normal image doubles as the roughness input for the denoiser: roughness
+    // is packed in `normal.w`. Alongside the full view (world-space normal) we
+    // build an alpha-broadcast swizzle view (`{r,g,b,a} <- A`) that presents that
+    // packed roughness on every channel, sampled as the roughness G-buffer.
     let normal = Image::new_private(
         allocator.clone(),
         &vk::ImageCreateInfo {
@@ -1382,7 +1370,17 @@ fn ensure_hdr_target(
     .with_name(c"G-Buffer Normal Image")
     .create_full_view()
     .unwrap()
-    .with_name(c"G-Buffer Normal Image View");
+    .with_name(c"G-Buffer Normal Image View")
+    .create_swizzled_view(
+        vk::ComponentMapping {
+            r: vk::ComponentSwizzle::A,
+            g: vk::ComponentSwizzle::A,
+            b: vk::ComponentSwizzle::A,
+            a: vk::ComponentSwizzle::A,
+        },
+        vk::ImageUsageFlags::SAMPLED,
+    )
+    .unwrap();
 
     let depth = Image::new_private(
         allocator.clone(),
@@ -1629,12 +1627,12 @@ fn shadow_pass(
                 .scene_bvh(tlas)
                 .uniforms(uniform)
                 .output_texture(render_target_views.hdr_output.full_view())
-                .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
+                .gbuffer_albedo_linear(render_target_views.albedo.full_view())
                 .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
                 .gbuffer_albedo_uint(render_target_views.albedo.uint_view())
                 .gbuffer_normal_texture(render_target_views.normal.full_view())
                 .gbuffer_depth_texture(render_target_views.depth.full_view())
-                .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+                .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
                 .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
                 .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
                 .sky_atmosphere_params(atmo_buffer)
@@ -1941,11 +1939,11 @@ pub(crate) fn final_gather_pass(
             .scene_bvh(tlas)
             .uniforms(uniform)
             .output_texture(render_target_views.hdr_output.full_view())
-            .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
+            .gbuffer_albedo_linear(render_target_views.albedo.full_view())
             .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
             .gbuffer_normal_texture(render_target_views.normal.full_view())
             .gbuffer_depth_texture(render_target_views.depth.full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
             .sky_atmosphere_params(atmo_buffer)
@@ -2026,7 +2024,7 @@ fn start_occluding_render_pass(
                     .clear(Vec4::new(0.0, 0.0, 0.0, 0.0))
                     .image_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
                     .store(true)
-                    .view(render_target_views.sdr_target.linear_view());
+                    .view(render_target_views.sdr_target.full_view());
                 // Use linear view for egui. egui does all the interpolation in srgb space.
             })
             .render_area(

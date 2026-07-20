@@ -825,11 +825,11 @@ fn record_sharc_rt(
             .scene_bvh(tlas_locked)
             .uniforms(cam_buffer)
             .output_texture(render_target_views.hdr_output.full_view())
-            .gbuffer_albedo_linear(render_target_views.albedo.linear_view())
+            .gbuffer_albedo_linear(render_target_views.albedo.full_view())
             .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
             .gbuffer_normal_texture(render_target_views.normal.full_view())
             .gbuffer_depth_texture(render_target_views.depth.full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
             .sky_atmosphere_params(atmo_buffer)
@@ -1104,7 +1104,7 @@ fn sharc_debug_overlay_pass(
             let mut params = PbrPipelineParams::new();
             params
                 .uniforms(cam_buffer)
-                .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+                .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
                 .sharc_g_sharc_constants(constants_buffer)
                 .sharc_g_sharc_candidates_read(cand_buf)
                 .sharc_g_sharc_keys_read(keys_buf);
@@ -1181,7 +1181,7 @@ fn sharc_debug_overlay_pass(
         // dirty-bit tracking leaves every other slot in the layout untouched.
         let mut params = PbrPipelineParams::new();
         params
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.linear_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
             .sharc_g_sharc_hash_entries(hash_buf)
             .sharc_g_sharc_constants(constants_buffer);
         encoder.push_descriptor_set(

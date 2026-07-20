@@ -885,7 +885,7 @@ source = "git+https://github.com/dust-engine/bevy?branch=release-0.17.3#1e34adbd
 [[package]]
 name = "bevy_pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=cada751879618a2390c81227b27a8174896152d0#cada751879618a2390c81227b27a8174896152d0"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3#1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3"
 dependencies = [
  "async-lock",
  "bevy_app",
@@ -3638,7 +3638,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 [[package]]
 name = "pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=cada751879618a2390c81227b27a8174896152d0#cada751879618a2390c81227b27a8174896152d0"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3#1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3"
 dependencies = [
  "ash",
  "bevy_asset",
@@ -3666,7 +3666,7 @@ dependencies = [
 [[package]]
 name = "pumicite_egui"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=cada751879618a2390c81227b27a8174896152d0#cada751879618a2390c81227b27a8174896152d0"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3#1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -3683,7 +3683,7 @@ dependencies = [
 [[package]]
 name = "pumicite_super_resolution"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite_super_resolution.git?rev=0e7e8cbd5ac1b1da21c3b73c5eee3ce0e8378d77#0e7e8cbd5ac1b1da21c3b73c5eee3ce0e8378d77"
+source = "git+https://github.com/dust-engine/pumicite_super_resolution.git?rev=81985bf31b949dfd36fa73b4d73bedd12ca694ba#81985bf31b949dfd36fa73b4d73bedd12ca694ba"
 dependencies = [
  "ash",
  "cc",
@@ -3700,7 +3700,7 @@ dependencies = [
 [[package]]
 name = "pumicite_types"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=cada751879618a2390c81227b27a8174896152d0#cada751879618a2390c81227b27a8174896152d0"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3#1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3"
 dependencies = [
  "ash",
  "glam",

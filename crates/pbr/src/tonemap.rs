@@ -397,7 +397,7 @@ pub(crate) fn tonemap_pass(
                     },
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: render_target_views.sdr_target.linear_view().vk_handle(),
+                        image_view: render_target_views.sdr_target.full_view().vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
                 ]),
