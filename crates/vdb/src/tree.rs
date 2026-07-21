@@ -17,12 +17,13 @@ where
 /// #![feature(generic_const_exprs)]
 /// use dust_vdb::{hierarchy, Node, Tree};
 /// use glam::UVec3;
-/// let mut tree = Tree::<hierarchy!(2, 2)>::new();
-/// tree.set_value(UVec3{x: 0, y: 4, z: 0}, Some(true));
-/// tree.set_value(UVec3{x: 0, y: 2, z: 2}, Some(false));
-/// assert_eq!(tree.get_value(UVec3::new(0, 4, 0)), Some(true));
-/// assert_eq!(tree.get_value(UVec3::new(0, 3, 0)), None);
-/// assert_eq!(tree.get_value(UVec3::new(0, 2, 2)), Some(false));
+/// let mut tree = Tree::<hierarchy!(2, 2, u32)>::new();
+/// tree.set_occupancy(UVec3 { x: 0, y: 4, z: 0 }, true);
+/// tree.set_occupancy(UVec3 { x: 0, y: 2, z: 2 }, true);
+/// assert!(tree.get_occupancy(UVec3::new(0, 4, 0)));
+/// assert!(!tree.get_occupancy(UVec3::new(0, 3, 0)));
+/// tree.set_occupancy(UVec3::new(0, 4, 0), false);
+/// assert!(!tree.get_occupancy(UVec3::new(0, 4, 0)));
 /// ```
 impl<ROOT: Node> Tree<ROOT>
 where
@@ -111,10 +112,10 @@ where
     /// #![feature(generic_const_exprs)]
     /// use dust_vdb::{Tree, hierarchy};
     /// use glam::UVec3;
-    /// let mut tree = Tree::<hierarchy!(4, 2)>::new();
-    /// tree.set_value(UVec3::new(0, 1, 2), Some(true));
-    /// tree.set_value(UVec3::new(63, 1, 3), Some(true));
-    /// tree.set_value(UVec3::new(63, 63, 63), Some(true));
+    /// let mut tree = Tree::<hierarchy!(4, 2, u32)>::new();
+    /// tree.set_occupancy(UVec3::new(0, 1, 2), true);
+    /// tree.set_occupancy(UVec3::new(63, 1, 3), true);
+    /// tree.set_occupancy(UVec3::new(63, 63, 63), true);
     /// let mut iter = tree.iter();
     /// assert_eq!(iter.next().unwrap(), UVec3::new(0, 1, 2));
     /// assert_eq!(iter.next().unwrap(), UVec3::new(63, 1, 3));

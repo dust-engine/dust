@@ -105,17 +105,27 @@ pub trait Node: 'static + Send + Sync + Default + Clone {
 }
 
 /// Macro that simplifies tree type construction.
+///
+/// The last argument is the per-leaf value type (e.g. an attribute pointer); the preceding
+/// arguments are the log2 extents of each level, from the root down to the leaves.
 /// ```
+/// #![feature(generic_const_exprs)]
 /// use dust_vdb::{hierarchy, Node};
-/// // Create a 4x4x4 LeafNode
-/// let hierarchy = <hierarchy!(2)>::new();
-/// // Create a two-level tree with 2x2x2 leafs and 8x8x8 root.
-/// let hierarchy = <hierarchy!(3, 1)>::new();
-/// // Create a three-level tree with 2x2x2 leafs, 4x4x4 intermediate nodes and 4x4x4 root.
-/// let hierarchy = <hierarchy!(2, 2, 1)>::new();
-/// // Create a three-level tree with infinite size (implemented with a HashMap), 4x4x4 intermediate nodes and 2x2x2 leafs.
-/// let hierarchy = <hierarchy!(#, 2, 1)>::new();
+/// // A 4x4x4 LeafNode with a `u32` per-leaf value.
+/// type Leaf = hierarchy!(2, u32);
+/// // A two-level tree with 2x2x2 leaves and a 8x8x8 root (16x16x16 total).
+/// type TwoLevels = hierarchy!(3, 1, u32);
+/// // A three-level tree with 2x2x2 leaves, 4x4x4 intermediate nodes and a 4x4x4 root
+/// // (32x32x32 total).
+/// type ThreeLevels = hierarchy!(2, 2, 1, u32);
+///
+/// assert_eq!(<Leaf as Node>::EXTENT_LOG2.x, 2);
+/// assert_eq!(<TwoLevels as Node>::EXTENT_LOG2.x, 4);
+/// assert_eq!(<ThreeLevels as Node>::EXTENT_LOG2.x, 5);
 /// ```
+///
+/// The `hierarchy!(#, ...)` form maps to the hash-map based `RootNode` for unbounded domains,
+/// which is currently disabled.
 #[macro_export]
 macro_rules! hierarchy {
     ($e: tt, $t: ty) => {

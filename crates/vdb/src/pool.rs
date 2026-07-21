@@ -60,17 +60,17 @@ unsafe impl Sync for Pool {}
 /// A memory pool for objects of the same layout.
 /// ```
 /// use std::alloc::Layout;
-/// use dust_vdb::Pool;
+/// use dust_vdb::pool::Pool;
 /// let item: u64 = 0;
-/// // Create a pool of u64s with 2 items in each block.
+/// // Create a pool of u64s.
 /// unsafe {
-///   let mut pool = Pool::new(Layout::for_value(&item), 1);
+///   let mut pool = Pool::new(Layout::for_value(&item));
 ///   assert_eq!(pool.alloc::<u64>(), 0);
 ///   assert_eq!(pool.alloc::<u64>(), 1);
 ///   assert_eq!(pool.alloc::<u64>(), 2);
 ///   assert_eq!(pool.alloc::<u64>(), 3);
-///   assert_eq!(pool.num_chunks(), 2);
 ///
+///   // Freed entries are recycled in LIFO order.
 ///   pool.free(1);
 ///   pool.free(2);
 ///   assert_eq!(pool.alloc::<u64>(), 2);
