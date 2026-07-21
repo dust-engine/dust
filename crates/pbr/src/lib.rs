@@ -11,7 +11,7 @@ include!(concat!(
 
 use std::{ffi::CStr, ops::Deref};
 
-use tonemap::tonemap_pass;
+use tonemap::{autoexposure_pass, tonemap_pass};
 
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
@@ -43,7 +43,8 @@ use pumicite::{device::DeviceBuilder, image::UintImageView};
 use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
 use pumicite_super_resolution::{
     ScalingFactor, SuperResolutionCameraInfo, SuperResolutionCommandEncoder,
-    SuperResolutionDispatchDenoiseInfo, SuperResolutionDispatchFlags, SuperResolutionDispatchInfo,
+    SuperResolutionDispatchDenoiseInfo, SuperResolutionDispatchExposureInfo,
+    SuperResolutionDispatchFlags, SuperResolutionDispatchInfo,
     SuperResolutionDispatchMotionInfo, SuperResolutionEngine, SuperResolutionImageInfo,
     SuperResolutionPhysicalDevice, SuperResolutionQualityFocusFlags, SuperResolutionSession,
     SuperResolutionSessionCreateFlags, SuperResolutionSessionCreateInfo,
@@ -207,10 +208,14 @@ impl Plugin for PbrRenderPlugin {
                     // to 0 (so the WRS-of-1 atomic_max starts from "empty")
                     // before vox_final_gather CHS pushes Query misses.
                     .after(sharc::clear_sharc_buffers),
+                autoexposure_pass
+                    .in_set(DefaultRenderSet)
+                    .after(final_gather_pass),
                 upscaler_evaluate
                     .in_set(DefaultRenderSet)
                     .after(ensure_upscaler_session)
-                    .after(final_gather_pass),
+                    .after(final_gather_pass)
+                    .after(autoexposure_pass),
                 tonemap_pass
                     .in_set(DefaultRenderSet)
                     .after(render)
@@ -609,6 +614,13 @@ pub struct HdrRenderTargetViews {
 
     // R16G16B16A16_SFLOAT. Stores denoised (and potentially upscaled) raw light.
     pub hdr_denoised_output: FullImageView<Image>,
+
+    /// R16_SFLOAT, 1×1. Auto-exposure scale: multiplying the HDR color by this
+    /// value maps the scene's metered average to 18% mid-gray. Written by
+    /// `autoexposure_pass`; read by the upscaler dispatch (MetalFX
+    /// `exposureTexture` / DLSS-RR `pInExposureTexture`) and the tonemap pass,
+    /// so all three agree on one exposure.
+    pub exposure: FullImageView<Image>,
 }
 
 #[derive(Resource)]
@@ -623,6 +635,11 @@ pub struct HdrRenderTarget {
     pub hdr_denoised_target_state: ResourceState,
     pub motion_vectors_state: ResourceState,
     pub specular_albedo_state: ResourceState,
+    pub exposure_state: ResourceState,
+    /// False until `autoexposure_pass` has written the exposure image once
+    /// after (re)creation; while false the shader ignores the (undefined)
+    /// previous value and adopts the metered target directly.
+    pub exposure_initialized: bool,
     /// Display/output resolution (matches the swapchain). DLSS *output* targets
     /// (`hdr_denoised_output`, `sdr_target`) and the tonemap pass use this.
     pub display_extent: UVec2,
@@ -706,6 +723,7 @@ pub struct PbrRenderState {
     pub shadow_pipeline: Handle<RayTracingPipeline>,
     pub final_gather_pipeline: Handle<RayTracingPipeline>,
     pub tonemap_pipeline: Handle<ComputePipeline>,
+    pub autoexposure_pipeline: Handle<ComputePipeline>,
     pub sbt: Option<ShaderBindingTable>,
     pub shadow_sbt: Option<ShaderBindingTable>,
     pub final_gather_sbt: Option<ShaderBindingTable>,
@@ -754,12 +772,15 @@ pub fn setup(
 
     let tonemap_pipeline: Handle<ComputePipeline> =
         asset_server.load("bazel://dust/crates/pbr/shaders/tonemap.comp.pipeline.bin");
+    let autoexposure_pipeline: Handle<ComputePipeline> =
+        asset_server.load("bazel://dust/crates/pbr/shaders/autoexposure.comp.pipeline.bin");
 
     let res = PbrRenderState {
         pipeline: pipeline_manager.add_pipeline(),
         shadow_pipeline: pipeline_manager.add_pipeline(),
         final_gather_pipeline: pipeline_manager.add_pipeline(),
         tonemap_pipeline,
+        autoexposure_pipeline,
         sbt: None,
         shadow_sbt: None,
         final_gather_sbt: None,
@@ -911,7 +932,8 @@ fn ensure_upscaler_session(
         motion_vector_format: vk::Format::R16G16_SFLOAT,
         reactive_mask_format: vk::Format::UNDEFINED,
         ignore_history_mask_format: vk::Format::UNDEFINED,
-        exposure_scale_format: vk::Format::UNDEFINED,
+        // 1×1 scale written by `autoexposure_pass`, sampled by the engine.
+        exposure_scale_format: vk::Format::R16_SFLOAT,
         diffuse_albedo_format: vk::Format::R8G8B8A8_SRGB,
         specular_albedo_format: vk::Format::R8G8B8A8_UNORM,
         normal_format: vk::Format::R16G16B16A16_SFLOAT,
@@ -1104,6 +1126,15 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
+            &views.exposure,
+            &mut hdr.exposure_state,
+            read_access,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
             &views.hdr_denoised_output,
             &mut hdr.hdr_denoised_target_state,
             write_access,
@@ -1132,6 +1163,7 @@ fn upscaler_evaluate(
         let diffuse_info = sr_image_info(&views.albedo, views.albedo.srgb_view());
         let specular_info =
             sr_image_info(&views.specular_albedo, views.specular_albedo.full_view());
+        let exposure_img_info = sr_image_info(&views.exposure, views.exposure.full_view());
 
         let motion = SuperResolutionDispatchMotionInfo {
             motion_vectors_image_info: Some(&motion_img_info),
@@ -1146,12 +1178,22 @@ fn upscaler_evaluate(
             texel_jitter_x: jitter_offset.x,
             texel_jitter_y: jitter_offset.y,
         };
+        // The color input is raw scene radiance (nothing premultiplied, so
+        // pre-exposure stays 1.0); the 1×1 image carries the auto-exposure
+        // scale the tonemap pass will apply, which is exactly the value the
+        // engine wants for judging displayed brightness.
+        let exposure = SuperResolutionDispatchExposureInfo {
+            pre_exposure: 1.0,
+            exposure_scale_uniform: 1.0,
+            exposure_scale_image_info: Some(&exposure_img_info),
+        };
         let denoise = SuperResolutionDispatchDenoiseInfo {
             diffuse_albedo_image_info: &diffuse_info,
             specular_albedo_image_info: &specular_info,
             normal_image_info: &normal_info,
             // Roughness packed in `normal.w`, surfaced via the alpha-broadcast
-            // swizzle view of the normal image.
+            // swizzle view of the normal image (DLSS reads normal.w natively and
+            // ignores this; MetalFX binds the swizzle view).
             roughness_image_info: &roughness_info,
             specular_hit_distance_image_info: None,
             denoise_strength_mask_image_info: None,
@@ -1172,7 +1214,7 @@ fn upscaler_evaluate(
             },
             sharpness: 0.0,
             motion_info: Some(&motion),
-            exposure_info: None,
+            exposure_info: Some(&exposure),
             denoise_info: Some(&denoise),
             resource_descriptor_heap_offset: 0,
             sampler_descriptor_heap_offset: 0,
@@ -1424,6 +1466,27 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"DLSS-RR Specular Albedo Stand-in View");
 
+    // 1×1 exposure scale shared by the upscaler and the tonemap pass. Sized
+    // independently of both resolutions; recreated with the rest of the target
+    // only for simplicity.
+    let exposure = Image::new_private(
+        allocator.clone(),
+        &vk::ImageCreateInfo {
+            format: vk::Format::R16_SFLOAT,
+            extent: vk::Extent3D {
+                width: 1,
+                height: 1,
+                depth: 1,
+            },
+            ..base_create_info
+        },
+    )
+    .unwrap()
+    .with_name(c"Auto-Exposure Scale")
+    .create_full_view()
+    .unwrap()
+    .with_name(c"Auto-Exposure Scale View");
+
     let view = GPUMutex::new(HdrRenderTargetViews {
         hdr_output,
         sdr_target,
@@ -1433,6 +1496,7 @@ fn ensure_hdr_target(
         motion_vectors,
         specular_albedo,
         hdr_denoised_output,
+        exposure,
     });
 
     commands.insert_resource(HdrRenderTarget {
@@ -1445,6 +1509,8 @@ fn ensure_hdr_target(
         hdr_target_state: Default::default(),
         motion_vectors_state: Default::default(),
         specular_albedo_state: Default::default(),
+        exposure_state: Default::default(),
+        exposure_initialized: false,
         display_extent: extent,
         render_extent,
         hdr_denoised_target_state: Default::default(),

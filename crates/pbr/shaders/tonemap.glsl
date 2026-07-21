@@ -6,6 +6,10 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, rgba16f) uniform readonly image2D hdrInput;
 layout(set = 0, binding = 1, rgba16f)   uniform writeonly image2D ldrOutput;
 layout(set = 0, binding = 2, rgba8)   uniform readonly image2D sdrInput;
+// 1x1 auto-exposure scale written by autoexposure.glsl. The same value is fed
+// to the denoise/upscale engine, so the brightness it was told matches what we
+// display here.
+layout(set = 0, binding = 4, r16f)   uniform readonly image2D exposureInput;
 
 layout(set = 0, binding = 3, std140) uniform LpmCtl {
     uvec4 ctl[24];
@@ -63,7 +67,9 @@ void main() {
     }
     if (outColor.a != 1.0) {
         vec4 hdr = imageLoad(hdrInput, coord);
-        vec3 c = max(hdr.rgb, vec3(0.0));
+        // Scene radiance -> display-linear via the metered exposure; LPM below
+        // is configured exposure-neutral and only shapes shoulder/gamut.
+        vec3 c = max(hdr.rgb, vec3(0.0)) * imageLoad(exposureInput, ivec2(0)).r;
         bool shoulder  = (lpm.lpm_flags & LPM_FLAG_SHOULDER)   != 0u;
         bool con       = (lpm.lpm_flags & LPM_FLAG_CON)        != 0u;
         bool soft      = (lpm.lpm_flags & LPM_FLAG_SOFT)       != 0u;

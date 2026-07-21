@@ -33,7 +33,9 @@ impl PhysicalCameraParameters {
 pub struct Camera {
     pub viewport: Option<Viewport>,
     pub depth: Range<f32>,
-    /// Exposure in [EV100](https://en.wikipedia.org/wiki/Exposure_value).
+    /// Exposure compensation in stops (EV), applied on top of the metered
+    /// auto-exposure (see `autoexposure_pass`). 0.0 trusts the meter's 18%
+    /// mid-gray target; positive values brighten, negative darken.
     pub exposure: f32,
 
     /// The height of the [image sensor format] in meters.
@@ -63,9 +65,8 @@ impl Default for Camera {
         Self {
             viewport: None,
             depth: 0.1..10000.0,
-            // Linear multiplier matching previous hardcoded shader value.
-            // TODO: convert to EV100 when physical camera model is wired up.
-            exposure: 10.0,
+            // No compensation: trust the auto-exposure meter.
+            exposure: 0.0,
             sensor_width: 0.036,
             focal_length: 0.035,
         }

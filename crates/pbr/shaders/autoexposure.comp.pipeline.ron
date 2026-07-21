@@ -1,0 +1,7 @@
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/autoexposure.out",
+        entry_point: "main",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/autoexposure.playout.bin"),
+)

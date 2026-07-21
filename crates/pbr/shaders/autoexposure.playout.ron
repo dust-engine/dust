@@ -9,24 +9,14 @@ PipelineLayout(
                         ty: StorageImage,
                         stages: [Compute],
                     ),
-                    Binding( // ldrOutput
+                    Binding( // exposureImage (1x1 R16F, read + write)
                         binding: 1,
                         ty: StorageImage,
                         stages: [Compute],
                     ),
-                    Binding( // sdrInput
+                    Binding( // AutoExposureCtl
                         binding: 2,
-                        ty: StorageImage,
-                        stages: [Compute],
-                    ),
-                    Binding( // LPM control block (uvec4 ctl[24])
-                        binding: 3,
                         ty: UniformBuffer,
-                        stages: [Compute],
-                    ),
-                    Binding( // exposureInput (1x1 auto-exposure scale)
-                        binding: 4,
-                        ty: StorageImage,
                         stages: [Compute],
                     ),
                 ],

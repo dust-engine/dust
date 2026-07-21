@@ -282,16 +282,148 @@ struct TonemapPassUniforms {
     _pad: u32,
 }
 
+/// Per-frame parameters for the auto-exposure metering pass. Layout must match
+/// the `AutoExposureCtl` uniform block in `autoexposure.glsl`.
+#[derive(NoUninit, Clone, Copy)]
+#[repr(C)]
+struct AutoExposureUniforms {
+    dt: f32,
+    ev_compensation: f32,
+    adaptation_speed: f32,
+    first_frame: u32,
+    min_log_luminance: f32,
+    max_log_luminance: f32,
+    _pad: [u32; 2],
+}
+
+/// Meters the HDR scene and writes the adapted exposure scale into the 1×1
+/// [`HdrRenderTarget`] exposure image. Runs after lighting is complete and
+/// before `upscaler_evaluate`, so the denoise/upscale dispatch (MetalFX
+/// `exposureTexture` / DLSS-RR `pInExposureTexture`) and [`tonemap_pass`] read
+/// the same per-frame exposure — both engines want the value that, multiplied
+/// with the input color, matches the tonemapped brightness.
+pub(crate) fn autoexposure_pass(
+    mut ctx: SubmissionState,
+    state: Res<PbrRenderState>,
+    compute_pipelines: Res<Assets<ComputePipeline>>,
+    mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
+    cameras: Query<&Camera, With<bevy::window::PrimaryWindow>>,
+    hdr_target: Option<ResMut<HdrRenderTarget>>,
+    time: Res<Time>,
+    mut profiler: Option<ResMut<GpuProfiler>>,
+) {
+    let Ok(camera) = cameras.single() else {
+        return;
+    };
+    let Some(pipeline) = compute_pipelines.get(&state.autoexposure_pipeline) else {
+        return;
+    };
+    let Some(mut hdr_target) = hdr_target else {
+        return;
+    };
+    let pipeline = pipeline.clone().into_inner();
+
+    let first_frame = !hdr_target.exposure_initialized;
+    hdr_target.exposure_initialized = true;
+    let uniforms = AutoExposureUniforms {
+        dt: time.delta_secs(),
+        ev_compensation: camera.exposure,
+        // Reaches ~95% of a brightness step in about two seconds.
+        adaptation_speed: 1.5,
+        first_frame: first_frame as u32,
+        min_log_luminance: -12.0,
+        max_log_luminance: 16.0,
+        _pad: [0; 2],
+    };
+
+    ctx.record(move |encoder| {
+        let ctl_buffer =
+            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniforms));
+        let hdr = &mut *hdr_target;
+        let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
+
+        // HDR scene radiance: read
+        encoder.use_image_resource(
+            &views.hdr_output,
+            &mut hdr.state,
+            Access::COMPUTE_READ,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Exposure scale: read previous frame's value, write the adapted one.
+        // Contents are undefined right after (re)creation, hence the discard on
+        // the first frame — the shader ignores the previous value then.
+        encoder.use_image_resource(
+            &views.exposure,
+            &mut hdr.exposure_state,
+            Access {
+                stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ
+                    | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+            },
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            first_frame,
+        );
+        encoder.emit_barriers();
+
+        let pipeline = encoder.retain(pipeline);
+        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+
+        encoder.push_descriptor_set(
+            vk::PipelineBindPoint::COMPUTE,
+            pipeline.layout(),
+            0,
+            &[
+                vk::WriteDescriptorSet {
+                    dst_binding: 0,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[
+                    vk::DescriptorImageInfo {
+                        sampler: vk::Sampler::null(),
+                        image_view: views.hdr_output.full_view().vk_handle(),
+                        image_layout: vk::ImageLayout::GENERAL,
+                    },
+                    vk::DescriptorImageInfo {
+                        sampler: vk::Sampler::null(),
+                        image_view: views.exposure.full_view().vk_handle(),
+                        image_layout: vk::ImageLayout::GENERAL,
+                    },
+                ]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 2,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: ctl_buffer.vk_handle(),
+                    offset: ctl_buffer.offset(),
+                    range: ctl_buffer.size(),
+                }]),
+            ],
+        );
+
+        encoder.timing_scope(profiler.as_deref_mut(), "auto-exposure", |encoder| {
+            encoder.dispatch(UVec3::new(1, 1, 1));
+        });
+    });
+}
+
 pub(crate) fn tonemap_pass(
     mut ctx: SubmissionState,
     state: Res<PbrRenderState>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    mut swapchain_images: Query<(&mut SwapchainImage, &Camera), With<bevy::window::PrimaryWindow>>,
+    mut swapchain_images: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
-    let Ok((mut swapchain_image, camera)) = swapchain_images.single_mut() else {
+    let Ok(mut swapchain_image) = swapchain_images.single_mut() else {
         return;
     };
     let Some(pipeline) = compute_pipelines.get(&state.tonemap_pipeline) else {
@@ -301,10 +433,15 @@ pub(crate) fn tonemap_pass(
         return;
     };
     let swapchain_current_image = swapchain_image.current_image().unwrap();
-    let lpm_ctl = LpmConfig {
-        exposure: camera.exposure,
-        ..LpmConfig::new_for_colorspace(swapchain_current_image.color_space())
-    };
+    // The shader pre-multiplies the HDR input by the auto-exposure scale (see
+    // `autoexposure_pass`), so its mid-gray already sits at 0.18. Run LPM at
+    // its neutral exposure — `midIn = hdrMax · 0.18 · 2^-exposure = 0.18` ⇔
+    // `exposure = log2(hdrMax)` — so LPM adds no exposure of its own and only
+    // shapes the shoulder / gamut. Exposure intent lives in the auto-exposure
+    // pass (and `Camera::exposure` EV compensation), keeping the value the
+    // upscaler was told consistent with what is displayed.
+    let mut lpm_ctl = LpmConfig::new_for_colorspace(swapchain_current_image.color_space());
+    lpm_ctl.exposure = lpm_ctl.hdr_max.log2();
     let pipeline = pipeline.clone().into_inner();
     let swapchain_colorspace =
         pumicite::types::format::ColorSpace::from(swapchain_current_image.color_space());
@@ -350,6 +487,16 @@ pub(crate) fn tonemap_pass(
         encoder.use_image_resource(
             &render_target_views.sdr_target,
             &mut hdr.sdr_target_state,
+            Access::COMPUTE_READ,
+            vk::ImageLayout::GENERAL,
+            0..1,
+            0..1,
+            false,
+        );
+        // Auto-exposure scale: read
+        encoder.use_image_resource(
+            &render_target_views.exposure,
+            &mut hdr.exposure_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
             0..1,
@@ -410,6 +557,16 @@ pub(crate) fn tonemap_pass(
                     buffer: lpm_ctl_buffer.vk_handle(),
                     offset: lpm_ctl_buffer.offset(),
                     range: lpm_ctl_buffer.size(),
+                }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 4,
+                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    sampler: vk::Sampler::null(),
+                    image_view: render_target_views.exposure.full_view().vk_handle(),
+                    image_layout: vk::ImageLayout::GENERAL,
                 }]),
             ],
         );

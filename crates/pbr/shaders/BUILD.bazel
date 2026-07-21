@@ -184,6 +184,27 @@ ron2bin(
     type = "pipeline-layout",
 )
 
+glsl_shader(
+    name = "autoexposure",
+    src = "autoexposure.glsl",
+    stage = "compute",
+    target_env = "vulkan1.2",
+)
+
+ron2bin(
+    name = "autoexposure_comp_pipeline",
+    src = "autoexposure.comp.pipeline.ron",
+    out = "autoexposure.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+
+ron2bin(
+    name = "autoexposure_playout",
+    src = "autoexposure.playout.ron",
+    out = "autoexposure.playout.bin",
+    type = "pipeline-layout",
+)
+
 filegroup(
     name = "runtime",
     srcs = [
@@ -200,5 +221,8 @@ filegroup(
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",
+        ":autoexposure",
+        ":autoexposure_comp_pipeline",
+        ":autoexposure_playout",
     ],
 )
