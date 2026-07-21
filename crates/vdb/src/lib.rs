@@ -6,8 +6,6 @@ mod accessor;
 mod attributes;
 mod node;
 
-//#[cfg(feature = "physics")]
-//mod parry;
 pub mod pool;
 mod traversal;
 mod tree;
@@ -17,9 +15,6 @@ pub use tree::Tree;
 pub use accessor::*;
 pub use attributes::{AttributeAllocator, Attributes, IsDefault};
 pub use node::*;
-
-//#[cfg(feature = "physics")]
-//pub use parry::{VdbQueryDispatcher, VdbShape};
 
 pub extern crate self as dust_vdb;
 

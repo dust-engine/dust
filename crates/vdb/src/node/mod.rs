@@ -102,17 +102,6 @@ pub trait Node: 'static + Send + Sync + Default + Clone {
     fn count_leaves(&self, pools: &[Pool]) -> usize;
 
     fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::LeafType>>]);
-
-    #[cfg(feature = "physics")]
-    fn cast_local_ray_and_get_normal(
-        &self,
-        ray: &parry3d::query::Ray,
-        solid: bool,
-        initial_intersection_t: glam::Vec2,
-        pools: &[Pool],
-    ) -> Option<parry3d::query::RayIntersection> {
-        None
-    }
 }
 
 /// Macro that simplifies tree type construction.

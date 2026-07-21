@@ -229,63 +229,6 @@ where
         );
         1
     }
-
-    /*
-    #[cfg(feature = "physics")]
-    #[inline]
-    fn cast_local_ray_and_get_normal(
-        &self,
-        ray: &parry3d::query::Ray,
-        _solid: bool,
-        initial_intersection_t: glam::Vec2,
-        _pools: &[Pool],
-    ) -> Option<parry3d::query::RayIntersection> {
-        // Assume that the node is located at 0.0 - 4.0
-
-        use glam::{IVec3, Vec3, Vec3A, Vec3Swizzles};
-        let mut hit_distance: f32 = initial_intersection_t.x;
-        let initial_intersection_point: Vec3A = (ray.origin + ray.dir * hit_distance).into();
-        let mut position: IVec3 =
-            Vec3::from((initial_intersection_point * Self::EXTENT.as_vec3a()).floor())
-                .as_ivec3()
-                .clamp(IVec3::splat(0), Self::EXTENT.as_ivec3() - IVec3::splat(1));
-
-        let t_coef: Vec3A = 1.0 / Vec3A::from(ray.dir);
-        let t_bias: Vec3A = t_coef * Vec3A::from(ray.origin);
-
-        let step = Vec3A::from(ray.dir).signum();
-
-        let mut t_max: Vec3A =
-            ((position.as_vec3a() / Self::EXTENT.as_vec3a()) + step.max(Vec3A::ZERO)) * t_coef
-                - t_bias;
-
-        let t_delta = Vec3A::ONE * t_coef * step;
-        while !{
-            let mut result = false;
-            self.get(&mut [], position.try_into().unwrap(), &mut [], &mut result);
-            result
-        } {
-            let comp_result = Vec3A::select(t_max.zxy().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE)
-                * Vec3A::select(t_max.yzx().cmplt(t_max), Vec3A::ZERO, Vec3A::ONE);
-            let position_delta = (step * comp_result).as_ivec3();
-            position += position_delta;
-            hit_distance = t_max.x.min(t_max.y).min(t_max.z);
-            if hit_distance + 0.001 >= initial_intersection_t.y {
-                return None;
-            }
-            t_max += t_delta * comp_result;
-        }
-
-        let index = ((position.x as usize) << (LOG2.y + LOG2.z))
-            | ((position.y as usize) << LOG2.z)
-            | (position.z as usize);
-        Some(parry3d::query::RayIntersection {
-            feature: parry3d::shape::FeatureId::Vertex(index as u32),
-            time_of_impact: hit_distance,
-            normal: Default::default(),
-        })
-    }
-    */
 }
 
 impl<const LOG2: ConstUVec3, T: Send + Sync + 'static> std::fmt::Debug for LeafNode<LOG2, T>
