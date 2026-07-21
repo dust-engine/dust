@@ -9,6 +9,14 @@ pub enum BazelAssetReader {
     /// Standard Bazel runfiles, used when launched via `bazel run`. Env vars or a
     /// neighboring `*.runfiles` directory tell the `runfiles` crate where to look.
     Runfiles(Runfiles),
+    /// A `cargo` build, which produces no runfiles tree. Cargo's `[env]` table
+    /// sets `BAZEL_BIN` (see `.cargo/config.toml`), so paths resolve directly:
+    /// source files (e.g. `assets/*.vox`) at their package path under the
+    /// `workspace` root, generated files (e.g. shader `*.pipeline.bin`) at the
+    /// same relative path under `bin`. Unlike the runfiles manifest — named
+    /// `dust.runfiles` on Unix but `dust.exe.runfiles` on Windows — neither path
+    /// depends on the binary's extension, so this works on every platform.
+    DevTree { workspace: PathBuf, bin: PathBuf },
     /// A macOS `.app` bundle produced by `macos_application` with the
     /// `@build_bazel_rules_apple//apple:use_runfiles` aspect hint. rules_apple
     /// copies data into `Contents/Resources` keyed by each file's *exec* path
@@ -21,28 +29,60 @@ pub enum BazelAssetReader {
 
 impl BazelAssetReader {
     pub fn new() -> Self {
-        // `bazel run` provides runfiles. A bundled macOS `.app` does not, so fall
-        // back to reading from the bundle's `Contents/Resources` directory.
-        match Runfiles::create() {
-            Ok(runfiles) => Self::Runfiles(runfiles),
-            #[cfg(target_os = "macos")]
-            Err(_) => Self::Bundle {
-                resources: PathBuf::from(
-                    objc2_foundation::NSBundle::mainBundle()
-                        .resourcePath()
-                        .expect("app bundle has no Resources directory")
-                        .to_string(),
-                ),
-            },
-            #[cfg(not(target_os = "macos"))]
-            Err(err) => panic!("failed to locate Bazel runfiles: {err:?}"),
+        // `bazel run` provides runfiles.
+        if let Ok(runfiles) = Runfiles::create() {
+            return Self::Runfiles(runfiles);
         }
+
+        // A `cargo` build has no runfiles tree, but Cargo's `[env]` sets
+        // `BAZEL_BIN` (see `.cargo/config.toml`). `BAZEL_BIN` is `<workspace>/
+        // bazel-bin`, so its parent is the workspace root.
+        if let Some(bin) = std::env::var_os("BAZEL_BIN") {
+            let bin = PathBuf::from(bin);
+            let workspace = bin
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| bin.clone());
+            return Self::DevTree { workspace, bin };
+        }
+
+        // A bundled macOS `.app` has neither runfiles nor `BAZEL_BIN`, so fall
+        // back to reading from the bundle's `Contents/Resources` directory.
+        #[cfg(target_os = "macos")]
+        return Self::Bundle {
+            resources: PathBuf::from(
+                objc2_foundation::NSBundle::mainBundle()
+                    .resourcePath()
+                    .expect("app bundle has no Resources directory")
+                    .to_string(),
+            ),
+        };
+        #[cfg(not(target_os = "macos"))]
+        panic!("failed to locate Bazel runfiles and BAZEL_BIN is unset");
     }
 
     /// Resolves a runfile-style path to a real file, or `None` if it doesn't exist.
     fn resolve(&self, path: &Path) -> Option<PathBuf> {
         match self {
             Self::Runfiles(runfiles) => rlocation!(runfiles, path),
+            Self::DevTree { workspace, bin } => {
+                // Drop the leading apparent-repo component (e.g. `dust/`).
+                let mut components = path.components();
+                components.next();
+                let rel = components.as_path();
+
+                // Source files keep their workspace-relative path; generated
+                // files live under bazel-bin at the same relative path.
+                let source = workspace.join(rel);
+                if source.exists() {
+                    return Some(source);
+                }
+                let generated = bin.join(rel);
+                if generated.exists() {
+                    return Some(generated);
+                }
+                None
+            }
             #[cfg(target_os = "macos")]
             Self::Bundle { resources } => {
                 // Drop the leading apparent-repo component (e.g. `dust/`) that
