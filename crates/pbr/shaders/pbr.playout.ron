@@ -41,9 +41,10 @@ PipelineLayout(
         ),
     ],
     push_constants: {
-        // FinalGatherPush: just frameIndex (see final_gather.slang). The
-        // primary/shadow pipelines share this layout but declare no push
-        // constants of their own.
+        // A per-frame frameIndex sampling seed. Pushed by the final-gather
+        // pass (FinalGatherPush, final_gather.slang) and the shadow pass
+        // (ShadowPush, shadow.slang); the primary pipeline shares this layout
+        // but declares no push constants of its own.
         RayGen: (0, 4),
     }
 )

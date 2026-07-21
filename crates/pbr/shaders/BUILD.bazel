@@ -60,6 +60,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":sharc_module",
+        ":random.slang",
     ],
     out = "shadow.spv",
     profile = "lib_6_3",

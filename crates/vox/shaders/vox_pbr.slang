@@ -18,6 +18,8 @@ void closestHitShader(
     params.gbuffer.albedoLinear[DispatchRaysIndex().xy].xyz = color.xyz;
     params.gbuffer.albedoUint[DispatchRaysIndex().xy].w = 0; // miss shader index for the shadow pass
 
+    params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 0.0);
+
     // Directly-visible emissive surfaces
     if (mat.emission > 0.0) {
         params.outputTexture[DispatchRaysIndex().xy] = float4(color.xyz * mat.emission, 1.0);

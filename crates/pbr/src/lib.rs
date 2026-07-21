@@ -606,10 +606,10 @@ pub struct HdrRenderTargetViews {
     /// R16G16_SFLOAT. Screen-space motion vectors in pixels
     /// (currentPixel - prevPixel). Written by the primary RT pass.
     pub motion_vectors: FullImageView<Image>,
-    /// R8G8B8A8_UNORM. Stand-in specular albedo for DLSS-RR. Cleared to 0
-    /// each frame in `upscaler_evaluate` until the renderer produces a real
-    /// specular term — voxel materials are matte today, so black is a
-    /// physically reasonable placeholder.
+    /// R8G8B8A8_UNORM. Specular-albedo guide for the denoiser. Written to 0
+    /// every frame by the primary pass (closest-hit, miss, and UI paths):
+    /// the lighting evaluates no specular lobe today, so a zero guide is the
+    /// physically correct demodulation input.
     pub specular_albedo: FullImageView<Image>,
 
     // R16G16B16A16_SFLOAT. Stores denoised (and potentially upscaled) raw light.
@@ -1529,6 +1529,7 @@ fn shadow_pass(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<JitterState>,
     sharc_debug: Res<sharc::SharcDebugState>,
+    mut frame_index: Local<u32>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
@@ -1561,6 +1562,11 @@ fn shadow_pass(
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
+    // Per-frame seed for the sun-disk shadow-ray jitter (ShadowPush in
+    // shadow.slang). A dedicated counter, like final_gather's, so sampling
+    // doesn't couple to upscaler/jitter state.
+    let shadow_frame_index: u32 = *frame_index;
+    *frame_index = frame_index.wrapping_add(1);
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, shadow_sbt.layout(), |slice| {
@@ -1707,6 +1713,12 @@ fn shadow_pass(
                 .sky_linear_sampler(&atmosphere_luts.sampler)
                 .per_instance_data(per_instance_buf)
                 .as_slice(),
+        );
+        encoder.push_constants(
+            pipeline.layout(),
+            vk::ShaderStageFlags::RAYGEN_KHR,
+            0,
+            bytemuck::bytes_of(&shadow_frame_index),
         );
         encoder.timing_scope(profiler.as_deref_mut(), "shadow ray", |encoder| {
             encoder.trace_rays(
