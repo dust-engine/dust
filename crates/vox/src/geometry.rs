@@ -86,7 +86,7 @@ impl VoxGeometry {
     pub fn new(allocator: Allocator, unit_size: f32) -> Self {
         let tree = crate::Tree::new_with_leaf_storage(Box::new(VoxGeometryLeafStorage::new(
             allocator,
-            crate::Tree::metas()[0].layout.align(),
+            <crate::TreeRoot as dust_vdb::Node>::META[0].layout.align(),
         )));
 
         Self { tree, unit_size }

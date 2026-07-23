@@ -1,4 +1,4 @@
-use std::{alloc::Layout, any::Any, marker::PhantomData, mem::MaybeUninit};
+use std::{alloc::Layout, any::Any};
 
 pub trait PoolStorage: Send + Sync + Any {
     fn resize(&mut self, size: usize) -> *mut u8;
@@ -179,14 +179,14 @@ impl Pool {
     pub unsafe fn get_item<T>(&self, ptr: u32) -> &T {
         unsafe {
             debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
-            &*(self.get(ptr) as *const T)
+            &*(self.ptr.byte_add(Layout::new::<T>().pad_to_align().size() * ptr as usize) as *const T)
         }
     }
     #[inline]
     pub unsafe fn get_item_mut<T>(&mut self, ptr: u32) -> &mut T {
         unsafe {
             debug_assert_eq!(Layout::new::<T>().pad_to_align(), self.layout);
-            &mut *(self.get_mut(ptr) as *mut T)
+            &mut *(self.ptr.byte_add(Layout::new::<T>().pad_to_align().size() * ptr as usize) as *mut T)
         }
     }
 

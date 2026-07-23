@@ -2,14 +2,17 @@ use std::mem::MaybeUninit;
 
 use glam::UVec3;
 
-use crate::{AabbU32, Node, NodeMeta, pool::Pool, pool::PoolStorage};
+use crate::{
+    AabbU32, Node, NodeConst, NodeMeta,
+    pool::{Pool, PoolStorage},
+};
 
 pub struct Tree<ROOT: Node>
 where
-    [(); ROOT::LEVEL as usize]: Sized,
+    [(); ROOT::LEVEL]: Sized,
 {
     pub(crate) root: ROOT,
-    pub(crate) pool: [Pool; ROOT::LEVEL as usize],
+    pub(crate) pool: [Pool; ROOT::LEVEL],
     pub(crate) aabb: AabbU32,
 }
 
@@ -27,23 +30,21 @@ where
 /// ```
 impl<ROOT: Node> Tree<ROOT>
 where
-    [(); ROOT::LEVEL as usize]: Sized,
-    [(); ROOT::LEVEL as usize + 1]: Sized,
+    [(); ROOT::LEVEL + 1]: Sized,
 {
     pub fn new() -> Self
     where
         ROOT: Node,
     {
-        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] =
-            [const { MaybeUninit::uninit() }; ROOT::LEVEL as usize];
-        let metas = Self::metas();
-        for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate() {
+        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL] =
+            [const { MaybeUninit::uninit() }; ROOT::LEVEL];
+        for (i, meta) in ROOT::META.iter().take(ROOT::LEVEL).enumerate() {
             // Create CPU pool for levels 1..LEVEL. 1024 internal nodes at each level
             let pool = Pool::new(meta.layout);
             pools[i].write(pool);
         }
 
-        let pools: [Pool; ROOT::LEVEL as usize] = unsafe { MaybeUninit::array_assume_init(pools) };
+        let pools: [Pool; ROOT::LEVEL] = unsafe { MaybeUninit::array_assume_init(pools) };
         Self {
             root: ROOT::default(),
             pool: pools,
@@ -54,17 +55,16 @@ where
     where
         ROOT: Node,
     {
-        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL as usize] =
-            [const { MaybeUninit::uninit() }; ROOT::LEVEL as usize];
-        let metas = Self::metas();
-        for (i, meta) in metas.iter().take(ROOT::LEVEL).enumerate().skip(1) {
+        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL] =
+            [const { MaybeUninit::uninit() }; ROOT::LEVEL];
+        for (i, meta) in ROOT::META.iter().take(ROOT::LEVEL).enumerate().skip(1) {
             // Create CPU pool for levels 1..LEVEL. 1024 internal nodes at each level
             let pool = Pool::new(meta.layout);
             pools[i].write(pool);
         }
-        pools[0].write(Pool::new_with_storage(metas[0].layout, storage));
+        pools[0].write(Pool::new_with_storage(ROOT::META[0].layout, storage));
 
-        let pools: [Pool; ROOT::LEVEL as usize] = unsafe { MaybeUninit::array_assume_init(pools) };
+        let pools: [Pool; ROOT::LEVEL] = unsafe { MaybeUninit::array_assume_init(pools) };
         Self {
             root: ROOT::default(),
             pool: pools,
@@ -127,7 +127,9 @@ where
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
 
-    pub fn iter_leaf<'a>(&'a self) -> impl Iterator<Item = (UVec3, &'a <ROOT as Node>::LeafType)> {
+    pub fn iter_leaf<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (UVec3, &'a <ROOT as NodeConst>::LeafType)> {
         self.root
             .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
             .map(|(position, leaf)| unsafe {
@@ -149,11 +151,5 @@ where
 
     pub fn count_leaves(&self) -> usize {
         self.root.count_leaves(&self.pool)
-    }
-
-    pub fn metas() -> [NodeMeta<ROOT::LeafType>; ROOT::LEVEL as usize + 1] {
-        let mut arr = [const { MaybeUninit::uninit() }; ROOT::LEVEL as usize + 1];
-        ROOT::write_meta(&mut arr);
-        unsafe { MaybeUninit::array_assume_init(arr) }
     }
 }

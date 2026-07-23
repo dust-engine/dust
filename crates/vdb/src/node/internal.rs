@@ -1,5 +1,5 @@
 use super::{NodeMeta, size_of_grid};
-use crate::{ConstUVec3, Node, pool::Pool};
+use crate::{ConstUVec3, Node, NodeConst, pool::Pool};
 use bitvec::{array::BitArray, order::Lsb0, slice::IterOnes};
 use glam::UVec3;
 use std::{
@@ -23,10 +23,10 @@ pub union InternalNodeEntry {
 #[repr(C)]
 pub struct InternalNode<CHILD: Node, const FANOUT_LOG2: ConstUVec3>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     /// This is 0 if that tile is completely air, and 1 otherwise.
-    pub child_mask: BitArray<[usize; size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]>,
+    pub child_mask: BitArray<[usize; size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]>,
 
     /// points to self.child_mask.count_ones() LeafNodes or InternalNodes
     pub child_ptrs: [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
@@ -35,7 +35,7 @@ where
 }
 impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Clone for InternalNode<CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     fn clone(&self) -> Self {
         Self {
@@ -47,7 +47,7 @@ where
 }
 impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Default for InternalNode<CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     fn default() -> Self {
         Self {
@@ -57,11 +57,30 @@ where
         }
     }
 }
-impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Node for InternalNode<CHILD, FANOUT_LOG2>
+const impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> NodeConst
+    for InternalNode<CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     type LeafType = CHILD::LeafType;
+    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::LeafType>>]) {
+        let (child, this) = metas.split_at_mut(metas.len() - 1);
+        CHILD::write_meta(child);
+
+        this[0].write(NodeMeta {
+            layout: std::alloc::Layout::new::<Self>(),
+            setter: Self::set_in_pools,
+            getter: Self::get_in_pools,
+            extent_log2: Self::EXTENT_LOG2,
+            extent_mask: Self::EXTENT_MASK,
+            fanout_log2: FANOUT_LOG2.to_glam(),
+        });
+    }
+}
+impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> Node for InternalNode<CHILD, FANOUT_LOG2>
+where
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
+{
     const SIZE: usize = size_of_grid(FANOUT_LOG2);
     const EXTENT_LOG2: UVec3 = UVec3 {
         x: FANOUT_LOG2.x + CHILD::EXTENT_LOG2.x,
@@ -241,21 +260,6 @@ where
             child_iterator: None,
         }
     }
-    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::LeafType>>]) {
-        let (child, this) = metas.split_at_mut(metas.len() - 1);
-        CHILD::write_meta(child);
-
-        debug_assert_eq!(this.len(), 1);
-        this[0].write(NodeMeta {
-            layout: std::alloc::Layout::new::<Self>(),
-            setter: Self::set_in_pools,
-            getter: Self::get_in_pools,
-            extent_log2: Self::EXTENT_LOG2,
-            extent_mask: Self::EXTENT_MASK,
-            fanout_log2: FANOUT_LOG2.to_glam(),
-        });
-    }
-
     fn count_leaves(&self, pools: &[Pool]) -> usize {
         if Self::LEVEL == 1 {
             // We're one level above leaves.
@@ -277,7 +281,7 @@ where
 impl<CHILD: Node, const FANOUT_LOG2: ConstUVec3> std::fmt::Debug
     for InternalNode<CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Internal Node\n")?;
@@ -288,7 +292,7 @@ where
 
 pub struct InternalNodeIterator<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     pools: &'a [Pool],
     location_offset: UVec3,
@@ -299,7 +303,7 @@ where
 impl<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3> Iterator
     for InternalNodeIterator<'a, CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     type Item = UVec3;
 
@@ -334,7 +338,7 @@ where
 
 pub struct InternalNodeLeafIterator<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     pools: &'a [Pool],
     location_offset: UVec3,
@@ -345,7 +349,7 @@ where
 impl<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3> Iterator
     for InternalNodeLeafIterator<'a, CHILD, FANOUT_LOG2>
 where
-    [(); size_of_grid(FANOUT_LOG2) / size_of::<usize>() / 8]: Sized,
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
     type Item = (UVec3, &'a UnsafeCell<CHILD::LeafType>);
 

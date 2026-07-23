@@ -1,5 +1,5 @@
 use super::{NodeMeta, size_of_grid};
-use crate::{ConstUVec3, Node, pool::Pool};
+use crate::{ConstUVec3, Node, NodeConst, pool::Pool};
 use bitvec::{
     array::BitArray,
     order::Lsb0,
@@ -94,13 +94,30 @@ where
     }
 }
 
+const impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> NodeConst
+    for LeafNode<LOG2, T>
+where
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
+{
+    type LeafType = Self;
+    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self>>]) {
+        metas[0].write(NodeMeta {
+            layout: std::alloc::Layout::new::<Self>(),
+            extent_log2: Self::EXTENT_LOG2,
+            fanout_log2: LOG2.to_glam(),
+            extent_mask: Self::EXTENT_MASK,
+            setter: Self::set_in_pools,
+            getter: Self::get_in_pools,
+        });
+    }
+}
+
 impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> Node for LeafNode<LOG2, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// Total number of voxels contained within the leaf node.
     const SIZE: usize = size_of_grid(LOG2);
-    type LeafType = Self;
     /// Extent of the leaf node in each axis.
     const EXTENT_LOG2: UVec3 = LOG2.to_glam();
     const EXTENT: UVec3 = UVec3 {
@@ -208,18 +225,6 @@ where
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
         let node = unsafe { pools[0].get_item::<Self>(ptr) };
         std::iter::once((offset, unsafe { std::mem::transmute(node) }))
-    }
-
-    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self>>]) {
-        debug_assert_eq!(metas.len(), 1);
-        metas[0].write(NodeMeta {
-            layout: std::alloc::Layout::new::<Self>(),
-            extent_log2: Self::EXTENT_LOG2,
-            fanout_log2: LOG2.to_glam(),
-            extent_mask: Self::EXTENT_MASK,
-            setter: Self::set_in_pools,
-            getter: Self::get_in_pools,
-        });
     }
 
     fn count_leaves(&self, _pools: &[Pool]) -> usize {

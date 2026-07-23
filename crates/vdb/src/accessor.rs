@@ -1,16 +1,13 @@
-use crate::{Attributes, IsDefault, IsLeaf, Node, NodeMeta, Tree};
+use crate::{Attributes, IsDefault, IsLeaf, Node, Tree};
 use glam::UVec3;
-use std::mem::MaybeUninit;
 use std::ops::Deref;
 
 pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
-    [(); ROOT::LEVEL + 1]: Sized,
-    [(); ROOT::LEVEL as usize]: Sized,
+    [(); ROOT::LEVEL]: Sized,
 {
     tree: &'a mut Tree<ROOT>,
     ptrs: [u32; ROOT::LEVEL],
-    metas: [NodeMeta<ROOT::LeafType>; ROOT::LEVEL + 1],
     last_coords: UVec3,
     attributes: &'a mut ATTRIBS,
     last_leaf: Option<u32>,
@@ -44,7 +41,6 @@ impl<
         >,
 > Accessor<'a, ROOT, ATTRIBS>
 where
-    [(); ROOT::LEVEL as usize + 1]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
 {
     pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
@@ -58,7 +54,7 @@ where
         let leaf_node = if lca_level >= ROOT::LEVEL as u32 {
             self.tree.root.get(&self.tree.pool, coords, &mut self.ptrs)
         } else {
-            let meta = &self.metas[lca_level as usize];
+            let meta = &ROOT::META[lca_level as usize];
             let new_coords = coords & meta.extent_mask;
             let ptr = self.ptrs[lca_level as usize];
             (meta.getter)(&self.tree.pool, new_coords, ptr, &mut self.ptrs)
@@ -105,7 +101,7 @@ where
                 &mut self.ptrs,
             )
         } else {
-            let meta = &self.metas[lca_level as usize];
+            let meta = &ROOT::META[lca_level as usize];
             let new_coords = coords & meta.extent_mask;
             let mut ptr = self.ptrs[lca_level as usize];
             (meta.setter)(
@@ -200,7 +196,6 @@ where
 
 impl<ROOT: Node> Tree<ROOT>
 where
-    [(); ROOT::LEVEL as usize + 1]: Sized,
     [(); ROOT::LEVEL + 1]: Sized,
 {
     pub fn accessor_mut<
@@ -213,17 +208,9 @@ where
         &'a mut self,
         attributes: &'a mut A,
     ) -> Accessor<'a, ROOT, A> {
-        let mut metas: [MaybeUninit<NodeMeta<_>>; ROOT::LEVEL + 1] =
-            [const { MaybeUninit::uninit() }; ROOT::LEVEL + 1];
-        let metas_src = Self::metas();
-        assert_eq!(metas.len(), metas_src.len());
-        for (dst, src) in metas.iter_mut().zip(metas_src.into_iter()) {
-            dst.write(src);
-        }
         Accessor {
             tree: self,
             ptrs: [u32::MAX; ROOT::LEVEL],
-            metas: unsafe { MaybeUninit::array_assume_init(metas) },
             last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
             attributes,
             last_leaf: None,

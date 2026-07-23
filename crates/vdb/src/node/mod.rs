@@ -34,9 +34,13 @@ pub struct NodeMeta<V> {
     pub(crate) extent_mask: UVec3, // = (1 << extent_log2) - 1
 }
 
-pub trait Node: 'static + Send + Sync + Default + Clone {
-    /// span of the node.
+pub const trait NodeConst {
     type LeafType: IsLeaf;
+    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::LeafType>>]);
+}
+
+pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
+    /// span of the node.
     const EXTENT_LOG2: UVec3;
     const EXTENT: UVec3;
     const EXTENT_MASK: UVec3; // = (1 << extent_log2) - 1
@@ -46,6 +50,12 @@ pub trait Node: 'static + Send + Sync + Default + Clone {
 
     /// This is 0 for leaf nodes and +1 for each layer of nodes above leaves.
     const LEVEL: usize;
+
+    const META: [NodeMeta<Self::LeafType>; Self::LEVEL + 1] = {
+        let mut arr = [const { MaybeUninit::uninit() }; Self::LEVEL + 1];
+        Self::write_meta(&mut arr);
+        unsafe { MaybeUninit::array_assume_init(arr) }
+    } where [(); Self::LEVEL + 1]: Sized;
 
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
@@ -100,8 +110,6 @@ pub trait Node: 'static + Send + Sync + Default + Clone {
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a>;
 
     fn count_leaves(&self, pools: &[Pool]) -> usize;
-
-    fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self::LeafType>>]);
 }
 
 /// Macro that simplifies tree type construction.
