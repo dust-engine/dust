@@ -2,6 +2,11 @@ use crate::{Attributes, IsDefault, IsLeaf, Node, Tree};
 use glam::UVec3;
 use std::ops::Deref;
 
+/// Accessors are designed to help accelerate accesses into the tree structures by storing caches
+/// to tree branches. When traversing a grid in a spatially coherent pattern, the same branches
+/// and nodes of the underlying tree can be hit. Accessors cache the path down to the leaf node so
+/// that subsequent neighboring accesses can skip traversing the upper levels of the tree and go
+/// directly to the leaf node.
 pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
     [(); ROOT::LEVEL]: Sized,

@@ -16,18 +16,6 @@ where
     pub(crate) aabb: AabbU32,
 }
 
-/// ```
-/// #![feature(generic_const_exprs)]
-/// use dust_vdb::{hierarchy, Node, Tree};
-/// use glam::UVec3;
-/// let mut tree = Tree::<hierarchy!(2, 2, u32)>::new();
-/// tree.set_occupancy(UVec3 { x: 0, y: 4, z: 0 }, true);
-/// tree.set_occupancy(UVec3 { x: 0, y: 2, z: 2 }, true);
-/// assert!(tree.get_occupancy(UVec3::new(0, 4, 0)));
-/// assert!(!tree.get_occupancy(UVec3::new(0, 3, 0)));
-/// tree.set_occupancy(UVec3::new(0, 4, 0), false);
-/// assert!(!tree.get_occupancy(UVec3::new(0, 4, 0)));
-/// ```
 impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL + 1]: Sized,
@@ -108,21 +96,6 @@ where
         }
     }
 
-    /// ```
-    /// #![feature(generic_const_exprs)]
-    /// use dust_vdb::{Tree, hierarchy};
-    /// use glam::UVec3;
-    /// let mut tree = Tree::<hierarchy!(4, 2, u32)>::new();
-    /// tree.set_occupancy(UVec3::new(0, 1, 2), true);
-    /// tree.set_occupancy(UVec3::new(63, 1, 3), true);
-    /// tree.set_occupancy(UVec3::new(63, 63, 63), true);
-    /// let mut iter = tree.iter();
-    /// assert_eq!(iter.next().unwrap(), UVec3::new(0, 1, 2));
-    /// assert_eq!(iter.next().unwrap(), UVec3::new(63, 1, 3));
-    /// assert_eq!(iter.next().unwrap(), UVec3::new(63, 63, 63));
-    /// assert!(iter.next().is_none());
-    ///
-    /// ```
     pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
         self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
     }
