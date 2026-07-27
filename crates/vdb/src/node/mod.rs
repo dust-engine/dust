@@ -27,6 +27,7 @@ pub struct NodeMeta<V> {
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
+        moved: &mut bool,
     ) -> &'a mut V,
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
@@ -83,19 +84,45 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
         coords: UVec3,
         value: bool,
         cached_path: &mut [u32],
+        leaf_moved: &mut bool,
     ) -> &'a mut Self::LeafType;
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
-    /// Returns a reference to the old leaf, and a reference to the new one.
-    /// The old leaf is None if the node was not changed or if the old leaf node did not exist.
+    ///
+    /// Nodes on the descent path that are shared with a snapshot (see
+    /// [`Pool::is_shared`]) are copied on write: the parent's edge (`ptr`) is
+    /// redirected to a private copy and the original is left untouched for the
+    /// snapshots that reference it. If the *leaf* node was copied this way,
+    /// `moved` is set to true.
     fn set_in_pools<'a>(
         pools: &'a mut [Pool],
         coords: UVec3,
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
+        leaf_moved: &mut bool,
     ) -> &'a mut Self::LeafType;
+
+    /// Record one additional parent edge to each direct child of this node.
+    /// Called on a node that was just duplicated (a root cloned into a
+    /// snapshot, or a pooled node copied for copy-on-write): the duplicate and
+    /// the original both reference the same children afterwards.
+    fn retain_children(&self, pools: &mut [Pool]);
+
+    /// Remove one parent edge to the node stored at `ptr`. If it was the last
+    /// edge, the node is freed after recursively releasing its own children;
+    /// `leaf_dropped` is invoked for every leaf freed this way so the caller
+    /// can reclaim external resources tied to it (e.g. attribute ranges).
+    fn release_in_pools(
+        pools: &mut [Pool],
+        ptr: u32,
+        leaf_dropped: &mut dyn FnMut(&Self::LeafType),
+    );
+
+    /// Remove one parent edge from each direct child of an owned (non-pooled)
+    /// node: the working root of a tree, or a snapshot root being released.
+    fn release_children(&self, pools: &mut [Pool], leaf_dropped: &mut dyn FnMut(&Self::LeafType));
 
     type Iterator<'a>: Iterator<Item = UVec3>;
     /// This is called when the node was owned as the root node in the tree.

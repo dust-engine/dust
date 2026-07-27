@@ -143,6 +143,7 @@ where
         coords: UVec3,
         value: bool,
         _cached_path: &mut [u32],
+        _moved: &mut bool,
     ) -> &'a mut Self::LeafType {
         self.occupancy
             .set(Self::get_fully_mapped_offset(coords) as usize, value);
@@ -182,7 +183,19 @@ where
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
+        leaf_moved: &mut bool,
     ) -> &'a mut Self {
+        // Copy-on-write: a leaf shared with a snapshot is frozen. Redirect the
+        // parent's edge to a private copy and leave the original untouched.
+        // The copy still references the original's attribute range; `moved`
+        // tells the caller to re-home the attributes before writing any.
+        if pools[Self::LEVEL].is_shared(*ptr) {
+            let copy = unsafe { pools[Self::LEVEL].copy_item::<Self>(*ptr) };
+            let dead = pools[Self::LEVEL].release(*ptr);
+            debug_assert!(!dead);
+            *ptr = copy;
+            *leaf_moved = true;
+        }
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
             | (coords.z as usize);
@@ -197,6 +210,24 @@ where
         let old_leaf_node: &mut _ = unsafe { &mut *old_leaf_node };
         //old_leaf_node.occupancy.set(index, value); the caller should set this on their own
         return old_leaf_node;
+    }
+
+    fn retain_children(&self, _pools: &mut [Pool]) {
+        // Leaves have no children.
+    }
+
+    fn release_in_pools(pools: &mut [Pool], ptr: u32, leaf_dropped: &mut dyn FnMut(&Self)) {
+        if pools[Self::LEVEL].release(ptr) {
+            unsafe {
+                let node = pools[Self::LEVEL].get(ptr) as *const Self;
+                leaf_dropped(&*node);
+            }
+            pools[Self::LEVEL].free(ptr);
+        }
+    }
+
+    fn release_children(&self, _pools: &mut [Pool], _leaf_dropped: &mut dyn FnMut(&Self)) {
+        // Leaves have no children.
     }
 
     type Iterator<'a> = LeafNodeIterator<'a, LOG2>;

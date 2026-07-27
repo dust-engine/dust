@@ -14,6 +14,78 @@ where
     pub(crate) root: ROOT,
     pub(crate) pool: [Pool; ROOT::LEVEL],
     pub(crate) aabb: AabbU32,
+    /// Number of snapshots created by [`Tree::snapshot`] and not yet returned
+    /// to [`Tree::release_snapshot`].
+    pub(crate) snapshot_count: u32,
+}
+
+/// A self-contained, read-only version of a [`Tree`], captured by
+/// [`Tree::snapshot`].
+///
+/// The snapshot owns a copy of the tree's root node plus a captured, read-only
+/// view of each node pool ([`Pool::capture`]); everything below the root is
+/// shared with the live tree through per-slot reference counts
+/// ([`Pool::retain`]). Mutating the tree afterwards copies shared nodes on
+/// write, so the snapshot keeps observing the exact state it captured, at a
+/// cost proportional to the number of nodes actually touched.
+///
+/// Reads need no access to the originating tree and may run on another thread
+/// while the tree is being mutated. This is sound because
+/// - every slot reachable from a snapshot is frozen by copy-on-write: the
+///   writer redirects edges to private copies instead of mutating shared
+///   nodes, and a slot is only freed (and its bytes scribbled) once no version
+///   references it;
+/// - the captured pools pin their backing allocations, so a live pool growing
+///   into a new allocation cannot invalidate a snapshot mid-read.
+/// The writer therefore only ever writes bytes a snapshot reader never
+/// dereferences.
+///
+/// A snapshot pins every node reachable from it: it must eventually be given
+/// back to [`Tree::release_snapshot`] (or made the current state again via
+/// [`Tree::restore`], and then released), otherwise those pool slots are never
+/// reclaimed. Reference-count bookkeeping lives with the tree, which is why
+/// releasing takes `&mut Tree` while reading does not.
+#[must_use = "a snapshot pins pool slots until it is returned to Tree::release_snapshot"]
+pub struct TreeSnapshot<ROOT: Node>
+where
+    [(); ROOT::LEVEL]: Sized,
+{
+    root: ROOT,
+    pool: [Pool; ROOT::LEVEL],
+    aabb: AabbU32,
+}
+
+impl<ROOT: Node> TreeSnapshot<ROOT>
+where
+    [(); ROOT::LEVEL]: Sized,
+{
+    /// Get the leaf node containing `coords` as of the snapshot, if any.
+    pub fn get(&self, coords: UVec3) -> Option<&ROOT::LeafType> {
+        self.root.get(&self.pool, coords, &mut [])
+    }
+
+    /// Iterate the coordinates of every occupied voxel as of the snapshot.
+    pub fn iter(&self) -> ROOT::Iterator<'_> {
+        self.root.iter(&self.pool, UVec3::ZERO)
+    }
+
+    /// Iterate every leaf node as of the snapshot.
+    pub fn iter_leaf(&self) -> impl Iterator<Item = (UVec3, &ROOT::LeafType)> {
+        self.root
+            .iter_leaf(&self.pool, UVec3::ZERO)
+            .map(|(position, leaf)| unsafe {
+                let leaf: &ROOT::LeafType = &*leaf.get();
+                (position, leaf)
+            })
+    }
+
+    pub fn count_leaves(&self) -> usize {
+        self.root.count_leaves(&self.pool)
+    }
+
+    pub fn aabb(&self) -> AabbU32 {
+        self.aabb
+    }
 }
 
 impl<ROOT: Node> Tree<ROOT>
@@ -37,6 +109,7 @@ where
             root: ROOT::default(),
             pool: pools,
             aabb: AabbU32::default(),
+            snapshot_count: 0,
         }
     }
     pub fn new_with_leaf_storage(storage: Box<dyn PoolStorage>) -> Self
@@ -57,6 +130,7 @@ where
             root: ROOT::default(),
             pool: pools,
             aabb: AabbU32::default(),
+            snapshot_count: 0,
         }
     }
     pub fn pools(&self) -> &[Pool] {
@@ -114,6 +188,12 @@ where
     pub fn iter_leaf_mut<'a>(
         &'a mut self,
     ) -> impl Iterator<Item = (UVec3, &'a mut ROOT::LeafType)> {
+        // Handing out &mut leaves bypasses copy-on-write: a leaf shared with a
+        // snapshot would be mutated in place, corrupting the snapshot.
+        assert_eq!(
+            self.snapshot_count, 0,
+            "iter_leaf_mut bypasses copy-on-write; release all snapshots first"
+        );
         self.root
             .iter_leaf(&mut self.pool, UVec3 { x: 0, y: 0, z: 0 })
             .map(|(position, leaf)| unsafe {
@@ -124,5 +204,71 @@ where
 
     pub fn count_leaves(&self) -> usize {
         self.root.count_leaves(&self.pool)
+    }
+
+    /// Number of live snapshots ([`Tree::snapshot`] minus
+    /// [`Tree::release_snapshot`]).
+    pub fn snapshot_count(&self) -> u32 {
+        self.snapshot_count
+    }
+
+    /// Capture the current state of the tree as a self-contained read-only
+    /// snapshot.
+    ///
+    /// Cost is independent of tree size: the root node is cloned, each of its
+    /// direct children gains one reference count entry, and each pool's
+    /// current backing allocation is captured ([`Pool::capture`]). Later
+    /// mutations copy shared nodes on write instead of mutating them in place,
+    /// so the snapshot keeps observing the captured state — including from
+    /// other threads — while the tree moves on.
+    pub fn snapshot(&mut self) -> TreeSnapshot<ROOT> {
+        self.root.retain_children(&mut self.pool);
+        self.snapshot_count += 1;
+        let mut pools: [MaybeUninit<Pool>; ROOT::LEVEL] =
+            [const { MaybeUninit::uninit() }; ROOT::LEVEL];
+        for (capture, pool) in pools.iter_mut().zip(self.pool.iter()) {
+            capture.write(pool.capture());
+        }
+        TreeSnapshot {
+            root: self.root.clone(),
+            pool: unsafe { MaybeUninit::array_assume_init(pools) },
+            aabb: self.aabb,
+        }
+    }
+
+    /// Release a snapshot, freeing every node that stayed allocated solely for
+    /// it. `leaf_dropped` is called for each leaf node freed this way, so
+    /// externally managed per-leaf resources (e.g. the attribute range
+    /// referenced by the leaf's value) can be reclaimed by the caller.
+    pub fn release_snapshot(
+        &mut self,
+        snapshot: TreeSnapshot<ROOT>,
+        mut leaf_dropped: impl FnMut(&ROOT::LeafType),
+    ) {
+        snapshot
+            .root
+            .release_children(&mut self.pool, &mut leaf_dropped);
+        self.snapshot_count -= 1;
+    }
+
+    /// Restore the tree to the state captured by `snapshot` (undo).
+    ///
+    /// The snapshot stays valid and must still be released eventually; an undo
+    /// stack can therefore restore the same snapshot repeatedly. Nodes only
+    /// reachable from the abandoned working state are freed, reporting dropped
+    /// leaves to `leaf_dropped`.
+    pub fn restore(
+        &mut self,
+        snapshot: &TreeSnapshot<ROOT>,
+        mut leaf_dropped: impl FnMut(&ROOT::LeafType),
+    ) {
+        // Pin the snapshot's children with the edges the restored root is
+        // about to hold *before* releasing the current root's edges, so that
+        // subtrees referenced by both can never hit refcount zero in between.
+        snapshot.root.retain_children(&mut self.pool);
+        self.root
+            .release_children(&mut self.pool, &mut leaf_dropped);
+        self.root = snapshot.root.clone();
+        self.aabb = snapshot.aabb;
     }
 }

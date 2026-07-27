@@ -110,6 +110,7 @@ where
         coords: UVec3,
         value: bool,
         cached_path: &mut [u32],
+        moved: &mut bool,
     ) -> &'a mut Self::LeafType {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
@@ -135,7 +136,7 @@ where
         }
         let new_coords = coords & CHILD::EXTENT_MASK;
         let child_ptr = unsafe { &mut self.child_ptrs[index].occupied };
-        <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
+        <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path, moved)
     }
     #[inline]
     fn set_in_pools<'a>(
@@ -144,8 +145,21 @@ where
         ptr: &mut u32,
         value: bool,
         cached_path: &mut [u32],
+        moved: &mut bool,
     ) -> &'a mut Self::LeafType {
         unsafe {
+            // Copy-on-write: if this node is shared with a snapshot, redirect
+            // the parent's edge to a private copy before mutating anything at
+            // or below it. The children become referenced by both the original
+            // (still visible to snapshots) and the copy.
+            if pools[Self::LEVEL].is_shared(*ptr) {
+                let copy = pools[Self::LEVEL].copy_item::<Self>(*ptr);
+                let dead = pools[Self::LEVEL].release(*ptr);
+                debug_assert!(!dead);
+                let copied_node = pools[Self::LEVEL].get(copy) as *const Self;
+                (*copied_node).retain_children(pools);
+                *ptr = copy;
+            }
             let node: *mut _ = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
 
             let internal_offset = coords >> CHILD::EXTENT_LOG2;
@@ -171,7 +185,38 @@ where
             }
             let new_coords = coords & CHILD::EXTENT_MASK;
             let child_ptr = &mut (&mut *node).child_ptrs[index].occupied;
-            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path)
+            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path, moved)
+        }
+    }
+
+    fn retain_children(&self, pools: &mut [Pool]) {
+        for index in self.child_mask.iter_ones() {
+            let child_ptr = unsafe { self.child_ptrs[index].occupied };
+            pools[CHILD::LEVEL].retain(child_ptr);
+        }
+    }
+
+    fn release_in_pools(
+        pools: &mut [Pool],
+        ptr: u32,
+        leaf_dropped: &mut dyn FnMut(&Self::LeafType),
+    ) {
+        if pools[Self::LEVEL].release(ptr) {
+            // Last parent edge gone: the node dies, and each of its children
+            // loses one edge in turn. Releasing never allocates, so the raw
+            // pointer into this pool stays valid across the recursion.
+            unsafe {
+                let node = pools[Self::LEVEL].get(ptr) as *const Self;
+                (*node).release_children(pools, leaf_dropped);
+            }
+            pools[Self::LEVEL].free(ptr);
+        }
+    }
+
+    fn release_children(&self, pools: &mut [Pool], leaf_dropped: &mut dyn FnMut(&Self::LeafType)) {
+        for index in self.child_mask.iter_ones() {
+            let child_ptr = unsafe { self.child_ptrs[index].occupied };
+            <CHILD as Node>::release_in_pools(pools, child_ptr, leaf_dropped);
         }
     }
     /// Get the value of a voxel at the specified coordinates within the node space.

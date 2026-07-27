@@ -8,7 +8,7 @@ use bevy::{
 use bevy_pumicite::{
     rtx::blas::BLAS, shader::compute::ComputePipeline, staging::DeviceLocalRingBuffer,
 };
-use dust_vdb::pool::PoolStorage;
+use dust_vdb::pool::{FrozenStorage, PoolStorage};
 use pumicite::{
     Allocator,
     ash::vk,
@@ -52,6 +52,14 @@ impl PoolStorage for VoxGeometryLeafStorage {
         } else {
             0
         }
+    }
+    fn capture(&self) -> FrozenStorage {
+        FrozenStorage::new(
+            self.device_address(),
+            self.buffer
+                .clone()
+                .map(|buffer| buffer as Arc<dyn Any + Send + Sync>),
+        )
     }
     fn resize(&mut self, size: usize) -> *mut u8 {
         let mut new_buffer = Buffer::new_dynamic(

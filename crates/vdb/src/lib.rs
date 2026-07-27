@@ -12,7 +12,7 @@ pub mod pool;
 mod traversal;
 mod tree;
 
-pub use tree::Tree;
+pub use tree::{Tree, TreeSnapshot};
 
 pub use accessor::*;
 pub use attributes::{AttributeAllocator, Attributes, IsDefault};
