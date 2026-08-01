@@ -9,7 +9,11 @@ use std::ops::Deref;
 /// directly to the leaf node.
 pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
-    [(); ROOT::LEVEL]: Sized,
+    [(); ROOT::LEVEL + 1]: Sized,
+    ATTRIBS: Attributes<
+            Ptr = <ROOT::LeafType as IsLeaf>::Value,
+            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+        >,
 {
     tree: &'a mut Tree<ROOT>,
     /// Cached path refreshed by reads. It may reference nodes that are shared
@@ -46,16 +50,13 @@ fn lowest_common_ancestor_level(a: UVec3, b: UVec3, mask: UVec3, root_level: u32
     root_level + 1 - parent_index
 }
 
-impl<
-    'a,
-    ROOT: Node,
+impl<'a, ROOT: Node, ATTRIBS> Accessor<'a, ROOT, ATTRIBS>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
     ATTRIBS: Attributes<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
             Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
-> Accessor<'a, ROOT, ATTRIBS>
-where
-    [(); ROOT::LEVEL + 1]: Sized,
 {
     pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
         let lca_level = lowest_common_ancestor_level(
@@ -170,7 +171,7 @@ where
         // descent landed on a different leaf: transition the hot leaf away.
         debug_assert!(self.last_leaf != Some(self.set_ptrs[0]));
         // Release reference to leaf_node so that we can borrow prev_access_leaf_node.
-        // Satefty: It has already been established that prev_access_leaf_node is not leaf_node, so it should be fine to have both mutable references.
+        // Safety: It has already been established that prev_access_leaf_node is not leaf_node, so it should be fine to have both mutable references.
         let leaf_node: *mut _ = leaf_node;
         self.purge_prev_access_leaf_node();
         let leaf_node = unsafe { &mut *leaf_node };
@@ -395,7 +396,16 @@ where
             self.last_leaf = None;
         }
     }
-    pub fn end(mut self) {
+}
+impl<'a, ROOT: Node, ATTRIBS> Drop for Accessor<'a, ROOT, ATTRIBS>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+    ATTRIBS: Attributes<
+            Ptr = <ROOT::LeafType as IsLeaf>::Value,
+            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+        >,
+{
+    fn drop(&mut self) {
         self.purge_prev_access_leaf_node();
     }
 }
@@ -592,7 +602,7 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
 
-        accessor.end();
+        drop(accessor);
     }
 
     /// Frees the attribute range owned by a leaf that the tree dropped during
@@ -618,7 +628,7 @@ mod tests {
         accessor.set(UVec3::new(0, 0, 3), 12);
         accessor.set(UVec3::new(0, 1, 0), 13);
         accessor.set(UVec3::new(144, 1, 0), 14);
-        accessor.end();
+        drop(accessor);
 
         let baseline_leaves = tree.pools()[0].count();
         let baseline_internal = tree.pools()[1].count();
@@ -632,7 +642,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 99);
         accessor.set(UVec3::new(1, 1, 1), 55);
-        accessor.end();
+        drop(accessor);
 
         // The working tree sees the new state...
         let mut accessor = tree.accessor_mut(&mut attributes);
@@ -640,7 +650,7 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(1, 1, 1)), Some(55));
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
-        accessor.end();
+        drop(accessor);
 
         // ...while the snapshot still observes the captured state.
         let leaf = snapshot.get(UVec3::new(0, 0, 3)).unwrap();
@@ -679,7 +689,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(99));
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
-        accessor.end();
+        drop(accessor);
     }
 
     #[test]
@@ -690,7 +700,7 @@ mod tests {
 
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 12);
-        accessor.end();
+        drop(accessor);
 
         let baseline_leaves = tree.pools()[0].count();
         let baseline_internal = tree.pools()[1].count();
@@ -701,7 +711,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 99);
         accessor.set(UVec3::new(144, 1, 0), 7);
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), baseline_leaves + 2);
         assert_eq!(tree.pools()[1].count(), baseline_internal + 2);
 
@@ -713,7 +723,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), None);
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), baseline_leaves);
         assert_eq!(tree.pools()[1].count(), baseline_internal);
 
@@ -730,11 +740,11 @@ mod tests {
         // With no snapshots left, edits mutate in place again: no copies.
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 50);
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), baseline_leaves);
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(50));
-        accessor.end();
+        drop(accessor);
     }
 
     #[test]
@@ -746,17 +756,17 @@ mod tests {
         let coords = UVec3::new(0, 0, 3);
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(coords, 1);
-        accessor.end();
+        drop(accessor);
 
         let snap_v1 = tree.snapshot();
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(coords, 2);
-        accessor.end();
+        drop(accessor);
 
         let snap_v2 = tree.snapshot();
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(coords, 3);
-        accessor.end();
+        drop(accessor);
 
         // Three versions of the same leaf coexist.
         let v1 = snap_v1.get(coords).unwrap();
@@ -771,7 +781,7 @@ mod tests {
         );
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(coords), Some(3));
-        accessor.end();
+        drop(accessor);
 
         // Releasing v1 must not disturb v2 or the working state.
         tree.release_snapshot(snap_v1, |leaf| drop_leaf_attributes(&mut attributes, leaf));
@@ -784,7 +794,7 @@ mod tests {
 
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(coords), Some(3));
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
@@ -800,7 +810,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 12);
         accessor.set(UVec3::new(0, 1, 0), 13);
-        accessor.end();
+        drop(accessor);
 
         let snapshot = tree.snapshot();
 
@@ -812,7 +822,7 @@ mod tests {
         accessor.set(UVec3::new(0, 1, 0), 42);
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(42));
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
-        accessor.end();
+        drop(accessor);
 
         let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
         assert_eq!(
@@ -839,7 +849,7 @@ mod tests {
             let coords = UVec3::new((i * 7) % 64, (i * 13) % 64, (i * 29) % 64);
             accessor.set(coords, (i + 1) as u8);
         }
-        accessor.end();
+        drop(accessor);
 
         let snapshot = tree.snapshot();
         let expected: Vec<UVec3> = snapshot.iter().collect();
@@ -863,7 +873,7 @@ mod tests {
                 let coords = UVec3::new((i * 3) % 64, (i * 11) % 64, (i * 17) % 64);
                 accessor.set(coords, 200);
             }
-            accessor.end();
+            drop(accessor);
             reader.join().unwrap();
         });
 
@@ -882,19 +892,19 @@ mod tests {
         accessor.set(UVec3::new(0, 0, 3), 12);
         accessor.set(UVec3::new(0, 1, 0), 13);
         accessor.set(UVec3::new(144, 1, 0), 14);
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 2);
         assert_eq!(tree.pools()[1].count(), 2);
 
         // Clearing one of two voxels: the leaf survives and becomes the hot
-        // leaf (inflated attribute range), and no nodes are freed. `end`
-        // fits the range back down to the one remaining voxel.
+        // leaf (inflated attribute range), and no nodes are freed. Dropping
+        // the accessor fits the range back down to the one remaining voxel.
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 1, 0), 0);
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 2);
         assert_eq!(tree.pools()[1].count(), 2);
         assert_eq!(attributes.attribute_maps[1].len(), 0);
@@ -907,7 +917,7 @@ mod tests {
         accessor.set(UVec3::new(0, 0, 3), 0);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), None);
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(attributes.attribute_maps[5].len(), 0);
@@ -922,7 +932,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 21);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(21));
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 2);
         assert_eq!(tree.pools()[1].count(), 2);
     }
@@ -936,7 +946,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 12);
         accessor.set(UVec3::new(144, 1, 0), 14);
-        accessor.end();
+        drop(accessor);
 
         let snapshot = tree.snapshot();
 
@@ -947,7 +957,7 @@ mod tests {
         accessor.set(UVec3::new(0, 0, 3), 0);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), None);
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 2);
         assert_eq!(tree.pools()[1].count(), 2);
         assert_eq!(attributes.attribute_maps[1], vec![12]);
@@ -972,7 +982,7 @@ mod tests {
 
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
-        accessor.end();
+        drop(accessor);
     }
 
     #[test]
@@ -985,7 +995,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 12);
         accessor.set(UVec3::new(0, 1, 0), 13);
-        accessor.end();
+        drop(accessor);
 
         let snapshot = tree.snapshot();
 
@@ -996,7 +1006,7 @@ mod tests {
         accessor.set(UVec3::new(0, 1, 0), 0);
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
-        accessor.end();
+        drop(accessor);
 
         let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
         assert!(leaf.get_occupancy_at(UVec3::new(0, 1, 0)));
@@ -1017,7 +1027,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
-        accessor.end();
+        drop(accessor);
     }
 
     #[test]
@@ -1058,10 +1068,10 @@ mod tests {
             maps_after_first_set
         );
 
-        // Ending on an erase: the empty hot leaf collapses on `end`, taking
+        // Ending on an erase: the empty hot leaf collapses on drop, taking
         // its emptied ancestors with it.
         accessor.set(v, 0);
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 0);
         assert_eq!(tree.pools()[1].count(), 0);
         assert_eq!(tree.count_leaves(), 0);
@@ -1098,7 +1108,7 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         assert_eq!(accessor.get(UVec3::new(0, 2, 0)), Some(7));
         assert_eq!(accessor.get(UVec3::new(4, 0, 0)), Some(9));
-        accessor.end();
+        drop(accessor);
 
         assert_eq!(tree.pools()[0].count(), 2);
         assert_eq!(tree.pools()[1].count(), 1);
@@ -1115,7 +1125,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 12);
         accessor.set(UVec3::new(0, 1, 0), 13);
-        accessor.end();
+        drop(accessor);
 
         let snapshot = tree.snapshot();
 
@@ -1126,7 +1136,7 @@ mod tests {
         accessor.set(UVec3::new(0, 1, 0), 0);
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(99));
-        accessor.end();
+        drop(accessor);
 
         // The snapshot's leaf still holds both voxels and its attributes.
         let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
@@ -1143,7 +1153,7 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(99));
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
-        accessor.end();
+        drop(accessor);
     }
 
     #[test]
@@ -1163,7 +1173,7 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(0, 0, 67)), None);
         // A real voxel is still found after the misses.
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
-        accessor.end();
+        drop(accessor);
     }
 
     #[test]
@@ -1174,7 +1184,7 @@ mod tests {
 
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 3), 12);
-        accessor.end();
+        drop(accessor);
         let maps_before = attributes.attribute_maps.len();
 
         let snapshot = tree.snapshot();
@@ -1188,7 +1198,7 @@ mod tests {
         accessor.set(UVec3::new(0, 0, 2), 0);
         accessor.set(UVec3::new(32, 32, 32), 0);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
-        accessor.end();
+        drop(accessor);
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(attributes.attribute_maps.len(), maps_before);
@@ -1204,6 +1214,6 @@ mod tests {
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
-        accessor.end();
+        drop(accessor);
     }
 }

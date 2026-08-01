@@ -449,7 +449,7 @@ impl VoxLoader {
             max = max.max(coords);
         }
 
-        accessor.end();
+        drop(accessor);
         // TODO: material.0.buffer_mut().flush(..);
 
         (geometry, material)

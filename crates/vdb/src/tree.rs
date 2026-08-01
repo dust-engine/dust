@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 use glam::UVec3;
 
 use crate::{
-    AabbU32, Node, NodeConst, NodeMeta,
+    AabbU32, Node, NodeConst,
     pool::{Pool, PoolStorage},
 };
 
@@ -53,6 +53,19 @@ where
     root: ROOT,
     pool: [Pool; ROOT::LEVEL],
     aabb: AabbU32,
+    drop_guard: TreeSnapshotDropGuard,
+}
+struct TreeSnapshotDropGuard;
+impl Drop for TreeSnapshotDropGuard {
+    fn drop(&mut self) {
+        panic!("TreeSnapshot must be released via Tree::release_snapshot");
+    }
+}
+impl TreeSnapshotDropGuard {
+    fn disarm(self) {
+        std::mem::forget(self);
+    }
+    
 }
 
 impl<ROOT: Node> TreeSnapshot<ROOT>
@@ -233,6 +246,7 @@ where
             root: self.root.clone(),
             pool: unsafe { MaybeUninit::array_assume_init(pools) },
             aabb: self.aabb,
+            drop_guard: TreeSnapshotDropGuard,
         }
     }
 
@@ -249,6 +263,7 @@ where
             .root
             .release_children(&mut self.pool, &mut leaf_dropped);
         self.snapshot_count -= 1;
+        snapshot.drop_guard.disarm();
     }
 
     /// Restore the tree to the state captured by `snapshot` (undo).

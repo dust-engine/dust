@@ -180,7 +180,7 @@ fn paint_rainbow_wedge(geometry: &mut VoxGeometry, material: &mut VoxMaterial, p
             }
         }
     }
-    accessor.end();
+    drop(accessor);
 }
 
 fn setup_rainbow_demo(

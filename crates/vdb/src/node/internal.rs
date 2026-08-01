@@ -2,11 +2,7 @@ use super::{NodeMeta, size_of_grid};
 use crate::{ConstUVec3, Node, NodeConst, pool::Pool};
 use bitvec::{array::BitArray, order::Lsb0, slice::IterOnes};
 use glam::UVec3;
-use std::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    mem::{MaybeUninit, size_of},
-};
+use std::{cell::UnsafeCell, marker::PhantomData, mem::MaybeUninit};
 
 #[derive(Clone, Copy)]
 pub union InternalNodeEntry {
@@ -72,9 +68,7 @@ where
             setter: Self::set_in_pools,
             getter: Self::get_in_pools,
             clearer: Self::clear_in_pools,
-            extent_log2: Self::EXTENT_LOG2,
             extent_mask: Self::EXTENT_MASK,
-            fanout_log2: FANOUT_LOG2.to_glam(),
         });
     }
 }

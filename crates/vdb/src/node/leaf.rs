@@ -103,8 +103,6 @@ where
     fn write_meta(metas: &mut [MaybeUninit<NodeMeta<Self>>]) {
         metas[0].write(NodeMeta {
             layout: std::alloc::Layout::new::<Self>(),
-            extent_log2: Self::EXTENT_LOG2,
-            fanout_log2: LOG2.to_glam(),
             extent_mask: Self::EXTENT_MASK,
             setter: Self::set_in_pools,
             getter: Self::get_in_pools,
@@ -141,13 +139,13 @@ where
     fn set<'a>(
         &'a mut self,
         _pools: &'a mut [Pool],
-        coords: UVec3,
+        _coords: UVec3,
         _cached_path: &mut [u32],
         _moved: &mut bool,
     ) -> &'a mut Self::LeafType {
-        // Only ever called if leaf is root, which should never happen
-        self.occupancy
-            .set(Self::get_fully_mapped_offset(coords) as usize, true);
+        // Only ever called if the leaf is the root. Like every descent, this
+        // never flips occupancy bits — the caller sets the bit on the
+        // returned leaf.
         self
     }
 
@@ -158,9 +156,12 @@ where
         _cached_path: &mut [u32],
         _moved: &mut bool,
     ) -> Option<&'a mut Self::LeafType> {
-        // Only ever called if leaf is root, which should never happen
-        self.occupancy
-            .set(Self::get_fully_mapped_offset(coords) as usize, false);
+        // Only ever called if the leaf is the root. Like every descent, this
+        // never flips occupancy bits — the caller clears the bit on the
+        // returned leaf. A missing voxel is a no-op.
+        if !self.get_occupancy_at(coords) {
+            return None;
+        }
         Some(self)
     }
     /// Get the value of a voxel at the specified coordinates within the node space.
@@ -168,9 +169,9 @@ where
     /// Implementation will write to cached_path for all levels below the current level.
     fn get<'a>(
         &'a self,
-        pools: &'a [Pool],
-        coords: UVec3,
-        cached_path: &mut [u32],
+        _pools: &'a [Pool],
+        _coords: UVec3,
+        _cached_path: &mut [u32],
     ) -> Option<&'a Self::LeafType> {
         Some(self)
     }
@@ -180,7 +181,7 @@ where
     /// Implementation will write to cached_path for all levels including the current level.
     fn get_in_pools<'a>(
         pools: &'a [Pool],
-        coords: UVec3,
+        _coords: UVec3,
         ptr: u32,
         cached_path: &mut [u32],
     ) -> Option<&'a Self::LeafType> {
@@ -193,7 +194,7 @@ where
     #[inline]
     fn set_in_pools<'a>(
         pools: &'a mut [Pool],
-        coords: UVec3,
+        _coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
@@ -213,9 +214,8 @@ where
         if cached_path.len() > 0 {
             cached_path[0] = *ptr;
         }
-        let old_leaf_node: &mut _ = unsafe { &mut *old_leaf_node };
-        //old_leaf_node.occupancy.set(index, value); the caller should set this on their own
-        return old_leaf_node;
+        // The caller sets the occupancy bit on the returned leaf.
+        unsafe { &mut *old_leaf_node }
     }
 
     fn clear_in_pools<'a>(

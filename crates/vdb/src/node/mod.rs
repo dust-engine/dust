@@ -40,8 +40,6 @@ pub struct NodeMeta<V> {
         moved: &mut bool,
         ancestor_shared: bool,
     ) -> Option<&'a mut V>,
-    pub(crate) extent_log2: UVec3,
-    pub(crate) fanout_log2: UVec3,
 
     pub(crate) extent_mask: UVec3, // = (1 << extent_log2) - 1
 }
