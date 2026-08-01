@@ -25,10 +25,20 @@ pub struct NodeMeta<V> {
         pools: &'a mut [Pool],
         coords: UVec3,
         ptr: &mut u32,
-        value: bool,
         cached_path: &mut [u32],
         moved: &mut bool,
     ) -> &'a mut V,
+    /// [`Node::clear_in_pools`], for re-entering the tree mid-path. Only safe
+    /// when the clear cannot empty the re-entered node (the leaf survives):
+    /// a collapse would report itself through `ptr`, which a mid-path caller
+    /// cannot propagate to the real parent edge.
+    pub(crate) clearer: for<'a> fn(
+        pools: &'a mut [Pool],
+        coords: UVec3,
+        ptr: &mut u32,
+        cached_path: &mut [u32],
+        moved: &mut bool,
+    ) -> Option<&'a mut V>,
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
 
@@ -82,7 +92,6 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
         &'a mut self,
         pools: &'a mut [Pool],
         coords: UVec3,
-        value: bool,
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
     ) -> &'a mut Self::LeafType;
@@ -90,19 +99,56 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
     /// This is called when the node was located in a node pool.
     /// Implementation will write to cached_path for all levels including the current level.
     ///
+    /// The descent never mutates occupancy bits: the caller flips the bit on
+    /// the returned leaf, for sets and clears alike. The path down to the
+    /// leaf is allocated as needed and the leaf is always returned.
+    ///
     /// Nodes on the descent path that are shared with a snapshot (see
     /// [`Pool::is_shared`]) are copied on write: the parent's edge (`ptr`) is
     /// redirected to a private copy and the original is left untouched for the
     /// snapshots that reference it. If the *leaf* node was copied this way,
-    /// `moved` is set to true.
+    /// `leaf_moved` is set to true, telling the caller that the leaf's
+    /// attribute range still belongs to the snapshot's version.
     fn set_in_pools<'a>(
         pools: &'a mut [Pool],
         coords: UVec3,
         ptr: &mut u32,
-        value: bool,
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
     ) -> &'a mut Self::LeafType;
+
+    fn clear<'a>(
+        &'a mut self,
+        pools: &'a mut [Pool],
+        coords: UVec3,
+        cached_path: &mut [u32],
+        leaf_moved: &mut bool,
+    ) -> Option<&'a mut Self::LeafType>;
+    /// Descend to the voxel at `coords` for clearing. Copy-on-write and
+    /// `cached_path` behave exactly as in [`Node::set_in_pools`], and like
+    /// sets, the descent never flips occupancy bits — the caller clears the
+    /// bit on the returned leaf.
+    ///
+    /// A clear for a voxel that does not exist returns None without copying
+    /// or freeing anything at the level that discovered the miss — it is
+    /// safe to issue blindly, no existence probe required.
+    ///
+    /// Clearing never frees nodes either: a leaf whose last bit the caller
+    /// clears simply stays in the tree, empty. It is reclaimed by invoking
+    /// this again on the emptied leaf (occupancy fully zero) — only then is
+    /// the leaf released, and every ancestor that empties with it is freed
+    /// in turn, each reporting to its parent by writing `u32::MAX` — the air
+    /// marker of [`InternalNodeEntry::free`] — through `ptr`. Because the
+    /// collapse is the only path that frees, and it always starts from the
+    /// root, a clear entered mid-path can never orphan the edge it was
+    /// handed.
+    fn clear_in_pools<'a>(
+        pools: &'a mut [Pool],
+        coords: UVec3,
+        ptr: &mut u32,
+        cached_path: &mut [u32],
+        leaf_moved: &mut bool,
+    ) -> Option<&'a mut Self::LeafType>;
 
     /// Record one additional parent edge to each direct child of this node.
     /// Called on a node that was just duplicated (a root cloned into a

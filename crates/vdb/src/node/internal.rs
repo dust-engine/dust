@@ -52,7 +52,7 @@ where
     fn default() -> Self {
         Self {
             child_mask: Default::default(),
-            child_ptrs: [InternalNodeEntry { free: 0 }; size_of_grid(FANOUT_LOG2)],
+            child_ptrs: [InternalNodeEntry { free: u32::MAX }; size_of_grid(FANOUT_LOG2)],
             _marker: Default::default(),
         }
     }
@@ -71,6 +71,7 @@ where
             layout: std::alloc::Layout::new::<Self>(),
             setter: Self::set_in_pools,
             getter: Self::get_in_pools,
+            clearer: Self::clear_in_pools,
             extent_log2: Self::EXTENT_LOG2,
             extent_mask: Self::EXTENT_MASK,
             fanout_log2: FANOUT_LOG2.to_glam(),
@@ -108,7 +109,6 @@ where
         &'a mut self,
         pools: &'a mut [Pool],
         coords: UVec3,
-        value: bool,
         cached_path: &mut [u32],
         moved: &mut bool,
     ) -> &'a mut Self::LeafType {
@@ -116,34 +116,55 @@ where
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
             | ((internal_offset.y as usize) << FANOUT_LOG2.z)
             | (internal_offset.z as usize);
-        if value {
-            // set
-            let has_child = *self.child_mask.get(index).unwrap();
-            if !has_child {
-                unsafe {
-                    // ensure have children
-                    let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
-                    self.child_mask.set(index, true);
+        let has_child = *self.child_mask.get(index).unwrap();
+        if !has_child {
+            unsafe {
+                // ensure have children
+                let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
+                self.child_mask.set(index, true);
 
-                    // allocate a child node
-                    self.child_ptrs[index].occupied = allocated_child_ptr;
-                }
+                // allocate a child node
+                self.child_ptrs[index].occupied = allocated_child_ptr;
             }
-            // TODO: propagate when filled.
-        } else {
-            // clear
-            todo!() // TODO: clear recursively, propagate if completely cleared
+        }
+        // TODO: propagate when filled.
+        let new_coords = coords & CHILD::EXTENT_MASK;
+        let child_ptr = unsafe { &mut self.child_ptrs[index].occupied };
+        <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, cached_path, moved)
+    }
+    fn clear<'a>(
+        &'a mut self,
+        pools: &'a mut [Pool],
+        coords: UVec3,
+        cached_path: &mut [u32],
+        leaf_moved: &mut bool,
+    ) -> Option<&'a mut Self::LeafType> {
+        let internal_offset = coords >> CHILD::EXTENT_LOG2;
+        let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
+            | ((internal_offset.y as usize) << FANOUT_LOG2.z)
+            | (internal_offset.z as usize);
+        let has_child = *self.child_mask.get(index).unwrap();
+        if !has_child {
+            // Clearing inside a cell that is already air: nothing to do.
+            return None;
         }
         let new_coords = coords & CHILD::EXTENT_MASK;
         let child_ptr = unsafe { &mut self.child_ptrs[index].occupied };
-        <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path, moved)
+        let leaf =
+            <CHILD as Node>::clear_in_pools(pools, new_coords, child_ptr, cached_path, leaf_moved);
+        if unsafe { self.child_ptrs[index].occupied } == u32::MAX {
+            // The child emptied and freed itself, leaving the air marker in
+            // our entry: detach the cell. The root node itself is owned by
+            // the tree and is never freed.
+            self.child_mask.set(index, false);
+        }
+        leaf
     }
     #[inline]
     fn set_in_pools<'a>(
         pools: &'a mut [Pool],
         coords: UVec3,
         ptr: &mut u32,
-        value: bool,
         cached_path: &mut [u32],
         moved: &mut bool,
     ) -> &'a mut Self::LeafType {
@@ -160,32 +181,91 @@ where
                 (*copied_node).retain_children(pools);
                 *ptr = copy;
             }
-            let node: *mut _ = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
+            let node: *mut Self = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
 
             let internal_offset = coords >> CHILD::EXTENT_LOG2;
             let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
                 | ((internal_offset.y as usize) << FANOUT_LOG2.z)
                 | (internal_offset.z as usize);
-            if value {
-                // set
-                let has_child = *(&mut *node).child_mask.get(index).unwrap();
-                if !has_child {
-                    // ensure have children
-                    let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
-                    (&mut *node).child_mask.set(index, true);
-                    (&mut *node).child_ptrs[index].occupied = allocated_child_ptr;
-                }
-                // TODO: propagate when filled.
-            } else {
-                // clear
-                todo!() // TODO: clear recursively, propagate if completely cleared
+            // set
+            let has_child = *(&mut *node).child_mask.get(index).unwrap();
+            if !has_child {
+                // ensure have children
+                let allocated_child_ptr = pools[CHILD::LEVEL].alloc::<CHILD>();
+                (&mut *node).child_mask.set(index, true);
+                (&mut *node).child_ptrs[index].occupied = allocated_child_ptr;
             }
+            // TODO: propagate when filled
+
             if cached_path.len() > 0 {
                 cached_path[Self::LEVEL] = *ptr;
             }
             let new_coords = coords & CHILD::EXTENT_MASK;
             let child_ptr = &mut (&mut *node).child_ptrs[index].occupied;
-            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, value, cached_path, moved)
+            <CHILD as Node>::set_in_pools(pools, new_coords, child_ptr, cached_path, moved)
+        }
+    }
+
+    fn clear_in_pools<'a>(
+        pools: &'a mut [Pool],
+        coords: UVec3,
+        ptr: &mut u32,
+        cached_path: &mut [u32],
+        leaf_moved: &mut bool,
+    ) -> Option<&'a mut Self::LeafType> {
+        unsafe {
+            let internal_offset = coords >> CHILD::EXTENT_LOG2;
+            let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
+                | ((internal_offset.y as usize) << FANOUT_LOG2.z)
+                | (internal_offset.z as usize);
+            // Clearing inside a cell that is already air: nothing to do —
+            let node = pools[Self::LEVEL].get_item::<Self>(*ptr);
+            if !*node.child_mask.get(index).unwrap() {
+                return None;
+            }
+            // Copy-on-write: if this node is shared with a snapshot, redirect
+            // the parent's edge to a private copy before mutating anything at
+            // or below it. The children become referenced by both the original
+            // (still visible to snapshots) and the copy.
+            if pools[Self::LEVEL].is_shared(*ptr) {
+                let copy = pools[Self::LEVEL].copy_item::<Self>(*ptr);
+                let dead = pools[Self::LEVEL].release(*ptr);
+                debug_assert!(!dead);
+                let copied_node = pools[Self::LEVEL].get(copy) as *const Self;
+                (*copied_node).retain_children(pools);
+                *ptr = copy;
+            }
+            let node: *mut Self = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
+
+            if cached_path.len() > 0 {
+                cached_path[Self::LEVEL] = *ptr;
+            }
+            let new_coords = coords & CHILD::EXTENT_MASK;
+            let child_ptr = &mut (&mut *node).child_ptrs[index].occupied;
+            let leaf = <CHILD as Node>::clear_in_pools(
+                &mut *pools,
+                new_coords,
+                child_ptr,
+                cached_path,
+                leaf_moved,
+            )
+            .map(|leaf| leaf as *mut Self::LeafType);
+            if (*node).child_ptrs[index].occupied == u32::MAX {
+                // The child emptied and freed itself, leaving the air marker
+                // in our entry: detach the cell.
+                (*node).child_mask.set(index, false);
+                if (*node).child_mask.not_any() {
+                    // Nothing left below this node either (a clear mask means
+                    // every cell is air — constant tiles don't exist yet).
+                    // Free it and report through the parent's edge in turn.
+                    // The copy-on-write step above guarantees the slot is
+                    // uniquely owned here.
+                    pools[Self::LEVEL].free(*ptr);
+                    *ptr = u32::MAX;
+                }
+                return None;
+            }
+            leaf.map(|leaf| &mut *leaf)
         }
     }
 
@@ -234,6 +314,12 @@ where
             | (internal_offset.z as usize);
         let has_child = *self.child_mask.get(index).unwrap();
         if !has_child {
+            // The descent ends here, leaving the lower cache levels holding
+            // whatever an older descent wrote — a later re-entry there would
+            // read a stale node. Poison them with u32::MAX, which re-entry
+            // interprets as "this whole region is known air".
+            let stale_levels = Self::LEVEL.min(cached_path.len());
+            cached_path[..stale_levels].fill(u32::MAX);
             return None;
         }
         let new_coords = coords & CHILD::EXTENT_MASK;

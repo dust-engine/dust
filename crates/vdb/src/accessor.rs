@@ -71,6 +71,11 @@ where
             let meta = &ROOT::META[lca_level as usize];
             let new_coords = coords & meta.extent_mask;
             let ptr = self.ptrs[lca_level as usize];
+            if ptr == u32::MAX {
+                // Poisoned by an earlier missed descent: an ancestor of this
+                // whole region is known to be air.
+                return None;
+            }
             (meta.getter)(&self.tree.pool, new_coords, ptr, &mut self.ptrs)
         }?;
         let occupied = leaf_node.get_occupancy_at(coords);
@@ -100,6 +105,11 @@ where
     where
         ROOT: Node,
     {
+        if value.is_default() {
+            // Writing the default value erases the voxel.
+            self.erase(coords);
+            return;
+        }
         let lca_level = lowest_common_ancestor_level(
             self.last_set_coords,
             coords,
@@ -109,13 +119,9 @@ where
         self.last_set_coords = coords;
         let mut moved = false;
         let leaf_node = if lca_level >= ROOT::LEVEL as u32 {
-            self.tree.root.set(
-                &mut self.tree.pool,
-                coords,
-                !value.is_default(),
-                &mut self.set_ptrs,
-                &mut moved,
-            )
+            self.tree
+                .root
+                .set(&mut self.tree.pool, coords, &mut self.set_ptrs, &mut moved)
         } else {
             let meta = &ROOT::META[lca_level as usize];
             let new_coords = coords & meta.extent_mask;
@@ -128,7 +134,6 @@ where
                 &mut self.tree.pool,
                 new_coords,
                 &mut ptr,
-                !value.is_default(),
                 &mut self.set_ptrs,
                 &mut moved,
             )
@@ -220,12 +225,172 @@ where
         };
     }
 
+    /// Remove the voxel at `coords`: clear its occupancy bit and drop its
+    /// attribute. The clear descent itself never frees nodes; an emptied
+    /// leaf is collapsed — freed together with any ancestors that empty
+    /// with it — by a separate descent from the root, where the free-cascade
+    /// walks real parent edges. The slow path collapses immediately; the
+    /// fast path defers to `purge_prev_access_leaf_node` so that set/erase
+    /// cycles in the hot leaf can resurrect it for free.
+    fn erase(&mut self, coords: UVec3) {
+        // Fast path: erasing inside the hot leaf. Its attribute range is
+        // inflated (one slot per voxel), so clearing the occupancy bit is the
+        // whole job — the dead slot is dropped whenever the leaf is next
+        // fitted. Set/erase cycles on one voxel never thrash the tree or the
+        // attribute allocator.
+        if self.last_leaf.is_some()
+            && ((coords ^ self.last_leaf_coords) & !<ROOT::LeafType as Node>::EXTENT_MASK)
+                == UVec3::ZERO
+        {
+            let last_leaf = self.last_leaf.unwrap();
+            // The hot leaf was established by a write, so it is uniquely
+            // owned: mutating it in place cannot be observed by a snapshot.
+            debug_assert!(!self.tree.pool[0].is_shared(last_leaf));
+            let leaf_node = unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
+            leaf_node.set_occupancy_at(coords, false);
+            return;
+        }
+        // Clear through the write cache. The descent verifies existence
+        // itself — a clear for a missing voxel is a no-op returning None —
+        // and never frees nodes (collapses run as separate root-anchored
+        // descents), so re-entering the tree mid-path is always safe: no
+        // cascade of frees can escape above the re-entry point.
+        let lca_level = lowest_common_ancestor_level(
+            self.last_set_coords,
+            coords,
+            ROOT::META_MASK,
+            ROOT::LEVEL as u32,
+        );
+        let mut moved = false;
+        let survivor = if lca_level >= ROOT::LEVEL as u32 {
+            self.tree
+                .root
+                .clear(&mut self.tree.pool, coords, &mut self.set_ptrs, &mut moved)
+        } else {
+            let meta = &ROOT::META[lca_level as usize];
+            let mut ptr = self.set_ptrs[lca_level as usize];
+            // Writes may only re-enter the tree at a uniquely owned node: a
+            // shared node would be copied against a dangling local edge. The
+            // set path guarantees this (see the set_ptrs field docs).
+            debug_assert!(!self.tree.pool[lca_level as usize].is_shared(ptr));
+            let survivor = (meta.clearer)(
+                &mut self.tree.pool,
+                coords & meta.extent_mask,
+                &mut ptr,
+                &mut self.set_ptrs,
+                &mut moved,
+            );
+            // `ptr` is a local copy of the edge, so a free-cascade reaching
+            // the re-entered node would orphan it: the real parent edge would
+            // keep pointing at freed nodes. Unreachable today — clear
+            // descents free nothing; only the purge's root-anchored collapse
+            // does — but pin the invariant against a future eager-freeing
+            // clear.
+            debug_assert_ne!(ptr, u32::MAX, "free-cascade reached a mid-path re-entry");
+            survivor
+        };
+        let Some(leaf_node) = survivor else {
+            // The voxel never existed. The descent may still have copied
+            // shared path nodes before discovering that, so both caches are
+            // conservatively dropped.
+            self.last_coords = UVec3::MAX;
+            self.last_set_coords = UVec3::MAX;
+            return;
+        };
+        // The survivor still carries its pre-clear state (the descent flips
+        // no bits): capture it for the attribute compaction below.
+        let old_value = leaf_node.get_value().clone();
+        let old_mask = leaf_node.get_occupancy().clone();
+        // Transition the old hot leaf away before adopting this one.
+        // Release the reference so the purge can borrow the tree.
+        // Safety: the slow path only runs when the target is not the hot
+        // leaf, and purging never allocates pool space (its collapse only
+        // frees, along a path that was already uniquified), so the pointer
+        // is neither aliased nor invalidated.
+        let leaf_node: *mut ROOT::LeafType = leaf_node;
+        self.purge_prev_access_leaf_node();
+        let leaf_node = unsafe { &mut *leaf_node };
+        // The purge may have collapsed an emptied hot leaf and invalidated
+        // the caches. The survivor's path leads to a live leaf, so the
+        // collapse cannot have freed any node on it: adopt it for both
+        // caches (the clear uniquified every node on the way down).
+        self.last_set_coords = coords;
+        self.ptrs = self.set_ptrs;
+        self.last_coords = coords;
+        // Clear the bit (occupancy is the caller's job, symmetric with
+        // sets).
+        leaf_node.set_occupancy_at(coords, false);
+        if leaf_node.get_occupancy().deref().not_any() {
+            // That was the leaf's last voxel. Making a dead leaf hot buys
+            // nothing, so skip the inflation and collapse it right away:
+            // reclaim its attribute range (unless the snapshot's leaf owns
+            // it) and re-descend from the root, where the free-cascade walks
+            // real parent edges all the way up.
+            if !moved {
+                self.attributes
+                    .free_attributes(&old_value, old_mask.count_ones() as u32);
+            }
+            let mut collapse_moved = false;
+            let removed =
+                self.tree
+                    .root
+                    .clear(&mut self.tree.pool, coords, &mut [], &mut collapse_moved);
+            debug_assert!(removed.is_none());
+            // The clear above already uniquified this path; nothing is left
+            // for the collapse to copy.
+            debug_assert!(!collapse_moved);
+            // The collapse freed nodes that both caches now reference.
+            self.last_coords = UVec3::MAX;
+            self.last_set_coords = UVec3::MAX;
+            return;
+        }
+        // Re-home the attributes to a fully inflated range and make this the
+        // hot leaf: repeated edits in the same leaf — an eraser brush — stay
+        // on the fast paths. If the old range is shared with a snapshot's
+        // leaf (`moved`), it stays with the snapshot instead of being freed.
+        let new_value =
+            self.attributes
+                .copy_attribute(&old_value, &old_mask, &ATTRIBS::MAX_OCCUPANCY, &coords);
+        if !moved {
+            self.attributes
+                .free_attributes(&old_value, old_mask.count_ones() as u32);
+        }
+        leaf_node.set_value(new_value);
+        self.last_leaf = Some(self.set_ptrs[0]);
+        self.last_leaf_coords = coords;
+    }
+
     fn purge_prev_access_leaf_node(&mut self) {
         if let Some(last_leaf) = self.last_leaf {
             // purge prev access leaf node by fitting its attributes
             let prev_access_leaf_node =
                 unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
             let old_attrib_ptr = prev_access_leaf_node.get_value();
+            if !prev_access_leaf_node.get_occupancy().deref().any() {
+                // The hot leaf was fully erased; its collapse was deferred to
+                // here (see the erase fast path). Free the inflated attribute
+                // range, then remove the leaf — and any ancestors that empty
+                // with it — from the tree.
+                self.attributes
+                    .free_attributes(old_attrib_ptr, ROOT::LeafType::SIZE as u32);
+                let mut moved = false;
+                let survivor = self.tree.root.clear(
+                    &mut self.tree.pool,
+                    self.last_leaf_coords,
+                    &mut [],
+                    &mut moved,
+                );
+                debug_assert!(survivor.is_none());
+                // The hot leaf and its path were uniquified by the write that
+                // established them, and no snapshot can be taken while this
+                // accessor borrows the tree.
+                debug_assert!(!moved);
+                // The collapse freed nodes that either cache may reference.
+                self.last_coords = UVec3::MAX;
+                self.last_set_coords = UVec3::MAX;
+                self.last_leaf = None;
+                return;
+            }
             if !prev_access_leaf_node.get_occupancy().deref().all() {
                 // fitting attributes by realloc and copy
                 let new_attrib_ptr = self.attributes.copy_attribute(
@@ -716,5 +881,335 @@ mod tests {
         tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
+    }
+
+    #[test]
+    fn test_clear_voxel() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.set(UVec3::new(0, 1, 0), 13);
+        accessor.set(UVec3::new(144, 1, 0), 14);
+        accessor.end();
+        assert_eq!(tree.pools()[0].count(), 2);
+        assert_eq!(tree.pools()[1].count(), 2);
+
+        // Clearing one of two voxels: the leaf survives and becomes the hot
+        // leaf (inflated attribute range), and no nodes are freed. `end`
+        // fits the range back down to the one remaining voxel.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 1, 0), 0);
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
+        accessor.end();
+        assert_eq!(tree.pools()[0].count(), 2);
+        assert_eq!(tree.pools()[1].count(), 2);
+        assert_eq!(attributes.attribute_maps[1].len(), 0);
+        assert_eq!(attributes.attribute_maps[4].len(), 0);
+        assert_eq!(attributes.attribute_maps[5], vec![12]);
+
+        // Clearing the last voxel of the leaf: the leaf dies, and the
+        // internal node above it became empty and dies with it.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 0);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), None);
+        assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
+        accessor.end();
+        assert_eq!(tree.pools()[0].count(), 1);
+        assert_eq!(tree.pools()[1].count(), 1);
+        assert_eq!(attributes.attribute_maps[5].len(), 0);
+        // The death path allocates no attribute ranges: the range is freed
+        // and the leaf collapses without ever being inflated.
+        assert_eq!(attributes.attribute_maps.len(), 6);
+        assert_eq!(tree.count_leaves(), 1);
+        let occupied: Vec<UVec3> = tree.iter().collect();
+        assert_eq!(occupied, vec![UVec3::new(144, 1, 0)]);
+
+        // The collapsed region accepts new voxels again.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 21);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(21));
+        accessor.end();
+        assert_eq!(tree.pools()[0].count(), 2);
+        assert_eq!(tree.pools()[1].count(), 2);
+    }
+
+    #[test]
+    fn test_clear_with_snapshot() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.set(UVec3::new(144, 1, 0), 14);
+        accessor.end();
+
+        let snapshot = tree.snapshot();
+
+        // Clear the only voxel of the first leaf. The leaf and its emptied
+        // ancestors leave the working tree, but the snapshot still owns them:
+        // nothing is freed, and the attribute range stays with the snapshot.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 0);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), None);
+        assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
+        accessor.end();
+        assert_eq!(tree.pools()[0].count(), 2);
+        assert_eq!(tree.pools()[1].count(), 2);
+        assert_eq!(attributes.attribute_maps[1], vec![12]);
+
+        let leaf = snapshot.get(UVec3::new(0, 0, 3)).unwrap();
+        assert!(leaf.get_occupancy_at(UVec3::new(0, 0, 3)));
+        assert_eq!(
+            attributes.get_attribute(
+                leaf.get_value(),
+                leaf.get_attribute_offset(UVec3::new(0, 0, 3))
+            ),
+            12
+        );
+
+        // Releasing the snapshot frees the nodes the clear left behind.
+        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        assert_eq!(tree.pools()[0].count(), 1);
+        assert_eq!(tree.pools()[1].count(), 1);
+        assert_eq!(tree.pools()[0].refcounts.len(), 0);
+        assert_eq!(tree.pools()[1].refcounts.len(), 0);
+        assert_eq!(attributes.attribute_maps[1].len(), 0);
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        assert_eq!(accessor.get(UVec3::new(144, 1, 0)), Some(14));
+        accessor.end();
+    }
+
+    #[test]
+    fn test_clear_survivor_with_snapshot() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        // Two voxels in the same leaf.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.set(UVec3::new(0, 1, 0), 13);
+        accessor.end();
+
+        let snapshot = tree.snapshot();
+
+        // Clear one of the two: the leaf survives in the working tree, so it
+        // must be copied on write — the snapshot's leaf keeps both voxels and
+        // its attribute range.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 1, 0), 0);
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        accessor.end();
+
+        let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
+        assert!(leaf.get_occupancy_at(UVec3::new(0, 1, 0)));
+        assert!(leaf.get_occupancy_at(UVec3::new(0, 0, 3)));
+        assert_eq!(
+            attributes.get_attribute(
+                leaf.get_value(),
+                leaf.get_attribute_offset(UVec3::new(0, 1, 0))
+            ),
+            13
+        );
+        assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
+
+        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        assert_eq!(tree.pools()[0].refcounts.len(), 0);
+        assert_eq!(tree.pools()[1].refcounts.len(), 0);
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
+        accessor.end();
+    }
+
+    #[test]
+    fn test_erase_set_cycle() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let v = UVec3::new(0, 0, 3);
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(v, 1);
+        let maps_after_first_set = accessor.attributes.attribute_maps.len();
+
+        // set/unset cycles on one voxel stay inside the hot leaf: no
+        // attribute reallocation and no tree surgery, even though the voxel
+        // is the leaf's only one — the empty leaf's collapse is deferred.
+        for i in 0..100u8 {
+            accessor.set(v, 0);
+            assert_eq!(accessor.tree.pools()[0].count(), 1);
+            assert_eq!(accessor.get(v), None);
+            accessor.set(v, i + 2);
+            assert_eq!(accessor.get(v), Some(i + 2));
+        }
+        assert_eq!(
+            accessor.attributes.attribute_maps.len(),
+            maps_after_first_set
+        );
+        assert_eq!(accessor.tree.pools()[0].count(), 1);
+        assert_eq!(accessor.tree.pools()[1].count(), 1);
+
+        // Ending on an erase: the empty hot leaf collapses on `end`, taking
+        // its emptied ancestors with it.
+        accessor.set(v, 0);
+        accessor.end();
+        assert_eq!(tree.pools()[0].count(), 0);
+        assert_eq!(tree.pools()[1].count(), 0);
+        assert_eq!(tree.count_leaves(), 0);
+        assert_eq!(tree.iter().count(), 0);
+        for map in &attributes.attribute_maps {
+            assert!(map.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_erase_cached_reentry() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.set(UVec3::new(0, 1, 0), 13);
+        // A second leaf under the same internal node; it becomes the hot one.
+        accessor.set(UVec3::new(4, 0, 0), 9);
+
+        // Erasing in the first leaf now: the probe re-enters through the read
+        // cache and the clear re-enters through the write cache at the shared
+        // internal node — no root descent. The surviving leaf takes over as
+        // the hot leaf.
+        accessor.set(UVec3::new(0, 1, 0), 0);
+        // A follow-up set in the erased leaf rides the write cache and the
+        // hot-leaf fast path: no attribute allocation.
+        let maps_before = accessor.attributes.attribute_maps.len();
+        accessor.set(UVec3::new(0, 2, 0), 7);
+        assert_eq!(accessor.attributes.attribute_maps.len(), maps_before);
+
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(0, 2, 0)), Some(7));
+        assert_eq!(accessor.get(UVec3::new(4, 0, 0)), Some(9));
+        accessor.end();
+
+        assert_eq!(tree.pools()[0].count(), 2);
+        assert_eq!(tree.pools()[1].count(), 1);
+        assert_eq!(attributes.attribute_maps[3], vec![9]);
+        assert_eq!(attributes.attribute_maps[5], vec![12, 7]);
+    }
+
+    #[test]
+    fn test_erase_hot_leaf_with_snapshot() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.set(UVec3::new(0, 1, 0), 13);
+        accessor.end();
+
+        let snapshot = tree.snapshot();
+
+        // The set copies the shared leaf and makes the copy hot; the erase
+        // then takes the fast path, flipping a bit on the private copy only.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 99);
+        accessor.set(UVec3::new(0, 1, 0), 0);
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(99));
+        accessor.end();
+
+        // The snapshot's leaf still holds both voxels and its attributes.
+        let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
+        assert!(leaf.get_occupancy_at(UVec3::new(0, 1, 0)));
+        assert!(leaf.get_occupancy_at(UVec3::new(0, 0, 3)));
+        assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
+
+        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        assert_eq!(tree.pools()[0].count(), 1);
+        assert_eq!(tree.pools()[1].count(), 1);
+        assert_eq!(tree.pools()[0].refcounts.len(), 0);
+        assert_eq!(tree.pools()[1].refcounts.len(), 0);
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(99));
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), None);
+        accessor.end();
+    }
+
+    #[test]
+    fn test_get_miss_then_cached_reentry() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        // A miss in an unallocated root cell. The descent stops early, so the
+        // lower levels of the read cache still describe the previous path.
+        assert_eq!(accessor.get(UVec3::new(0, 0, 64)), None);
+        // The lca with the previous (missed) lookup is at leaf level, so this
+        // re-enters the cached path at its lowest level — which the miss never
+        // wrote. It must not read the stale leaf from the first set and
+        // fabricate a voxel.
+        assert_eq!(accessor.get(UVec3::new(0, 0, 67)), None);
+        // A real voxel is still found after the misses.
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        accessor.end();
+    }
+
+    #[test]
+    fn test_clear_missing_noop() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.end();
+        let maps_before = attributes.attribute_maps.len();
+
+        let snapshot = tree.snapshot();
+
+        // Clearing voxels that do not exist — in an existing leaf and in
+        // unallocated space — must not disturb any live data: the
+        // single-voxel leaf survives the missing-voxel clear untouched, and
+        // no attributes move. The descent needs no existence probe; it may
+        // uniquify shared internal nodes on the way down (here: one copy of
+        // the internal node) before discovering the no-op, which is
+        // invisible to both versions. The leaf itself — checked before its
+        // copy-on-write — is never copied for a no-op.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 2), 0);
+        accessor.set(UVec3::new(32, 32, 32), 0);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        accessor.end();
+        assert_eq!(tree.pools()[0].count(), 1);
+        assert_eq!(tree.pools()[1].count(), 2);
+        assert_eq!(attributes.attribute_maps.len(), maps_before);
+        // The leaf is now referenced by both the snapshot's internal node and
+        // the working tree's copy; the copied internal node is unique again.
+        assert_eq!(tree.pools()[0].refcounts.len(), 1);
+        assert_eq!(tree.pools()[1].refcounts.len(), 0);
+
+        tree.release_snapshot(snapshot, |_| {
+            unreachable!("the snapshot exclusively pinned no leaf")
+        });
+        assert_eq!(tree.pools()[0].count(), 1);
+        assert_eq!(tree.pools()[1].count(), 1);
+        assert_eq!(tree.pools()[0].refcounts.len(), 0);
+        assert_eq!(tree.pools()[1].refcounts.len(), 0);
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        accessor.end();
     }
 }

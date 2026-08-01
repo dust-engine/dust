@@ -30,7 +30,7 @@ where
 
 pub trait IsLeaf: Node {
     /// Total number of voxels in the leaf node.
-    type Occupancy: DerefMut<Target = BitSlice<usize, Lsb0>>;
+    type Occupancy: DerefMut<Target = BitSlice<usize, Lsb0>> + Clone;
     type Value: Default + Send + Sync + Clone;
     fn get_occupancy(&self) -> &Self::Occupancy;
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
@@ -108,6 +108,7 @@ where
             extent_mask: Self::EXTENT_MASK,
             setter: Self::set_in_pools,
             getter: Self::get_in_pools,
+            clearer: Self::clear_in_pools,
         });
     }
 }
@@ -141,13 +142,26 @@ where
         &'a mut self,
         _pools: &'a mut [Pool],
         coords: UVec3,
-        value: bool,
         _cached_path: &mut [u32],
         _moved: &mut bool,
     ) -> &'a mut Self::LeafType {
+        // Only ever called if leaf is root, which should never happen
         self.occupancy
-            .set(Self::get_fully_mapped_offset(coords) as usize, value);
+            .set(Self::get_fully_mapped_offset(coords) as usize, true);
         self
+    }
+
+    fn clear<'a>(
+        &'a mut self,
+        _pools: &'a mut [Pool],
+        coords: UVec3,
+        _cached_path: &mut [u32],
+        _moved: &mut bool,
+    ) -> Option<&'a mut Self::LeafType> {
+        // Only ever called if leaf is root, which should never happen
+        self.occupancy
+            .set(Self::get_fully_mapped_offset(coords) as usize, false);
+        Some(self)
     }
     /// Get the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was owned.
@@ -181,14 +195,13 @@ where
         pools: &'a mut [Pool],
         coords: UVec3,
         ptr: &mut u32,
-        value: bool,
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
     ) -> &'a mut Self {
         // Copy-on-write: a leaf shared with a snapshot is frozen. Redirect the
         // parent's edge to a private copy and leave the original untouched.
-        // The copy still references the original's attribute range; `moved`
-        // tells the caller to re-home the attributes before writing any.
+        // The copy still references the original's attribute range;
+        // `leaf_moved` tells the caller to re-home the attributes.
         if pools[Self::LEVEL].is_shared(*ptr) {
             let copy = unsafe { pools[Self::LEVEL].copy_item::<Self>(*ptr) };
             let dead = pools[Self::LEVEL].release(*ptr);
@@ -196,20 +209,58 @@ where
             *ptr = copy;
             *leaf_moved = true;
         }
-        let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
-            | ((coords.y as usize) << LOG2.z)
-            | (coords.z as usize);
-        let (old_leaf_node, old_value): (*mut _, bool) = unsafe {
-            let old_leaf_node = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
-            let old_value = *old_leaf_node.occupancy.get(index).unwrap();
-            (old_leaf_node, old_value)
-        };
+        let old_leaf_node: *mut Self = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(*ptr) };
         if cached_path.len() > 0 {
             cached_path[0] = *ptr;
         }
         let old_leaf_node: &mut _ = unsafe { &mut *old_leaf_node };
         //old_leaf_node.occupancy.set(index, value); the caller should set this on their own
         return old_leaf_node;
+    }
+
+    fn clear_in_pools<'a>(
+        pools: &'a mut [Pool],
+        coords: UVec3,
+        ptr: &mut u32,
+        cached_path: &mut [u32],
+        leaf_moved: &mut bool,
+    ) -> Option<&'a mut Self::LeafType> {
+        let node = unsafe { pools[Self::LEVEL].get_item::<Self>(*ptr) };
+        let empty = node.occupancy.not_any();
+        let missing = !node.get_occupancy_at(coords);
+        if empty {
+            // A fully erased leaf being collapsed (clears themselves never
+            // empty the tree — the caller clears bits and re-invokes on the
+            // empty leaf later): drop the working tree's edge. The leaf dies
+            // with it unless a snapshot still references it.
+            Self::release_in_pools(pools, *ptr, &mut |_| {});
+            // Tell the parent the cell is air now; u32::MAX is the air
+            // marker of `InternalNodeEntry::free`.
+            *ptr = u32::MAX;
+            return None;
+        }
+        if missing {
+            // The voxel was never set: a no-op. Decided before the
+            // copy-on-write below, so a no-op never copies the leaf.
+            return None;
+        }
+        // Copy-on-write: a shared leaf is frozen — redirect the parent's
+        // edge to a private copy before the caller flips its occupancy bit.
+        // The copy still references the original's attribute range;
+        // `leaf_moved` tells the caller to re-home it.
+        if pools[Self::LEVEL].is_shared(*ptr) {
+            let copy = unsafe { pools[Self::LEVEL].copy_item::<Self>(*ptr) };
+            let dead = pools[Self::LEVEL].release(*ptr);
+            debug_assert!(!dead);
+            *ptr = copy;
+            *leaf_moved = true;
+        }
+        let old_leaf_node: *mut Self = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(*ptr) };
+        if cached_path.len() > 0 {
+            cached_path[0] = *ptr;
+        }
+        // The caller flips the occupancy bit on the returned leaf.
+        Some(unsafe { &mut *old_leaf_node })
     }
 
     fn retain_children(&self, _pools: &mut [Pool]) {

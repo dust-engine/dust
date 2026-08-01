@@ -79,7 +79,10 @@ impl PoolStorage for DefaultPoolStorage {
     fn capture(&self) -> FrozenStorage {
         FrozenStorage {
             device_address: 0,
-            buffer: self.buffer.as_ref().map(|x| x.clone() as Arc<dyn Any + Send + Sync>),
+            buffer: self
+                .buffer
+                .as_ref()
+                .map(|x| x.clone() as Arc<dyn Any + Send + Sync>),
         }
     }
 }
