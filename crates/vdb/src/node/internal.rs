@@ -148,17 +148,27 @@ where
             // Clearing inside a cell that is already air: nothing to do.
             return None;
         }
+        let old_child = unsafe { self.child_ptrs[index].occupied };
+        let mut child_ptr = old_child;
         let new_coords = coords & CHILD::EXTENT_MASK;
-        let child_ptr = unsafe { &mut self.child_ptrs[index].occupied };
-        let leaf =
-            <CHILD as Node>::clear_in_pools(pools, new_coords, child_ptr, cached_path, leaf_moved);
-        if unsafe { self.child_ptrs[index].occupied } == u32::MAX {
-            // The child emptied and freed itself, leaving the air marker in
-            // our entry: detach the cell. The root node itself is owned by
-            // the tree and is never freed.
-            self.child_mask.set(index, false);
+        let leaf = <CHILD as Node>::clear_in_pools(
+            pools,
+            new_coords,
+            &mut child_ptr,
+            cached_path,
+            leaf_moved,
+            false,
+        )
+        .map(|leaf| leaf as *mut Self::LeafType);
+        if child_ptr != old_child {
+            // The child forked (it was shared with a snapshot): redirect the
+            // root's edge and drop the old version's. The root is owned by
+            // the tree, so it is always safe to update in place.
+            self.child_ptrs[index].occupied = child_ptr;
+            let dead = pools[CHILD::LEVEL].release(old_child);
+            debug_assert!(!dead);
         }
-        leaf
+        leaf.map(|leaf| unsafe { &mut *leaf })
     }
     #[inline]
     fn set_in_pools<'a>(
@@ -212,6 +222,7 @@ where
         ptr: &mut u32,
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
+        ancestor_shared: bool,
     ) -> Option<&'a mut Self::LeafType> {
         unsafe {
             let internal_offset = coords >> CHILD::EXTENT_LOG2;
@@ -223,49 +234,107 @@ where
             if !*node.child_mask.get(index).unwrap() {
                 return None;
             }
-            // Copy-on-write: if this node is shared with a snapshot, redirect
-            // the parent's edge to a private copy before mutating anything at
-            // or below it. The children become referenced by both the original
-            // (still visible to snapshots) and the copy.
-            if pools[Self::LEVEL].is_shared(*ptr) {
-                let copy = pools[Self::LEVEL].copy_item::<Self>(*ptr);
-                let dead = pools[Self::LEVEL].release(*ptr);
-                debug_assert!(!dead);
-                let copied_node = pools[Self::LEVEL].get(copy) as *const Self;
-                (*copied_node).retain_children(pools);
-                *ptr = copy;
-            }
-            let node: *mut Self = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
-
-            if cached_path.len() > 0 {
-                cached_path[Self::LEVEL] = *ptr;
-            }
+            // Sharing recorded at an ancestor freezes this node too, even
+            // while its own count still reads unique (refcounts are pushed
+            // down lazily, by the forks themselves).
+            let shared = ancestor_shared || pools[Self::LEVEL].is_shared(*ptr);
+            let old_child = node.child_ptrs[index].occupied;
+            // Descend on a local copy of the edge: this node may be frozen,
+            // so nothing below may write through its storage. Forks are
+            // recorded on the way back up, only once the voxel is found — a
+            // clear that misses touches nothing.
+            let mut child_ptr = old_child;
             let new_coords = coords & CHILD::EXTENT_MASK;
-            let child_ptr = &mut (&mut *node).child_ptrs[index].occupied;
             let leaf = <CHILD as Node>::clear_in_pools(
                 &mut *pools,
                 new_coords,
-                child_ptr,
+                &mut child_ptr,
                 cached_path,
                 leaf_moved,
+                shared,
             )
             .map(|leaf| leaf as *mut Self::LeafType);
+            let Some(leaf) = leaf else {
+                // No-op below: nothing was forked, nothing to record.
+                debug_assert_eq!(child_ptr, old_child);
+                return None;
+            };
+            if child_ptr != old_child {
+                // The child forked; record the new edge. A frozen node forks
+                // itself first: the copy aliases all children, so retaining
+                // them and then releasing the replaced one nets the old
+                // child's count back to unchanged. The pre-fork version's own
+                // edge stays with our parent — it releases it when it records
+                // `ptr`, exactly as we do for our child here.
+                if shared {
+                    let copy = pools[Self::LEVEL].copy_item::<Self>(*ptr);
+                    let copied_node = pools[Self::LEVEL].get(copy) as *const Self;
+                    (*copied_node).retain_children(pools);
+                    let copied_node = pools[Self::LEVEL].get_item_mut::<Self>(copy);
+                    copied_node.child_ptrs[index].occupied = child_ptr;
+                    *ptr = copy;
+                } else {
+                    let node = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
+                    node.child_ptrs[index].occupied = child_ptr;
+                }
+                let dead = pools[CHILD::LEVEL].release(old_child);
+                debug_assert!(!dead);
+            }
+            if cached_path.len() > 0 {
+                cached_path[Self::LEVEL] = *ptr;
+            }
+            Some(&mut *leaf)
+        }
+    }
+
+    fn collapse(&mut self, pools: &mut [Pool], coords: UVec3) {
+        let internal_offset = coords >> CHILD::EXTENT_LOG2;
+        let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
+            | ((internal_offset.y as usize) << FANOUT_LOG2.z)
+            | (internal_offset.z as usize);
+        debug_assert!(
+            *self.child_mask.get(index).unwrap(),
+            "collapse must target an existing path"
+        );
+        let new_coords = coords & CHILD::EXTENT_MASK;
+        let child_ptr = unsafe { &mut self.child_ptrs[index].occupied };
+        <CHILD as Node>::collapse_in_pools(pools, new_coords, child_ptr);
+        if unsafe { self.child_ptrs[index].occupied } == u32::MAX {
+            // The child emptied and freed itself: detach the cell. The root
+            // node itself is owned by the tree and is never freed.
+            self.child_mask.set(index, false);
+        }
+    }
+
+    fn collapse_in_pools(pools: &mut [Pool], coords: UVec3, ptr: &mut u32) {
+        unsafe {
+            let internal_offset = coords >> CHILD::EXTENT_LOG2;
+            let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
+                | ((internal_offset.y as usize) << FANOUT_LOG2.z)
+                | (internal_offset.z as usize);
+            // The cascade mutates parents in place, which is only sound on
+            // uniquely owned nodes reached through real parent edges — both
+            // guaranteed by the caller (see the trait docs).
+            debug_assert!(!pools[Self::LEVEL].is_shared(*ptr));
+            let node: *mut Self = pools[Self::LEVEL].get_item_mut::<Self>(*ptr);
+            debug_assert!(
+                *(*node).child_mask.get(index).unwrap(),
+                "collapse must target an existing path"
+            );
+            let new_coords = coords & CHILD::EXTENT_MASK;
+            let child_ptr = &mut (*node).child_ptrs[index].occupied;
+            <CHILD as Node>::collapse_in_pools(&mut *pools, new_coords, child_ptr);
             if (*node).child_ptrs[index].occupied == u32::MAX {
-                // The child emptied and freed itself, leaving the air marker
-                // in our entry: detach the cell.
+                // The child emptied and freed itself: detach the cell.
                 (*node).child_mask.set(index, false);
                 if (*node).child_mask.not_any() {
                     // Nothing left below this node either (a clear mask means
                     // every cell is air — constant tiles don't exist yet).
                     // Free it and report through the parent's edge in turn.
-                    // The copy-on-write step above guarantees the slot is
-                    // uniquely owned here.
                     pools[Self::LEVEL].free(*ptr);
                     *ptr = u32::MAX;
                 }
-                return None;
             }
-            leaf.map(|leaf| &mut *leaf)
         }
     }
 

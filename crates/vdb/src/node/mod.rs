@@ -38,6 +38,7 @@ pub struct NodeMeta<V> {
         ptr: &mut u32,
         cached_path: &mut [u32],
         moved: &mut bool,
+        ancestor_shared: bool,
     ) -> Option<&'a mut V>,
     pub(crate) extent_log2: UVec3,
     pub(crate) fanout_log2: UVec3,
@@ -124,31 +125,50 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
     ) -> Option<&'a mut Self::LeafType>;
-    /// Descend to the voxel at `coords` for clearing. Copy-on-write and
-    /// `cached_path` behave exactly as in [`Node::set_in_pools`], and like
-    /// sets, the descent never flips occupancy bits — the caller clears the
-    /// bit on the returned leaf.
+    /// Descend to the voxel at `coords` for clearing. Like sets, the descent
+    /// never flips occupancy bits — the caller clears the bit on the
+    /// returned leaf.
     ///
-    /// A clear for a voxel that does not exist returns None without copying
-    /// or freeing anything at the level that discovered the miss — it is
-    /// safe to issue blindly, no existence probe required.
+    /// A clear for a voxel that does not exist returns None having touched
+    /// nothing at all: unlike sets, the descent walks down on *local copies*
+    /// of the edges and forks shared nodes only on the way back up, after
+    /// the voxel is found — so it is safe to issue blindly, costs nothing
+    /// when it misses, and leaves any caller-cached paths intact. A forked
+    /// child redirects `ptr` to its copy; the parent then forks itself if
+    /// needed to record the new edge, and releases the old child's edge (the
+    /// child cannot: with lazily pushed-down refcounts it may be frozen via
+    /// an ancestor — reported through `ancestor_shared` — while its own
+    /// count still reads unique). If the leaf was forked, `leaf_moved` is
+    /// set: its attribute range still belongs to the snapshot's version.
+    /// `cached_path` is written only on the found-voxel path, post-fork.
     ///
-    /// Clearing never frees nodes either: a leaf whose last bit the caller
-    /// clears simply stays in the tree, empty. It is reclaimed by invoking
-    /// this again on the emptied leaf (occupancy fully zero) — only then is
-    /// the leaf released, and every ancestor that empties with it is freed
-    /// in turn, each reporting to its parent by writing `u32::MAX` — the air
-    /// marker of [`InternalNodeEntry::free`] — through `ptr`. Because the
-    /// collapse is the only path that frees, and it always starts from the
-    /// root, a clear entered mid-path can never orphan the edge it was
-    /// handed.
+    /// Clearing never frees nodes: a leaf whose last bit the caller clears
+    /// simply stays in the tree, empty, until [`Node::collapse`] reclaims
+    /// it. With no freeing anywhere in the descent, a clear entered mid-path
+    /// can never orphan the edge it was handed.
     fn clear_in_pools<'a>(
         pools: &'a mut [Pool],
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
+        ancestor_shared: bool,
     ) -> Option<&'a mut Self::LeafType>;
+
+    /// Reclaim the fully erased leaf at `coords`: release it, and free every
+    /// ancestor that empties with it. A freed node reports to its parent by
+    /// writing `u32::MAX` — the air marker of [`InternalNodeEntry::free`] —
+    /// through `ptr`, and the parent detaches the cell.
+    ///
+    /// The structural counterpart to [`Node::clear_in_pools`], which only
+    /// touches occupancy paths and never frees: all reclamation lives here.
+    /// The cascade mutates parents in place, so it must run through real
+    /// parent edges — always enter through the owned root
+    /// ([`Node::collapse`]), never mid-path — and it walks uniquely owned
+    /// nodes only: the accessor collapses just the leaves it emptied itself,
+    /// whose paths its own writes uniquified.
+    fn collapse(&mut self, pools: &mut [Pool], coords: UVec3);
+    fn collapse_in_pools(pools: &mut [Pool], coords: UVec3, ptr: &mut u32);
 
     /// Record one additional parent edge to each direct child of this node.
     /// Called on a node that was just duplicated (a root cloned into a

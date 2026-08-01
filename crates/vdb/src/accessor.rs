@@ -252,9 +252,10 @@ where
         }
         // Clear through the write cache. The descent verifies existence
         // itself — a clear for a missing voxel is a no-op returning None —
-        // and never frees nodes (collapses run as separate root-anchored
-        // descents), so re-entering the tree mid-path is always safe: no
-        // cascade of frees can escape above the re-entry point.
+        // and cannot free nodes (freeing lives in `collapse`, which always
+        // descends from the root), so re-entering the tree mid-path is
+        // always safe: there is no cascade of frees to escape above the
+        // re-entry point.
         let lca_level = lowest_common_ancestor_level(
             self.last_set_coords,
             coords,
@@ -273,28 +274,21 @@ where
             // shared node would be copied against a dangling local edge. The
             // set path guarantees this (see the set_ptrs field docs).
             debug_assert!(!self.tree.pool[lca_level as usize].is_shared(ptr));
-            let survivor = (meta.clearer)(
+            (meta.clearer)(
                 &mut self.tree.pool,
                 coords & meta.extent_mask,
                 &mut ptr,
                 &mut self.set_ptrs,
                 &mut moved,
-            );
-            // `ptr` is a local copy of the edge, so a free-cascade reaching
-            // the re-entered node would orphan it: the real parent edge would
-            // keep pointing at freed nodes. Unreachable today — clear
-            // descents free nothing; only the purge's root-anchored collapse
-            // does — but pin the invariant against a future eager-freeing
-            // clear.
-            debug_assert_ne!(ptr, u32::MAX, "free-cascade reached a mid-path re-entry");
-            survivor
+                // Every ancestor of a write-cache entry was uniquified by the
+                // write that cached it (see the set_ptrs field docs).
+                false,
+            )
         };
         let Some(leaf_node) = survivor else {
-            // The voxel never existed. The descent may still have copied
-            // shared path nodes before discovering that, so both caches are
-            // conservatively dropped.
-            self.last_coords = UVec3::MAX;
-            self.last_set_coords = UVec3::MAX;
+            // The voxel never existed. The descent forks shared nodes only
+            // on its way back up from a found voxel, so a miss has touched
+            // nothing — both caches remain exactly as valid as they were.
             return;
         };
         // The survivor still carries its pre-clear state (the descent flips
@@ -325,20 +319,13 @@ where
             // nothing, so skip the inflation and collapse it right away:
             // reclaim its attribute range (unless the snapshot's leaf owns
             // it) and re-descend from the root, where the free-cascade walks
-            // real parent edges all the way up.
+            // real parent edges all the way up. The clear above uniquified
+            // this path, as the collapse requires.
             if !moved {
                 self.attributes
                     .free_attributes(&old_value, old_mask.count_ones() as u32);
             }
-            let mut collapse_moved = false;
-            let removed =
-                self.tree
-                    .root
-                    .clear(&mut self.tree.pool, coords, &mut [], &mut collapse_moved);
-            debug_assert!(removed.is_none());
-            // The clear above already uniquified this path; nothing is left
-            // for the collapse to copy.
-            debug_assert!(!collapse_moved);
+            self.tree.root.collapse(&mut self.tree.pool, coords);
             // The collapse freed nodes that both caches now reference.
             self.last_coords = UVec3::MAX;
             self.last_set_coords = UVec3::MAX;
@@ -370,21 +357,13 @@ where
                 // The hot leaf was fully erased; its collapse was deferred to
                 // here (see the erase fast path). Free the inflated attribute
                 // range, then remove the leaf — and any ancestors that empty
-                // with it — from the tree.
+                // with it — from the tree. The write that made the leaf hot
+                // uniquified its path, as the collapse requires.
                 self.attributes
                     .free_attributes(old_attrib_ptr, ROOT::LeafType::SIZE as u32);
-                let mut moved = false;
-                let survivor = self.tree.root.clear(
-                    &mut self.tree.pool,
-                    self.last_leaf_coords,
-                    &mut [],
-                    &mut moved,
-                );
-                debug_assert!(survivor.is_none());
-                // The hot leaf and its path were uniquified by the write that
-                // established them, and no snapshot can be taken while this
-                // accessor borrows the tree.
-                debug_assert!(!moved);
+                self.tree
+                    .root
+                    .collapse(&mut self.tree.pool, self.last_leaf_coords);
                 // The collapse freed nodes that either cache may reference.
                 self.last_coords = UVec3::MAX;
                 self.last_set_coords = UVec3::MAX;
@@ -1059,6 +1038,16 @@ mod tests {
         assert_eq!(accessor.tree.pools()[0].count(), 1);
         assert_eq!(accessor.tree.pools()[1].count(), 1);
 
+        // A no-op erase in unallocated space touches nothing: the hot leaf
+        // and both caches survive it, so the next edit is still fast.
+        accessor.set(UVec3::new(200, 200, 200), 0);
+        accessor.set(v, 77);
+        assert_eq!(accessor.get(v), Some(77));
+        assert_eq!(
+            accessor.attributes.attribute_maps.len(),
+            maps_after_first_set
+        );
+
         // Ending on an erase: the empty hot leaf collapses on `end`, taking
         // its emptied ancestors with it.
         accessor.set(v, 0);
@@ -1181,28 +1170,23 @@ mod tests {
         let snapshot = tree.snapshot();
 
         // Clearing voxels that do not exist — in an existing leaf and in
-        // unallocated space — must not disturb any live data: the
-        // single-voxel leaf survives the missing-voxel clear untouched, and
-        // no attributes move. The descent needs no existence probe; it may
-        // uniquify shared internal nodes on the way down (here: one copy of
-        // the internal node) before discovering the no-op, which is
-        // invisible to both versions. The leaf itself — checked before its
-        // copy-on-write — is never copied for a no-op.
+        // unallocated space — must change nothing at all, even with a live
+        // snapshot sharing the path: the clear descent forks nodes only on
+        // its way back up from a found voxel, so a miss makes no
+        // copy-on-write copies anywhere. No probe needed for that.
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 0, 2), 0);
         accessor.set(UVec3::new(32, 32, 32), 0);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         accessor.end();
         assert_eq!(tree.pools()[0].count(), 1);
-        assert_eq!(tree.pools()[1].count(), 2);
+        assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(attributes.attribute_maps.len(), maps_before);
-        // The leaf is now referenced by both the snapshot's internal node and
-        // the working tree's copy; the copied internal node is unique again.
-        assert_eq!(tree.pools()[0].refcounts.len(), 1);
-        assert_eq!(tree.pools()[1].refcounts.len(), 0);
+        assert_eq!(tree.pools()[0].refcounts.len(), 0);
+        assert_eq!(tree.pools()[1].refcounts.len(), 1);
 
         tree.release_snapshot(snapshot, |_| {
-            unreachable!("the snapshot exclusively pinned no leaf")
+            unreachable!("nothing was exclusively pinned by the snapshot")
         });
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);

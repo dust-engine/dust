@@ -224,34 +224,24 @@ where
         ptr: &mut u32,
         cached_path: &mut [u32],
         leaf_moved: &mut bool,
+        ancestor_shared: bool,
     ) -> Option<&'a mut Self::LeafType> {
         let node = unsafe { pools[Self::LEVEL].get_item::<Self>(*ptr) };
-        let empty = node.occupancy.not_any();
-        let missing = !node.get_occupancy_at(coords);
-        if empty {
-            // A fully erased leaf being collapsed (clears themselves never
-            // empty the tree — the caller clears bits and re-invokes on the
-            // empty leaf later): drop the working tree's edge. The leaf dies
-            // with it unless a snapshot still references it.
-            Self::release_in_pools(pools, *ptr, &mut |_| {});
-            // Tell the parent the cell is air now; u32::MAX is the air
-            // marker of `InternalNodeEntry::free`.
-            *ptr = u32::MAX;
+        if !node.get_occupancy_at(coords) {
+            // The voxel was never set (or the leaf is already fully empty
+            // and awaiting collapse): a no-op. Decided before the fork
+            // below, so a no-op clear never copies anything anywhere — the
+            // ancestors only fork on the way back up, after this point.
             return None;
         }
-        if missing {
-            // The voxel was never set: a no-op. Decided before the
-            // copy-on-write below, so a no-op never copies the leaf.
-            return None;
-        }
-        // Copy-on-write: a shared leaf is frozen — redirect the parent's
-        // edge to a private copy before the caller flips its occupancy bit.
-        // The copy still references the original's attribute range;
-        // `leaf_moved` tells the caller to re-home it.
-        if pools[Self::LEVEL].is_shared(*ptr) {
+        // Fork: a frozen leaf must not be mutated in place. Sharing recorded
+        // at an ancestor freezes this leaf too, even while its own count
+        // still reads unique. The copy still references the original's
+        // attribute range; `leaf_moved` tells the caller to re-home it. The
+        // old version's edge belongs to our parent — it releases it when it
+        // records the fork on its way back up.
+        if ancestor_shared || pools[Self::LEVEL].is_shared(*ptr) {
             let copy = unsafe { pools[Self::LEVEL].copy_item::<Self>(*ptr) };
-            let dead = pools[Self::LEVEL].release(*ptr);
-            debug_assert!(!dead);
             *ptr = copy;
             *leaf_moved = true;
         }
@@ -261,6 +251,26 @@ where
         }
         // The caller flips the occupancy bit on the returned leaf.
         Some(unsafe { &mut *old_leaf_node })
+    }
+
+    fn collapse(&mut self, _pools: &mut [Pool], _coords: UVec3) {
+        // Only ever called if the leaf is the root, which is owned by the
+        // tree: there is nothing to free.
+    }
+
+    fn collapse_in_pools(pools: &mut [Pool], _coords: UVec3, ptr: &mut u32) {
+        debug_assert!(
+            unsafe { pools[Self::LEVEL].get_item::<Self>(*ptr) }
+                .occupancy
+                .not_any(),
+            "only a fully erased leaf may be collapsed"
+        );
+        // Drop the working tree's edge; the leaf dies with it unless a
+        // snapshot still references it.
+        Self::release_in_pools(pools, *ptr, &mut |_| {});
+        // Tell the parent the cell is air now; u32::MAX is the air marker
+        // of `InternalNodeEntry::free`.
+        *ptr = u32::MAX;
     }
 
     fn retain_children(&self, _pools: &mut [Pool]) {
