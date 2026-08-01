@@ -110,6 +110,28 @@ where
             self.erase(coords);
             return;
         }
+        // Fast path: writing inside the hot leaf. Its attribute range is
+        // inflated (one slot per voxel), so setting the occupancy bit and
+        // writing the slot is the whole job — no descent at all. Writes in
+        // the hot leaf change no tree structure, so both caches stay valid
+        // as they are.
+        if self.last_leaf.is_some()
+            && ((coords ^ self.last_leaf_coords) & !<ROOT::LeafType as Node>::EXTENT_MASK)
+                == UVec3::ZERO
+        {
+            let last_leaf = self.last_leaf.unwrap();
+            // The hot leaf was established by a write, so it is uniquely
+            // owned: mutating it in place cannot be observed by a snapshot.
+            debug_assert!(!self.tree.pool[0].is_shared(last_leaf));
+            let leaf_node = unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
+            leaf_node.set_occupancy_at(coords, true);
+            self.attributes.set_attribute(
+                leaf_node.get_value(),
+                <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+                value,
+            );
+            return;
+        }
         let lca_level = lowest_common_ancestor_level(
             self.last_set_coords,
             coords,
@@ -144,21 +166,9 @@ where
         self.ptrs = self.set_ptrs;
         self.last_coords = coords;
 
-        if let Some(last_leaf) = self.last_leaf {
-            if last_leaf == self.set_ptrs[0] {
-                // Still accessing the same leaf node. A leaf we already wrote
-                // to in this session is uniquely owned, so it cannot have been
-                // copied on this write.
-                debug_assert!(!moved);
-                leaf_node.set_occupancy_at(coords, true);
-                self.attributes.set_attribute(
-                    &leaf_node.get_value(),
-                    <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
-                    value,
-                );
-                return;
-            }
-        }
+        // The fast path above caught every write into the hot leaf, so this
+        // descent landed on a different leaf: transition the hot leaf away.
+        debug_assert!(self.last_leaf != Some(self.set_ptrs[0]));
         // Release reference to leaf_node so that we can borrow prev_access_leaf_node.
         // Satefty: It has already been established that prev_access_leaf_node is not leaf_node, so it should be fine to have both mutable references.
         let leaf_node: *mut _ = leaf_node;
