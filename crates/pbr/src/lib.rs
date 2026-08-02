@@ -44,10 +44,10 @@ use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
 use pumicite_super_resolution::{
     ScalingFactor, SuperResolutionCameraInfo, SuperResolutionCommandEncoder,
     SuperResolutionDispatchDenoiseInfo, SuperResolutionDispatchExposureInfo,
-    SuperResolutionDispatchFlags, SuperResolutionDispatchInfo,
-    SuperResolutionDispatchMotionInfo, SuperResolutionEngine, SuperResolutionImageInfo,
-    SuperResolutionPhysicalDevice, SuperResolutionQualityFocusFlags, SuperResolutionSession,
-    SuperResolutionSessionCreateFlags, SuperResolutionSessionCreateInfo,
+    SuperResolutionDispatchFlags, SuperResolutionDispatchInfo, SuperResolutionDispatchMotionInfo,
+    SuperResolutionEngine, SuperResolutionImageInfo, SuperResolutionPhysicalDevice,
+    SuperResolutionQualityFocusFlags, SuperResolutionSession, SuperResolutionSessionCreateFlags,
+    SuperResolutionSessionCreateInfo,
 };
 
 use dust_gfxdebug::{GpuProfiler, GpuTimerCommands, PerformancePanel};
@@ -1155,7 +1155,8 @@ fn upscaler_evaluate(
             views.hdr_denoised_output.full_view(),
         );
         let depth_info = sr_image_info(&views.depth, views.depth.full_view());
-        let motion_img_info = sr_image_info(&views.motion_vectors, views.motion_vectors.full_view());
+        let motion_img_info =
+            sr_image_info(&views.motion_vectors, views.motion_vectors.full_view());
         let normal_info = sr_image_info(&views.normal, views.normal.full_view());
         // Roughness is packed in `normal.w`; feed it via the normal image's
         // alpha-broadcast swizzle view so every channel reads the packed value.

@@ -1,20 +1,56 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use bevy::ecs::name::Name;
+use bevy::ecs::template::{EntityTemplate, SceneEntityReference};
+use bevy::scene::{NameEntityReference, RelatedScenes, Scene, ScenePatch, bsn, template_value};
 use bevy::{
-    asset::{AssetLoader, AsyncReadExt},
+    asset::AssetLoader,
     math::{U8Vec4, Vec3A},
     prelude::*,
 };
-use bevy_pumicite::rtx::tlas::TLASInstance;
 use dot_vox::{DotVoxData, Rotation, SceneNode};
 use pumicite::{Allocator, ash::vk};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Tree, VoxGeometry, VoxGpuMaterial, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel,
-    VoxModelBundle, VoxPalette, geometry::VoxGeometryLeafStorage,
-};
+use crate::{VoxGeometry, VoxGpuMaterial, VoxInstanceTemplate, VoxMaterial, VoxModel, VoxPalette};
+
+pub enum GraphScene {
+    Node {
+        transform: Transform,
+        children: Vec<GraphScene>,
+    },
+    Leaf {
+        transform: Transform,
+        model: SceneEntityReference,
+    },
+}
+impl Scene for GraphScene {
+    fn resolve(
+        self,
+        context: &mut bevy::scene::ResolveContext,
+        scene: &mut bevy::scene::ResolvedScene,
+    ) -> Result<(), bevy::scene::ResolveSceneError> {
+        match self {
+            Self::Node {
+                transform,
+                children,
+            } => {
+                scene.push_template(transform);
+                RelatedScenes::<ChildOf, _>::new(children).resolve(context, scene);
+                Ok(())
+            }
+            Self::Leaf { transform, model } => {
+                scene.push_template(transform);
+                scene.push_template(VoxInstanceTemplate {
+                    model: EntityTemplate::SceneEntityReference(model),
+                });
+                Ok(())
+            }
+        }
+    }
+}
 
 impl VoxGpuMaterial {
     /// Decode a MagicaVoxel `MATL` entry into the packed GPU representation.
@@ -68,38 +104,31 @@ impl VoxGpuMaterial {
     }
 }
 
-enum WorldOrParent<'w, 'q> {
-    World(&'w mut World),
-    Parent(&'w mut ChildSpawner<'q>),
-}
-
-impl<'w, 'q> WorldOrParent<'w, 'q> {
-    fn spawn(self, bundle: impl Bundle + Send + Sync + 'static) -> EntityWorldMut<'w> {
-        match self {
-            WorldOrParent::World(world) => world.spawn(bundle),
-            WorldOrParent::Parent(parent) => parent.spawn(bundle),
-        }
-    }
-    fn has_parent(&self) -> bool {
-        match self {
-            WorldOrParent::World(_) => false,
-            WorldOrParent::Parent(_) => true,
-        }
-    }
-}
-
 struct SceneGraphTraverser<'a> {
     unit_size: f32,
     scene: &'a DotVoxData,
-    models: BTreeSet<u32>,
-    instances: Vec<(u32, Entity)>,
+    /// One entity reference per referenced model, allocated on first use.
+    models: BTreeMap<u32, SceneEntityReference>,
 }
 
 impl<'a> SceneGraphTraverser<'a> {
+    /// The entity reference for `model_id`, allocating one on first use.
+    fn model_reference(&mut self, model_id: u32) -> SceneEntityReference {
+        static VOX_SCENE_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let run_count = VOX_SCENE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        *self.models.entry(model_id).or_insert_with(|| {
+            SceneEntityReference::new(
+                (file!(), line!() as usize, column!() as usize),
+                model_id as usize,
+                run_count,
+            )
+        })
+    }
+
     fn traverse(
         &mut self,
         node: u32,
-        parent: WorldOrParent<'_, '_>,
+        out: &mut Vec<GraphScene>,
         translation: IVec3,
         rotation: Rotation,
         name: Option<&str>,
@@ -111,24 +140,19 @@ impl<'a> SceneGraphTraverser<'a> {
             if model.voxels.len() == 0 {
                 return;
             }
-            let entity = parent
-                .spawn(VoxInstanceBundle {
-                    transform: Transform::default(),
-                    global_transform: GlobalTransform::default(),
-                    instance: VoxInstance,
-                    tlas_instance: TLASInstance::new(Entity::PLACEHOLDER),
-                })
-                .id();
-            self.instances.push((0, entity));
-            self.models.insert(0);
+            let reference = self.model_reference(0);
+            out.push(GraphScene::Leaf {
+                transform: Transform::default(),
+                model: reference,
+            });
             return;
         }
-        self.traverse_recursive(node, parent, translation, rotation, name);
+        self.traverse_recursive(node, out, translation, rotation, name);
     }
     fn traverse_recursive(
         &mut self,
         node: u32,
-        parent: WorldOrParent<'_, '_>,
+        out: &mut Vec<GraphScene>,
         translation: IVec3,
         rotation: Rotation,
         _name: Option<&str>,
@@ -159,28 +183,27 @@ impl<'a> SceneGraphTraverser<'a> {
                 //let rotation = rotation * this_rotation; // reverse?
                 let translation = translation + this_translation;
 
-                self.traverse_recursive(*child, parent, translation, this_rotation, name);
+                self.traverse_recursive(*child, out, translation, this_rotation, name);
             }
             SceneNode::Group {
                 attributes: _,
                 children,
             } => {
-                parent
-                    .spawn((
-                        self.to_transform(translation, rotation, UVec3::ZERO),
-                        GlobalTransform::default(),
-                    ))
-                    .with_children(|builder| {
-                        for &i in children {
-                            self.traverse_recursive(
-                                i,
-                                WorldOrParent::Parent(builder),
-                                IVec3::ZERO,
-                                Rotation::IDENTITY,
-                                None,
-                            );
-                        }
-                    });
+                let transform = self.to_transform(translation, rotation, UVec3::ZERO);
+                let mut group_children = Vec::new();
+                for &i in children {
+                    self.traverse_recursive(
+                        i,
+                        &mut group_children,
+                        IVec3::ZERO,
+                        Rotation::IDENTITY,
+                        None,
+                    );
+                }
+                out.push(GraphScene::Node {
+                    transform,
+                    children: group_children,
+                });
             }
             SceneNode::Shape {
                 attributes: _,
@@ -196,22 +219,20 @@ impl<'a> SceneGraphTraverser<'a> {
                     return;
                 }
                 let size = self.scene.models[shape_model.model_id as usize].size;
-                let entity = parent
-                    .spawn(VoxInstanceBundle {
-                        transform: self.to_transform(
-                            translation,
-                            rotation,
-                            UVec3 {
-                                x: size.x,
-                                y: size.y,
-                                z: size.z,
-                            },
-                        ),
-                        ..Default::default()
-                    })
-                    .id();
-                self.instances.push((shape_model.model_id, entity));
-                self.models.insert(shape_model.model_id);
+                let transform = self.to_transform(
+                    translation,
+                    rotation,
+                    UVec3 {
+                        x: size.x,
+                        y: size.y,
+                        z: size.z,
+                    },
+                );
+                let reference = self.model_reference(shape_model.model_id);
+                out.push(GraphScene::Leaf {
+                    transform,
+                    model: reference,
+                });
             }
         }
     }
@@ -255,6 +276,7 @@ pub enum VoxLoadingError {
     VulkanError(#[from] vk::Result),
 }
 
+#[derive(TypePath)]
 pub struct VoxLoader {
     allocator: Allocator,
 }
@@ -286,7 +308,7 @@ impl Default for VoxLoaderSettings {
 }
 
 impl AssetLoader for VoxLoader {
-    type Asset = Scene;
+    type Asset = ScenePatch;
     type Settings = VoxLoaderSettings;
     type Error = VoxLoadingError;
     fn load(
@@ -294,40 +316,31 @@ impl AssetLoader for VoxLoader {
         reader: &mut dyn bevy::asset::io::Reader,
         settings: &Self::Settings,
         load_context: &mut bevy::asset::LoadContext,
-    ) -> impl bevy::tasks::ConditionalSendFuture<Output = Result<Scene, VoxLoadingError>> {
+    ) -> impl bevy::tasks::ConditionalSendFuture<Output = Result<ScenePatch, VoxLoadingError>> {
         async {
-            tracing::info!("Loading vox file {}", load_context.path().display());
+            tracing::info!("Loading vox file {}", load_context.path());
             let mut buffer = Vec::new();
             reader.read_to_end(&mut buffer).await?;
             let mut file = dot_vox::load_bytes(buffer.as_slice())
                 .map_err(|reason| VoxLoadingError::ParseError(reason))?;
             tracing::info!("Vox file deserialized: {} models", file.models.len());
 
-            let mut world = World::default();
             let mut traverser = SceneGraphTraverser {
                 unit_size: settings.unit_size,
                 scene: &file,
-                models: BTreeSet::new(),
-                instances: Vec::new(),
+                models: BTreeMap::new(),
             };
-            traverser.traverse(
-                0,
-                WorldOrParent::World(&mut world),
-                IVec3::ZERO,
-                Rotation::IDENTITY,
-                None,
-            );
-            let referenced_models = std::mem::take(&mut traverser.models);
-            let referenced_instances = std::mem::take(&mut traverser.instances);
-            drop(traverser);
+            let mut root_nodes: Vec<GraphScene> = Vec::new();
+            traverser.traverse(0, &mut root_nodes, IVec3::ZERO, Rotation::IDENTITY, None);
+            let model_references = traverser.models;
 
             tracing::info!(
-                "Scene graph traversed: {} models, {} instances",
-                referenced_models.len(),
-                referenced_instances.len()
+                "Scene graph traversed: {} models, {} root nodes",
+                model_references.len(),
+                root_nodes.len()
             );
 
-            let palette_handle = load_context.add_labeled_asset("Palette".into(), {
+            let palette_handle = load_context.add_labeled_asset("Palette", {
                 let mut entries = Box::new([VoxGpuMaterial::default(); 256]);
 
                 // Colors: dot_vox exposes the 256-entry RGBA palette as 0-based
@@ -348,14 +361,14 @@ impl AssetLoader for VoxLoader {
                     .map_err(VoxLoadingError::VulkanError)?
             });
 
-            let model_handles = {
+            let model_scenes: Vec<_> = {
                 // Add models
                 let mut models: Vec<_> = std::mem::take(&mut file.models)
                     .into_iter()
                     .map(|a| Some(a))
                     .collect();
-                let models = referenced_models
-                    .iter()
+                let models = model_references
+                    .keys()
                     .map(|model_id| {
                         (
                             *model_id,
@@ -371,48 +384,41 @@ impl AssetLoader for VoxLoader {
                         (*model_id, (tree, attribute_allocator))
                     })
                     .collect_vec_list();
-                let bundles =
-                    handles
-                        .into_iter()
-                        .flat_map(|a| a)
-                        .map(|(model_id, (tree, material))| {
-                            let geometry = load_context
-                                .add_labeled_asset(format!("Geometry{}", model_id), tree);
-                            let material = load_context
-                                .add_labeled_asset(format!("Material{}", model_id), material);
-                            let bundle = VoxModelBundle {
-                                model: VoxModel {
-                                    geometry,
-                                    material,
-                                    palette: palette_handle.clone(),
-                                    sbt_index: u32::MAX,
-                                    enable_compaction: true,
-                                    prefer_fast_build: false,
-                                },
-                                ..Default::default()
-                            };
-                            bundle
-                        });
-                let entities = world.spawn_batch(bundles);
-                BTreeMap::from_iter(referenced_models.into_iter().zip(entities))
+                handles
+                    .into_iter()
+                    .flat_map(|a| a)
+                    .map(|(model_id, (tree, material))| {
+                        let geometry =
+                            load_context.add_labeled_asset(format!("Geometry{}", model_id), tree);
+                        let material = load_context
+                            .add_labeled_asset(format!("Material{}", model_id), material);
+
+                        bsn! {
+                            { NameEntityReference { name: Name(format!("Model{model_id}").into()), reference: model_references[&model_id] } }
+                            VoxModel {
+                                geometry: {geometry},
+                                material: {material},
+                                palette: {palette_handle.clone()},
+                            }
+                        }
+                    })
+                    .collect()
             };
 
-            referenced_instances
-                .into_iter()
-                .for_each(|(model_id, entity_id)| {
-                    let model_entity = model_handles.get(&model_id).unwrap();
-
-                    let mut entity = world.entity_mut(entity_id);
-                    entity
-                        .get_mut::<TLASInstance<dust_pbr::PbrInstanceData>>()
-                        .as_mut()
-                        .unwrap()
-                        .blas = *model_entity;
-                });
-            let scene = bevy::scene::Scene::new(world);
-
-            tracing::info!("Scene spawned");
-            Ok(scene)
+            tracing::info!("Vox scene built");
+            // Wrapping the scene in a `ScenePatch` is what lets a `.vox` path be
+            // spawned with the normal scene APIs. There are no scene-level asset
+            // dependencies: everything it references is a labeled subasset of this
+            // same asset.
+            Ok(ScenePatch::load_with(
+                load_context,
+                bsn! {
+                    Transform
+                    // One root entity whose children are the file's model
+                    // entities and the roots of its scene graph.
+                    Children [ { model_scenes }, { root_nodes } ]
+                },
+            ))
         }
     }
 
@@ -420,6 +426,7 @@ impl AssetLoader for VoxLoader {
         &["vox"]
     }
 }
+
 impl VoxLoader {
     fn model_to_tree(&self, model: &dot_vox::Model, unit_size: f32) -> (VoxGeometry, VoxMaterial) {
         let mut geometry = VoxGeometry::new(self.allocator.clone(), unit_size);

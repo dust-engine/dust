@@ -337,8 +337,7 @@ pub(crate) fn autoexposure_pass(
     };
 
     ctx.record(move |encoder| {
-        let ctl_buffer =
-            uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniforms));
+        let ctl_buffer = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniforms));
         let hdr = &mut *hdr_target;
         let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
 

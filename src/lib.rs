@@ -5,12 +5,10 @@ mod flycam;
 use std::time::Duration;
 
 use bevy::prelude::*;
+use bevy::scene::{CachedSceneAsset, CommandsSceneExt, PatchTemplate};
 use bevy_pumicite::CreateDevice;
 use bevy_pumicite::rtx::tlas::TLASInstance;
-use dust_vox::{
-    VoxGeometry, VoxInstance, VoxInstanceBundle, VoxMaterial, VoxModel, VoxModelBLASRebuild,
-    VoxModelBundle, VoxPalette,
-};
+use dust_vox::{VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxModelBLASRebuild, VoxPalette};
 use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
@@ -91,32 +89,30 @@ pub fn run() {
         Startup,
         (startup_system, setup_rainbow_demo).after(CreateDevice),
     )
-    .add_systems(Update, (animate_teapot_system));
+    .add_systems(Update, (animate_teapot_system, update_rainbow_demo_system));
 
     app.run();
 }
 
-fn startup_system(mut commands: Commands, asset_server: Res<bevy::asset::AssetServer>) {
-    let scene: Handle<Scene> = asset_server.load("bazel://dust/assets/castle.vox");
-    commands.spawn(SceneRoot(scene));
+fn startup_system(mut commands: Commands) {
+    // `queue_spawn_scene` rather than `spawn_scene`: the `.vox` files are scene
+    // dependencies that have not loaded yet, and queueing waits for them.
+    commands.queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/castle.vox"));
 
     let teapot_origin = Vec3::new(12.2, 26.0, 18.0);
     let mut teapot_transform = Transform::from_translation(teapot_origin);
     teapot_transform.scale = Vec3::splat(1.5);
 
-    let teapot: Handle<Scene> = asset_server.load("bazel://dust/assets/teapot.vox");
-    commands.spawn((
-        SceneRoot(teapot),
-        teapot_transform,
-        GlobalTransform::default(),
-        MovingTeapot {
+    commands
+        .queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/teapot.vox"))
+        .insert(MovingTeapot {
             origin: teapot_origin,
             radius: 56.0,
             height: 18.0,
             angular_speed: 0.6,
             spin_speed: 1.4,
-        },
-    ));
+        })
+        .insert(teapot_transform);
     return;
 }
 
@@ -201,24 +197,21 @@ fn setup_rainbow_demo(
         palettes.add(VoxPalette::colorful(allocator.clone()).expect("rainbow palette allocation"));
 
     let model_entity = commands
-        .spawn(VoxModelBundle {
-            model: VoxModel {
-                geometry: geometry.clone(),
-                material: material.clone(),
-                palette: palette.clone(),
-                sbt_index: u32::MAX,
+        .spawn_scene(bsn! {
+            VoxModel {
+                geometry: {geometry.clone()},
+                material: {material.clone()},
+                palette: {palette.clone()},
                 prefer_fast_build: true,
                 enable_compaction: false,
-            },
-            ..Default::default()
+            }
         })
         .id();
-
-    commands.spawn(VoxInstanceBundle {
-        transform: Transform::from_translation(RAINBOW_WORLD_TRANSLATION),
-        global_transform: GlobalTransform::default(),
-        instance: VoxInstance,
-        tlas_instance: TLASInstance::new(model_entity),
+    commands.spawn_scene(bsn! {
+        Transform::from_translation(RAINBOW_WORLD_TRANSLATION)
+        VoxInstance {
+            model: model_entity
+        }
     });
 
     commands.insert_resource(RainbowDemo {
@@ -281,14 +274,14 @@ fn update_rainbow_demo_system(
         return;
     }
 
-    let Some(geometry) = geometries.get_mut(&demo.geometry) else {
+    let Some(mut geometry) = geometries.get_mut(&demo.geometry) else {
         return;
     };
-    let Some(material) = materials.get_mut(&demo.material) else {
+    let Some(mut material) = materials.get_mut(&demo.material) else {
         return;
     };
 
-    paint_rainbow_wedge(geometry, material, demo.progress);
+    paint_rainbow_wedge(&mut geometry, &mut material, demo.progress);
 
     demo.progress += 1;
     if demo.progress >= RAINBOW_WEDGES {

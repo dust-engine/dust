@@ -13,4 +13,4 @@ dust_app.workspace = true
 dust_gfxdebug.workspace = true
 tracing = "0.1"
 bytemuck = "1.25"
-glam = "0.30"
+glam = "0.32"

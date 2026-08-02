@@ -1,5 +1,4 @@
 use atomicow::CowArc;
-use bevy::asset::io::AssetSource;
 use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
 use runfiles::{Runfiles, rlocation};
 use std::path::{Path, PathBuf};
@@ -174,13 +173,13 @@ impl AssetReader for BazelAssetReader {
     }
 }
 
-/// Returns an [`AssetSource`] builder configured to read from a Bazel workspace's
-/// `bazel-bin/` directory.
+/// Returns an [`AssetSource`](bevy::asset::io::AssetSource) builder configured to
+/// read from a Bazel workspace's `bazel-bin/` directory.
 ///
 /// Register before `DefaultPlugins`:
 /// ```ignore
 /// app.register_asset_source("bazel", bazel_asset_source(workspace_root));
 /// ```
 pub fn bazel_asset_source() -> bevy::asset::io::AssetSourceBuilder {
-    AssetSource::build().with_reader(move || Box::new(BazelAssetReader::new()))
+    bevy::asset::io::AssetSourceBuilder::new(move || Box::new(BazelAssetReader::new()))
 }

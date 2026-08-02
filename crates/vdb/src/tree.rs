@@ -65,7 +65,6 @@ impl TreeSnapshotDropGuard {
     fn disarm(self) {
         std::mem::forget(self);
     }
-    
 }
 
 impl<ROOT: Node> TreeSnapshot<ROOT>

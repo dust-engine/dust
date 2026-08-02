@@ -6,7 +6,7 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glam = "^0.30"
+glam = "^0.32"
 nohash = "0.2.0"
 bitvec = "1"
 

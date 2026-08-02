@@ -196,7 +196,7 @@ fn camera_movement_system(
 
 fn mouse_motion_system(
     time: Res<Time>,
-    mut mouse_motion_event_reader: EventReader<MouseMotion>,
+    mut mouse_motion_event_reader: MessageReader<MouseMotion>,
     mut query: Query<(&mut FlyCamera, &mut Transform)>,
 ) {
     let mut delta: Vec2 = Vec2::ZERO;

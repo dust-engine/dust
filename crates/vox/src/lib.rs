@@ -1,12 +1,16 @@
 #![feature(generic_const_exprs)]
 #![feature(f16)]
 
-use bevy::ecs::entity::{Entity, MapEntities};
-use bevy::ecs::reflect::{ReflectComponent, ReflectMapEntities};
+use bevy::ecs::entity::Entity;
+use bevy::ecs::reflect::ReflectComponent;
 use bevy::ecs::schedule::{IntoScheduleConfigs, Schedules};
+use bevy::ecs::template::{
+    EntityTemplate, FnTemplate, FromTemplate, SceneEntityReference, TemplateContext,
+};
 use bevy::math::U8Vec4;
 use bevy::prelude::*;
 use bevy::reflect::Reflect;
+use bevy::scene::{RelatedScenes, ResolveContext, ResolveSceneError, ResolvedScene, Scene};
 use bevy::{
     asset::{Asset, Handle},
     ecs::{bundle::Bundle, component::Component},
@@ -122,11 +126,38 @@ impl VoxPalette {
 }
 
 /// Marker component for Vox instances
-#[derive(Component, Reflect, Default)]
+#[derive(Component, Reflect, Clone)]
+#[require(Transform)]
 #[reflect(Component)]
 pub struct VoxInstance;
 
-#[derive(Component, Reflect)]
+#[derive(Default)]
+pub struct VoxInstanceTemplate {
+    pub model: EntityTemplate,
+}
+impl Template for VoxInstanceTemplate {
+    type Output = VoxInstance;
+
+    fn build_template(&self, context: &mut TemplateContext) -> Result<Self::Output> {
+        let blas = self.model.build_template(context)?;
+        context
+            .entity
+            .insert(TLASInstance::<dust_pbr::PbrInstanceData>::new(blas));
+        Ok(VoxInstance)
+    }
+
+    fn clone_template(&self) -> Self {
+        Self {
+            model: self.model.clone_template(),
+        }
+    }
+}
+impl FromTemplate for VoxInstance {
+    type Template = VoxInstanceTemplate;
+}
+
+#[derive(Component, Reflect, Clone, FromTemplate)]
+#[require(VoxModelBLASRebuild)]
 #[reflect(Component)]
 pub struct VoxModel {
     pub geometry: Handle<VoxGeometry>,
@@ -142,7 +173,7 @@ impl Default for VoxModel {
             geometry: Handle::default(),
             material: Handle::default(),
             palette: Handle::default(),
-            sbt_index: 0,
+            sbt_index: u32::MAX,
             enable_compaction: true,
             prefer_fast_build: false,
         }
@@ -150,27 +181,13 @@ impl Default for VoxModel {
 }
 
 /// A marker trait for requesting BLAS rebuilds.
-#[derive(Component, Default, Reflect)]
+#[derive(Component, Default, Reflect, Clone)]
 #[reflect(Component)]
 pub struct VoxModelBLASRebuild;
 impl VoxModelBLASRebuild {
     pub fn request_rebuild(&mut self) {
         // No-op. BlasBuilder uses change tracker to schedule BLAS rebuilds.
     }
-}
-
-#[derive(Bundle, Default)]
-pub struct VoxModelBundle {
-    pub model: VoxModel,
-    pub blas_rebuild_tracker: VoxModelBLASRebuild,
-}
-
-#[derive(Bundle, Default)]
-pub struct VoxInstanceBundle {
-    pub transform: Transform,
-    pub global_transform: GlobalTransform,
-    pub instance: VoxInstance,
-    pub tlas_instance: TLASInstance<dust_pbr::PbrInstanceData>,
 }
 
 pub struct VoxPlugin;
