@@ -1,4 +1,4 @@
-use crate::{Attributes, IsDefault, IsLeaf, Node, Tree};
+use crate::{Attributes, IsDefault, IsLeaf, Node, Tree, TreeSnapshot, pool::Pool};
 use glam::UVec3;
 use std::ops::Deref;
 
@@ -7,7 +7,7 @@ use std::ops::Deref;
 /// and nodes of the underlying tree can be hit. Accessors cache the path down to the leaf node so
 /// that subsequent neighboring accesses can skip traversing the upper levels of the tree and go
 /// directly to the leaf node.
-pub struct Accessor<'a, ROOT: Node, ATTRIBS>
+pub struct AccessorMut<'a, ROOT: Node, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
     ATTRIBS: Attributes<
@@ -50,7 +50,7 @@ fn lowest_common_ancestor_level(a: UVec3, b: UVec3, mask: UVec3, root_level: u32
     root_level + 1 - parent_index
 }
 
-impl<'a, ROOT: Node, ATTRIBS> Accessor<'a, ROOT, ATTRIBS>
+impl<'a, ROOT: Node, ATTRIBS> AccessorMut<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
     ATTRIBS: Attributes<
@@ -59,6 +59,24 @@ where
         >,
 {
     pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
+        // Fast path: reading inside the hot leaf — no descent. The hot
+        // leaf's attribute range is inflated (one slot per voxel), so the
+        // lookup goes through the fully mapped offset.
+        if let Some(last_leaf) = self.last_leaf
+            && ((coords ^ self.last_leaf_coords) & !<ROOT::LeafType as Node>::EXTENT_MASK)
+                == UVec3::ZERO
+        {
+            let leaf_node = unsafe { self.tree.get_node::<ROOT::LeafType>(last_leaf) };
+            if !leaf_node.get_occupancy_at(coords) {
+                return None;
+            }
+            let attribute = self.attributes.get_attribute(
+                leaf_node.get_value(),
+                <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+            );
+            return Some(attribute);
+        }
+
         let lca_level = lowest_common_ancestor_level(
             self.last_coords,
             coords,
@@ -79,20 +97,13 @@ where
             }
             (meta.getter)(&self.tree.pool, new_coords, ptr, &mut self.ptrs)
         }?;
+        // The fast path above caught every read inside the hot leaf, so this
+        // descent landed on a different leaf, whose attribute range is
+        // fitted: read it through the rank-based offset.
+        debug_assert!(self.last_leaf != Some(self.ptrs[0]));
         let occupied = leaf_node.get_occupancy_at(coords);
         if !occupied {
             return None;
-        }
-        if let Some(last_leaf) = self.last_leaf {
-            if last_leaf == self.ptrs[0] {
-                let last_leaf = unsafe { self.tree.get_node::<ROOT::LeafType>(last_leaf) };
-                if std::ptr::eq(last_leaf, leaf_node) {
-                    return Some(self.attributes.get_attribute(
-                        leaf_node.get_value(),
-                        <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
-                    ));
-                }
-            }
         }
         let value = self.attributes.get_attribute(
             leaf_node.get_value(),
@@ -116,11 +127,10 @@ where
         // writing the slot is the whole job — no descent at all. Writes in
         // the hot leaf change no tree structure, so both caches stay valid
         // as they are.
-        if self.last_leaf.is_some()
+        if let Some(last_leaf) = self.last_leaf
             && ((coords ^ self.last_leaf_coords) & !<ROOT::LeafType as Node>::EXTENT_MASK)
                 == UVec3::ZERO
         {
-            let last_leaf = self.last_leaf.unwrap();
             // The hot leaf was established by a write, so it is uniquely
             // owned: mutating it in place cannot be observed by a snapshot.
             debug_assert!(!self.tree.pool[0].is_shared(last_leaf));
@@ -249,11 +259,10 @@ where
         // whole job — the dead slot is dropped whenever the leaf is next
         // fitted. Set/erase cycles on one voxel never thrash the tree or the
         // attribute allocator.
-        if self.last_leaf.is_some()
+        if let Some(last_leaf) = self.last_leaf
             && ((coords ^ self.last_leaf_coords) & !<ROOT::LeafType as Node>::EXTENT_MASK)
                 == UVec3::ZERO
         {
-            let last_leaf = self.last_leaf.unwrap();
             // The hot leaf was established by a write, so it is uniquely
             // owned: mutating it in place cannot be observed by a snapshot.
             debug_assert!(!self.tree.pool[0].is_shared(last_leaf));
@@ -397,7 +406,7 @@ where
         }
     }
 }
-impl<'a, ROOT: Node, ATTRIBS> Drop for Accessor<'a, ROOT, ATTRIBS>
+impl<'a, ROOT: Node, ATTRIBS> Drop for AccessorMut<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
     ATTRIBS: Attributes<
@@ -406,7 +415,12 @@ where
         >,
 {
     fn drop(&mut self) {
-        self.purge_prev_access_leaf_node();
+        // Skip the purge while unwinding: it mutates the tree and calls the
+        // attribute hooks, which may be mid-operation from the original
+        // panic — a second panic here would abort and mask it.
+        if !std::thread::panicking() {
+            self.purge_prev_access_leaf_node();
+        }
     }
 }
 
@@ -414,6 +428,34 @@ impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL + 1]: Sized,
 {
+    /// A cached read accessor over the tree's current state.
+    ///
+    /// Borrows the tree shared, so any number of them may coexist — but the
+    /// tree cannot be mutated while they live. To keep reading a fixed
+    /// version while the tree gets mutated asynchronously, capture a
+    /// [`Tree::snapshot`] and use [`TreeSnapshot::accessor`] instead.
+    pub fn accessor<
+        'a,
+        A: Attributes<
+                Ptr = <ROOT::LeafType as IsLeaf>::Value,
+                Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            >,
+    >(
+        &'a self,
+        attributes: &'a A,
+    ) -> Accessor<'a, ROOT, A> {
+        Accessor {
+            root: &self.root,
+            pool: &self.pool,
+            ptrs: [u32::MAX; ROOT::LEVEL],
+            last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
+            attributes,
+            last_leaf: None,
+            last_leaf_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
+        }
+    }
+    /// A cached read/write accessor over the tree, borrowing the tree and
+    /// the attribute storage exclusively.
     pub fn accessor_mut<
         'a,
         A: Attributes<
@@ -423,8 +465,8 @@ where
     >(
         &'a mut self,
         attributes: &'a mut A,
-    ) -> Accessor<'a, ROOT, A> {
-        Accessor {
+    ) -> AccessorMut<'a, ROOT, A> {
+        AccessorMut {
             tree: self,
             ptrs: [u32::MAX; ROOT::LEVEL],
             last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
@@ -437,11 +479,133 @@ where
     }
 }
 
+impl<ROOT: Node> TreeSnapshot<ROOT>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+{
+    /// A cached read accessor over the snapshot's captured state. It reads
+    /// through the snapshot's pinned pools, so it stays valid — including on
+    /// another thread — while the originating tree keeps being mutated.
+    pub fn accessor<
+        'a,
+        A: Attributes<
+                Ptr = <ROOT::LeafType as IsLeaf>::Value,
+                Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            >,
+    >(
+        &'a self,
+        attributes: &'a A,
+    ) -> Accessor<'a, ROOT, A> {
+        Accessor {
+            root: &self.root,
+            pool: &self.pool,
+            ptrs: [u32::MAX; ROOT::LEVEL],
+            last_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
+            attributes,
+            last_leaf: None,
+            last_leaf_coords: UVec3::new(u32::MAX, u32::MAX, u32::MAX),
+        }
+    }
+}
+
+/// Accessors are designed to help accelerate accesses into the tree structures by storing caches
+/// to tree branches. When traversing a grid in a spatially coherent pattern, the same branches
+/// and nodes of the underlying tree can be hit. Accessors cache the path down to the leaf node so
+/// that subsequent neighboring accesses can skip traversing the upper levels of the tree and go
+/// directly to the leaf node.
+///
+/// Obtained from a live [`Tree::accessor`] or a captured
+/// [`TreeSnapshot::accessor`]; a snapshot's accessor reads the snapshot's
+/// pinned pools, so it stays valid — including on another thread — while the
+/// originating tree keeps being mutated.
+///
+/// To mutate the tree structure, use [`AccessorMut`] instead.
+pub struct Accessor<'a, ROOT: Node, ATTRIBS>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+    ATTRIBS: Attributes<
+            Ptr = <ROOT::LeafType as IsLeaf>::Value,
+            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+        >,
+{
+    root: &'a ROOT,
+    pool: &'a [Pool; ROOT::LEVEL],
+    /// Cached descent path for lca re-entry.
+    ptrs: [u32; ROOT::LEVEL],
+    last_coords: UVec3,
+    attributes: &'a ATTRIBS,
+    last_leaf: Option<u32>,
+    last_leaf_coords: UVec3,
+}
+
+impl<'a, ROOT: Node, ATTRIBS> Accessor<'a, ROOT, ATTRIBS>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+    ATTRIBS: Attributes<
+            Ptr = <ROOT::LeafType as IsLeaf>::Value,
+            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+        >,
+{
+    pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
+        // Fast path: reading inside the last visited leaf — no descent. The
+        // tree is read-only, so its attribute ranges are all fitted and the
+        // lookup goes through the rank-based offset (never the fully mapped
+        // one — that layout only exists for [`AccessorMut`]'s hot leaf).
+        if let Some(last_leaf) = self.last_leaf
+            && ((coords ^ self.last_leaf_coords) & !<ROOT::LeafType as Node>::EXTENT_MASK)
+                == UVec3::ZERO
+        {
+            let leaf_node = unsafe { self.pool[0].get_item::<ROOT::LeafType>(last_leaf) };
+            if !leaf_node.get_occupancy_at(coords) {
+                return None;
+            }
+            let attribute = self.attributes.get_attribute(
+                leaf_node.get_value(),
+                leaf_node.get_attribute_offset(coords),
+            );
+            return Some(attribute);
+        }
+        let lca_level = lowest_common_ancestor_level(
+            self.last_coords,
+            coords,
+            ROOT::META_MASK,
+            ROOT::LEVEL as u32,
+        );
+        self.last_coords = coords;
+        let leaf_node = if lca_level >= ROOT::LEVEL as u32 {
+            self.root.get(self.pool, coords, &mut self.ptrs)
+        } else {
+            let meta = &ROOT::META[lca_level as usize];
+            let new_coords = coords & meta.extent_mask;
+            let ptr = self.ptrs[lca_level as usize];
+            if ptr == u32::MAX {
+                // Poisoned by an earlier missed descent: an ancestor of this
+                // whole region is known to be air.
+                return None;
+            }
+            (meta.getter)(self.pool, new_coords, ptr, &mut self.ptrs)
+        }?;
+        // Remember the landing leaf: subsequent reads within its region skip
+        // the descent, whether this one hits or misses its occupancy.
+        self.last_leaf = Some(self.ptrs[0]);
+        self.last_leaf_coords = coords;
+        let occupied = leaf_node.get_occupancy_at(coords);
+        if !occupied {
+            return None;
+        }
+        let value = self.attributes.get_attribute(
+            leaf_node.get_value(),
+            leaf_node.get_attribute_offset(coords),
+        );
+        Some(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
 
-    use bitvec::{BitArr, array::BitArray};
+    use bitvec::array::BitArray;
     use glam::UVec3;
 
     use super::{Attributes, lowest_common_ancestor_level};
@@ -1174,6 +1338,85 @@ mod tests {
         // A real voxel is still found after the misses.
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         drop(accessor);
+    }
+
+    #[test]
+    fn test_readonly_accessor() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.set(UVec3::new(0, 1, 0), 13);
+        accessor.set(UVec3::new(144, 1, 0), 14);
+        drop(accessor);
+        let maps_before = attributes.attribute_maps.len();
+
+        // Read-only accessors borrow the tree shared, so several can coexist.
+        let mut reader = tree.accessor(&attributes);
+        let mut other = tree.accessor(&attributes);
+        // Cold read, then repeated reads in the same leaf ride the fast
+        // path — always through the fitted, rank-compacted attribute layout.
+        assert_eq!(reader.get(UVec3::new(0, 0, 3)), Some(12));
+        assert_eq!(reader.get(UVec3::new(0, 1, 0)), Some(13));
+        assert_eq!(reader.get(UVec3::new(0, 1, 2)), None);
+        // Leaf transitions and back.
+        assert_eq!(reader.get(UVec3::new(144, 1, 0)), Some(14));
+        assert_eq!(reader.get(UVec3::new(144, 1, 1)), None);
+        assert_eq!(reader.get(UVec3::new(0, 0, 3)), Some(12));
+        // A miss in unallocated space poisons the descent cache without
+        // disturbing the last-leaf fast path.
+        assert_eq!(reader.get(UVec3::new(0, 0, 64)), None);
+        assert_eq!(reader.get(UVec3::new(0, 0, 67)), None);
+        assert_eq!(reader.get(UVec3::new(0, 1, 0)), Some(13));
+        assert_eq!(other.get(UVec3::new(144, 1, 0)), Some(14));
+        // Reading allocates nothing: a read-only accessor cannot inflate.
+        assert_eq!(attributes.attribute_maps.len(), maps_before);
+    }
+
+    #[test]
+    fn test_snapshot_accessor() {
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 12);
+        accessor.set(UVec3::new(0, 1, 0), 13);
+        accessor.set(UVec3::new(144, 1, 0), 14);
+        drop(accessor);
+
+        let snapshot = tree.snapshot();
+
+        // Diverge the tree from the snapshot: overwrite, insert, and erase.
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 0, 3), 99);
+        accessor.set(UVec3::new(1, 1, 1), 55);
+        accessor.set(UVec3::new(144, 1, 0), 0);
+        drop(accessor);
+
+        // The snapshot's accessor keeps observing the captured state —
+        // repeated same-leaf reads ride the fast path — through the
+        // snapshot's own fitted attribute ranges.
+        let mut reader = snapshot.accessor(&attributes);
+        assert_eq!(reader.get(UVec3::new(0, 0, 3)), Some(12));
+        assert_eq!(reader.get(UVec3::new(0, 1, 0)), Some(13));
+        assert_eq!(reader.get(UVec3::new(1, 1, 1)), None);
+        assert_eq!(reader.get(UVec3::new(144, 1, 0)), Some(14));
+        assert_eq!(reader.get(UVec3::new(0, 0, 3)), Some(12));
+        drop(reader);
+
+        // The live tree's accessor sees the diverged state.
+        let mut reader = tree.accessor(&attributes);
+        assert_eq!(reader.get(UVec3::new(0, 0, 3)), Some(99));
+        assert_eq!(reader.get(UVec3::new(1, 1, 1)), Some(55));
+        assert_eq!(reader.get(UVec3::new(144, 1, 0)), None);
+        drop(reader);
+
+        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        assert_eq!(tree.pools()[0].refcounts.len(), 0);
+        assert_eq!(tree.pools()[1].refcounts.len(), 0);
     }
 
     #[test]

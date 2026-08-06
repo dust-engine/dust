@@ -50,8 +50,8 @@ pub struct TreeSnapshot<ROOT: Node>
 where
     [(); ROOT::LEVEL]: Sized,
 {
-    root: ROOT,
-    pool: [Pool; ROOT::LEVEL],
+    pub(crate) root: ROOT,
+    pub(crate) pool: [Pool; ROOT::LEVEL],
     aabb: AabbU32,
     drop_guard: TreeSnapshotDropGuard,
 }
@@ -71,11 +71,6 @@ impl<ROOT: Node> TreeSnapshot<ROOT>
 where
     [(); ROOT::LEVEL]: Sized,
 {
-    /// Get the leaf node containing `coords` as of the snapshot, if any.
-    pub fn get(&self, coords: UVec3) -> Option<&ROOT::LeafType> {
-        self.root.get(&self.pool, coords, &mut [])
-    }
-
     /// Iterate the coordinates of every occupied voxel as of the snapshot.
     pub fn iter(&self) -> ROOT::Iterator<'_> {
         self.root.iter(&self.pool, UVec3::ZERO)
