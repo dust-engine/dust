@@ -77,13 +77,9 @@ where
     }
 
     /// Iterate every leaf node as of the snapshot.
-    pub fn iter_leaf(&self) -> impl Iterator<Item = (UVec3, &ROOT::LeafType)> {
+    pub fn iter_leaf(&self) -> ROOT::LeafIterator<'_> {
         self.root
             .iter_leaf(&self.pool, UVec3::ZERO)
-            .map(|(position, leaf)| unsafe {
-                let leaf: &ROOT::LeafType = &*leaf.get();
-                (position, leaf)
-            })
     }
 
     pub fn count_leaves(&self) -> usize {
@@ -183,30 +179,9 @@ where
 
     pub fn iter_leaf<'a>(
         &'a self,
-    ) -> impl Iterator<Item = (UVec3, &'a <ROOT as NodeConst>::LeafType)> {
+    ) -> ROOT::LeafIterator<'a> {
         self.root
             .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
-            .map(|(position, leaf)| unsafe {
-                let leaf: &'a ROOT::LeafType = &*leaf.get();
-                (position, leaf)
-            })
-    }
-
-    pub fn iter_leaf_mut<'a>(
-        &'a mut self,
-    ) -> impl Iterator<Item = (UVec3, &'a mut ROOT::LeafType)> {
-        // Handing out &mut leaves bypasses copy-on-write: a leaf shared with a
-        // snapshot would be mutated in place, corrupting the snapshot.
-        assert_eq!(
-            self.snapshot_count, 0,
-            "iter_leaf_mut bypasses copy-on-write; release all snapshots first"
-        );
-        self.root
-            .iter_leaf(&mut self.pool, UVec3 { x: 0, y: 0, z: 0 })
-            .map(|(position, leaf)| unsafe {
-                let leaf: &'a mut ROOT::LeafType = &mut *leaf.get();
-                (position, leaf)
-            })
     }
 
     pub fn count_leaves(&self) -> usize {

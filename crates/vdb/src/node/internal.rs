@@ -545,7 +545,7 @@ impl<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3> Iterator
 where
     [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
 {
-    type Item = (UVec3, &'a UnsafeCell<CHILD::LeafType>);
+    type Item = (UVec3, &'a CHILD::LeafType);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {

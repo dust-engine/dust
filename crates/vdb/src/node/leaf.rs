@@ -38,19 +38,19 @@ pub trait IsLeaf: Node {
     fn get_occupancy_at(&self, coords: UVec3) -> bool {
         *self
             .get_occupancy()
-            .get(Self::get_fully_mapped_offset(coords) as usize)
+            .get(Self::get_inflated_attribute_offset(coords) as usize)
             .expect("get_occupancy_at: coords out of bounds")
     }
     fn set_occupancy_at(&mut self, coords: UVec3, value: bool) {
-        let offset = Self::get_fully_mapped_offset(coords);
+        let offset = Self::get_inflated_attribute_offset(coords);
         self.get_occupancy_mut().set(offset as usize, value);
     }
 
     fn get_value(&self) -> &Self::Value;
     fn set_value(&mut self, value: Self::Value);
 
-    fn get_attribute_offset(&self, coords: UVec3) -> u32;
-    fn get_fully_mapped_offset(coords: UVec3) -> u32;
+    fn get_fitted_attribute_offset(&self, coords: UVec3) -> u32;
+    fn get_inflated_attribute_offset(coords: UVec3) -> u32;
 }
 
 impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> IsLeaf
@@ -60,7 +60,7 @@ where
 {
     type Value = T;
     type Occupancy = BitArray<[usize; size_of_grid(LOG2) / size_of::<usize>() / 8]>;
-    fn get_attribute_offset(&self, coords: UVec3) -> u32 {
+    fn get_fitted_attribute_offset(&self, coords: UVec3) -> u32 {
         let coords = coords & Self::EXTENT_MASK;
         let voxel_id = (coords.x << (LOG2.y + LOG2.z)) | (coords.y << LOG2.z) | coords.z;
         debug_assert!(
@@ -72,7 +72,7 @@ where
         masked.count_ones()
     }
 
-    fn get_fully_mapped_offset(coords: UVec3) -> u32 {
+    fn get_inflated_attribute_offset(coords: UVec3) -> u32 {
         let coords = coords & Self::EXTENT_MASK;
         let index = ((coords.x as usize) << (LOG2.y + LOG2.z))
             | ((coords.y as usize) << LOG2.z)
@@ -306,7 +306,7 @@ where
         }
     }
 
-    type LeafIterator<'a> = Once<(UVec3, &'a UnsafeCell<Self>)>;
+    type LeafIterator<'a> = Once<(UVec3, &'a Self)>;
 
     #[inline]
     fn iter_leaf<'a>(&'a self, _pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {

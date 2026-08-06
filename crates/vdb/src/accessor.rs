@@ -72,7 +72,7 @@ where
             }
             let attribute = self.attributes.get_attribute(
                 leaf_node.get_value(),
-                <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
             );
             return Some(attribute);
         }
@@ -107,7 +107,7 @@ where
         }
         let value = self.attributes.get_attribute(
             leaf_node.get_value(),
-            leaf_node.get_attribute_offset(coords),
+            leaf_node.get_fitted_attribute_offset(coords),
         );
         Some(value)
     }
@@ -138,7 +138,7 @@ where
             leaf_node.set_occupancy_at(coords, true);
             self.attributes.set_attribute(
                 leaf_node.get_value(),
-                <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
             );
             return;
@@ -203,7 +203,7 @@ where
             leaf_node.set_occupancy_at(coords, true);
             self.attributes.set_attribute(
                 &new_attrib_ptr,
-                <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
             );
             leaf_node.set_value(new_attrib_ptr);
@@ -214,7 +214,7 @@ where
         if previously_occupied {
             self.attributes.set_attribute(
                 leaf_node.get_value(),
-                leaf_node.get_attribute_offset(coords),
+                leaf_node.get_fitted_attribute_offset(coords),
                 value,
             );
         } else {
@@ -239,7 +239,7 @@ where
             // Hint: just need to get the old attrib_occupancy now.
             self.attributes.set_attribute(
                 &new_attrib_ptr,
-                <ROOT::LeafType as IsLeaf>::get_fully_mapped_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
             );
             leaf_node.set_value(new_attrib_ptr);
@@ -561,7 +561,7 @@ where
             }
             let attribute = self.attributes.get_attribute(
                 leaf_node.get_value(),
-                leaf_node.get_attribute_offset(coords),
+                leaf_node.get_fitted_attribute_offset(coords),
             );
             return Some(attribute);
         }
@@ -595,7 +595,7 @@ where
         }
         let value = self.attributes.get_attribute(
             leaf_node.get_value(),
-            leaf_node.get_attribute_offset(coords),
+            leaf_node.get_fitted_attribute_offset(coords),
         );
         Some(value)
     }
