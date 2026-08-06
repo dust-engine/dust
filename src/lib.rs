@@ -1,13 +1,10 @@
-#![feature(impl_trait_in_fn_trait_return)]
-
 mod flycam;
 
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy::scene::{CachedSceneAsset, CommandsSceneExt, PatchTemplate};
+use bevy::scene::{CachedSceneAsset, CommandsSceneExt};
 use bevy_pumicite::CreateDevice;
-use bevy_pumicite::rtx::tlas::TLASInstance;
 use dust_vox::{VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxModelBLASRebuild, VoxPalette};
 use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode};
 

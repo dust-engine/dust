@@ -1,5 +1,5 @@
 #![feature(generic_const_exprs)]
-#![feature(adt_const_params)]
+#![feature(min_adt_const_params)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(const_trait_impl)]
 #![feature(generic_const_items)]
