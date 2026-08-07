@@ -7,7 +7,6 @@ use bitvec::{
 };
 use glam::UVec3;
 use std::{
-    cell::UnsafeCell,
     iter::Once,
     mem::{MaybeUninit, size_of},
     ops::DerefMut,
@@ -51,6 +50,9 @@ pub trait IsLeaf: Node {
 
     fn get_fitted_attribute_offset(&self, coords: UVec3) -> u32;
     fn get_inflated_attribute_offset(coords: UVec3) -> u32;
+
+    type Iterator<'a>: Iterator<Item = UVec3> where Self: 'a;
+    fn iter<'a>(&'a self, offset: UVec3) -> Self::Iterator<'a>;
 }
 
 impl<const LOG2: ConstUVec3, T: Clone + Send + Sync + 'static + Default> IsLeaf
@@ -91,6 +93,14 @@ where
     }
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy {
         &mut self.occupancy
+    }
+
+    type Iterator<'a> = LeafNodeIterator<'a, LOG2>;
+    fn iter<'a>(&'a self, offset: UVec3) -> Self::Iterator<'a> {
+        LeafNodeIterator {
+            location_offset: offset,
+            bits_iterator: self.occupancy.iter_ones(),
+        }
     }
 }
 
@@ -289,21 +299,6 @@ where
 
     fn release_children(&self, _pools: &mut [Pool], _leaf_dropped: &mut dyn FnMut(&Self)) {
         // Leaves have no children.
-    }
-
-    type Iterator<'a> = LeafNodeIterator<'a, LOG2>;
-    fn iter<'a>(&'a self, _pool: &'a [Pool], offset: UVec3) -> Self::Iterator<'a> {
-        LeafNodeIterator {
-            location_offset: offset,
-            bits_iterator: self.occupancy.iter_ones(),
-        }
-    }
-    fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a> {
-        let node = unsafe { pools[0].get_item::<Self>(ptr) };
-        LeafNodeIterator {
-            location_offset: offset,
-            bits_iterator: node.occupancy.iter_ones(),
-        }
     }
 
     type LeafIterator<'a> = Once<(UVec3, &'a Self)>;

@@ -3,7 +3,6 @@ mod leaf;
 //mod root;
 
 use std::alloc::Layout;
-use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
 
 use glam::UVec3;
@@ -187,12 +186,6 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
     /// Remove one parent edge from each direct child of an owned (non-pooled)
     /// node: the working root of a tree, or a snapshot root being released.
     fn release_children(&self, pools: &mut [Pool], leaf_dropped: &mut dyn FnMut(&Self::LeafType));
-
-    type Iterator<'a>: Iterator<Item = UVec3>;
-    /// This is called when the node was owned as the root node in the tree.
-    fn iter<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::Iterator<'a>;
-    /// This is called when the node was located in a node pool.
-    fn iter_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::Iterator<'a>;
 
     type LeafIterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)>;
     /// This is called when the node was owned as the root node in the tree.

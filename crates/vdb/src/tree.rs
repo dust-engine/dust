@@ -3,8 +3,7 @@ use std::mem::MaybeUninit;
 use glam::UVec3;
 
 use crate::{
-    AabbU32, Node, NodeConst,
-    pool::{Pool, PoolStorage},
+    AabbU32, IsLeaf, Node, pool::{Pool, PoolStorage},
 };
 
 pub struct Tree<ROOT: Node>
@@ -72,8 +71,10 @@ where
     [(); ROOT::LEVEL]: Sized,
 {
     /// Iterate the coordinates of every occupied voxel as of the snapshot.
-    pub fn iter(&self) -> ROOT::Iterator<'_> {
-        self.root.iter(&self.pool, UVec3::ZERO)
+    pub fn iter(&self) -> impl Iterator<Item = UVec3> {
+        self.root
+            .iter_leaf(&self.pool, UVec3::ZERO)
+            .flat_map(|(position, leaf)| leaf.iter(position))
     }
 
     /// Iterate every leaf node as of the snapshot.
@@ -173,8 +174,11 @@ where
         }
     }
 
-    pub fn iter<'a>(&'a self) -> ROOT::Iterator<'a> {
-        self.root.iter(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
+    /// Iterate the coordinates of every occupied voxel as of the snapshot.
+    pub fn iter(&self) -> impl Iterator<Item = UVec3> {
+        self.root
+            .iter_leaf(&self.pool, UVec3::ZERO)
+            .flat_map(|(position, leaf)| leaf.iter(position))
     }
 
     pub fn iter_leaf<'a>(
