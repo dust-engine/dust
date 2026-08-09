@@ -66,32 +66,6 @@ impl TreeSnapshotDropGuard {
     }
 }
 
-impl<ROOT: Node> TreeSnapshot<ROOT>
-where
-    [(); ROOT::LEVEL]: Sized,
-{
-    /// Iterate the coordinates of every occupied voxel as of the snapshot.
-    pub fn iter(&self) -> impl Iterator<Item = UVec3> {
-        self.root
-            .iter_leaf(&self.pool, UVec3::ZERO)
-            .flat_map(|(position, leaf)| leaf.iter(position))
-    }
-
-    /// Iterate every leaf node as of the snapshot.
-    pub fn iter_leaf(&self) -> ROOT::LeafIterator<'_> {
-        self.root
-            .iter_leaf(&self.pool, UVec3::ZERO)
-    }
-
-    pub fn count_leaves(&self) -> usize {
-        self.root.count_leaves(&self.pool)
-    }
-
-    pub fn aabb(&self) -> AabbU32 {
-        self.aabb
-    }
-}
-
 impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL + 1]: Sized,
@@ -174,24 +148,6 @@ where
         }
     }
 
-    /// Iterate the coordinates of every occupied voxel as of the snapshot.
-    pub fn iter(&self) -> impl Iterator<Item = UVec3> {
-        self.root
-            .iter_leaf(&self.pool, UVec3::ZERO)
-            .flat_map(|(position, leaf)| leaf.iter(position))
-    }
-
-    pub fn iter_leaf<'a>(
-        &'a self,
-    ) -> ROOT::LeafIterator<'a> {
-        self.root
-            .iter_leaf(&self.pool, UVec3 { x: 0, y: 0, z: 0 })
-    }
-
-    pub fn count_leaves(&self) -> usize {
-        self.root.count_leaves(&self.pool)
-    }
-
     /// Number of live snapshots ([`Tree::snapshot`] minus
     /// [`Tree::release_snapshot`]).
     pub fn snapshot_count(&self) -> u32 {
@@ -258,5 +214,64 @@ where
             .release_children(&mut self.pool, &mut leaf_dropped);
         self.root = snapshot.root.clone();
         self.aabb = snapshot.aabb;
+    }
+}
+
+impl<ROOT: Node> TreeLike for Tree<ROOT>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+{
+    fn count_leaves(&self) -> usize {
+        self.root.count_leaves(&self.pool)
+    }
+
+    fn aabb(&self) -> AabbU32 {
+        self.aabb
+    }
+
+    type LeafType = ROOT::LeafType;
+
+    type Iterator<'a> = ROOT::LeafIterator<'a>;
+
+    fn iter_leaf(&self) -> Self::Iterator<'_> {
+        self.root
+            .iter_leaf(&self.pool, UVec3::ZERO)
+    }
+}
+
+impl<ROOT: Node> TreeLike for TreeSnapshot<ROOT>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+{
+    fn count_leaves(&self) -> usize {
+        self.root.count_leaves(&self.pool)
+    }
+
+    fn aabb(&self) -> AabbU32 {
+        self.aabb
+    }
+
+    type LeafType = ROOT::LeafType;
+
+    type Iterator<'a> = ROOT::LeafIterator<'a>;
+
+    fn iter_leaf(&self) -> Self::Iterator<'_> {
+        self.root
+            .iter_leaf(&self.pool, UVec3::ZERO)
+    }
+}
+
+/// Trait abstracting over all [`Tree`] and [`TreeSnapshot`]
+pub trait TreeLike: Send + Sync + 'static {
+    fn count_leaves(&self) -> usize;
+    fn aabb(&self) -> AabbU32;
+
+    type LeafType: IsLeaf;
+    type Iterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)> where Self: 'a;
+    fn iter_leaf(&self) -> Self::Iterator<'_>;
+
+    fn iter(&self) -> impl Iterator<Item = UVec3> {
+        self.iter_leaf()
+            .flat_map(|(position, leaf)| leaf.iter(position))
     }
 }
