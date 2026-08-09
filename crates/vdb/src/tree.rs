@@ -261,15 +261,61 @@ where
     }
 }
 
-/// Trait abstracting over all [`Tree`] and [`TreeSnapshot`]
+/// The read-only interface shared by a live [`Tree`] and a captured
+/// [`TreeSnapshot`]
+///
+/// ```
+/// # #![feature(generic_const_exprs)]
+/// use dust_vdb::{Tree, TreeLike, hierarchy};
+///
+/// /// Accepts a live tree and a snapshot alike.
+/// fn occupied_voxels(version: &impl TreeLike) -> usize {
+///     version.iter().count()
+/// }
+///
+/// let tree = Tree::<hierarchy!(3, 3, 2, u32)>::new();
+/// assert_eq!(tree.count_leaves(), 0);
+/// assert_eq!(occupied_voxels(&tree), 0);
+/// ```
 pub trait TreeLike: Send + Sync + 'static {
+    /// Number of leaf nodes present in this version, i.e. exactly as many
+    /// items as [`TreeLike::iter_leaf`] yields. Useful for sizing a buffer
+    /// before filling it from that iterator.
+    ///
+    /// Not cached: this walks every internal node, summing child masks with
+    /// `popcnt` one level above the leaves.
+    ///
+    /// Meaningful only for hierarchies that have at least one internal level
+    /// above the leaves; a tree whose root *is* a leaf trips a debug assertion.
     fn count_leaves(&self) -> usize;
+
+    /// Axis-aligned bounds of this version, in tree-global voxel coordinates.
     fn aabb(&self) -> AabbU32;
 
+    /// The leaf node type of this hierarchy, carrying the occupancy mask and
+    /// the per-leaf value.
     type LeafType: IsLeaf;
+
+    /// Iterator returned by [`TreeLike::iter_leaf`]
     type Iterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)> where Self: 'a;
+
+    /// Iterate the leaf nodes present in this tree, yielding each leaf with
+    /// the tree-global coordinate of its minimum corner (a multiple of
+    /// [`Node::EXTENT`] of the leaf). Voxel coordinates inside the leaf are
+    /// relative to it.
+    ///
+    /// Empty regions cost nothing: the walk descends only into occupied cells,
+    /// driven by each node's child mask. Every leaf reached by this iterator
+    /// holds at least one voxel.
+    ///
+    /// Order is depth-first, and within a node ascending child index, i.e.
+    /// x-major with z varying fastest. It therefore depends only on *which*
+    /// cells are occupied, never on insertion order or pool layout: two trees
+    /// holding the same voxels iterate identically.
     fn iter_leaf(&self) -> Self::Iterator<'_>;
 
+    /// Iterate every occupied voxel in tree-global coordinates, flattening
+    /// [`TreeLike::iter_leaf`] through each leaf's occupancy mask.
     fn iter(&self) -> impl Iterator<Item = UVec3> {
         self.iter_leaf()
             .flat_map(|(position, leaf)| leaf.iter(position))
