@@ -41,6 +41,20 @@ pub struct NodeMeta<V> {
     ) -> Option<&'a mut V>,
 
     pub(crate) extent_mask: UVec3, // = (1 << extent_log2) - 1
+
+    // Geometry for [`crate::LeafIter`], the hierarchy-erased leaf walker. Each
+    // node type reports its own layout (via `offset_of!`), so the walker makes
+    // no assumptions about field placement.
+    /// Log2 shape of this node's child grid (voxel grid for leaves).
+    pub(crate) fanout_log2: ConstUVec3,
+    /// Extent of one child cell, in voxels. Unused for leaves.
+    pub(crate) child_extent: UVec3,
+    /// Byte offset of the child mask (occupancy mask for leaves) words.
+    pub(crate) mask_offset: u32,
+    /// Number of `usize` words in the mask.
+    pub(crate) mask_words: u32,
+    /// Byte offset of the `[InternalNodeEntry; SIZE]` array. Unused for leaves.
+    pub(crate) child_ptrs_offset: u32,
 }
 
 pub const trait NodeConst {

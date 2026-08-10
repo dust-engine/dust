@@ -117,6 +117,11 @@ where
             setter: Self::set_in_pools,
             getter: Self::get_in_pools,
             clearer: Self::clear_in_pools,
+            fanout_log2: LOG2,
+            child_extent: UVec3::ZERO,
+            mask_offset: std::mem::offset_of!(Self, occupancy.data) as u32,
+            mask_words: (size_of_grid(LOG2) / size_of::<usize>() / 8) as u32,
+            child_ptrs_offset: 0,
         });
     }
 }

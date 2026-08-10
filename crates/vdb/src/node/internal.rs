@@ -69,6 +69,11 @@ where
             getter: Self::get_in_pools,
             clearer: Self::clear_in_pools,
             extent_mask: Self::EXTENT_MASK,
+            fanout_log2: FANOUT_LOG2,
+            child_extent: CHILD::EXTENT,
+            mask_offset: std::mem::offset_of!(Self, child_mask.data) as u32,
+            mask_words: size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize) as u32,
+            child_ptrs_offset: std::mem::offset_of!(Self, child_ptrs) as u32,
         });
     }
 }
