@@ -609,7 +609,7 @@ mod tests {
     use glam::UVec3;
 
     use super::{Attributes, lowest_common_ancestor_level};
-    use crate::{IsLeaf, Node, Tree, TreeLike, hierarchy};
+    use crate::{IsLeaf, Node, Tree, TreeErased, TreeLike, hierarchy};
 
     #[derive(Default)]
     struct TestAttributes {
@@ -1458,5 +1458,83 @@ mod tests {
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         drop(accessor);
+    }
+
+    #[test]
+    fn test_iter_erased() {
+        use std::collections::BTreeSet;
+
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        type MyLeaf = hierarchy!(2, u32);
+        let mut tree = MyTree::new();
+        let mut attributes = TestAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        let mut expected = BTreeSet::new();
+        for i in 0..512u32 {
+            let coords = UVec3::new((i * 7) % 256, (i * 13) % 256, (i * 29) % 256);
+            accessor.set(coords, ((i % 200) + 1) as u8);
+            expected.insert((coords.x, coords.y, coords.z));
+        }
+        drop(accessor);
+
+        // Voxel iteration reproduces exactly the voxels that were set.
+        let seen: Vec<UVec3> = tree.iter().collect();
+        assert_eq!(seen.len(), expected.len());
+        let seen_set: BTreeSet<_> = seen.iter().map(|v| (v.x, v.y, v.z)).collect();
+        assert_eq!(seen_set, expected);
+
+        // Leaf origins are leaf-aligned, count matches count_leaves, and
+        // flattening each leaf's mask manually reproduces the same voxels.
+        let mut leaves = 0;
+        let mut from_leaves = BTreeSet::new();
+        for (origin, leaf) in tree.iter_leaf() {
+            assert_eq!(origin % 4, UVec3::ZERO);
+            leaves += 1;
+            for voxel in leaf.iter(origin) {
+                assert!(from_leaves.insert((voxel.x, voxel.y, voxel.z)));
+            }
+        }
+        assert_eq!(leaves, tree.count_leaves());
+        assert_eq!(from_leaves, expected);
+
+        // The erased walker and the hierarchy's own iterator must stay
+        // behaviorally identical: same leaves (by identity, not just value),
+        // same origins, same order.
+        let template: Vec<(UVec3, &MyLeaf)> = tree.iter_leaf().collect();
+        let erased: Vec<(UVec3, &MyLeaf)> = tree.iter_leaf_erased().collect();
+        assert_eq!(template.len(), erased.len());
+        for ((origin_t, leaf_t), (origin_e, leaf_e)) in template.iter().zip(&erased) {
+            assert_eq!(origin_t, origin_e);
+            assert!(std::ptr::eq(*leaf_t, *leaf_e));
+        }
+        assert_eq!(tree.iter_erased().collect::<Vec<_>>(), seen);
+
+        // The hierarchy-erased object view iterates identically as well.
+        let erased: &dyn TreeErased<LeafType = MyLeaf> = &tree;
+        assert_eq!(erased.count_leaves(), tree.count_leaves());
+        assert_eq!(erased.iter_erased().collect::<Vec<_>>(), seen);
+
+        let boxed: Box<dyn TreeErased<LeafType = MyLeaf>> = Box::new(tree);
+        assert_eq!(boxed.iter_erased().collect::<Vec<_>>(), seen);
+    }
+
+    #[test]
+    fn test_iter_leaf_root_hierarchy() {
+        type LeafTree = Tree<hierarchy!(2, u32)>;
+        let mut tree = LeafTree::new();
+        // A hierarchy whose root is itself a leaf yields the root leaf, once,
+        // even while empty — through both iterators.
+        assert_eq!(tree.iter_leaf().count(), 1);
+        assert_eq!(tree.iter_leaf_erased().count(), 1);
+        assert_eq!(tree.iter().count(), 0);
+        assert_eq!(tree.iter_erased().count(), 0);
+
+        // Occupancy index packs x-major with z fastest: 0b0101 = (0, 1, 1).
+        tree.root.occupancy.set(5, true);
+        tree.root.occupancy.set(63, true);
+        let occupied: Vec<UVec3> = tree.iter().collect();
+        assert_eq!(occupied, vec![UVec3::new(0, 1, 1), UVec3::new(3, 3, 3)]);
+        assert_eq!(tree.iter_erased().collect::<Vec<_>>(), occupied);
     }
 }
