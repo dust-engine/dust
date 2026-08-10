@@ -609,7 +609,7 @@ mod tests {
     use glam::UVec3;
 
     use super::{Attributes, lowest_common_ancestor_level};
-    use crate::{IsLeaf, Node, Tree, hierarchy};
+    use crate::{IsLeaf, Node, Tree, TreeLike, hierarchy};
 
     #[derive(Default)]
     struct TestAttributes {
@@ -823,14 +823,14 @@ mod tests {
         assert_eq!(
             attributes.get_attribute(
                 leaf.get_value(),
-                leaf.get_attribute_offset(UVec3::new(0, 0, 3))
+                leaf.get_fitted_attribute_offset(UVec3::new(0, 0, 3))
             ),
             12
         );
         assert_eq!(
             attributes.get_attribute(
                 leaf.get_value(),
-                leaf.get_attribute_offset(UVec3::new(0, 1, 0))
+                leaf.get_fitted_attribute_offset(UVec3::new(0, 1, 0))
             ),
             13
         );
@@ -935,12 +935,12 @@ mod tests {
         // Three versions of the same leaf coexist.
         let v1 = snap_v1.get(coords).unwrap();
         assert_eq!(
-            attributes.get_attribute(v1.get_value(), v1.get_attribute_offset(coords)),
+            attributes.get_attribute(v1.get_value(), v1.get_fitted_attribute_offset(coords)),
             1
         );
         let v2 = snap_v2.get(coords).unwrap();
         assert_eq!(
-            attributes.get_attribute(v2.get_value(), v2.get_attribute_offset(coords)),
+            attributes.get_attribute(v2.get_value(), v2.get_fitted_attribute_offset(coords)),
             2
         );
         let mut accessor = tree.accessor_mut(&mut attributes);
@@ -951,7 +951,7 @@ mod tests {
         tree.release_snapshot(snap_v1, |leaf| drop_leaf_attributes(&mut attributes, leaf));
         let v2 = snap_v2.get(coords).unwrap();
         assert_eq!(
-            attributes.get_attribute(v2.get_value(), v2.get_attribute_offset(coords)),
+            attributes.get_attribute(v2.get_value(), v2.get_fitted_attribute_offset(coords)),
             2
         );
         tree.release_snapshot(snap_v2, |leaf| drop_leaf_attributes(&mut attributes, leaf));
@@ -992,7 +992,7 @@ mod tests {
         assert_eq!(
             attributes.get_attribute(
                 leaf.get_value(),
-                leaf.get_attribute_offset(UVec3::new(0, 1, 0))
+                leaf.get_fitted_attribute_offset(UVec3::new(0, 1, 0))
             ),
             13
         );
@@ -1131,7 +1131,7 @@ mod tests {
         assert_eq!(
             attributes.get_attribute(
                 leaf.get_value(),
-                leaf.get_attribute_offset(UVec3::new(0, 0, 3))
+                leaf.get_fitted_attribute_offset(UVec3::new(0, 0, 3))
             ),
             12
         );
@@ -1178,7 +1178,7 @@ mod tests {
         assert_eq!(
             attributes.get_attribute(
                 leaf.get_value(),
-                leaf.get_attribute_offset(UVec3::new(0, 1, 0))
+                leaf.get_fitted_attribute_offset(UVec3::new(0, 1, 0))
             ),
             13
         );

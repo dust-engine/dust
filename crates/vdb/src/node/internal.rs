@@ -1,6 +1,6 @@
 use super::{NodeMeta, size_of_grid};
 use crate::{ConstUVec3, Node, NodeConst, pool::Pool};
-use bitvec::{array::BitArray, order::Lsb0, slice::IterOnes};
+use bitvec::array::BitArray;
 use glam::UVec3;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -412,25 +412,13 @@ where
 
     #[inline]
     fn iter_leaf<'a>(&'a self, pools: &'a [Pool], offset: UVec3) -> Self::LeafIterator<'a> {
-        InternalNodeLeafIterator {
-            pools,
-            location_offset: offset,
-            child_mask_iterator: self.child_mask.iter_ones(),
-            child_ptrs: &self.child_ptrs,
-            child_iterator: None,
-        }
+        InternalNodeLeafIterator::new(pools, self, offset)
     }
 
     #[inline]
     fn iter_leaf_in_pool<'a>(pools: &'a [Pool], ptr: u32, offset: UVec3) -> Self::LeafIterator<'a> {
         let node = unsafe { pools[Self::LEVEL].get_item::<Self>(ptr) };
-        InternalNodeLeafIterator {
-            pools,
-            location_offset: offset,
-            child_mask_iterator: node.child_mask.iter_ones(),
-            child_ptrs: &node.child_ptrs,
-            child_iterator: None,
-        }
+        InternalNodeLeafIterator::new(pools, node, offset)
     }
     fn count_leaves(&self, pools: &[Pool]) -> usize {
         if Self::LEVEL == 1 {
@@ -468,9 +456,36 @@ where
 {
     pools: &'a [Pool],
     location_offset: UVec3,
-    child_mask_iterator: IterOnes<'a, usize, Lsb0>,
+    /// Raw words of the child mask, scanned directly with `trailing_zeros`
+    /// (`word` caches the current word's unvisited bits) instead of through
+    /// `bitvec`'s `IterOnes`, whose `BitSlice` region machinery dominated the
+    /// per-leaf cost.
+    mask_words: &'a [usize; size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)],
+    word: usize,
+    word_idx: u32,
     child_iterator: Option<CHILD::LeafIterator<'a>>,
     child_ptrs: &'a [InternalNodeEntry; size_of_grid(FANOUT_LOG2)],
+}
+impl<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3>
+    InternalNodeLeafIterator<'a, CHILD, FANOUT_LOG2>
+where
+    [(); size_of_grid(FANOUT_LOG2).div_ceil(usize::BITS as usize)]: Sized,
+{
+    fn new(
+        pools: &'a [Pool],
+        node: &'a InternalNode<CHILD, FANOUT_LOG2>,
+        location_offset: UVec3,
+    ) -> Self {
+        Self {
+            pools,
+            location_offset,
+            mask_words: &node.child_mask.data,
+            word: node.child_mask.data[0],
+            word_idx: 0,
+            child_iterator: None,
+            child_ptrs: &node.child_ptrs,
+        }
+    }
 }
 impl<'a, CHILD: Node, const FANOUT_LOG2: ConstUVec3> Iterator
     for InternalNodeLeafIterator<'a, CHILD, FANOUT_LOG2>
@@ -479,6 +494,7 @@ where
 {
     type Item = (UVec3, &'a CHILD::LeafType);
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // Try taking it out from the current child
@@ -486,7 +502,19 @@ where
                 return Some(item);
             }
             // self.child_iterator is None or ran out. Grab the next child.
-            if let Some(next_child_index) = self.child_mask_iterator.next() {
+            let next_child_index = loop {
+                if self.word != 0 {
+                    let bit = self.word.trailing_zeros();
+                    self.word &= self.word - 1;
+                    break Some(self.word_idx as usize * usize::BITS as usize + bit as usize);
+                }
+                self.word_idx += 1;
+                if self.word_idx as usize >= self.mask_words.len() {
+                    break None;
+                }
+                self.word = self.mask_words[self.word_idx as usize];
+            };
+            if let Some(next_child_index) = next_child_index {
                 let child_ptr = unsafe { self.child_ptrs[next_child_index].occupied };
                 let offset = UVec3 {
                     x: next_child_index as u32 >> (FANOUT_LOG2.z + FANOUT_LOG2.y),
