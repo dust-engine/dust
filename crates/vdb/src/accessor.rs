@@ -122,6 +122,10 @@ where
             self.erase(coords);
             return;
         }
+        // Track voxel-tight bounds of everything ever set. Erases don't shrink
+        // the box, so it stays a conservative bound of the occupied voxels
+        // (which is what consumers like collision domains need).
+        self.tree.aabb.grow(coords);
         // Fast path: writing inside the hot leaf. Its attribute range is
         // inflated (one slot per voxel), so setting the occupancy bit and
         // writing the slot is the whole job — no descent at all. Writes in
