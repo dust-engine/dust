@@ -1,4 +1,4 @@
-use std::mem::MaybeUninit;
+use std::{mem::{ManuallyDrop, MaybeUninit}, ops::Deref};
 
 use glam::UVec3;
 
@@ -16,6 +16,8 @@ where
     /// Number of snapshots created by [`Tree::snapshot`] and not yet returned
     /// to [`Tree::release_snapshot`].
     pub(crate) snapshot_count: u32,
+    snapshot_return_receiver: crossbeam::channel::Receiver<ROOT>,
+    snapshot_return_sender: crossbeam::channel::Sender<ROOT>,
 }
 
 /// A self-contained, read-only version of a [`Tree`], captured by
@@ -49,24 +51,22 @@ pub struct TreeSnapshot<ROOT: Node>
 where
     [(); ROOT::LEVEL]: Sized,
 {
-    pub(crate) root: ROOT,
+    pub(crate) root: ManuallyDrop<ROOT>,
     pub(crate) pool: [Pool; ROOT::LEVEL],
     aabb: AabbU32,
-    drop_guard: TreeSnapshotDropGuard,
+    return_channel: crossbeam::channel::Sender<ROOT>,
 }
-
-struct TreeSnapshotDropGuard;
-impl Drop for TreeSnapshotDropGuard {
+impl<ROOT: Node> Drop for TreeSnapshot<ROOT>
+where
+    [(); ROOT::LEVEL]: Sized,
+{
     fn drop(&mut self) {
-        panic!("TreeSnapshot must be released via Tree::release_snapshot");
+        unsafe {
+            let root = ManuallyDrop::take(&mut self.root);
+            self.return_channel.send(root).ok();
+        }
     }
 }
-impl TreeSnapshotDropGuard {
-    fn disarm(self) {
-        std::mem::forget(self);
-    }
-}
-
 impl<ROOT: Node> Tree<ROOT>
 where
     [(); ROOT::LEVEL + 1]: Sized,
@@ -84,11 +84,14 @@ where
         }
 
         let pools: [Pool; ROOT::LEVEL] = unsafe { MaybeUninit::array_assume_init(pools) };
+        let (snapshot_return_sender, snapshot_return_receiver) = crossbeam::channel::unbounded();
         Self {
             root: ROOT::default(),
             pool: pools,
             aabb: AabbU32::default(),
             snapshot_count: 0,
+            snapshot_return_sender,
+            snapshot_return_receiver,
         }
     }
     pub fn new_with_leaf_storage(storage: Box<dyn PoolStorage>) -> Self
@@ -105,11 +108,14 @@ where
         pools[0].write(Pool::new_with_storage(ROOT::META[0].layout, storage));
 
         let pools: [Pool; ROOT::LEVEL] = unsafe { MaybeUninit::array_assume_init(pools) };
+        let (snapshot_return_sender, snapshot_return_receiver) = crossbeam::channel::unbounded();
         Self {
             root: ROOT::default(),
             pool: pools,
             aabb: AabbU32::default(),
             snapshot_count: 0,
+            snapshot_return_sender,
+            snapshot_return_receiver,
         }
     }
     pub fn pools(&self) -> &[Pool] {
@@ -173,10 +179,10 @@ where
             capture.write(pool.capture());
         }
         TreeSnapshot {
-            root: self.root.clone(),
+            root: ManuallyDrop::new(self.root.clone()),
             pool: unsafe { MaybeUninit::array_assume_init(pools) },
             aabb: self.aabb,
-            drop_guard: TreeSnapshotDropGuard,
+            return_channel: self.snapshot_return_sender.clone(),
         }
     }
 
@@ -187,14 +193,33 @@ where
     pub fn release_snapshot(
         &mut self,
         snapshot: TreeSnapshot<ROOT>,
-        mut leaf_dropped: impl FnMut(&ROOT::LeafType),
+        leaf_dropped: impl FnMut(&ROOT::LeafType),
     ) {
-        snapshot
-            .root
-            .release_children(&mut self.pool, &mut leaf_dropped);
-        self.snapshot_count -= 1;
-        snapshot.drop_guard.disarm();
+        drop(snapshot);
+        self.reclaim_dropped_snapshots(leaf_dropped);
     }
+
+    /// Releases every snapshot that was dropped rather than explicitly
+    /// released since the last reclamation, freeing the nodes that stayed
+    /// allocated solely for them. Returns how many snapshots were reclaimed.
+    ///
+    /// `leaf_dropped` serves the same purpose as in
+    /// [`Tree::release_snapshot`]. Mutation sessions ([`Tree::accessor_mut`])
+    /// call this automatically with a callback that frees the leaves'
+    /// attribute ranges.
+    pub fn reclaim_dropped_snapshots(
+        &mut self,
+        mut leaf_dropped: impl FnMut(&ROOT::LeafType),
+    ) -> u32 {
+        let mut num_dropped: u32 = 0;
+        for root in self.snapshot_return_receiver.try_iter() {
+            root.release_children(&mut self.pool, &mut leaf_dropped);
+            num_dropped += 1;
+        }
+        self.snapshot_count -= num_dropped;
+        num_dropped
+    }
+
 
     /// Restore the tree to the state captured by `snapshot` (undo).
     ///
@@ -213,7 +238,7 @@ where
         snapshot.root.retain_children(&mut self.pool);
         self.root
             .release_children(&mut self.pool, &mut leaf_dropped);
-        self.root = snapshot.root.clone();
+        self.root = snapshot.root.deref().clone();
         self.aabb = snapshot.aabb;
     }
 }
@@ -498,7 +523,7 @@ unsafe fn mask_word(node: *const u8, info: &LevelInfo, idx: u32) -> usize {
     unsafe { *(node.add(info.mask_offset as usize) as *const usize).add(idx as usize) }
 }
 
-/// The iterator returned by [`crate::TreeErased::iter_leaf_erased`]: walks
+/// The iterator returned by [`crate::TreeErasedLeaf::iter_leaf_erased`]: walks
 /// every leaf of a tree, yielding each with the coordinate of its minimum
 /// corner.
 ///

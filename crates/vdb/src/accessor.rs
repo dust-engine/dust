@@ -470,6 +470,13 @@ where
         &'a mut self,
         attributes: &'a mut A,
     ) -> AccessorMut<'a, ROOT, A> {
+        // attribute store needed to free the dropped leaves' ranges is at hand.
+        self.reclaim_dropped_snapshots(|leaf| {
+            let occupied = leaf.get_occupancy().count_ones() as u32;
+            if occupied > 0 {
+                attributes.free_attributes(leaf.get_value(), occupied);
+            }
+        });
         AccessorMut {
             tree: self,
             ptrs: [u32::MAX; ROOT::LEVEL],

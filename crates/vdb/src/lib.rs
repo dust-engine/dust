@@ -67,3 +67,16 @@ impl From<AabbU16> for AabbU32 {
         }
     }
 }
+
+impl AabbU32 {
+    /// Grows the box to contain `point`. Both bounds are inclusive.
+    pub fn grow(&mut self, point: glam::UVec3) {
+        self.min = self.min.min(point);
+        self.max = self.max.max(point);
+    }
+
+    /// Whether the box contains no point at all (its [`Default`] state).
+    pub fn is_empty(&self) -> bool {
+        self.min.cmpgt(self.max).any()
+    }
+}

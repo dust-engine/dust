@@ -9,6 +9,7 @@ edition = "2024"
 glam = "^0.32"
 nohash = "0.2.0"
 bitvec = "1"
+crossbeam = "0.8"
 
 [dev-dependencies]
 rand = "0.8.5"
