@@ -263,6 +263,15 @@ where
         self.aabb
     }
 
+    fn iter_erased(&self) -> ErasedVoxelIter<'_> {
+        ErasedVoxelIter::new(&self.root, &self.pool)
+    }
+}
+
+impl<ROOT: Node> TreeErasedLeaf for Tree<ROOT>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+{
     type LeafType = ROOT::LeafType;
 
     fn iter_leaf_erased(&self) -> ErasedLeafIter<'_, ROOT::LeafType> {
@@ -282,6 +291,15 @@ where
         self.aabb
     }
 
+    fn iter_erased(&self) -> ErasedVoxelIter<'_> {
+        ErasedVoxelIter::new(&self.root, &self.pool)
+    }
+}
+
+impl<ROOT: Node> TreeErasedLeaf for TreeSnapshot<ROOT>
+where
+    [(); ROOT::LEVEL + 1]: Sized,
+{
     type LeafType = ROOT::LeafType;
 
     fn iter_leaf_erased(&self) -> ErasedLeafIter<'_, ROOT::LeafType> {
@@ -305,7 +323,7 @@ where
 /// assert_eq!(tree.count_leaves(), 0);
 /// assert_eq!(occupied_voxels(&tree), 0);
 /// ```
-pub trait TreeLike: TreeErased {
+pub trait TreeLike: TreeErasedLeaf {
     /// Iterator returned by [`TreeLike::iter_leaf`]
     type Iterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)> where Self: 'a;
 
@@ -332,34 +350,41 @@ pub trait TreeLike: TreeErased {
     }
 }
 
-/// The object-safe counterpart of [`TreeLike`], for storing trees or
-/// snapshots of different hierarchies uniformly — e.g. behind a
-/// `Box<dyn TreeErased<LeafType = L>>`. Only the hierarchy is erased; the
-/// leaf type stays concrete in the object type.
+/// The fully type-erased read-only interface: nothing about the tree — not
+/// the hierarchy, not even its leaf type — appears in the object type.
+/// Consumers that only need occupancy (voxel coordinates, counts, bounds) can
+/// hold any tree or snapshot as a plain `&dyn TreeErased` or
+/// `Box<dyn TreeErased>` without naming a single tree parameter.
 ///
-/// [`TreeLike`] is the zero-cost interface: its iterator is the hierarchy's
-/// own nested type, monomorphized with full type information. What keeps this
-/// trait object-safe is that [`TreeErased::iter_leaf_erased`] returns
-/// [`LeafIter`], a concrete iterator driven by per-level metadata instead of
-/// the hierarchy's generics — still no dynamic dispatch and no allocation per
-/// step, at the cost of runtime rather than compile-time tree geometry. Both
-/// iterators yield the same items in the same documented order.
+/// The interface comes in three tiers of erasure:
+/// - [`TreeLike`] — full type information, the hierarchy's own monomorphized
+///   iterators; the fast path. Not object-safe (its iterator is a generic
+///   associated type).
+/// - [`TreeErasedLeaf`] — hierarchy erased, leaf type still named:
+///   `dyn TreeErasedLeaf<LeafType = L>` iterates leaves as `&L`.
+/// - [`TreeErased`] — everything erased: iteration yields bare voxel
+///   coordinates, walked through runtime tree geometry.
+///
+/// Each tier is a supertrait of the one above, so every tree offers all
+/// three, and a `&dyn TreeErasedLeaf<LeafType = L>` upcasts to
+/// `&dyn TreeErased`.
 ///
 /// ```
 /// # #![feature(generic_const_exprs)]
-/// use dust_vdb::{Tree, TreeErased, hierarchy};
+/// use dust_vdb::{Tree, TreeErased, TreeErasedLeaf, hierarchy};
 ///
 /// let tree = Tree::<hierarchy!(3, 3, 2, u32)>::new();
-/// // Hierarchy-erased: only the leaf type remains in the object type.
-/// let erased: &dyn TreeErased<LeafType = hierarchy!(2, u32)> = &tree;
-/// assert_eq!(erased.count_leaves(), 0);
-/// assert_eq!(erased.iter_erased().count(), 0);
+/// // Nothing about the tree's shape or leaves needs to be named:
+/// let opaque: &dyn TreeErased = &tree;
+/// assert_eq!(opaque.count_leaves(), 0);
+/// assert_eq!(opaque.iter_erased().count(), 0);
+///
+/// // The leaf-typed object upcasts to the fully erased one.
+/// let typed: &dyn TreeErasedLeaf<LeafType = hierarchy!(2, u32)> = &tree;
+/// let opaque: &dyn TreeErased = typed;
+/// assert_eq!(opaque.aabb().min, glam::UVec3::MAX);
 /// ```
 pub trait TreeErased: Send + Sync + 'static {
-    /// The leaf node type of this hierarchy, carrying the occupancy mask and
-    /// the per-leaf value.
-    type LeafType: IsLeaf;
-
     /// Number of leaf nodes present in this version, i.e. exactly as many
     /// items as [`TreeLike::iter_leaf`] yields. Useful for sizing a buffer
     /// before filling it from that iterator.
@@ -374,16 +399,45 @@ pub trait TreeErased: Send + Sync + 'static {
     /// Axis-aligned bounds of this version, in tree-global voxel coordinates.
     fn aabb(&self) -> AabbU32;
 
+    /// Iterate every occupied voxel in tree-global coordinates. Same items,
+    /// same order as [`TreeLike::iter`].
+    fn iter_erased(&self) -> ErasedVoxelIter<'_>;
+}
+
+/// The object-safe counterpart of [`TreeLike`], for storing trees or
+/// snapshots of different hierarchies uniformly — e.g. behind a
+/// `Box<dyn TreeErasedLeaf<LeafType = L>>`. Only the hierarchy is erased; the
+/// leaf type stays concrete in the object type, so iteration still hands out
+/// typed `&L` leaves. When not even the leaf type is known, use the
+/// [`TreeErased`] supertrait instead.
+///
+/// [`TreeLike`] is the zero-cost interface: its iterator is the hierarchy's
+/// own nested type, monomorphized with full type information. What keeps this
+/// trait object-safe is that [`TreeErasedLeaf::iter_leaf_erased`] returns
+/// [`ErasedLeafIter`], a concrete iterator driven by per-level metadata
+/// instead of the hierarchy's generics — still no dynamic dispatch and no
+/// allocation per step, at the cost of runtime rather than compile-time tree
+/// geometry. Both iterators yield the same items in the same documented order.
+///
+/// ```
+/// # #![feature(generic_const_exprs)]
+/// use dust_vdb::{Tree, TreeErased, TreeErasedLeaf, hierarchy};
+///
+/// let tree = Tree::<hierarchy!(3, 3, 2, u32)>::new();
+/// // Hierarchy-erased: only the leaf type remains in the object type.
+/// let erased: &dyn TreeErasedLeaf<LeafType = hierarchy!(2, u32)> = &tree;
+/// assert_eq!(erased.count_leaves(), 0);
+/// assert_eq!(erased.iter_leaf_erased().count(), 0);
+/// ```
+pub trait TreeErasedLeaf: TreeErased {
+    /// The leaf node type of this hierarchy, carrying the occupancy mask and
+    /// the per-leaf value.
+    type LeafType: IsLeaf;
+
     /// Iterate the leaf nodes present in this tree through the
     /// hierarchy-erased walker. Same items, same order as
     /// [`TreeLike::iter_leaf`].
     fn iter_leaf_erased(&self) -> ErasedLeafIter<'_, Self::LeafType>;
-
-    /// Iterate every occupied voxel in tree-global coordinates. Same items,
-    /// same order as [`TreeLike::iter`].
-    fn iter_erased(&self) -> ErasedVoxelIter<'_, Self::LeafType> {
-        ErasedVoxelIter::new(self.iter_leaf_erased())
-    }
 }
 
 /// Per-level walk constants, copied out of [`Node::META`] when the iterator is
@@ -590,35 +644,121 @@ impl<'a, L> Iterator for ErasedLeafIter<'a, L> {
 }
 
 /// The iterator returned by [`crate::TreeErased::iter_erased`]: every occupied
-/// voxel in tree-global coordinates, [`LeafIter`] flattened through each
-/// leaf's occupancy mask. Like [`LeafIter`], erased over the hierarchy with no
-/// dynamic dispatch anywhere.
-pub struct ErasedVoxelIter<'a, L: IsLeaf> {
-    leaves: ErasedLeafIter<'a, L>,
-    current: Option<L::Iterator<'a>>,
+/// voxel in tree-global coordinates.
+///
+/// Fully type-erased — nothing about the hierarchy, not even the leaf type,
+/// appears in the iterator, yet `next` involves no dynamic dispatch. The leaf
+/// level needs no special machinery for that: a leaf's occupancy mask is
+/// scanned exactly like an internal node's child mask, as one more record on
+/// the same stack — the only difference is that a set bit at level 0 decodes
+/// to a voxel coordinate instead of a child to descend into.
+pub struct ErasedVoxelIter<'a> {
+    pools: &'a [Pool],
+    /// Record for tree level `k` at `levels[k]`, `k = 0..=root_level`: levels
+    /// above 0 scan child masks, level 0 scans leaf occupancy.
+    levels: Box<[(LevelInfo, Frame)]>,
+    /// Number of live frames; the deepest open level is
+    /// `root_level + 1 - depth`.
+    depth: u32,
+    root_level: u32,
 }
 
-impl<'a, L: IsLeaf> ErasedVoxelIter<'a, L> {
-    pub fn new(leaves: ErasedLeafIter<'a, L>) -> Self {
-        Self {
-            leaves,
-            current: None,
+/// Everything the iterator dereferences is reachable through the `&'a` borrows
+/// it was created from (the root node and the pools), so it inherits their
+/// thread-safety: the raw pointers are an implementation detail. Nodes are
+/// unconditionally `Sync` ([`Node`] requires it), and only coordinates are
+/// yielded.
+unsafe impl Send for ErasedVoxelIter<'_> {}
+unsafe impl Sync for ErasedVoxelIter<'_> {}
+
+impl<'a> ErasedVoxelIter<'a> {
+    /// Walk the voxels of the tree rooted at `root`, whose non-root nodes
+    /// live in `pools` (pools[k] holding level-k nodes, exactly as in
+    /// [`crate::Tree`]).
+    pub(crate) fn new<ROOT: Node>(root: &'a ROOT, pools: &'a [Pool]) -> Self
+    where
+        [(); ROOT::LEVEL + 1]: Sized,
+    {
+        let mut records: Vec<(LevelInfo, Frame)> = (0..=ROOT::LEVEL)
+            .map(|level| (LevelInfo::new(&ROOT::META[level]), Frame::EMPTY))
+            .collect();
+        // The root opens like any other node — for a hierarchy whose root is
+        // itself a leaf, the walk simply starts (and ends) at level 0,
+        // scanning the root's occupancy words.
+        let node = root as *const ROOT as *const u8;
+        let (info, frame) = records.last_mut().unwrap();
+        *frame = Frame {
+            node,
+            word: unsafe { mask_word(node, info, 0) },
+            word_idx: 0,
+            origin: UVec3::ZERO,
+        };
+        ErasedVoxelIter {
+            pools,
+            levels: records.into_boxed_slice(),
+            depth: 1,
+            root_level: ROOT::LEVEL as u32,
         }
     }
 }
 
-impl<'a, L: IsLeaf> Iterator for ErasedVoxelIter<'a, L> {
+impl Iterator for ErasedVoxelIter<'_> {
     type Item = UVec3;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<UVec3> {
-        loop {
-            if let Some(current) = &mut self.current
-                && let Some(voxel) = current.next()
-            {
-                return Some(voxel);
+        while self.depth > 0 {
+            let level = (self.root_level + 1 - self.depth) as usize;
+            let (info, frame) = &mut self.levels[level];
+
+            // Advance to the next set bit, popping the frame when its mask is
+            // exhausted.
+            let index = loop {
+                if frame.word != 0 {
+                    let bit = frame.word.trailing_zeros();
+                    frame.word &= frame.word - 1;
+                    break Some(frame.word_idx * usize::BITS + bit);
+                }
+                frame.word_idx += 1;
+                if frame.word_idx >= info.mask_words {
+                    break None;
+                }
+                frame.word = unsafe { mask_word(frame.node, info, frame.word_idx) };
+            };
+            let Some(index) = index else {
+                self.depth -= 1;
+                continue;
+            };
+
+            let cell = UVec3 {
+                x: index >> info.shift_x,
+                y: (index >> info.shift_y) & info.mask_y,
+                z: index & info.mask_z,
+            };
+            if level == 0 {
+                // A set occupancy bit: the decoded cell is the voxel itself.
+                return Some(frame.origin + cell);
             }
-            let (origin, leaf) = self.leaves.next()?;
-            self.current = Some(leaf.iter(origin));
+
+            // A set child-mask bit guarantees the entry holds an occupied
+            // pointer. Descend — into a leaf's occupancy (level 1 → 0) and an
+            // internal node's child mask alike.
+            let child_ptr = unsafe {
+                (*(frame.node.add(info.child_ptrs_offset as usize) as *const InternalNodeEntry)
+                    .add(index as usize))
+                .occupied
+            };
+            let origin = frame.origin + cell * info.child_extent;
+            let node = unsafe { self.pools[level - 1].get(child_ptr) };
+            let (child_info, child_frame) = &mut self.levels[level - 1];
+            *child_frame = Frame {
+                node,
+                word: unsafe { mask_word(node, child_info, 0) },
+                word_idx: 0,
+                origin,
+            };
+            self.depth += 1;
         }
+        None
     }
 }

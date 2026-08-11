@@ -1,8 +1,8 @@
 //! Leaf and voxel iteration throughput: the hierarchy's own monomorphized
 //! iterator ([`dust_vdb::TreeLike::iter_leaf`], full type information, nested
 //! per-level iterators) against the hierarchy-erased walker
-//! ([`dust_vdb::TreeErased::iter_leaf_erased`], runtime tree geometry, inline
-//! frame stack).
+//! ([`dust_vdb::TreeErasedLeaf::iter_leaf_erased`], runtime tree geometry,
+//! inline frame stack).
 //!
 //! Both variants of a pair run over the *same* tree and use the *same* sink,
 //! so any gap between them is the cost (or benefit) of erasure alone.
@@ -33,7 +33,7 @@ extern crate test;
 use std::marker::PhantomData;
 
 use bitvec::array::BitArray;
-use dust_vdb::{AttributeAllocator, Attributes, Tree, TreeErased, TreeLike, hierarchy};
+use dust_vdb::{AttributeAllocator, Attributes, Tree, TreeErased, TreeErasedLeaf, TreeLike, hierarchy};
 use glam::UVec3;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use test::{Bencher, black_box};

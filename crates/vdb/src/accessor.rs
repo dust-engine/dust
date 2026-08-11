@@ -609,7 +609,7 @@ mod tests {
     use glam::UVec3;
 
     use super::{Attributes, lowest_common_ancestor_level};
-    use crate::{IsLeaf, Node, Tree, TreeErased, TreeLike, hierarchy};
+    use crate::{IsLeaf, Node, Tree, TreeErased, TreeErasedLeaf, TreeLike, hierarchy};
 
     #[derive(Default)]
     struct TestAttributes {
@@ -1511,11 +1511,22 @@ mod tests {
         assert_eq!(tree.iter_erased().collect::<Vec<_>>(), seen);
 
         // The hierarchy-erased object view iterates identically as well.
-        let erased: &dyn TreeErased<LeafType = MyLeaf> = &tree;
-        assert_eq!(erased.count_leaves(), tree.count_leaves());
-        assert_eq!(erased.iter_erased().collect::<Vec<_>>(), seen);
+        let typed: &dyn TreeErasedLeaf<LeafType = MyLeaf> = &tree;
+        assert_eq!(typed.count_leaves(), tree.count_leaves());
+        assert_eq!(
+            typed.iter_leaf_erased().map(|(o, _)| o).collect::<Vec<_>>(),
+            template.iter().map(|(o, _)| *o).collect::<Vec<_>>()
+        );
 
-        let boxed: Box<dyn TreeErased<LeafType = MyLeaf>> = Box::new(tree);
+        // The fully erased view names no tree parameter at all, and the
+        // leaf-typed object upcasts to it.
+        let opaque: &dyn TreeErased = &tree;
+        assert_eq!(opaque.count_leaves(), tree.count_leaves());
+        assert_eq!(opaque.iter_erased().collect::<Vec<_>>(), seen);
+        let upcast: &dyn TreeErased = typed;
+        assert_eq!(upcast.iter_erased().collect::<Vec<_>>(), seen);
+
+        let boxed: Box<dyn TreeErased> = Box::new(tree);
         assert_eq!(boxed.iter_erased().collect::<Vec<_>>(), seen);
     }
 
