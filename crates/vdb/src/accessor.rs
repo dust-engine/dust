@@ -817,23 +817,11 @@ mod tests {
         drop(accessor);
 
         // ...while the snapshot still observes the captured state.
-        let leaf = snapshot.get(UVec3::new(0, 0, 3)).unwrap();
-        assert!(leaf.get_occupancy_at(UVec3::new(0, 0, 3)));
-        assert!(!leaf.get_occupancy_at(UVec3::new(1, 1, 1)));
-        assert_eq!(
-            attributes.get_attribute(
-                leaf.get_value(),
-                leaf.get_fitted_attribute_offset(UVec3::new(0, 0, 3))
-            ),
-            12
-        );
-        assert_eq!(
-            attributes.get_attribute(
-                leaf.get_value(),
-                leaf.get_fitted_attribute_offset(UVec3::new(0, 1, 0))
-            ),
-            13
-        );
+        let mut accessor = snapshot.accessor(&attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        assert_eq!(accessor.get(UVec3::new(1, 1, 1)), None);
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
+        drop(accessor);
         assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
 
         // The edit copied exactly one leaf and one internal node.
@@ -933,27 +921,21 @@ mod tests {
         drop(accessor);
 
         // Three versions of the same leaf coexist.
-        let v1 = snap_v1.get(coords).unwrap();
-        assert_eq!(
-            attributes.get_attribute(v1.get_value(), v1.get_fitted_attribute_offset(coords)),
-            1
-        );
-        let v2 = snap_v2.get(coords).unwrap();
-        assert_eq!(
-            attributes.get_attribute(v2.get_value(), v2.get_fitted_attribute_offset(coords)),
-            2
-        );
+        let mut v1 = snap_v1.accessor(&attributes);
+        assert_eq!(v1.get(coords), Some(1));
+        drop(v1);
+        let mut v2 = snap_v2.accessor(&attributes);
+        assert_eq!(v2.get(coords), Some(2));
+        drop(v2);
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(coords), Some(3));
         drop(accessor);
 
         // Releasing v1 must not disturb v2 or the working state.
         tree.release_snapshot(snap_v1, |leaf| drop_leaf_attributes(&mut attributes, leaf));
-        let v2 = snap_v2.get(coords).unwrap();
-        assert_eq!(
-            attributes.get_attribute(v2.get_value(), v2.get_fitted_attribute_offset(coords)),
-            2
-        );
+        let mut v2 = snap_v2.accessor(&attributes);
+        assert_eq!(v2.get(coords), Some(2));
+        drop(v2);
         tree.release_snapshot(snap_v2, |leaf| drop_leaf_attributes(&mut attributes, leaf));
 
         let mut accessor = tree.accessor_mut(&mut attributes);
@@ -988,14 +970,9 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         drop(accessor);
 
-        let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
-        assert_eq!(
-            attributes.get_attribute(
-                leaf.get_value(),
-                leaf.get_fitted_attribute_offset(UVec3::new(0, 1, 0))
-            ),
-            13
-        );
+        let mut accessor = snapshot.accessor(&attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
+        drop(accessor);
 
         tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
@@ -1126,15 +1103,9 @@ mod tests {
         assert_eq!(tree.pools()[1].count(), 2);
         assert_eq!(attributes.attribute_maps[1], vec![12]);
 
-        let leaf = snapshot.get(UVec3::new(0, 0, 3)).unwrap();
-        assert!(leaf.get_occupancy_at(UVec3::new(0, 0, 3)));
-        assert_eq!(
-            attributes.get_attribute(
-                leaf.get_value(),
-                leaf.get_fitted_attribute_offset(UVec3::new(0, 0, 3))
-            ),
-            12
-        );
+        let mut accessor = snapshot.accessor(&attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        drop(accessor);
 
         // Releasing the snapshot frees the nodes the clear left behind.
         tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
@@ -1172,16 +1143,10 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
         drop(accessor);
 
-        let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
-        assert!(leaf.get_occupancy_at(UVec3::new(0, 1, 0)));
-        assert!(leaf.get_occupancy_at(UVec3::new(0, 0, 3)));
-        assert_eq!(
-            attributes.get_attribute(
-                leaf.get_value(),
-                leaf.get_fitted_attribute_offset(UVec3::new(0, 1, 0))
-            ),
-            13
-        );
+        let mut accessor = snapshot.accessor(&attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        drop(accessor);
         assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
 
         tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
@@ -1303,9 +1268,10 @@ mod tests {
         drop(accessor);
 
         // The snapshot's leaf still holds both voxels and its attributes.
-        let leaf = snapshot.get(UVec3::new(0, 1, 0)).unwrap();
-        assert!(leaf.get_occupancy_at(UVec3::new(0, 1, 0)));
-        assert!(leaf.get_occupancy_at(UVec3::new(0, 0, 3)));
+        let mut accessor = snapshot.accessor(&attributes);
+        assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
+        assert_eq!(accessor.get(UVec3::new(0, 0, 3)), Some(12));
+        drop(accessor);
         assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
 
         tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));

@@ -54,15 +54,6 @@ where
     aabb: AabbU32,
     drop_guard: TreeSnapshotDropGuard,
 }
-impl<ROOT: Node> TreeSnapshot<ROOT>
-where
-    [(); ROOT::LEVEL]: Sized,
-{
-    /// Get the leaf node containing `coords` as of the snapshot, if any.
-    pub fn get(&self, coords: UVec3) -> Option<&ROOT::LeafType> {
-        self.root.get(&self.pool, coords, &mut [])
-    }
-}
 
 struct TreeSnapshotDropGuard;
 impl Drop for TreeSnapshotDropGuard {
