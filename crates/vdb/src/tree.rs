@@ -279,6 +279,14 @@ where
         self.aabb
     }
 
+    fn extent(&self) -> UVec3 {
+        ROOT::EXTENT
+    }
+
+    fn leaf_extent(&self) -> UVec3 {
+        <ROOT::LeafType as Node>::EXTENT
+    }
+
     fn iter_erased(&self) -> ErasedVoxelIter<'_> {
         ErasedVoxelIter::new(&self.root, &self.pool)
     }
@@ -305,6 +313,14 @@ where
 
     fn aabb(&self) -> AabbU32 {
         self.aabb
+    }
+
+    fn extent(&self) -> UVec3 {
+        ROOT::EXTENT
+    }
+
+    fn leaf_extent(&self) -> UVec3 {
+        <ROOT::LeafType as Node>::EXTENT
     }
 
     fn iter_erased(&self) -> ErasedVoxelIter<'_> {
@@ -414,6 +430,14 @@ pub trait TreeErased: Send + Sync + 'static {
 
     /// Axis-aligned bounds of this version, in tree-global voxel coordinates.
     fn aabb(&self) -> AabbU32;
+
+    /// The tree's addressable extent along each axis, regardless of
+    /// voxel occupancy states. A property of the tree hierarchy.
+    fn extent(&self) -> UVec3;
+
+    /// The extent of one leaf node along each axis, regardless of
+    /// voxel occupancy states. A property of the tree hierarchy.
+    fn leaf_extent(&self) -> UVec3;
 
     /// Iterate every occupied voxel in tree-global coordinates. Same items,
     /// same order as [`TreeLike::iter`].
