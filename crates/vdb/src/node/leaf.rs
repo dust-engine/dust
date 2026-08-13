@@ -150,6 +150,7 @@ where
         z: 1 << (LOG2.z - 1),
     };
     const LEVEL: usize = 0;
+    const OCCUPANCY_MASK_OFFSET: usize = std::mem::offset_of!(Self, occupancy.data);
 
     fn set<'a>(
         &'a mut self,

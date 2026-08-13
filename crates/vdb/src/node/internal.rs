@@ -103,6 +103,7 @@ where
         z: CHILD::META_MASK.z | (1 << (Self::EXTENT_LOG2.z - 1)),
     };
     const LEVEL: usize = CHILD::LEVEL + 1;
+    const OCCUPANCY_MASK_OFFSET: usize = std::mem::offset_of!(Self, child_mask.data);
 
     fn set<'a>(
         &'a mut self,

@@ -68,6 +68,7 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
     const EXTENT: UVec3;
     const EXTENT_MASK: UVec3; // = (1 << extent_log2) - 1
     const META_MASK: UVec3;
+    const OCCUPANCY_MASK_OFFSET: usize;
     /// Max number of child nodes.
     const SIZE: usize;
 

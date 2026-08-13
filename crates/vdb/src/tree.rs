@@ -290,6 +290,22 @@ where
     fn iter_erased(&self) -> ErasedVoxelIter<'_> {
         ErasedVoxelIter::new(&self.root, &self.pool)
     }
+
+    fn leaf_view_at(&self, coords: UVec3) -> Option<ErasedLeafView<'_>> {
+        if coords.cmpge(ROOT::EXTENT).any() {
+            return None;
+        }
+        let mut path = [u32::MAX; ROOT::LEVEL];
+        let leaf = self.root.get(&self.pool, coords, &mut path)?;
+        Some(ErasedLeafView::new(
+            leaf,
+            coords,
+        ))
+    }
+
+    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_> {
+        ErasedLeafViewIter::new(&self.root, &self.pool, range)
+    }
 }
 
 impl<ROOT: Node> TreeErasedLeaf for Tree<ROOT>
@@ -325,6 +341,22 @@ where
 
     fn iter_erased(&self) -> ErasedVoxelIter<'_> {
         ErasedVoxelIter::new(&self.root, &self.pool)
+    }
+
+    fn leaf_view_at(&self, coords: UVec3) -> Option<ErasedLeafView<'_>> {
+        if coords.cmpge(ROOT::EXTENT).any() {
+            return None;
+        }
+        let mut path = [u32::MAX; ROOT::LEVEL];
+        let leaf = self.root.get(&self.pool, coords, &mut path)?;
+        Some(ErasedLeafView::new(
+            leaf,
+            coords,
+        ))
+    }
+
+    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_> {
+        ErasedLeafViewIter::new(&self.root, &self.pool, range)
     }
 }
 
@@ -442,6 +474,26 @@ pub trait TreeErased: Send + Sync + 'static {
     /// Iterate every occupied voxel in tree-global coordinates. Same items,
     /// same order as [`TreeLike::iter`].
     fn iter_erased(&self) -> ErasedVoxelIter<'_>;
+
+    /// The occupancy bits of the leaf containing `coords`: one tree descent,
+    /// then any voxel of that leaf can be tested through the returned view
+    /// without re-descending. `None` when `coords` falls outside
+    /// [`TreeErased::extent`] or in a region with no leaf allocated (all of
+    /// it empty).
+    fn leaf_view_at(&self, coords: UVec3) -> Option<ErasedLeafView<'_>>;
+
+    /// Iterate views of the leaves intersecting `range` (inclusive on both
+    /// bounds, like every [`AabbU32`]), in [`TreeLike::iter_leaf`] order. The
+    /// walk descends only into children whose cells intersect the range, so a
+    /// small box over a large tree costs the descent along the box — not a
+    /// filtered full iteration.
+    ///
+    /// This is the bulk counterpart of [`TreeErased::leaf_view_at`], for
+    /// consumers that want a leaf's occupancy words whole (to mask, scan, or
+    /// compare against neighbors) rather than one coordinate at a time. A
+    /// yielded leaf intersects the range but need not lie inside it: voxels of
+    /// a straddling leaf are the caller's to clip.
+    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_>;
 }
 
 /// The object-safe counterpart of [`TreeLike`], for storing trees or
@@ -791,6 +843,297 @@ impl Iterator for ErasedVoxelIter<'_> {
             let origin = frame.origin + cell * info.child_extent;
             let node = unsafe { self.pools[level - 1].get(child_ptr) };
             let (child_info, child_frame) = &mut self.levels[level - 1];
+            *child_frame = Frame {
+                node,
+                word: unsafe { mask_word(node, child_info, 0) },
+                word_idx: 0,
+                origin,
+            };
+            self.depth += 1;
+        }
+        None
+    }
+}
+
+/// A read-only view of one leaf's occupancy bits, returned by
+/// [`crate::TreeErased::leaf_view_at`]: the result of a single tree descent,
+/// letting any voxel of that leaf be tested without descending again.
+///
+/// Like the erased iterators, the view names nothing about the hierarchy —
+/// not even the leaf type — and involves no dynamic dispatch: it reads the
+/// occupancy words through offsets from [`Node::META`]. Coordinates are
+/// tree-global; the leaf covers `[origin, origin + extent)`.
+#[derive(Clone, Copy)]
+pub struct ErasedLeafView<'a> {
+    /// Tree-global coordinate of the leaf's minimum corner (a multiple of
+    /// `extent`).
+    origin: UVec3,
+    extent: UVec3,
+    /// = extent - 1 (extents are powers of two).
+    extent_mask: UVec3,
+    /// Decode a leaf-relative coordinate into an occupancy bit index:
+    /// `i = (x << shift_x) | (y << shift_y) | z` — the packing used by
+    /// `LeafNode` (x-major, z fastest).
+    shift_x: u32,
+    shift_y: u32,
+    /// Byte offset of the occupancy words within the leaf node.
+    mask_offset: u32,
+    /// Number of `usize` words in the occupancy mask.
+    mask_words: u32,
+    /// Raw bytes of the leaf node.
+    node: *const u8,
+    _borrow: std::marker::PhantomData<&'a ()>,
+}
+
+/// The raw pointer is a borrow of a live node in disguise (see `_borrow`);
+/// nodes are unconditionally `Sync` ([`Node`] requires it).
+unsafe impl Send for ErasedLeafView<'_> {}
+unsafe impl Sync for ErasedLeafView<'_> {}
+
+impl<'a> ErasedLeafView<'a> {
+    /// A view of `leaf`, which contains the tree-global coordinate `coords`
+    /// and whose layout `meta` (the hierarchy's level-0 entry) describes.
+    pub(crate) fn new<L: IsLeaf>(
+        leaf: &'a L,
+        coords: UVec3,
+    ) -> Self {
+        let fanout = <L as Node>::EXTENT_LOG2;
+        Self {
+            origin: coords & !L::EXTENT_MASK,
+            extent: L::EXTENT,
+            extent_mask: L::EXTENT_MASK,
+            shift_x: fanout.y + fanout.z,
+            shift_y: fanout.z,
+            mask_offset: <L as Node>::OCCUPANCY_MASK_OFFSET as u32,
+            mask_words: (<L as Node>::SIZE / size_of::<usize>() / 8) as u32,
+            node: leaf as *const L as *const u8,
+            _borrow: std::marker::PhantomData,
+        }
+    }
+
+    /// Tree-global coordinate of the leaf's minimum corner.
+    pub fn origin(&self) -> UVec3 {
+        self.origin
+    }
+
+    /// Extent of the leaf along each axis: it covers
+    /// `[origin, origin + extent)`.
+    pub fn extent(&self) -> UVec3 {
+        self.extent
+    }
+
+    /// Whether the tree-global coordinate `coords` falls within this leaf.
+    pub fn contains(&self, coords: UVec3) -> bool {
+        ((coords ^ self.origin) & !self.extent_mask) == UVec3::ZERO
+    }
+
+    /// Whether the voxel at the tree-global coordinate `coords` is occupied.
+    /// `coords` must be within this leaf ([`ErasedLeafView::contains`]).
+    pub fn get(&self, coords: UVec3) -> bool {
+        debug_assert!(self.contains(coords), "coords outside of the viewed leaf");
+        let cell = coords & self.extent_mask;
+        let index = (cell.x << self.shift_x) | (cell.y << self.shift_y) | cell.z;
+        let word = unsafe {
+            *(self.node.add(self.mask_offset as usize) as *const usize)
+                .add(index as usize / usize::BITS as usize)
+        };
+        word & (1 << (index as usize % usize::BITS as usize)) != 0
+    }
+
+    /// The leaf's raw occupancy words. Bit `i` of the concatenated words (LSB
+    /// first) is the voxel at the leaf-relative coordinate
+    /// [`ErasedLeafView::coord_of_bit`]`(i)` — one bit per voxel, `extent`
+    /// voxels total, in x-major order with z varying fastest. This is the
+    /// whole leaf in hand at once, for consumers doing their own bit math
+    /// (masking a range, diffing against a neighbor); [`ErasedLeafView::get`]
+    /// is the one-voxel form.
+    pub fn occupancy_words(&self) -> &'a [usize] {
+        unsafe {
+            std::slice::from_raw_parts(
+                self.node.add(self.mask_offset as usize) as *const usize,
+                self.mask_words as usize,
+            )
+        }
+    }
+
+    /// The leaf-relative coordinate of occupancy bit `index`: the inverse of
+    /// the `(x << shift_x) | (y << shift_y) | z` packing.
+    pub fn coord_of_bit(&self, index: u32) -> UVec3 {
+        UVec3 {
+            x: index >> self.shift_x,
+            y: (index >> self.shift_y) & self.extent_mask.y,
+            z: index & self.extent_mask.z,
+        }
+    }
+}
+
+/// The iterator returned by [`crate::TreeErased::iter_leaf_views_in_range`]:
+/// an [`ErasedLeafView`] of every leaf intersecting a coordinate box.
+///
+/// The walk is the fully erased frame stack of [`ErasedVoxelIter`], stopping
+/// one level up: leaves are yielded whole (as views over their occupancy
+/// words) instead of being scanned bit by bit, and children whose cells lie
+/// outside the box are never descended into.
+pub struct ErasedLeafViewIter<'a> {
+    pools: &'a [Pool],
+    /// Record for tree level `k` at `levels[k - 1]`, `k = 1..=root_level`;
+    /// leaves (level 0) are yielded, never opened, and need no record.
+    levels: Box<[(LevelInfo, Frame)]>,
+    /// Number of live frames; the deepest open level is
+    /// `root_level + 1 - depth`.
+    depth: u32,
+    root_level: u32,
+    /// Inclusive bounds of the walk.
+    range: AabbU32,
+    /// The leaf-level constants stamped onto every yielded view.
+    leaf_extent: UVec3,
+    leaf_extent_mask: UVec3,
+    leaf_shift_x: u32,
+    leaf_shift_y: u32,
+    leaf_mask_offset: u32,
+    leaf_mask_words: u32,
+    /// A hierarchy whose root is itself a leaf yields it here, once.
+    root_leaf: Option<ErasedLeafView<'a>>,
+}
+
+/// See [`ErasedVoxelIter`]'s impls: the raw pointers are borrows of live,
+/// unconditionally-`Sync` nodes.
+unsafe impl Send for ErasedLeafViewIter<'_> {}
+unsafe impl Sync for ErasedLeafViewIter<'_> {}
+
+impl<'a> ErasedLeafViewIter<'a> {
+    /// Walk the leaves of the tree rooted at `root`, whose non-root nodes
+    /// live in `pools` (pools[k] holding level-k nodes, exactly as in
+    /// [`crate::Tree`]), yielding views of leaves intersecting `range`
+    /// (inclusive).
+    pub(crate) fn new<ROOT: Node>(root: &'a ROOT, pools: &'a [Pool], range: AabbU32) -> Self
+    where
+        [(); ROOT::LEVEL + 1]: Sized,
+    {
+        let leaf_meta = &ROOT::META[0];
+        let leaf_fanout = leaf_meta.fanout_log2;
+        let leaf_extent = <ROOT::LeafType as Node>::EXTENT;
+
+        let mut records: Vec<(LevelInfo, Frame)> = (1..=ROOT::LEVEL)
+            .map(|level| (LevelInfo::new(&ROOT::META[level]), Frame::EMPTY))
+            .collect();
+        let mut root_leaf = None;
+        let mut depth = 0;
+        if ROOT::LEVEL == 0 {
+            // The root is itself a leaf; yield it if it intersects the range
+            // (its block starts at the origin, so only the low bound can
+            // exclude it).
+            if (leaf_extent - UVec3::ONE).cmpge(range.min).all() {
+                root_leaf = Some(ErasedLeafView {
+                    origin: UVec3::ZERO,
+                    extent: leaf_extent,
+                    extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
+                    shift_x: leaf_fanout.y + leaf_fanout.z,
+                    shift_y: leaf_fanout.z,
+                    mask_offset: leaf_meta.mask_offset,
+                    mask_words: leaf_meta.mask_words,
+                    node: root as *const ROOT as *const u8,
+                    _borrow: std::marker::PhantomData,
+                });
+            }
+        } else {
+            let node = root as *const ROOT as *const u8;
+            let (info, frame) = records.last_mut().unwrap();
+            *frame = Frame {
+                node,
+                word: unsafe { mask_word(node, info, 0) },
+                word_idx: 0,
+                origin: UVec3::ZERO,
+            };
+            depth = 1;
+        }
+        ErasedLeafViewIter {
+            pools,
+            levels: records.into_boxed_slice(),
+            depth,
+            root_level: ROOT::LEVEL as u32,
+            range,
+            leaf_extent,
+            leaf_extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
+            leaf_shift_x: leaf_fanout.y + leaf_fanout.z,
+            leaf_shift_y: leaf_fanout.z,
+            leaf_mask_offset: leaf_meta.mask_offset,
+            leaf_mask_words: leaf_meta.mask_words,
+            root_leaf,
+        }
+    }
+}
+
+impl<'a> Iterator for ErasedLeafViewIter<'a> {
+    type Item = ErasedLeafView<'a>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<ErasedLeafView<'a>> {
+        if let Some(leaf) = self.root_leaf.take() {
+            return Some(leaf);
+        }
+        while self.depth > 0 {
+            let level = (self.root_level + 1 - self.depth) as usize;
+            let (info, frame) = &mut self.levels[level - 1];
+
+            // Advance to the next set child bit, popping the frame when its
+            // mask is exhausted.
+            let index = loop {
+                if frame.word != 0 {
+                    let bit = frame.word.trailing_zeros();
+                    frame.word &= frame.word - 1;
+                    break Some(frame.word_idx * usize::BITS + bit);
+                }
+                frame.word_idx += 1;
+                if frame.word_idx >= info.mask_words {
+                    break None;
+                }
+                frame.word = unsafe { mask_word(frame.node, info, frame.word_idx) };
+            };
+            let Some(index) = index else {
+                self.depth -= 1;
+                continue;
+            };
+
+            let cell = UVec3 {
+                x: index >> info.shift_x,
+                y: (index >> info.shift_y) & info.mask_y,
+                z: index & info.mask_z,
+            };
+            let origin = frame.origin + cell * info.child_extent;
+            if origin.cmpgt(self.range.max).any()
+                || (origin + info.child_extent - UVec3::ONE)
+                    .cmplt(self.range.min)
+                    .any()
+            {
+                // The child's cell lies entirely outside the box.
+                continue;
+            }
+
+            // A set mask bit guarantees the entry holds an occupied pointer.
+            let child_ptr = unsafe {
+                (*(frame.node.add(info.child_ptrs_offset as usize) as *const InternalNodeEntry)
+                    .add(index as usize))
+                .occupied
+            };
+
+            if level == 1 {
+                return Some(ErasedLeafView {
+                    origin,
+                    extent: self.leaf_extent,
+                    extent_mask: self.leaf_extent_mask,
+                    shift_x: self.leaf_shift_x,
+                    shift_y: self.leaf_shift_y,
+                    mask_offset: self.leaf_mask_offset,
+                    mask_words: self.leaf_mask_words,
+                    node: unsafe { self.pools[0].get(child_ptr) },
+                    _borrow: std::marker::PhantomData,
+                });
+            }
+            // Descend into an internal child.
+            let child_level = level - 1;
+            let node = unsafe { self.pools[child_level].get(child_ptr) };
+            let (child_info, child_frame) = &mut self.levels[child_level - 1];
             *child_frame = Frame {
                 node,
                 word: unsafe { mask_word(node, child_info, 0) },
