@@ -348,7 +348,7 @@ where
     fn release_in_pools(
         pools: &mut [Pool],
         ptr: u32,
-        leaf_dropped: &mut dyn FnMut(&Self::LeafType),
+        leaf_dropped: &mut dyn FnMut(u32, &Self::LeafType),
     ) {
         if pools[Self::LEVEL].release(ptr) {
             // Last parent edge gone: the node dies, and each of its children
@@ -362,7 +362,7 @@ where
         }
     }
 
-    fn release_children(&self, pools: &mut [Pool], leaf_dropped: &mut dyn FnMut(&Self::LeafType)) {
+    fn release_children(&self, pools: &mut [Pool], leaf_dropped: &mut dyn FnMut(u32, &Self::LeafType)) {
         for index in self.child_mask.iter_ones() {
             let child_ptr = unsafe { self.child_ptrs[index].occupied };
             <CHILD as Node>::release_in_pools(pools, child_ptr, leaf_dropped);

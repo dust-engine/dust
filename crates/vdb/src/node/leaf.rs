@@ -283,7 +283,7 @@ where
         );
         // Drop the working tree's edge; the leaf dies with it unless a
         // snapshot still references it.
-        Self::release_in_pools(pools, *ptr, &mut |_| {});
+        Self::release_in_pools(pools, *ptr, &mut |_, _| {});
         // Tell the parent the cell is air now; u32::MAX is the air marker
         // of `InternalNodeEntry::free`.
         *ptr = u32::MAX;
@@ -293,17 +293,17 @@ where
         // Leaves have no children.
     }
 
-    fn release_in_pools(pools: &mut [Pool], ptr: u32, leaf_dropped: &mut dyn FnMut(&Self)) {
+    fn release_in_pools(pools: &mut [Pool], ptr: u32, leaf_dropped: &mut dyn FnMut(u32, &Self)) {
         if pools[Self::LEVEL].release(ptr) {
             unsafe {
                 let node = pools[Self::LEVEL].get(ptr) as *const Self;
-                leaf_dropped(&*node);
+                leaf_dropped(ptr, &*node);
             }
             pools[Self::LEVEL].free(ptr);
         }
     }
 
-    fn release_children(&self, _pools: &mut [Pool], _leaf_dropped: &mut dyn FnMut(&Self)) {
+    fn release_children(&self, _pools: &mut [Pool], _leaf_dropped: &mut dyn FnMut(u32, &Self)) {
         // Leaves have no children.
     }
 

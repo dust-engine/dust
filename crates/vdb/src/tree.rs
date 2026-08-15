@@ -193,7 +193,7 @@ where
     pub fn release_snapshot(
         &mut self,
         snapshot: TreeSnapshot<ROOT>,
-        leaf_dropped: impl FnMut(&ROOT::LeafType),
+        leaf_dropped: impl FnMut(u32, &ROOT::LeafType),
     ) {
         drop(snapshot);
         self.reclaim_dropped_snapshots(leaf_dropped);
@@ -209,7 +209,7 @@ where
     /// attribute ranges.
     pub fn reclaim_dropped_snapshots(
         &mut self,
-        mut leaf_dropped: impl FnMut(&ROOT::LeafType),
+        mut leaf_dropped: impl FnMut(u32, &ROOT::LeafType),
     ) -> u32 {
         let mut num_dropped: u32 = 0;
         for root in self.snapshot_return_receiver.try_iter() {
@@ -230,7 +230,7 @@ where
     pub fn restore(
         &mut self,
         snapshot: &TreeSnapshot<ROOT>,
-        mut leaf_dropped: impl FnMut(&ROOT::LeafType),
+        mut leaf_dropped: impl FnMut(u32, &ROOT::LeafType),
     ) {
         // Pin the snapshot's children with the edges the restored root is
         // about to hold *before* releasing the current root's edges, so that

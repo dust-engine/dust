@@ -195,12 +195,12 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
     fn release_in_pools(
         pools: &mut [Pool],
         ptr: u32,
-        leaf_dropped: &mut dyn FnMut(&Self::LeafType),
+        leaf_dropped: &mut dyn FnMut(u32, &Self::LeafType),
     );
 
     /// Remove one parent edge from each direct child of an owned (non-pooled)
     /// node: the working root of a tree, or a snapshot root being released.
-    fn release_children(&self, pools: &mut [Pool], leaf_dropped: &mut dyn FnMut(&Self::LeafType));
+    fn release_children(&self, pools: &mut [Pool], leaf_dropped: &mut dyn FnMut(u32, &Self::LeafType));
 
     type LeafIterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)>;
     /// This is called when the node was owned as the root node in the tree.

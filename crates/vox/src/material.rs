@@ -71,18 +71,14 @@ impl dust_vdb::Attributes for VoxMaterial {
         _ord: PhantomData,
     };
 
-    fn free_attributes(&mut self, ptr: &Self::Ptr, num_attributes: u32) {
+    fn free_attributes(&mut self, _index: u32, ptr: &Self::Ptr, num_attributes: u32) {
         self.attribute_allocator
             .free(ptr.material_ptr, num_attributes);
     }
 
-    fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+    fn get_attribute(&self, _index: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
         let slice: &[Self::Value] = bytemuck::cast_slice(self.buffer.as_slice());
         slice[ptr.material_ptr as usize + offset as usize]
-    }
-    fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value] {
-        let slice: &[Self::Value] = bytemuck::cast_slice(self.buffer.as_slice());
-        &slice[ptr.material_ptr as usize..(ptr.material_ptr as usize + len as usize)]
     }
 
     fn copy_attribute(
@@ -122,7 +118,7 @@ impl dust_vdb::Attributes for VoxMaterial {
         }
     }
 
-    fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+    fn set_attribute(&mut self, _index: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
         let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
         slice[ptr.material_ptr as usize + offset as usize] = value - 1;
     }

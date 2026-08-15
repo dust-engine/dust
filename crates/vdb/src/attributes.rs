@@ -24,10 +24,9 @@ pub trait Attributes {
     const MAX_OCCUPANCY: Self::Occupancy;
     /// The type of the attribute values. For a MagicaVoxel grid, this would be a u8 palette index.
     type Value: Default + IsDefault;
-    fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value;
-    fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value];
-    fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value);
-    fn free_attributes(&mut self, ptr: &Self::Ptr, num_attributes: u32);
+    fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value;
+    fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value);
+    fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32);
 
     /// Allocate a new attribute range using the new mask. Then, copy the attributes from the attribute range
     /// pointed to by `ptr` to the newly allocated attribute range. Returns the pointer to the new attribute range.

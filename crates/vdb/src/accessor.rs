@@ -71,6 +71,7 @@ where
                 return None;
             }
             let attribute = self.attributes.get_attribute(
+                last_leaf,
                 leaf_node.get_value(),
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
             );
@@ -106,6 +107,7 @@ where
             return None;
         }
         let value = self.attributes.get_attribute(
+            self.ptrs[0],
             leaf_node.get_value(),
             leaf_node.get_fitted_attribute_offset(coords),
         );
@@ -141,6 +143,7 @@ where
             let leaf_node = unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
             leaf_node.set_occupancy_at(coords, true);
             self.attributes.set_attribute(
+                last_leaf,
                 leaf_node.get_value(),
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
@@ -206,6 +209,7 @@ where
             self.last_leaf_coords = coords;
             leaf_node.set_occupancy_at(coords, true);
             self.attributes.set_attribute(
+                self.set_ptrs[0],
                 &new_attrib_ptr,
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
@@ -217,6 +221,7 @@ where
         // Copy to a new leaf node with maxed occupancy.
         if previously_occupied {
             self.attributes.set_attribute(
+                self.set_ptrs[0],
                 leaf_node.get_value(),
                 leaf_node.get_fitted_attribute_offset(coords),
                 value,
@@ -236,12 +241,13 @@ where
             let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones() as u32; // can optimize here
             if old_attrib_occupancy_count > 0 {
                 self.attributes
-                    .free_attributes(leaf_node.get_value(), old_attrib_occupancy_count);
+                    .free_attributes(self.set_ptrs[0], leaf_node.get_value(), old_attrib_occupancy_count);
             }
             leaf_node.set_occupancy_at(coords, true);
 
             // Hint: just need to get the old attrib_occupancy now.
             self.attributes.set_attribute(
+                self.set_ptrs[0],
                 &new_attrib_ptr,
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
@@ -347,7 +353,7 @@ where
             // this path, as the collapse requires.
             if !moved {
                 self.attributes
-                    .free_attributes(&old_value, old_mask.count_ones() as u32);
+                    .free_attributes(self.set_ptrs[0], &old_value, old_mask.count_ones() as u32);
             }
             self.tree.root.collapse(&mut self.tree.pool, coords);
             // The collapse freed nodes that both caches now reference.
@@ -364,7 +370,7 @@ where
                 .copy_attribute(&old_value, &old_mask, &ATTRIBS::MAX_OCCUPANCY, &coords);
         if !moved {
             self.attributes
-                .free_attributes(&old_value, old_mask.count_ones() as u32);
+                .free_attributes(self.set_ptrs[0], &old_value, old_mask.count_ones() as u32);
         }
         leaf_node.set_value(new_value);
         self.last_leaf = Some(self.set_ptrs[0]);
@@ -384,7 +390,7 @@ where
                 // with it — from the tree. The write that made the leaf hot
                 // uniquified its path, as the collapse requires.
                 self.attributes
-                    .free_attributes(old_attrib_ptr, ROOT::LeafType::SIZE as u32);
+                    .free_attributes(last_leaf, old_attrib_ptr, ROOT::LeafType::SIZE as u32);
                 self.tree
                     .root
                     .collapse(&mut self.tree.pool, self.last_leaf_coords);
@@ -403,7 +409,7 @@ where
                     &self.last_leaf_coords,
                 );
                 self.attributes
-                    .free_attributes(old_attrib_ptr, ROOT::LeafType::SIZE as u32);
+                    .free_attributes(last_leaf, old_attrib_ptr, ROOT::LeafType::SIZE as u32);
                 prev_access_leaf_node.set_value(new_attrib_ptr);
             }
             self.last_leaf = None;
@@ -471,10 +477,10 @@ where
         attributes: &'a mut A,
     ) -> AccessorMut<'a, ROOT, A> {
         // attribute store needed to free the dropped leaves' ranges is at hand.
-        self.reclaim_dropped_snapshots(|leaf| {
+        self.reclaim_dropped_snapshots(|index, leaf| {
             let occupied = leaf.get_occupancy().count_ones() as u32;
             if occupied > 0 {
-                attributes.free_attributes(leaf.get_value(), occupied);
+                attributes.free_attributes(index, leaf.get_value(), occupied);
             }
         });
         AccessorMut {
@@ -571,6 +577,7 @@ where
                 return None;
             }
             let attribute = self.attributes.get_attribute(
+                last_leaf,
                 leaf_node.get_value(),
                 leaf_node.get_fitted_attribute_offset(coords),
             );
@@ -605,6 +612,7 @@ where
             return None;
         }
         let value = self.attributes.get_attribute(
+            self.ptrs[0],
             leaf_node.get_value(),
             leaf_node.get_fitted_attribute_offset(coords),
         );
@@ -636,21 +644,15 @@ mod tests {
         };
         type Value = u8;
 
-        fn get_attribute(&self, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+        fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
             self.attribute_maps[*ptr as usize][offset as usize]
         }
 
-        fn get_attributes(&self, ptr: &Self::Ptr, len: u32) -> &[Self::Value] {
-            let slice = &self.attribute_maps[*ptr as usize];
-            assert_eq!(slice.len(), len as usize);
-            slice
-        }
-
-        fn set_attribute(&mut self, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+        fn set_attribute(&mut self, _leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
             self.attribute_maps[*ptr as usize][offset as usize] = value;
         }
 
-        fn free_attributes(&mut self, ptr: &Self::Ptr, num_attributes: u32) {
+        fn free_attributes(&mut self, _leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
             println!("free {} attributes: {}", num_attributes, ptr);
             let slice = &self.attribute_maps[*ptr as usize];
             assert_eq!(slice.len(), num_attributes as usize);
@@ -784,11 +786,12 @@ mod tests {
     /// a snapshot release or restore.
     fn drop_leaf_attributes(
         attributes: &mut TestAttributes,
+        index: u32,
         leaf: &<hierarchy!(2, 4, 2, u32) as crate::NodeConst>::LeafType,
     ) {
         let occupied = leaf.get_occupancy().count_ones() as u32;
         if occupied > 0 {
-            attributes.free_attributes(leaf.get_value(), occupied);
+            attributes.free_attributes(index, leaf.get_value(), occupied);
         }
     }
 
@@ -840,7 +843,7 @@ mod tests {
         assert_eq!(tree.pools()[1].count(), baseline_internal + 1);
 
         // Releasing the snapshot reclaims the pinned nodes and their attributes.
-        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         assert_eq!(tree.snapshot_count(), 0);
         assert_eq!(tree.pools()[0].count(), baseline_leaves);
         assert_eq!(tree.pools()[1].count(), baseline_internal);
@@ -879,8 +882,8 @@ mod tests {
         assert_eq!(tree.pools()[1].count(), baseline_internal + 2);
 
         // Undo: drop the working state, adopt the snapshot's.
-        tree.restore(&undo_point, |leaf| {
-            drop_leaf_attributes(&mut attributes, leaf)
+        tree.restore(&undo_point, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
         });
 
         let mut accessor = tree.accessor_mut(&mut attributes);
@@ -893,7 +896,7 @@ mod tests {
         // The undo point is still live and can be released independently.
         // Everything it references is also referenced by the restored working
         // state, so nothing gets freed.
-        tree.release_snapshot(undo_point, |_| {
+        tree.release_snapshot(undo_point, |_, _| {
             unreachable!("no node is exclusively pinned by the snapshot")
         });
         assert_eq!(tree.pools()[0].count(), baseline_leaves);
@@ -943,11 +946,11 @@ mod tests {
         drop(accessor);
 
         // Releasing v1 must not disturb v2 or the working state.
-        tree.release_snapshot(snap_v1, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snap_v1, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         let mut v2 = snap_v2.accessor(&attributes);
         assert_eq!(v2.get(coords), Some(2));
         drop(v2);
-        tree.release_snapshot(snap_v2, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snap_v2, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
 
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(coords), Some(3));
@@ -985,7 +988,7 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
         drop(accessor);
 
-        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
     }
@@ -1029,7 +1032,7 @@ mod tests {
             reader.join().unwrap();
         });
 
-        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
     }
@@ -1119,7 +1122,7 @@ mod tests {
         drop(accessor);
 
         // Releasing the snapshot frees the nodes the clear left behind.
-        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
@@ -1160,7 +1163,7 @@ mod tests {
         drop(accessor);
         assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
 
-        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
 
@@ -1285,7 +1288,7 @@ mod tests {
         drop(accessor);
         assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
 
-        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
@@ -1391,7 +1394,7 @@ mod tests {
         assert_eq!(reader.get(UVec3::new(144, 1, 0)), None);
         drop(reader);
 
-        tree.release_snapshot(snapshot, |leaf| drop_leaf_attributes(&mut attributes, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
     }
@@ -1425,7 +1428,7 @@ mod tests {
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 1);
 
-        tree.release_snapshot(snapshot, |_| {
+        tree.release_snapshot(snapshot, |_, _| {
             unreachable!("nothing was exclusively pinned by the snapshot")
         });
         assert_eq!(tree.pools()[0].count(), 1);
