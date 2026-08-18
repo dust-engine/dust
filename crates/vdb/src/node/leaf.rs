@@ -29,7 +29,7 @@ where
 
 pub trait IsLeaf: Node {
     /// Total number of voxels in the leaf node.
-    type Occupancy: DerefMut<Target = BitSlice<usize, Lsb0>> + Clone;
+    type Occupancy: DerefMut<Target = BitSlice<usize, Lsb0>> + Clone + 'static;
     type Value: Default + Send + Sync + Clone;
     fn get_occupancy(&self) -> &Self::Occupancy;
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;

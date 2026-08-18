@@ -17,11 +17,11 @@ pub trait Attributes {
     /// The attribute pointers are stored on the vdb leaf nodes, one per node.
     /// This is typically u32.
     type Ptr;
-    /// The occupancy mask of the attribute pointer.
-    /// If we have 4x4x4 leaf nodes, this would be BitMask<64>.
-    /// If we have 8x8x8 leaf nodes, this would be BitMask<512>.
-    type Occupancy;
-    const MAX_OCCUPANCY: Self::Occupancy;
+    /// The occupancy mask of the attribute pointer
+    /// If we have 4x4x4 leaf nodes, this would be &'a BitMask<64>.
+    /// If we have 8x8x8 leaf nodes, this would be &'a BitMask<512>.
+    type Occupancy<'a>;
+    const MAX_OCCUPANCY: Self::Occupancy<'static>;
     /// The type of the attribute values. For a MagicaVoxel grid, this would be a u8 palette index.
     type Value: Default + IsDefault;
     fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value;
@@ -40,8 +40,8 @@ pub trait Attributes {
     fn copy_attribute(
         &mut self,
         ptr: &Self::Ptr,
-        original_mask: &Self::Occupancy,
-        new_mask: &Self::Occupancy,
+        original_mask: Self::Occupancy<'_>,
+        new_mask: Self::Occupancy<'_>,
         coords: &UVec3,
     ) -> Self::Ptr; // need a value to represent: what are the ones to delete, and what are the ones to add?
 }

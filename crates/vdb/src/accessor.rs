@@ -10,9 +10,9 @@ use std::ops::Deref;
 pub struct AccessorMut<'a, ROOT: Node, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: Attributes<
+    ATTRIBS: for<'m> Attributes<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
 {
     tree: &'a mut Tree<ROOT>,
@@ -53,9 +53,9 @@ fn lowest_common_ancestor_level(a: UVec3, b: UVec3, mask: UVec3, root_level: u32
 impl<'a, ROOT: Node, ATTRIBS> AccessorMut<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: Attributes<
+    ATTRIBS: for<'m> Attributes<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
 {
     pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
@@ -202,7 +202,7 @@ where
             let new_attrib_ptr = self.attributes.copy_attribute(
                 &leaf_node.get_value(),
                 leaf_node.get_occupancy(),
-                &ATTRIBS::MAX_OCCUPANCY,
+                ATTRIBS::MAX_OCCUPANCY,
                 &coords,
             );
             self.last_leaf = Some(self.set_ptrs[0]);
@@ -232,7 +232,7 @@ where
             let new_attrib_ptr = self.attributes.copy_attribute(
                 &leaf_node.get_value(),
                 leaf_node.get_occupancy(), // this original mask is wrong. should be old_attrib_occupancy
-                &ATTRIBS::MAX_OCCUPANCY,
+                ATTRIBS::MAX_OCCUPANCY,
                 &coords,
             );
             self.last_leaf = Some(self.set_ptrs[0]);
@@ -367,7 +367,7 @@ where
         // leaf (`moved`), it stays with the snapshot instead of being freed.
         let new_value =
             self.attributes
-                .copy_attribute(&old_value, &old_mask, &ATTRIBS::MAX_OCCUPANCY, &coords);
+                .copy_attribute(&old_value, &old_mask, ATTRIBS::MAX_OCCUPANCY, &coords);
         if !moved {
             self.attributes
                 .free_attributes(self.set_ptrs[0], &old_value, old_mask.count_ones() as u32);
@@ -404,7 +404,7 @@ where
                 // fitting attributes by realloc and copy
                 let new_attrib_ptr = self.attributes.copy_attribute(
                     &old_attrib_ptr,
-                    &ATTRIBS::MAX_OCCUPANCY,
+                    ATTRIBS::MAX_OCCUPANCY,
                     prev_access_leaf_node.get_occupancy(),
                     &self.last_leaf_coords,
                 );
@@ -419,9 +419,9 @@ where
 impl<'a, ROOT: Node, ATTRIBS> Drop for AccessorMut<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: Attributes<
+    ATTRIBS: for<'m> Attributes<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
 {
     fn drop(&mut self) {
@@ -446,9 +446,9 @@ where
     /// [`Tree::snapshot`] and use [`TreeSnapshot::accessor`] instead.
     pub fn accessor<
         'a,
-        A: Attributes<
+        A: for<'m> Attributes<
                 Ptr = <ROOT::LeafType as IsLeaf>::Value,
-                Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+                Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
             >,
     >(
         &'a self,
@@ -468,9 +468,9 @@ where
     /// the attribute storage exclusively.
     pub fn accessor_mut<
         'a,
-        A: Attributes<
+        A: for<'m> Attributes<
                 Ptr = <ROOT::LeafType as IsLeaf>::Value,
-                Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+                Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
             >,
     >(
         &'a mut self,
@@ -505,9 +505,9 @@ where
     /// another thread — while the originating tree keeps being mutated.
     pub fn accessor<
         'a,
-        A: Attributes<
+        A: for<'m> Attributes<
                 Ptr = <ROOT::LeafType as IsLeaf>::Value,
-                Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+                Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
             >,
     >(
         &'a self,
@@ -540,9 +540,9 @@ where
 pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: Attributes<
+    ATTRIBS: for<'m> Attributes<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
 {
     root: &'a ROOT,
@@ -558,9 +558,9 @@ where
 impl<'a, ROOT: Node, ATTRIBS> Accessor<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: Attributes<
+    ATTRIBS: for<'m> Attributes<
             Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy = <ROOT::LeafType as IsLeaf>::Occupancy,
+            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
         >,
 {
     pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
@@ -637,8 +637,8 @@ mod tests {
 
     impl Attributes for TestAttributes {
         type Ptr = u32;
-        type Occupancy = BitArray<[usize; 64 / size_of::<usize>() / 8]>;
-        const MAX_OCCUPANCY: Self::Occupancy = Self::Occupancy {
+        type Occupancy<'a> = &'a BitArray<[usize; 64 / size_of::<usize>() / 8]>;
+        const MAX_OCCUPANCY: &'static BitArray<[usize; 64 / size_of::<usize>() / 8]> = &BitArray {
             _ord: PhantomData,
             data: [usize::MAX; 64 / size_of::<usize>() / 8],
         };
@@ -662,8 +662,8 @@ mod tests {
         fn copy_attribute(
             &mut self,
             ptr: &Self::Ptr,
-            original_mask: &Self::Occupancy,
-            new_mask: &Self::Occupancy,
+            original_mask: Self::Occupancy<'_>,
+            new_mask: Self::Occupancy<'_>,
             coords: &UVec3,
         ) -> Self::Ptr {
             if !original_mask.any() {

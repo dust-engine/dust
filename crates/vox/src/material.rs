@@ -64,9 +64,9 @@ impl dust_vdb::Attributes for VoxMaterial {
     /// 0 .. 255 for the offset into the palette.
     type Value = u8;
     type Ptr = VoxLeafNode;
-    type Occupancy = BitArr!(for 64);
+    type Occupancy<'a> = &'a BitArr!(for 64);
 
-    const MAX_OCCUPANCY: Self::Occupancy = BitArray {
+    const MAX_OCCUPANCY: Self::Occupancy<'static> = &BitArray {
         data: [usize::MAX; 1],
         _ord: PhantomData,
     };
@@ -84,8 +84,8 @@ impl dust_vdb::Attributes for VoxMaterial {
     fn copy_attribute(
         &mut self,
         ptr: &Self::Ptr,
-        original_mask: &Self::Occupancy,
-        new_mask: &Self::Occupancy,
+        original_mask: Self::Occupancy<'_>,
+        new_mask: Self::Occupancy<'_>,
         coords: &UVec3,
     ) -> Self::Ptr {
         let new_ptr = self

@@ -80,8 +80,8 @@ impl BenchAttributes {
 
 impl Attributes for BenchAttributes {
     type Ptr = u32;
-    type Occupancy = BitArray<[usize; OCCUPANCY_WORDS]>;
-    const MAX_OCCUPANCY: Self::Occupancy = BitArray {
+    type Occupancy<'a> = &'a BitArray<[usize; OCCUPANCY_WORDS]>;
+    const MAX_OCCUPANCY: Self::Occupancy<'static> = &BitArray {
         _ord: PhantomData,
         data: [usize::MAX; OCCUPANCY_WORDS],
     };
@@ -102,8 +102,8 @@ impl Attributes for BenchAttributes {
     fn copy_attribute(
         &mut self,
         ptr: &Self::Ptr,
-        original_mask: &Self::Occupancy,
-        new_mask: &Self::Occupancy,
+        original_mask: Self::Occupancy<'_>,
+        new_mask: Self::Occupancy<'_>,
         _coords: &UVec3,
     ) -> Self::Ptr {
         let new_len = new_mask.count_ones() as u32;
