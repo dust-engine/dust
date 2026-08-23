@@ -107,8 +107,8 @@ impl Attributes for BenchAttributes {
 
     fn copy_attribute(
         &mut self,
-        _original_leaf: u32,
-        _new_leaf: u32,
+        original_leaf: u32,
+        new_leaf: u32,
         ptr: &Self::Ptr,
         original_mask: &[usize],
         new_mask: &[usize],
@@ -130,6 +130,13 @@ impl Attributes for BenchAttributes {
             }
             if in_old {
                 old_cur += 1;
+            }
+        }
+        if original_leaf == new_leaf {
+            // In-place re-home: the original range is dead (contract).
+            let old_len = dust_vdb::mask_count_ones(original_mask);
+            if old_len > 0 {
+                self.allocator.free(*ptr, old_len);
             }
         }
         new_ptr

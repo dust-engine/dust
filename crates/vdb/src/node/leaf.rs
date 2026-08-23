@@ -64,7 +64,7 @@ pub trait IsLeaf: Node {
     }
 
     fn get_value(&self) -> &Self::Value;
-    fn set_value(&mut self, value: Self::Value);
+    fn get_value_mut(&mut self) -> &mut Self::Value;
 
     fn get_fitted_attribute_offset(&self, coords: UVec3) -> u32;
     fn get_inflated_attribute_offset(coords: UVec3) -> u32;
@@ -104,8 +104,8 @@ where
     fn get_value(&self) -> &Self::Value {
         &self.value
     }
-    fn set_value(&mut self, value: Self::Value) {
-        self.value = value;
+    fn get_value_mut(&mut self) -> &mut Self::Value {
+        &mut self.value
     }
     fn get_occupancy(&self) -> &Self::Occupancy {
         &self.occupancy

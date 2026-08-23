@@ -28,7 +28,8 @@ pub trait Attributes {
     ///
     /// Only attribute values that are set in both the original mask and the new mask will be copied.
     ///
-    /// The original attribute range will not be freed. It is the responsibility of the caller to free the original attribute range.
+    /// Whether the original attribute range is freed depends on the leaf
+    /// indices — see the in-place re-home paragraph below.
     ///
     /// Note that the original mask may be zeroed. In this case, `ptr` is meaningless, and the function will allocate
     /// a new attribute range without performing any copy.
@@ -50,6 +51,18 @@ pub trait Attributes {
     /// [`IsLeaf::MAX_OCCUPANCY`](crate::IsLeaf)), so implementations —
     /// including hierarchy-erased ones that cannot name a leaf size at
     /// compile time — never construct one.
+    ///
+    /// When `original_leaf == new_leaf` (an in-place re-home), the original
+    /// range is dead the moment this returns: the implementation releases it
+    /// itself, and the caller issues no separate
+    /// [`Attributes::free_attributes`] for it. When they differ
+    /// (copy-on-write), the original range stays with the snapshot's leaf
+    /// and dies through `free_attributes` when that leaf is released.
+    ///
+    /// `coords` is the tree-global coordinate of a voxel in the leaf, for
+    /// pointer types that carry derived per-leaf data alongside the range
+    /// pointer (e.g. packed leaf coordinates the intersection shader reads
+    /// inline from the leaf node).
     fn copy_attribute(
         &mut self,
         original_leaf: u32,
@@ -59,6 +72,111 @@ pub trait Attributes {
         new_mask: &[usize],
         coords: &UVec3,
     ) -> Self::Ptr; // need a value to represent: what are the ones to delete, and what are the ones to add?
+}
+
+/// The relationship between a hierarchy's leaf inline value and an attribute
+/// set's pointer: the leaf value can produce the pointer, and can absorb an
+/// updated pointer back into itself.
+///
+/// This is what decouples attributes from leaf inline values. The leaf value
+/// type belongs to the hierarchy (its layout may be GPU-visible); any
+/// attribute set whose pointer it can produce is compatible with the tree —
+/// one channel today, a tuple of channels tomorrow, same tree either way.
+///
+/// [`AttributePtr::set_attribute_ptr`] *merges*: it updates the parts of the
+/// leaf value the pointer determines and leaves the rest alone. It cannot be
+/// `From`/`Into`: the write-back direction over foreign leaf-value types
+/// like `u32` would violate the orphan rules, and a rebuild-from-scratch
+/// conversion would silently drop leaf-value fields the pointer doesn't
+/// determine.
+pub trait AttributePtr<P> {
+    /// The attribute pointer this leaf value carries or derives.
+    fn attribute_ptr(&self) -> P;
+    /// Absorb an updated attribute pointer, leaving unrelated parts of the
+    /// value intact.
+    fn set_attribute_ptr(&mut self, ptr: P);
+}
+
+/// A leaf value that *is* the pointer: every single-channel tree where the
+/// leaf stores the channel's pointer directly.
+impl<P: Clone> AttributePtr<P> for P {
+    fn attribute_ptr(&self) -> P {
+        self.clone()
+    }
+
+    fn set_attribute_ptr(&mut self, ptr: P) {
+        *self = ptr;
+    }
+}
+
+/// A tuple of attribute channels is itself an attribute set, driven as one
+/// accessor session: every event fans out to both channels.
+///
+/// The tuple's pointer is the *product* of the channels' pointers — each
+/// channel's typing is independent of its sibling's. What ties a tuple to a
+/// tree is the leaf value alone: it must produce (and absorb) the product
+/// pointer via [`AttributePtr`], and its implementation decides explicitly
+/// which components are stored inline and which are dropped (a channel that
+/// keys its own storage by leaf index uses a unit pointer that the leaf
+/// value discards). Nesting tuples composes more channels.
+///
+/// The joint value sets every channel at once: occupancy is shared, so a
+/// voxel exists in all channels or none, and the write-default-erases rule
+/// reads the joint default. The `Eq` bounds let the joint value satisfy
+/// [`IsDefault`] through the blanket implementation.
+impl<A: Attributes, B: Attributes> Attributes for (A, B)
+where
+    A::Value: Eq,
+    B::Value: Eq,
+{
+    type Ptr = (A::Ptr, B::Ptr);
+    type Value = (A::Value, B::Value);
+
+    fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+        (
+            self.0.get_attribute(leaf, &ptr.0, offset),
+            self.1.get_attribute(leaf, &ptr.1, offset),
+        )
+    }
+
+    fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+        self.0.set_attribute(leaf, &ptr.0, offset, value.0);
+        self.1.set_attribute(leaf, &ptr.1, offset, value.1);
+    }
+
+    fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
+        self.0.free_attributes(leaf, &ptr.0, num_attributes);
+        self.1.free_attributes(leaf, &ptr.1, num_attributes);
+    }
+
+    fn copy_attribute(
+        &mut self,
+        original_leaf: u32,
+        new_leaf: u32,
+        ptr: &Self::Ptr,
+        original_mask: &[usize],
+        new_mask: &[usize],
+        coords: &UVec3,
+    ) -> Self::Ptr {
+        (
+            self.0.copy_attribute(
+                original_leaf,
+                new_leaf,
+                &ptr.0,
+                original_mask,
+                new_mask,
+                coords,
+            ),
+            self.1.copy_attribute(
+                original_leaf,
+                new_leaf,
+                &ptr.1,
+                original_mask,
+                new_mask,
+                coords,
+            ),
+        )
+    }
 }
 
 /// Number of set bits in an occupancy mask.
