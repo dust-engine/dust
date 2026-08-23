@@ -65,6 +65,7 @@ bevy_derive = { path = "../bevy/crates/bevy_derive" }
 bevy_winit = { path = "../bevy/crates/bevy_winit" }
 bevy_internal = { path = "../bevy/crates/bevy_internal" }
 bevy_asset = { path = "../bevy/crates/bevy_asset" }
+bevy_camera = { path = "../bevy/crates/bevy_camera" }
 bevy_scene = { path = "../bevy/crates/bevy_scene" }
 bevy = { path = "../bevy" }
 

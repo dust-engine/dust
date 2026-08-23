@@ -1,6 +1,7 @@
-use crate::{Attributes, IsDefault, IsLeaf, Node, Tree, TreeSnapshot, pool::Pool};
+use crate::{
+    Attributes, IsDefault, IsLeaf, Node, Tree, TreeSnapshot, mask_count_ones, pool::Pool,
+};
 use glam::UVec3;
-use std::ops::Deref;
 
 /// Accessors are designed to help accelerate accesses into the tree structures by storing caches
 /// to tree branches. When traversing a grid in a spatially coherent pattern, the same branches
@@ -10,10 +11,7 @@ use std::ops::Deref;
 pub struct AccessorMut<'a, ROOT: Node, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: for<'m> Attributes<
-            Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-        >,
+    ATTRIBS: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
 {
     tree: &'a mut Tree<ROOT>,
     /// Cached path refreshed by reads. It may reference nodes that are shared
@@ -53,10 +51,7 @@ fn lowest_common_ancestor_level(a: UVec3, b: UVec3, mask: UVec3, root_level: u32
 impl<'a, ROOT: Node, ATTRIBS> AccessorMut<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: for<'m> Attributes<
-            Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-        >,
+    ATTRIBS: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
 {
     pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
         // Fast path: reading inside the hot leaf — no descent. The hot
@@ -157,7 +152,7 @@ where
             ROOT::LEVEL as u32,
         );
         self.last_set_coords = coords;
-        let mut moved = false;
+        let mut moved = None;
         let leaf_node = if lca_level >= ROOT::LEVEL as u32 {
             self.tree
                 .root
@@ -194,15 +189,17 @@ where
         let leaf_node = unsafe { &mut *leaf_node };
         let previously_occupied = leaf_node.get_occupancy_at(coords);
 
-        if moved {
+        if let Some(original_leaf) = moved {
             // This leaf was copied on write and still references the attribute
             // range owned by the snapshot's version of the leaf. Re-home it to
             // a private, fully inflated range. The old range must NOT be freed
             // here: the snapshot leaf keeps it until it is released.
             let new_attrib_ptr = self.attributes.copy_attribute(
+                original_leaf,
+                self.set_ptrs[0],
                 &leaf_node.get_value(),
-                leaf_node.get_occupancy(),
-                ATTRIBS::MAX_OCCUPANCY,
+                leaf_node.get_occupancy().as_ref(),
+                <ROOT::LeafType as IsLeaf>::MAX_OCCUPANCY.as_ref(),
                 &coords,
             );
             self.last_leaf = Some(self.set_ptrs[0]);
@@ -230,15 +227,17 @@ where
             // trick for now: set the bit to false, then after copy attribute, set it back.
 
             let new_attrib_ptr = self.attributes.copy_attribute(
+                self.set_ptrs[0],
+                self.set_ptrs[0],
                 &leaf_node.get_value(),
-                leaf_node.get_occupancy(), // this original mask is wrong. should be old_attrib_occupancy
-                ATTRIBS::MAX_OCCUPANCY,
+                leaf_node.get_occupancy().as_ref(), // this original mask is wrong. should be old_attrib_occupancy
+                <ROOT::LeafType as IsLeaf>::MAX_OCCUPANCY.as_ref(),
                 &coords,
             );
             self.last_leaf = Some(self.set_ptrs[0]);
             self.last_leaf_coords = coords;
             // if old_attrib_occupancy.count_ones() > 0, free.
-            let old_attrib_occupancy_count = leaf_node.get_occupancy().count_ones() as u32; // can optimize here
+            let old_attrib_occupancy_count = mask_count_ones(leaf_node.get_occupancy().as_ref()); // can optimize here
             if old_attrib_occupancy_count > 0 {
                 self.attributes
                     .free_attributes(self.set_ptrs[0], leaf_node.get_value(), old_attrib_occupancy_count);
@@ -292,7 +291,7 @@ where
             ROOT::META_MASK,
             ROOT::LEVEL as u32,
         );
-        let mut moved = false;
+        let mut moved = None;
         let survivor = if lca_level >= ROOT::LEVEL as u32 {
             self.tree
                 .root
@@ -344,16 +343,16 @@ where
         // Clear the bit (occupancy is the caller's job, symmetric with
         // sets).
         leaf_node.set_occupancy_at(coords, false);
-        if leaf_node.get_occupancy().deref().not_any() {
+        if leaf_node.get_occupancy().as_ref().iter().all(|&w| w == 0) {
             // That was the leaf's last voxel. Making a dead leaf hot buys
             // nothing, so skip the inflation and collapse it right away:
             // reclaim its attribute range (unless the snapshot's leaf owns
             // it) and re-descend from the root, where the free-cascade walks
             // real parent edges all the way up. The clear above uniquified
             // this path, as the collapse requires.
-            if !moved {
+            if moved.is_none() {
                 self.attributes
-                    .free_attributes(self.set_ptrs[0], &old_value, old_mask.count_ones() as u32);
+                    .free_attributes(self.set_ptrs[0], &old_value, mask_count_ones(old_mask.as_ref()));
             }
             self.tree.root.collapse(&mut self.tree.pool, coords);
             // The collapse freed nodes that both caches now reference.
@@ -365,12 +364,19 @@ where
         // hot leaf: repeated edits in the same leaf — an eraser brush — stay
         // on the fast paths. If the old range is shared with a snapshot's
         // leaf (`moved`), it stays with the snapshot instead of being freed.
-        let new_value =
+        let new_value = self.attributes.copy_attribute(
+            // On a copy-on-write fork the original range belongs to the
+            // snapshot's leaf; otherwise the leaf is re-homing its own range.
+            moved.unwrap_or(self.set_ptrs[0]),
+            self.set_ptrs[0],
+            &old_value,
+            old_mask.as_ref(),
+            <ROOT::LeafType as IsLeaf>::MAX_OCCUPANCY.as_ref(),
+            &coords,
+        );
+        if moved.is_none() {
             self.attributes
-                .copy_attribute(&old_value, &old_mask, ATTRIBS::MAX_OCCUPANCY, &coords);
-        if !moved {
-            self.attributes
-                .free_attributes(self.set_ptrs[0], &old_value, old_mask.count_ones() as u32);
+                .free_attributes(self.set_ptrs[0], &old_value, mask_count_ones(old_mask.as_ref()));
         }
         leaf_node.set_value(new_value);
         self.last_leaf = Some(self.set_ptrs[0]);
@@ -383,7 +389,12 @@ where
             let prev_access_leaf_node =
                 unsafe { self.tree.get_node_mut::<ROOT::LeafType>(last_leaf) };
             let old_attrib_ptr = prev_access_leaf_node.get_value();
-            if !prev_access_leaf_node.get_occupancy().deref().any() {
+            if prev_access_leaf_node
+                .get_occupancy()
+                .as_ref()
+                .iter()
+                .all(|&w| w == 0)
+            {
                 // The hot leaf was fully erased; its collapse was deferred to
                 // here (see the erase fast path). Free the inflated attribute
                 // range, then remove the leaf — and any ancestors that empty
@@ -400,12 +411,19 @@ where
                 self.last_leaf = None;
                 return;
             }
-            if !prev_access_leaf_node.get_occupancy().deref().all() {
+            if prev_access_leaf_node
+                .get_occupancy()
+                .as_ref()
+                .iter()
+                .any(|&w| w != usize::MAX)
+            {
                 // fitting attributes by realloc and copy
                 let new_attrib_ptr = self.attributes.copy_attribute(
+                    last_leaf,
+                    last_leaf,
                     &old_attrib_ptr,
-                    ATTRIBS::MAX_OCCUPANCY,
-                    prev_access_leaf_node.get_occupancy(),
+                    <ROOT::LeafType as IsLeaf>::MAX_OCCUPANCY.as_ref(),
+                    prev_access_leaf_node.get_occupancy().as_ref(),
                     &self.last_leaf_coords,
                 );
                 self.attributes
@@ -419,10 +437,7 @@ where
 impl<'a, ROOT: Node, ATTRIBS> Drop for AccessorMut<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: for<'m> Attributes<
-            Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-        >,
+    ATTRIBS: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
 {
     fn drop(&mut self) {
         // Skip the purge while unwinding: it mutates the tree and calls the
@@ -446,10 +461,7 @@ where
     /// [`Tree::snapshot`] and use [`TreeSnapshot::accessor`] instead.
     pub fn accessor<
         'a,
-        A: for<'m> Attributes<
-                Ptr = <ROOT::LeafType as IsLeaf>::Value,
-                Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-            >,
+        A: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
     >(
         &'a self,
         attributes: &'a A,
@@ -468,17 +480,14 @@ where
     /// the attribute storage exclusively.
     pub fn accessor_mut<
         'a,
-        A: for<'m> Attributes<
-                Ptr = <ROOT::LeafType as IsLeaf>::Value,
-                Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-            >,
+        A: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
     >(
         &'a mut self,
         attributes: &'a mut A,
     ) -> AccessorMut<'a, ROOT, A> {
         // attribute store needed to free the dropped leaves' ranges is at hand.
         self.reclaim_dropped_snapshots(|index, leaf| {
-            let occupied = leaf.get_occupancy().count_ones() as u32;
+            let occupied = mask_count_ones(leaf.get_occupancy().as_ref());
             if occupied > 0 {
                 attributes.free_attributes(index, leaf.get_value(), occupied);
             }
@@ -505,10 +514,7 @@ where
     /// another thread — while the originating tree keeps being mutated.
     pub fn accessor<
         'a,
-        A: for<'m> Attributes<
-                Ptr = <ROOT::LeafType as IsLeaf>::Value,
-                Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-            >,
+        A: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
     >(
         &'a self,
         attributes: &'a A,
@@ -540,10 +546,7 @@ where
 pub struct Accessor<'a, ROOT: Node, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: for<'m> Attributes<
-            Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-        >,
+    ATTRIBS: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
 {
     root: &'a ROOT,
     pool: &'a [Pool; ROOT::LEVEL],
@@ -558,10 +561,7 @@ where
 impl<'a, ROOT: Node, ATTRIBS> Accessor<'a, ROOT, ATTRIBS>
 where
     [(); ROOT::LEVEL + 1]: Sized,
-    ATTRIBS: for<'m> Attributes<
-            Ptr = <ROOT::LeafType as IsLeaf>::Value,
-            Occupancy<'m> = &'m <ROOT::LeafType as IsLeaf>::Occupancy,
-        >,
+    ATTRIBS: Attributes<Ptr = <ROOT::LeafType as IsLeaf>::Value>,
 {
     pub fn get(&mut self, coords: UVec3) -> Option<ATTRIBS::Value> {
         // Fast path: reading inside the last visited leaf — no descent. The
@@ -622,9 +622,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
 
-    use bitvec::array::BitArray;
     use glam::UVec3;
 
     use super::{Attributes, lowest_common_ancestor_level};
@@ -637,11 +635,6 @@ mod tests {
 
     impl Attributes for TestAttributes {
         type Ptr = u32;
-        type Occupancy<'a> = &'a BitArray<[usize; 64 / size_of::<usize>() / 8]>;
-        const MAX_OCCUPANCY: &'static BitArray<[usize; 64 / size_of::<usize>() / 8]> = &BitArray {
-            _ord: PhantomData,
-            data: [usize::MAX; 64 / size_of::<usize>() / 8],
-        };
         type Value = u8;
 
         fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
@@ -661,36 +654,38 @@ mod tests {
 
         fn copy_attribute(
             &mut self,
+            _original_leaf: u32,
+            _new_leaf: u32,
             ptr: &Self::Ptr,
-            original_mask: Self::Occupancy<'_>,
-            new_mask: Self::Occupancy<'_>,
+            original_mask: &[usize],
+            new_mask: &[usize],
             coords: &UVec3,
         ) -> Self::Ptr {
-            if !original_mask.any() {
-                let new = vec![0; new_mask.count_ones() as usize];
+            if original_mask.iter().all(|&w| w == 0) {
+                let new = vec![0; crate::mask_count_ones(new_mask) as usize];
                 println!(
                     "copy_attribute at {:?} from null to {}: {} -> {}",
                     coords,
                     self.attribute_maps.len(),
-                    original_mask.count_ones(),
-                    new_mask.count_ones()
+                    crate::mask_count_ones(original_mask),
+                    crate::mask_count_ones(new_mask)
                 );
                 self.attribute_maps.push(new);
                 return self.attribute_maps.len() as u32 - 1;
             }
-            let mut new = vec![0; new_mask.count_ones() as usize];
+            let mut new = vec![0; crate::mask_count_ones(new_mask) as usize];
             let old = &self.attribute_maps[*ptr as usize];
             let mut new_ptr = 0;
             let mut old_ptr = 0;
-            for bit in (*original_mask | new_mask).iter_ones() {
-                if *new_mask.get(bit).unwrap() && *original_mask.get(bit).unwrap() {
+            for (_, in_original, in_new) in crate::iter_mask_union(original_mask, new_mask) {
+                if in_new && in_original {
                     // copy it over
                     new[new_ptr] = old[old_ptr as usize];
                 }
-                if *new_mask.get(bit).unwrap() {
+                if in_new {
                     new_ptr += 1;
                 }
-                if *original_mask.get(bit).unwrap() {
+                if in_original {
                     old_ptr += 1;
                 }
             }
@@ -699,8 +694,8 @@ mod tests {
                 coords,
                 ptr,
                 self.attribute_maps.len(),
-                original_mask.count_ones(),
-                new_mask.count_ones()
+                crate::mask_count_ones(original_mask),
+                crate::mask_count_ones(new_mask)
             );
             self.attribute_maps.push(new);
             self.attribute_maps.len() as u32 - 1
@@ -789,7 +784,7 @@ mod tests {
         index: u32,
         leaf: &<hierarchy!(2, 4, 2, u32) as crate::NodeConst>::LeafType,
     ) {
-        let occupied = leaf.get_occupancy().count_ones() as u32;
+        let occupied = crate::mask_count_ones(leaf.get_occupancy().as_ref());
         if occupied > 0 {
             attributes.free_attributes(index, leaf.get_value(), occupied);
         }
@@ -1522,10 +1517,151 @@ mod tests {
         assert_eq!(tree.iter_erased().count(), 0);
 
         // Occupancy index packs x-major with z fastest: 0b0101 = (0, 1, 1).
-        tree.root.occupancy.set(5, true);
-        tree.root.occupancy.set(63, true);
+        tree.root.occupancy[0] |= (1 << 5) | (1 << 63);
         let occupied: Vec<UVec3> = tree.iter().collect();
         assert_eq!(occupied, vec![UVec3::new(0, 1, 1), UVec3::new(3, 3, 3)]);
         assert_eq!(tree.iter_erased().collect::<Vec<_>>(), occupied);
+    }
+
+    /// Records every `leaf` index handed to `set_attribute`, to check the
+    /// write-side keys against what the read side reports.
+    #[derive(Default)]
+    struct RecordingAttributes {
+        inner: TestAttributes,
+        leaves_seen: std::collections::HashSet<u32>,
+        /// Every `(original_leaf, new_leaf)` pair `copy_attribute` was called
+        /// with.
+        copies: Vec<(u32, u32)>,
+    }
+
+    impl Attributes for RecordingAttributes {
+        type Ptr = u32;
+        type Value = u8;
+
+        fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+            self.inner.get_attribute(leaf, ptr, offset)
+        }
+
+        fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+            self.leaves_seen.insert(leaf);
+            self.inner.set_attribute(leaf, ptr, offset, value);
+        }
+
+        fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
+            self.inner.free_attributes(leaf, ptr, num_attributes);
+        }
+
+        fn copy_attribute(
+            &mut self,
+            original_leaf: u32,
+            new_leaf: u32,
+            ptr: &Self::Ptr,
+            original_mask: &[usize],
+            new_mask: &[usize],
+            coords: &UVec3,
+        ) -> Self::Ptr {
+            self.copies.push((original_leaf, new_leaf));
+            self.inner
+                .copy_attribute(original_leaf, new_leaf, ptr, original_mask, new_mask, coords)
+        }
+    }
+
+    /// [`crate::ErasedLeafView::leaf_index`] exposes the same key the tree
+    /// passes to [`Attributes`], through both lookup paths, staying distinct
+    /// per leaf and diverging exactly when copy-on-write re-homes a leaf.
+    #[test]
+    fn test_leaf_view_index() {
+        use crate::AabbU32;
+        use std::collections::{HashMap, HashSet};
+
+        type MyTree = Tree<hierarchy!(2, 4, 2, u32)>;
+        let mut tree = MyTree::new();
+        let mut attributes = RecordingAttributes::default();
+
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        for (i, coords) in [
+            UVec3::new(0, 0, 3),
+            UVec3::new(0, 1, 0), // same leaf as (0, 0, 3)
+            UVec3::new(144, 1, 0),
+            UVec3::new(7, 200, 31),
+            UVec3::new(255, 255, 255),
+            UVec3::new(63, 64, 65),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            accessor.set(coords, i as u8 + 1);
+        }
+        drop(accessor);
+
+        // Both lookup paths agree on each leaf's index, and no two leaves
+        // share one.
+        let full = AabbU32 {
+            min: UVec3::ZERO,
+            max: UVec3::splat(255),
+        };
+        let mut seen: HashMap<u32, UVec3> = HashMap::new();
+        for view in tree.iter_leaf_views_in_range(full) {
+            let at = tree.leaf_view_at(view.origin()).unwrap();
+            assert_eq!(at.leaf_index(), view.leaf_index());
+            assert_eq!(at.origin(), view.origin());
+            assert!(seen.insert(view.leaf_index(), view.origin()).is_none());
+        }
+        assert_eq!(seen.len(), 5);
+        assert_eq!(seen.len(), tree.count_leaves());
+
+        // The read side reports exactly the keys the write side was driven
+        // with (no copy-on-write happened yet, so the sets match one-to-one).
+        assert_eq!(
+            seen.keys().copied().collect::<HashSet<u32>>(),
+            attributes.leaves_seen,
+        );
+
+        // Copy-on-write re-homes the edited leaf to a fresh index; untouched
+        // leaves and the snapshot's view of the old leaf keep theirs.
+        let snapshot = tree.snapshot();
+        let edited_before = tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index();
+        let untouched_before = tree
+            .leaf_view_at(UVec3::new(144, 0, 0))
+            .unwrap()
+            .leaf_index();
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        accessor.set(UVec3::new(0, 1, 1), 42);
+        drop(accessor);
+        let edited_after = tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index();
+        assert_ne!(edited_after, edited_before);
+        assert_eq!(
+            tree.leaf_view_at(UVec3::new(144, 0, 0))
+                .unwrap()
+                .leaf_index(),
+            untouched_before,
+        );
+        assert_eq!(
+            snapshot.leaf_view_at(UVec3::ZERO).unwrap().leaf_index(),
+            edited_before,
+        );
+        // The copy-on-write re-home reported that same index pair to
+        // `copy_attribute`, so index-keyed side tables can follow the move.
+        assert!(attributes.copies.contains(&(edited_before, edited_after)));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes.inner, index, leaf)
+        });
+
+        // A hierarchy whose root is itself a leaf has no pooled leaves; its
+        // views report the documented sentinel.
+        type LeafTree = Tree<hierarchy!(2, u32)>;
+        let mut tree = LeafTree::new();
+        tree.root.occupancy[0] |= 1 << 5;
+        let range = AabbU32 {
+            min: UVec3::ZERO,
+            max: UVec3::splat(3),
+        };
+        assert_eq!(
+            tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index(),
+            u32::MAX
+        );
+        let views: Vec<_> = tree.iter_leaf_views_in_range(range).collect();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].leaf_index(), u32::MAX);
     }
 }

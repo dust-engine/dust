@@ -1,7 +1,6 @@
 use super::{NodeMeta, size_of_grid};
 use crate::{ConstUVec3, Node, NodeConst, pool::Pool};
 use bitvec::{
-    array::BitArray,
     order::Lsb0,
     slice::{BitSlice, IterOnes},
 };
@@ -9,40 +8,59 @@ use glam::UVec3;
 use std::{
     iter::Once,
     mem::{MaybeUninit, size_of},
-    ops::DerefMut,
 };
 
 /// Nodes are always 4x4x4 so that each leaf node contains exactly 64 voxels,
 /// so that the occupancy mask happens to be exactly 64 bits.
 /// Size: 3 u32
 #[repr(C)]
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct LeafNode<const LOG2: ConstUVec3, T>
 where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     /// This is 1 for occupied voxels and 0 for unoccupied voxels
-    pub occupancy: BitArray<[usize; size_of_grid(LOG2) / size_of::<usize>() / 8]>,
+    pub occupancy: [usize; size_of_grid(LOG2) / size_of::<usize>() / 8],
     /// A pointer to self.occupancy.count_ones() material values
     pub value: T,
+}
+impl<const LOG2: ConstUVec3, T: Default> Default for LeafNode<LOG2, T> 
+where
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized {
+    fn default() -> Self {
+        Self {
+            occupancy: [0; size_of_grid(LOG2) / size_of::<usize>() / 8],
+            value: T::default(),
+        }
+    }
 }
 
 pub trait IsLeaf: Node {
     /// Total number of voxels in the leaf node.
-    type Occupancy: DerefMut<Target = BitSlice<usize, Lsb0>> + Clone + 'static;
+    type Occupancy: AsMut<[usize]> + AsRef<[usize]> + Clone + 'static;
+    /// The fully-set occupancy: every voxel of the leaf occupied. This is the
+    /// mask of an *inflated* attribute range (one slot per voxel); the
+    /// accessor passes it to
+    /// [`Attributes::copy_attribute`](crate::Attributes::copy_attribute) when
+    /// re-homing a leaf's range to or from that layout. It lives here — not on
+    /// [`Attributes`](crate::Attributes) — because only the leaf type knows
+    /// the mask's size at compile time; attribute implementations (including
+    /// hierarchy-erased ones) never construct it.
+    const MAX_OCCUPANCY: Self::Occupancy;
     type Value: Default + Send + Sync + Clone;
     fn get_occupancy(&self) -> &Self::Occupancy;
     fn get_occupancy_mut(&mut self) -> &mut Self::Occupancy;
 
     fn get_occupancy_at(&self, coords: UVec3) -> bool {
-        *self
-            .get_occupancy()
+        let occupancy: &BitSlice<usize, Lsb0> = BitSlice::from_slice(self.get_occupancy().as_ref());
+        *occupancy
             .get(Self::get_inflated_attribute_offset(coords) as usize)
             .expect("get_occupancy_at: coords out of bounds")
     }
     fn set_occupancy_at(&mut self, coords: UVec3, value: bool) {
+        let occupancy: &mut BitSlice<usize, Lsb0> = BitSlice::from_slice_mut(self.get_occupancy_mut().as_mut());
         let offset = Self::get_inflated_attribute_offset(coords);
-        self.get_occupancy_mut().set(offset as usize, value);
+        occupancy.set(offset as usize, value);
     }
 
     fn get_value(&self) -> &Self::Value;
@@ -61,15 +79,16 @@ where
     [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
 {
     type Value = T;
-    type Occupancy = BitArray<[usize; size_of_grid(LOG2) / size_of::<usize>() / 8]>;
+    type Occupancy = [usize; size_of_grid(LOG2) / size_of::<usize>() / 8];
+    const MAX_OCCUPANCY: Self::Occupancy = [usize::MAX; size_of_grid(LOG2) / size_of::<usize>() / 8];
     fn get_fitted_attribute_offset(&self, coords: UVec3) -> u32 {
         let coords = coords & Self::EXTENT_MASK;
         let voxel_id = (coords.x << (LOG2.y + LOG2.z)) | (coords.y << LOG2.z) | coords.z;
         debug_assert!(
-            self.occupancy.as_raw_slice().len() == 1,
+            self.occupancy.len() == 1,
             "Supports up to 64 voxels per leaf node for now"
         );
-        let mask: usize = self.occupancy.as_raw_slice()[0];
+        let mask: usize = self.occupancy[0];
         let masked = mask & ((1 << voxel_id) - 1);
         masked.count_ones()
     }
@@ -99,7 +118,7 @@ where
     fn iter<'a>(&'a self, offset: UVec3) -> Self::Iterator<'a> {
         LeafNodeIterator {
             location_offset: offset,
-            bits_iterator: self.occupancy.iter_ones(),
+            bits_iterator: BitSlice::from_slice(&self.occupancy).iter_ones(),
         }
     }
 }
@@ -119,7 +138,7 @@ where
             clearer: Self::clear_in_pools,
             fanout_log2: LOG2,
             child_extent: UVec3::ZERO,
-            mask_offset: std::mem::offset_of!(Self, occupancy.data) as u32,
+            mask_offset: std::mem::offset_of!(Self, occupancy) as u32,
             mask_words: (size_of_grid(LOG2) / size_of::<usize>() / 8) as u32,
             child_ptrs_offset: 0,
         });
@@ -150,14 +169,14 @@ where
         z: 1 << (LOG2.z - 1),
     };
     const LEVEL: usize = 0;
-    const OCCUPANCY_MASK_OFFSET: usize = std::mem::offset_of!(Self, occupancy.data);
+    const OCCUPANCY_MASK_OFFSET: usize = std::mem::offset_of!(Self, occupancy);
 
     fn set<'a>(
         &'a mut self,
         _pools: &'a mut [Pool],
         _coords: UVec3,
         _cached_path: &mut [u32],
-        _moved: &mut bool,
+        _moved: &mut Option<u32>,
     ) -> &'a mut Self::LeafType {
         // Only ever called if the leaf is the root. Like every descent, this
         // never flips occupancy bits — the caller sets the bit on the
@@ -170,7 +189,7 @@ where
         _pools: &'a mut [Pool],
         coords: UVec3,
         _cached_path: &mut [u32],
-        _moved: &mut bool,
+        _moved: &mut Option<u32>,
     ) -> Option<&'a mut Self::LeafType> {
         // Only ever called if the leaf is the root. Like every descent, this
         // never flips occupancy bits — the caller clears the bit on the
@@ -213,18 +232,20 @@ where
         _coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
     ) -> &'a mut Self {
         // Copy-on-write: a leaf shared with a snapshot is frozen. Redirect the
         // parent's edge to a private copy and leave the original untouched.
         // The copy still references the original's attribute range;
-        // `leaf_moved` tells the caller to re-home the attributes.
+        // `leaf_moved` reports the original's index so the caller re-homes
+        // the attributes.
         if pools[Self::LEVEL].is_shared(*ptr) {
+            let original = *ptr;
             let copy = unsafe { pools[Self::LEVEL].copy_item::<Self>(*ptr) };
             let dead = pools[Self::LEVEL].release(*ptr);
             debug_assert!(!dead);
             *ptr = copy;
-            *leaf_moved = true;
+            *leaf_moved = Some(original);
         }
         let old_leaf_node: *mut Self = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(*ptr) };
         if cached_path.len() > 0 {
@@ -239,7 +260,7 @@ where
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
         ancestor_shared: bool,
     ) -> Option<&'a mut Self::LeafType> {
         let node = unsafe { pools[Self::LEVEL].get_item::<Self>(*ptr) };
@@ -257,9 +278,10 @@ where
         // old version's edge belongs to our parent — it releases it when it
         // records the fork on its way back up.
         if ancestor_shared || pools[Self::LEVEL].is_shared(*ptr) {
+            let original = *ptr;
             let copy = unsafe { pools[Self::LEVEL].copy_item::<Self>(*ptr) };
             *ptr = copy;
-            *leaf_moved = true;
+            *leaf_moved = Some(original);
         }
         let old_leaf_node: *mut Self = unsafe { pools[Self::LEVEL].get_item_mut::<Self>(*ptr) };
         if cached_path.len() > 0 {
@@ -278,7 +300,8 @@ where
         debug_assert!(
             unsafe { pools[Self::LEVEL].get_item::<Self>(*ptr) }
                 .occupancy
-                .not_any(),
+                .iter()
+                .all(|&w| w == 0),
             "only a fully erased leaf may be collapsed"
         );
         // Drop the working tree's edge; the leaf dies with it unless a

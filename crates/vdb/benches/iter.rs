@@ -30,9 +30,7 @@
 
 extern crate test;
 
-use std::marker::PhantomData;
 
-use bitvec::array::BitArray;
 use dust_vdb::{AttributeAllocator, Attributes, Tree, TreeErased, TreeErasedLeaf, TreeLike, hierarchy};
 use glam::UVec3;
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -44,7 +42,6 @@ type BenchTreeRoot = hierarchy!(3, 3, 2, u32);
 type BenchTree = Tree<BenchTreeRoot>;
 
 /// One occupancy bit per voxel in a 4³ leaf.
-const OCCUPANCY_WORDS: usize = 64 / size_of::<usize>() / 8;
 
 /// The stored attribute. Must be non-zero: the default value erases the voxel.
 const VALUE: u8 = 1;
@@ -80,11 +77,6 @@ impl BenchAttributes {
 
 impl Attributes for BenchAttributes {
     type Ptr = u32;
-    type Occupancy<'a> = &'a BitArray<[usize; OCCUPANCY_WORDS]>;
-    const MAX_OCCUPANCY: Self::Occupancy<'static> = &BitArray {
-        _ord: PhantomData,
-        data: [usize::MAX; OCCUPANCY_WORDS],
-    };
     type Value = u8;
 
     fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
@@ -101,21 +93,21 @@ impl Attributes for BenchAttributes {
 
     fn copy_attribute(
         &mut self,
+        _original_leaf: u32,
+        _new_leaf: u32,
         ptr: &Self::Ptr,
-        original_mask: Self::Occupancy<'_>,
-        new_mask: Self::Occupancy<'_>,
+        original_mask: &[usize],
+        new_mask: &[usize],
         _coords: &UVec3,
     ) -> Self::Ptr {
-        let new_len = new_mask.count_ones() as u32;
+        let new_len = dust_vdb::mask_count_ones(new_mask);
         let new_ptr = self.allocator.allocate(new_len);
         self.reserve(new_ptr as usize + new_len as usize);
 
         let arena = self.arena.as_mut_slice();
         let mut new_cur = new_ptr as usize;
         let mut old_cur = *ptr as usize;
-        for bit in (*original_mask | new_mask).iter_ones() {
-            let in_new = new_mask[bit];
-            let in_old = original_mask[bit];
+        for (_, in_old, in_new) in dust_vdb::iter_mask_union(original_mask, new_mask) {
             if in_new && in_old {
                 arena[new_cur] = arena[old_cur];
             }

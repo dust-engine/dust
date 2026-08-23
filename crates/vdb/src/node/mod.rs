@@ -25,7 +25,7 @@ pub struct NodeMeta<V> {
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        moved: &mut bool,
+        moved: &mut Option<u32>,
     ) -> &'a mut V,
     /// [`Node::clear_in_pools`], for re-entering the tree mid-path. Only safe
     /// when the clear cannot empty the re-entered node (the leaf survives):
@@ -36,7 +36,7 @@ pub struct NodeMeta<V> {
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        moved: &mut bool,
+        moved: &mut Option<u32>,
         ancestor_shared: bool,
     ) -> Option<&'a mut V>,
 
@@ -106,7 +106,7 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
         pools: &'a mut [Pool],
         coords: UVec3,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
     ) -> &'a mut Self::LeafType;
     /// Set the value of a voxel at the specified coordinates within the node space.
     /// This is called when the node was located in a node pool.
@@ -120,14 +120,15 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
     /// [`Pool::is_shared`]) are copied on write: the parent's edge (`ptr`) is
     /// redirected to a private copy and the original is left untouched for the
     /// snapshots that reference it. If the *leaf* node was copied this way,
-    /// `leaf_moved` is set to true, telling the caller that the leaf's
-    /// attribute range still belongs to the snapshot's version.
+    /// `leaf_moved` is set to the leaf's old pool index, telling the caller
+    /// that the leaf moved and its attribute range still belongs to the
+    /// snapshot's version.
     fn set_in_pools<'a>(
         pools: &'a mut [Pool],
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
     ) -> &'a mut Self::LeafType;
 
     fn clear<'a>(
@@ -135,7 +136,7 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
         pools: &'a mut [Pool],
         coords: UVec3,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
     ) -> Option<&'a mut Self::LeafType>;
     /// Descend to the voxel at `coords` for clearing. Like sets, the descent
     /// never flips occupancy bits — the caller clears the bit on the
@@ -151,7 +152,8 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
     /// child cannot: with lazily pushed-down refcounts it may be frozen via
     /// an ancestor — reported through `ancestor_shared` — while its own
     /// count still reads unique). If the leaf was forked, `leaf_moved` is
-    /// set: its attribute range still belongs to the snapshot's version.
+    /// set to its old pool index: its attribute range still belongs to the
+    /// snapshot's version.
     /// `cached_path` is written only on the found-voxel path, post-fork.
     ///
     /// Clearing never frees nodes: a leaf whose last bit the caller clears
@@ -163,7 +165,7 @@ pub trait Node: 'static + Send + Sync + Default + Clone + const NodeConst {
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
         ancestor_shared: bool,
     ) -> Option<&'a mut Self::LeafType>;
 

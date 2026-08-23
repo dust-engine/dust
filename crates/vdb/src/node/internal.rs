@@ -110,7 +110,7 @@ where
         pools: &'a mut [Pool],
         coords: UVec3,
         cached_path: &mut [u32],
-        moved: &mut bool,
+        moved: &mut Option<u32>,
     ) -> &'a mut Self::LeafType {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
@@ -137,7 +137,7 @@ where
         pools: &'a mut [Pool],
         coords: UVec3,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
     ) -> Option<&'a mut Self::LeafType> {
         let internal_offset = coords >> CHILD::EXTENT_LOG2;
         let index = ((internal_offset.x as usize) << (FANOUT_LOG2.y + FANOUT_LOG2.z))
@@ -176,7 +176,7 @@ where
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        moved: &mut bool,
+        moved: &mut Option<u32>,
     ) -> &'a mut Self::LeafType {
         unsafe {
             // Copy-on-write: if this node is shared with a snapshot, redirect
@@ -221,7 +221,7 @@ where
         coords: UVec3,
         ptr: &mut u32,
         cached_path: &mut [u32],
-        leaf_moved: &mut bool,
+        leaf_moved: &mut Option<u32>,
         ancestor_shared: bool,
     ) -> Option<&'a mut Self::LeafType> {
         unsafe {

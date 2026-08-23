@@ -14,7 +14,10 @@ mod tree;
 
 pub use tree::*;
 pub use accessor::*;
-pub use attributes::{AttributeAllocator, Attributes, IsDefault};
+pub use attributes::{
+    AttributeAllocator, Attributes, IsDefault, MaskUnionIter, iter_mask_union,
+    mask_count_ones,
+};
 pub use node::*;
 
 pub extern crate self as dust_vdb;

@@ -297,10 +297,10 @@ where
         }
         let mut path = [u32::MAX; ROOT::LEVEL];
         let leaf = self.root.get(&self.pool, coords, &mut path)?;
-        Some(ErasedLeafView::new(
-            leaf,
-            coords,
-        ))
+        // A successful descent wrote the leaf's pool index into `path[0]`;
+        // a zero-level hierarchy has no pools (the root is the leaf).
+        let index = if ROOT::LEVEL == 0 { u32::MAX } else { path[0] };
+        Some(ErasedLeafView::new(leaf, index, coords))
     }
 
     fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_> {
@@ -349,10 +349,10 @@ where
         }
         let mut path = [u32::MAX; ROOT::LEVEL];
         let leaf = self.root.get(&self.pool, coords, &mut path)?;
-        Some(ErasedLeafView::new(
-            leaf,
-            coords,
-        ))
+        // A successful descent wrote the leaf's pool index into `path[0]`;
+        // a zero-level hierarchy has no pools (the root is the leaf).
+        let index = if ROOT::LEVEL == 0 { u32::MAX } else { path[0] };
+        Some(ErasedLeafView::new(leaf, index, coords))
     }
 
     fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_> {
@@ -862,12 +862,17 @@ impl Iterator for ErasedVoxelIter<'_> {
 /// Like the erased iterators, the view names nothing about the hierarchy —
 /// not even the leaf type — and involves no dynamic dispatch: it reads the
 /// occupancy words through offsets from [`Node::META`]. Coordinates are
-/// tree-global; the leaf covers `[origin, origin + extent)`.
+/// tree-global; the leaf covers `[origin, origin + extent)`. The view also
+/// identifies the leaf ([`ErasedLeafView::leaf_index`]) so side tables keyed
+/// the way [`Attributes`](crate::Attributes) is driven can be read through it.
 #[derive(Clone, Copy)]
 pub struct ErasedLeafView<'a> {
     /// Tree-global coordinate of the leaf's minimum corner (a multiple of
     /// `extent`).
     origin: UVec3,
+    /// Pool index of the leaf node; `u32::MAX` for the root leaf of a
+    /// hierarchy whose root is itself a leaf (it lives outside the pools).
+    index: u32,
     extent: UVec3,
     /// = extent - 1 (extents are powers of two).
     extent_mask: UVec3,
@@ -893,13 +898,17 @@ unsafe impl Sync for ErasedLeafView<'_> {}
 impl<'a> ErasedLeafView<'a> {
     /// A view of `leaf`, which contains the tree-global coordinate `coords`
     /// and whose layout `meta` (the hierarchy's level-0 entry) describes.
+    /// `index` is the leaf's pool index (`u32::MAX` for an out-of-pool root
+    /// leaf).
     pub(crate) fn new<L: IsLeaf>(
         leaf: &'a L,
+        index: u32,
         coords: UVec3,
     ) -> Self {
         let fanout = <L as Node>::EXTENT_LOG2;
         Self {
             origin: coords & !L::EXTENT_MASK,
+            index,
             extent: L::EXTENT,
             extent_mask: L::EXTENT_MASK,
             shift_x: fanout.y + fanout.z,
@@ -914,6 +923,18 @@ impl<'a> ErasedLeafView<'a> {
     /// Tree-global coordinate of the leaf's minimum corner.
     pub fn origin(&self) -> UVec3 {
         self.origin
+    }
+
+    /// The pool index of the viewed leaf: the same `leaf` index the tree
+    /// passes to [`Attributes`](crate::Attributes) while it is mutated, so
+    /// side tables keyed by it can be read back through this view. Stable
+    /// within one tree version; a copy-on-write edit re-homes the edited leaf
+    /// to a new index (with a matching
+    /// [`Attributes::copy_attribute`](crate::Attributes::copy_attribute)
+    /// event). `u32::MAX` for the root leaf of a hierarchy whose root is
+    /// itself a leaf — it lives outside the pools.
+    pub fn leaf_index(&self) -> u32 {
+        self.index
     }
 
     /// Extent of the leaf along each axis: it covers
@@ -1026,6 +1047,7 @@ impl<'a> ErasedLeafViewIter<'a> {
             if (leaf_extent - UVec3::ONE).cmpge(range.min).all() {
                 root_leaf = Some(ErasedLeafView {
                     origin: UVec3::ZERO,
+                    index: u32::MAX,
                     extent: leaf_extent,
                     extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
                     shift_x: leaf_fanout.y + leaf_fanout.z,
@@ -1120,6 +1142,7 @@ impl<'a> Iterator for ErasedLeafViewIter<'a> {
             if level == 1 {
                 return Some(ErasedLeafView {
                     origin,
+                    index: child_ptr,
                     extent: self.leaf_extent,
                     extent_mask: self.leaf_extent_mask,
                     shift_x: self.leaf_shift_x,

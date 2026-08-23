@@ -1,7 +1,5 @@
-use std::marker::PhantomData;
 
 use bevy::{asset::Asset, math::UVec3, reflect::TypePath};
-use bitvec::{BitArr, array::BitArray};
 use dust_vdb::{AttributeAllocator, Node};
 use pumicite::{
     Allocator,
@@ -64,12 +62,6 @@ impl dust_vdb::Attributes for VoxMaterial {
     /// 0 .. 255 for the offset into the palette.
     type Value = u8;
     type Ptr = VoxLeafNode;
-    type Occupancy<'a> = &'a BitArr!(for 64);
-
-    const MAX_OCCUPANCY: Self::Occupancy<'static> = &BitArray {
-        data: [usize::MAX; 1],
-        _ord: PhantomData,
-    };
 
     fn free_attributes(&mut self, _index: u32, ptr: &Self::Ptr, num_attributes: u32) {
         self.attribute_allocator
@@ -83,29 +75,30 @@ impl dust_vdb::Attributes for VoxMaterial {
 
     fn copy_attribute(
         &mut self,
+        _original_leaf: u32,
+        _new_leaf: u32,
         ptr: &Self::Ptr,
-        original_mask: Self::Occupancy<'_>,
-        new_mask: Self::Occupancy<'_>,
+        original_mask: &[usize],
+        new_mask: &[usize],
         coords: &UVec3,
     ) -> Self::Ptr {
-        let new_ptr = self
-            .attribute_allocator
-            .allocate(new_mask.count_ones() as u32);
-        self.reserve(new_ptr as u64 + new_mask.count_ones() as u64);
+        let new_len = dust_vdb::mask_count_ones(new_mask);
+        let new_ptr = self.attribute_allocator.allocate(new_len);
+        self.reserve(new_ptr as u64 + new_len as u64);
 
         let mut new_ptr_cur = new_ptr;
         let mut old_ptr_cur = ptr.material_ptr;
 
         let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
-        for bit in (*original_mask | new_mask).iter_ones() {
-            if *new_mask.get(bit).unwrap() && *original_mask.get(bit).unwrap() {
+        for (_, in_original, in_new) in dust_vdb::iter_mask_union(original_mask, new_mask) {
+            if in_new && in_original {
                 // copy it over
                 slice[new_ptr_cur as usize] = slice[old_ptr_cur as usize];
             }
-            if *new_mask.get(bit).unwrap() {
+            if in_new {
                 new_ptr_cur += 1;
             }
-            if *original_mask.get(bit).unwrap() {
+            if in_original {
                 old_ptr_cur += 1;
             }
         }
