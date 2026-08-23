@@ -79,12 +79,12 @@ impl Attributes for BenchAttributes {
     type Ptr = u32;
     type Value = u8;
 
-    fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
-        self.arena[*ptr as usize + offset as usize]
+    fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, _inflated_offset: u32) -> Self::Value {
+        self.arena[*ptr as usize + fitted_offset as usize]
     }
 
-    fn set_attribute(&mut self, _leaf: u32,  ptr: &Self::Ptr, offset: u32, value: Self::Value) {
-        self.arena[*ptr as usize + offset as usize] = value;
+    fn set_attribute(&mut self, _leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, _inflated_offset: u32, value: Self::Value) {
+        self.arena[*ptr as usize + fitted_offset as usize] = value;
     }
 
     fn free_attributes(&mut self, _leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {

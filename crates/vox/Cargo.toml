@@ -17,3 +17,7 @@ bitvec = "1"
 bytemuck = { version = "1.25", features = ["nightly_float"] }
 smallvec = "1.15"
 serde = "1"
+
+[dev-dependencies]
+dust_physics = { path = "../physics" }
+parry3d = { path = "../../../parry/crates/parry3d" }

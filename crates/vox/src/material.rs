@@ -22,6 +22,16 @@ impl Default for VoxLeafNode {
     }
 }
 
+impl dust_vdb::AttributePtr<u32> for VoxLeafNode {
+    fn attribute_ptr(&self) -> u32 {
+        self.material_ptr
+    }
+
+    fn set_attribute_ptr(&mut self, ptr: u32) {
+        self.material_ptr = ptr;
+    }
+}
+
 #[derive(Asset, TypePath)]
 pub struct VoxMaterial {
     pub attribute_allocator: AttributeAllocator,
@@ -68,9 +78,15 @@ impl dust_vdb::Attributes for VoxMaterial {
             .free(ptr.material_ptr, num_attributes);
     }
 
-    fn get_attribute(&self, _index: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+    fn get_attribute(
+        &self,
+        _index: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        _inflated_offset: u32,
+    ) -> Self::Value {
         let slice: &[Self::Value] = bytemuck::cast_slice(self.buffer.as_slice());
-        slice[ptr.material_ptr as usize + offset as usize]
+        slice[ptr.material_ptr as usize + fitted_offset as usize]
     }
 
     fn copy_attribute(
@@ -118,8 +134,15 @@ impl dust_vdb::Attributes for VoxMaterial {
         }
     }
 
-    fn set_attribute(&mut self, _index: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+    fn set_attribute(
+        &mut self,
+        _index: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        _inflated_offset: u32,
+        value: Self::Value,
+    ) {
         let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
-        slice[ptr.material_ptr as usize + offset as usize] = value - 1;
+        slice[ptr.material_ptr as usize + fitted_offset as usize] = value - 1;
     }
 }

@@ -72,6 +72,7 @@ where
                 last_leaf,
                 &leaf_node.get_value().attribute_ptr(),
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
             );
             return Some(attribute);
         }
@@ -108,6 +109,7 @@ where
             self.ptrs[0],
             &leaf_node.get_value().attribute_ptr(),
             leaf_node.get_fitted_attribute_offset(coords),
+            <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
         );
         Some(value)
     }
@@ -143,6 +145,7 @@ where
             self.attributes.set_attribute(
                 last_leaf,
                 &leaf_node.get_value().attribute_ptr(),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
             );
@@ -212,6 +215,7 @@ where
                 self.set_ptrs[0],
                 &new_attrib_ptr,
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
             );
             leaf_node.get_value_mut().set_attribute_ptr(new_attrib_ptr);
@@ -224,6 +228,7 @@ where
                 self.set_ptrs[0],
                 &leaf_node.get_value().attribute_ptr(),
                 leaf_node.get_fitted_attribute_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
             );
         } else {
@@ -247,6 +252,7 @@ where
             self.attributes.set_attribute(
                 self.set_ptrs[0],
                 &new_attrib_ptr,
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
                 value,
             );
@@ -572,6 +578,7 @@ where
                 last_leaf,
                 &leaf_node.get_value().attribute_ptr(),
                 leaf_node.get_fitted_attribute_offset(coords),
+                <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
             );
             return Some(attribute);
         }
@@ -607,6 +614,7 @@ where
             self.ptrs[0],
             &leaf_node.get_value().attribute_ptr(),
             leaf_node.get_fitted_attribute_offset(coords),
+            <ROOT::LeafType as IsLeaf>::get_inflated_attribute_offset(coords),
         );
         Some(value)
     }
@@ -629,12 +637,25 @@ mod tests {
         type Ptr = u32;
         type Value = u8;
 
-        fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
-            self.attribute_maps[*ptr as usize][offset as usize]
+        fn get_attribute(
+            &self,
+            _leaf: u32,
+            ptr: &Self::Ptr,
+            fitted_offset: u32,
+            _inflated_offset: u32,
+        ) -> Self::Value {
+            self.attribute_maps[*ptr as usize][fitted_offset as usize]
         }
 
-        fn set_attribute(&mut self, _leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
-            self.attribute_maps[*ptr as usize][offset as usize] = value;
+        fn set_attribute(
+            &mut self,
+            _leaf: u32,
+            ptr: &Self::Ptr,
+            fitted_offset: u32,
+            _inflated_offset: u32,
+            value: Self::Value,
+        ) {
+            self.attribute_maps[*ptr as usize][fitted_offset as usize] = value;
         }
 
         fn free_attributes(&mut self, _leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
@@ -1533,13 +1554,28 @@ mod tests {
         type Ptr = u32;
         type Value = u8;
 
-        fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
-            self.inner.get_attribute(leaf, ptr, offset)
+        fn get_attribute(
+            &self,
+            leaf: u32,
+            ptr: &Self::Ptr,
+            fitted_offset: u32,
+            inflated_offset: u32,
+        ) -> Self::Value {
+            self.inner
+                .get_attribute(leaf, ptr, fitted_offset, inflated_offset)
         }
 
-        fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
+        fn set_attribute(
+            &mut self,
+            leaf: u32,
+            ptr: &Self::Ptr,
+            fitted_offset: u32,
+            inflated_offset: u32,
+            value: Self::Value,
+        ) {
             self.leaves_seen.insert(leaf);
-            self.inner.set_attribute(leaf, ptr, offset, value);
+            self.inner
+                .set_attribute(leaf, ptr, fitted_offset, inflated_offset, value);
         }
 
         fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
@@ -1708,12 +1744,25 @@ mod tests {
         type Ptr = NoPtr;
         type Value = u8;
 
-        fn get_attribute(&self, leaf: u32, _ptr: &NoPtr, offset: u32) -> u8 {
-            self.ranges[&leaf][offset as usize]
+        fn get_attribute(
+            &self,
+            leaf: u32,
+            _ptr: &NoPtr,
+            fitted_offset: u32,
+            _inflated_offset: u32,
+        ) -> u8 {
+            self.ranges[&leaf][fitted_offset as usize]
         }
 
-        fn set_attribute(&mut self, leaf: u32, _ptr: &NoPtr, offset: u32, value: u8) {
-            self.ranges.get_mut(&leaf).unwrap()[offset as usize] = value;
+        fn set_attribute(
+            &mut self,
+            leaf: u32,
+            _ptr: &NoPtr,
+            fitted_offset: u32,
+            _inflated_offset: u32,
+            value: u8,
+        ) {
+            self.ranges.get_mut(&leaf).unwrap()[fitted_offset as usize] = value;
         }
 
         fn free_attributes(&mut self, leaf: u32, _ptr: &NoPtr, _num_attributes: u32) {

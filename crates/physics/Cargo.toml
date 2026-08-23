@@ -1,0 +1,10 @@
+[package]
+name = "dust_physics"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dust_vdb = { workspace = true }
+glam = "^0.32"
+parry3d = { path = "../../../parry/crates/parry3d" }
+bitvec = "1"

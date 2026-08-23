@@ -19,8 +19,20 @@ pub trait Attributes {
     type Ptr;
     /// The type of the attribute values. For a MagicaVoxel grid, this would be a u8 palette index.
     type Value: Default + IsDefault;
-    fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value;
-    fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value);
+    /// `fitted_offset` is the voxel's position within the leaf's attribute
+    /// range: its rank under the mask the range is currently laid out for —
+    /// the leaf's occupancy mask for a fitted range, the all-ones mask for
+    /// an inflated one. Range-based storages index with it.
+    ///
+    /// `inflated_offset` is the voxel's index within its leaf
+    /// (`0..leaf_size`), computed from its coordinates alone — equal to its
+    /// rank under the all-ones mask, hence the name. A storage that pre-owns
+    /// a fixed block per leaf indexes with it and never needs re-arranging
+    /// when the range layout changes.
+    ///
+    /// Each implementation uses one and ignores the other.
+    fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, inflated_offset: u32) -> Self::Value;
+    fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, inflated_offset: u32, value: Self::Value);
     fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32);
 
     /// Allocate a new attribute range using the new mask. Then, copy the attributes from the attribute range
@@ -132,16 +144,31 @@ where
     type Ptr = (A::Ptr, B::Ptr);
     type Value = (A::Value, B::Value);
 
-    fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, offset: u32) -> Self::Value {
+    fn get_attribute(
+        &self,
+        leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        inflated_offset: u32,
+    ) -> Self::Value {
         (
-            self.0.get_attribute(leaf, &ptr.0, offset),
-            self.1.get_attribute(leaf, &ptr.1, offset),
+            self.0.get_attribute(leaf, &ptr.0, fitted_offset, inflated_offset),
+            self.1.get_attribute(leaf, &ptr.1, fitted_offset, inflated_offset),
         )
     }
 
-    fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, offset: u32, value: Self::Value) {
-        self.0.set_attribute(leaf, &ptr.0, offset, value.0);
-        self.1.set_attribute(leaf, &ptr.1, offset, value.1);
+    fn set_attribute(
+        &mut self,
+        leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        inflated_offset: u32,
+        value: Self::Value,
+    ) {
+        self.0
+            .set_attribute(leaf, &ptr.0, fitted_offset, inflated_offset, value.0);
+        self.1
+            .set_attribute(leaf, &ptr.1, fitted_offset, inflated_offset, value.1);
     }
 
     fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
