@@ -1597,6 +1597,22 @@ mod tests {
         }
     }
 
+    /// The view of the leaf containing `coords` in this version, if that
+    /// leaf exists: a walk of the one-voxel range at `coords`. The walk
+    /// descends only into cells intersecting the range, so it visits exactly
+    /// the leaf covering `coords` — the pinpoint lookup the tests below use
+    /// on a handful of known coordinates.
+    fn view_at<'a, T: TreeErased + ?Sized>(
+        tree: &'a T,
+        coords: UVec3,
+    ) -> Option<crate::ErasedLeafView<'a, ()>> {
+        tree.iter_leaf_views_in_range(crate::AabbU32 {
+            min: coords,
+            max: coords,
+        })
+        .next()
+    }
+
     /// [`crate::ErasedLeafView::leaf_index`] exposes the same key the tree
     /// passes to [`Attributes`], through both lookup paths, staying distinct
     /// per leaf and diverging exactly when copy-on-write re-homes a leaf.
@@ -1625,15 +1641,15 @@ mod tests {
         }
         drop(accessor);
 
-        // Both lookup paths agree on each leaf's index, and no two leaves
-        // share one.
+        // The full-range walk and the pinpoint one-voxel walk agree on each
+        // leaf's index, and no two leaves share one.
         let full = AabbU32 {
             min: UVec3::ZERO,
             max: UVec3::splat(255),
         };
         let mut seen: HashMap<u32, UVec3> = HashMap::new();
         for view in tree.iter_leaf_views_in_range(full) {
-            let at = tree.leaf_view_at(view.origin()).unwrap();
+            let at = view_at(&tree, view.origin()).unwrap();
             assert_eq!(at.leaf_index(), view.leaf_index());
             assert_eq!(at.origin(), view.origin());
             assert!(seen.insert(view.leaf_index(), view.origin()).is_none());
@@ -1651,24 +1667,21 @@ mod tests {
         // Copy-on-write re-homes the edited leaf to a fresh index; untouched
         // leaves and the snapshot's view of the old leaf keep theirs.
         let snapshot = tree.snapshot();
-        let edited_before = tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index();
-        let untouched_before = tree
-            .leaf_view_at(UVec3::new(144, 0, 0))
+        let edited_before = view_at(&tree, UVec3::ZERO).unwrap().leaf_index();
+        let untouched_before = view_at(&tree, UVec3::new(144, 0, 0))
             .unwrap()
             .leaf_index();
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 1, 1), 42);
         drop(accessor);
-        let edited_after = tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index();
+        let edited_after = view_at(&tree, UVec3::ZERO).unwrap().leaf_index();
         assert_ne!(edited_after, edited_before);
         assert_eq!(
-            tree.leaf_view_at(UVec3::new(144, 0, 0))
-                .unwrap()
-                .leaf_index(),
+            view_at(&tree, UVec3::new(144, 0, 0)).unwrap().leaf_index(),
             untouched_before,
         );
         assert_eq!(
-            snapshot.leaf_view_at(UVec3::ZERO).unwrap().leaf_index(),
+            view_at(&snapshot, UVec3::ZERO).unwrap().leaf_index(),
             edited_before,
         );
         // The copy-on-write re-home reported that same index pair to
@@ -1688,7 +1701,7 @@ mod tests {
             max: UVec3::splat(3),
         };
         assert_eq!(
-            tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index(),
+            view_at(&tree, UVec3::ZERO).unwrap().leaf_index(),
             u32::MAX
         );
         let views: Vec<_> = tree.iter_leaf_views_in_range(range).collect();
@@ -1837,11 +1850,11 @@ mod tests {
         // Copy-on-write forks re-home the side channel by index pair; the
         // snapshot keeps reading the original range until released.
         let snapshot = tree.snapshot();
-        let before = tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index();
+        let before = view_at(&tree, UVec3::ZERO).unwrap().leaf_index();
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 1, 1), (42, 142));
         drop(accessor);
-        let after = tree.leaf_view_at(UVec3::ZERO).unwrap().leaf_index();
+        let after = view_at(&tree, UVec3::ZERO).unwrap().leaf_index();
         assert_ne!(before, after);
         assert!(attributes.1.ranges.contains_key(&before));
         assert!(attributes.1.ranges.contains_key(&after));

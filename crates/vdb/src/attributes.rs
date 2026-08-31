@@ -111,9 +111,9 @@ pub trait AttributePtr<P> {
 
 /// A leaf value that *is* the pointer: every single-channel tree where the
 /// leaf stores the channel's pointer directly.
-impl<P: Clone> AttributePtr<P> for P {
+impl<P: Clone + Copy> AttributePtr<P> for P {
     fn attribute_ptr(&self) -> P {
-        self.clone()
+        *self
     }
 
     fn set_attribute_ptr(&mut self, ptr: P) {

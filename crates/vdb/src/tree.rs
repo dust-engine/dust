@@ -3,7 +3,7 @@ use std::{mem::{ManuallyDrop, MaybeUninit}, ops::Deref};
 use glam::UVec3;
 
 use crate::{
-    AabbU32, InternalNodeEntry, IsLeaf, Node, NodeMeta, pool::{Pool, PoolStorage},
+    AabbU32, AttributePtr, InternalNodeEntry, IsLeaf, Node, NodeMeta, pool::{Pool, PoolStorage},
 };
 
 pub struct Tree<ROOT: Node>
@@ -291,19 +291,7 @@ where
         ErasedVoxelIter::new(&self.root, &self.pool)
     }
 
-    fn leaf_view_at(&self, coords: UVec3) -> Option<ErasedLeafView<'_>> {
-        if coords.cmpge(ROOT::EXTENT).any() {
-            return None;
-        }
-        let mut path = [u32::MAX; ROOT::LEVEL];
-        let leaf = self.root.get(&self.pool, coords, &mut path)?;
-        // A successful descent wrote the leaf's pool index into `path[0]`;
-        // a zero-level hierarchy has no pools (the root is the leaf).
-        let index = if ROOT::LEVEL == 0 { u32::MAX } else { path[0] };
-        Some(ErasedLeafView::new(leaf, index, coords))
-    }
-
-    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_> {
+    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_, ()> {
         ErasedLeafViewIter::new(&self.root, &self.pool, range)
     }
 }
@@ -343,19 +331,7 @@ where
         ErasedVoxelIter::new(&self.root, &self.pool)
     }
 
-    fn leaf_view_at(&self, coords: UVec3) -> Option<ErasedLeafView<'_>> {
-        if coords.cmpge(ROOT::EXTENT).any() {
-            return None;
-        }
-        let mut path = [u32::MAX; ROOT::LEVEL];
-        let leaf = self.root.get(&self.pool, coords, &mut path)?;
-        // A successful descent wrote the leaf's pool index into `path[0]`;
-        // a zero-level hierarchy has no pools (the root is the leaf).
-        let index = if ROOT::LEVEL == 0 { u32::MAX } else { path[0] };
-        Some(ErasedLeafView::new(leaf, index, coords))
-    }
-
-    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_> {
+    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_, ()> {
         ErasedLeafViewIter::new(&self.root, &self.pool, range)
     }
 }
@@ -475,25 +451,79 @@ pub trait TreeErased: Send + Sync + 'static {
     /// same order as [`TreeLike::iter`].
     fn iter_erased(&self) -> ErasedVoxelIter<'_>;
 
-    /// The occupancy bits of the leaf containing `coords`: one tree descent,
-    /// then any voxel of that leaf can be tested through the returned view
-    /// without re-descending. `None` when `coords` falls outside
-    /// [`TreeErased::extent`] or in a region with no leaf allocated (all of
-    /// it empty).
-    fn leaf_view_at(&self, coords: UVec3) -> Option<ErasedLeafView<'_>>;
-
     /// Iterate views of the leaves intersecting `range` (inclusive on both
     /// bounds, like every [`AabbU32`]), in [`TreeLike::iter_leaf`] order. The
     /// walk descends only into children whose cells intersect the range, so a
     /// small box over a large tree costs the descent along the box — not a
     /// filtered full iteration.
     ///
-    /// This is the bulk counterpart of [`TreeErased::leaf_view_at`], for
-    /// consumers that want a leaf's occupancy words whole (to mask, scan, or
-    /// compare against neighbors) rather than one coordinate at a time. A
-    /// yielded leaf intersects the range but need not lie inside it: voxels of
-    /// a straddling leaf are the caller's to clip.
-    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_>;
+    /// Each view exposes the leaf's occupancy words whole, to mask, scan, or
+    /// compare against neighbors without re-descending per voxel. A yielded
+    /// leaf intersects the range but need not lie inside it: voxels of a
+    /// straddling leaf are the caller's to clip. A single-coordinate lookup
+    /// is a range of one voxel — every descent starts from the root either
+    /// way.
+    fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_, ()>;
+}
+
+/// A [`TreeErased`] whose leaf values project an attribute pointer of type
+/// `V`, through the value's [`AttributePtr<V>`] implementation.
+///
+/// [`TreeErased`] names nothing about the leaf values, so its leaf views
+/// carry no pointer (`ErasedLeafView<()>`). A consumer that reads attribute
+/// stores with `Ptr = V` asks for this trait instead — e.g. a collision
+/// shape holding `Arc<dyn TreeWithValues<u32>>` accepts a tree of any
+/// hierarchy whose leaf value converts to a `u32` pointer — and its views
+/// hand the projected pointer out ([`ErasedLeafView::attribute_ptr`]).
+///
+/// Implemented blanketly: every [`TreeErasedLeaf`] whose
+/// [`LeafType`](TreeErasedLeaf::LeafType) has a value implementing
+/// [`AttributePtr<V>`] is a `TreeWithValues<V>`. A plain `u32` leaf value is
+/// its own pointer (the blanket identity `impl AttributePtr<u32> for u32`),
+/// and one value type can project several pointer types — `VoxLeafNode`
+/// in `dust_vox` projects its `material_ptr` as the `u32` pointer.
+///
+/// ```
+/// # #![feature(generic_const_exprs)]
+/// use dust_vdb::{AabbU32, Tree, TreeWithValues, hierarchy};
+/// use glam::UVec3;
+///
+/// let tree = Tree::<hierarchy!(3, 3, 2, u32)>::new();
+/// // Only the pointer type remains in the object type; the hierarchy — and
+/// // whether the leaf value *is* a `u32` or merely projects one — is erased.
+/// let with_values: &dyn TreeWithValues<u32> = &tree;
+/// let everything = AabbU32 { min: UVec3::ZERO, max: UVec3::splat(255) };
+/// assert_eq!(
+///     with_values
+///         .iter_leaf_views_in_range_with_values(everything)
+///         .count(),
+///     0
+/// );
+/// ```
+pub trait TreeWithValues<V>: TreeErased {
+    /// Like [`TreeErased::iter_leaf_views_in_range`], with each yielded view
+    /// additionally carrying the leaf value's projected attribute pointer
+    /// ([`ErasedLeafView::attribute_ptr`]).
+    fn iter_leaf_views_in_range_with_values(
+        &self,
+        range: AabbU32,
+    ) -> ErasedLeafViewIter<'_, V>;
+}
+
+impl<T: TreeErasedLeaf, V> TreeWithValues<V> for T
+where
+    <T::LeafType as IsLeaf>::Value: AttributePtr<V>,
+{
+    fn iter_leaf_views_in_range_with_values(
+        &self,
+        range: AabbU32,
+    ) -> ErasedLeafViewIter<'_, V> {
+        // `LeafType` is exactly the leaf type of the tree the plain walk
+        // iterates, which is what makes the byte reinterpretation inside
+        // `with_values` correct.
+        self.iter_leaf_views_in_range(range)
+            .with_values::<T::LeafType, V>()
+    }
 }
 
 /// The object-safe counterpart of [`TreeLike`], for storing trees or
@@ -855,9 +885,13 @@ impl Iterator for ErasedVoxelIter<'_> {
     }
 }
 
-/// A read-only view of one leaf's occupancy bits, returned by
-/// [`crate::TreeErased::leaf_view_at`]: the result of a single tree descent,
-/// letting any voxel of that leaf be tested without descending again.
+/// A read-only view of one leaf's occupancy bits, yielded by
+/// [`crate::TreeErased::iter_leaf_views_in_range`]: once the walk reaches a
+/// leaf, any voxel of that leaf can be tested without descending again.
+///
+/// `T` is what [`ErasedLeafView::attribute_ptr`] hands out: `()` on a plain
+/// [`TreeErased`](crate::TreeErased) walk, the leaf value's projected
+/// attribute pointer on a [`TreeWithValues`](crate::TreeWithValues) walk.
 ///
 /// Like the erased iterators, the view names nothing about the hierarchy —
 /// not even the leaf type — and involves no dynamic dispatch: it reads the
@@ -866,13 +900,17 @@ impl Iterator for ErasedVoxelIter<'_> {
 /// identifies the leaf ([`ErasedLeafView::leaf_index`]) so side tables keyed
 /// the way [`Attributes`](crate::Attributes) is driven can be read through it.
 #[derive(Clone, Copy)]
-pub struct ErasedLeafView<'a> {
+pub struct ErasedLeafView<'a, T> {
     /// Tree-global coordinate of the leaf's minimum corner (a multiple of
     /// `extent`).
     origin: UVec3,
     /// Pool index of the leaf node; `u32::MAX` for the root leaf of a
     /// hierarchy whose root is itself a leaf (it lives outside the pools).
     index: u32,
+    /// The leaf value's [`AttributePtr::attribute_ptr`] projection, read
+    /// when the view was stamped; `()` for views of a plain [`TreeErased`]
+    /// walk.
+    attribute_ptr: T,
     extent: UVec3,
     /// = extent - 1 (extents are powers of two).
     extent_mask: UVec3,
@@ -892,34 +930,10 @@ pub struct ErasedLeafView<'a> {
 
 /// The raw pointer is a borrow of a live node in disguise (see `_borrow`);
 /// nodes are unconditionally `Sync` ([`Node`] requires it).
-unsafe impl Send for ErasedLeafView<'_> {}
-unsafe impl Sync for ErasedLeafView<'_> {}
+unsafe impl<T: Send> Send for ErasedLeafView<'_, T> {}
+unsafe impl<T: Sync> Sync for ErasedLeafView<'_, T> {}
 
-impl<'a> ErasedLeafView<'a> {
-    /// A view of `leaf`, which contains the tree-global coordinate `coords`
-    /// and whose layout `meta` (the hierarchy's level-0 entry) describes.
-    /// `index` is the leaf's pool index (`u32::MAX` for an out-of-pool root
-    /// leaf).
-    pub(crate) fn new<L: IsLeaf>(
-        leaf: &'a L,
-        index: u32,
-        coords: UVec3,
-    ) -> Self {
-        let fanout = <L as Node>::EXTENT_LOG2;
-        Self {
-            origin: coords & !L::EXTENT_MASK,
-            index,
-            extent: L::EXTENT,
-            extent_mask: L::EXTENT_MASK,
-            shift_x: fanout.y + fanout.z,
-            shift_y: fanout.z,
-            mask_offset: <L as Node>::OCCUPANCY_MASK_OFFSET as u32,
-            mask_words: (<L as Node>::SIZE / size_of::<usize>() / 8) as u32,
-            node: leaf as *const L as *const u8,
-            _borrow: std::marker::PhantomData,
-        }
-    }
-
+impl<'a, T> ErasedLeafView<'a, T> {
     /// Tree-global coordinate of the leaf's minimum corner.
     pub fn origin(&self) -> UVec3 {
         self.origin
@@ -937,6 +951,21 @@ impl<'a> ErasedLeafView<'a> {
         self.index
     }
 
+    /// The leaf value's attribute pointer, projected through the value's
+    /// [`AttributePtr`](crate::AttributePtr) implementation when the view was
+    /// stamped. This is the same `ptr` the accessor passes to
+    /// [`Attributes`](crate::Attributes) methods for this leaf, so a store
+    /// with a matching `Ptr` can be indexed through the view, with no
+    /// accessor and no hierarchy type in sight.
+    ///
+    /// Views of a plain [`TreeErased`](crate::TreeErased) walk carry `()`;
+    /// walks started through
+    /// [`TreeWithValues`](crate::TreeWithValues::iter_leaf_views_in_range_with_values)
+    /// carry the projected pointer.
+    pub fn attribute_ptr(&self) -> &T {
+        &self.attribute_ptr
+    }
+
     /// Extent of the leaf along each axis: it covers
     /// `[origin, origin + extent)`.
     pub fn extent(&self) -> UVec3 {
@@ -951,9 +980,7 @@ impl<'a> ErasedLeafView<'a> {
     /// Whether the voxel at the tree-global coordinate `coords` is occupied.
     /// `coords` must be within this leaf ([`ErasedLeafView::contains`]).
     pub fn get(&self, coords: UVec3) -> bool {
-        debug_assert!(self.contains(coords), "coords outside of the viewed leaf");
-        let cell = coords & self.extent_mask;
-        let index = (cell.x << self.shift_x) | (cell.y << self.shift_y) | cell.z;
+        let index = self.bit_of_coord(coords);
         let word = unsafe {
             *(self.node.add(self.mask_offset as usize) as *const usize)
                 .add(index as usize / usize::BITS as usize)
@@ -977,6 +1004,18 @@ impl<'a> ErasedLeafView<'a> {
         }
     }
 
+    /// The occupancy bit index of the tree-global coordinate `coords`: the
+    /// `(x << shift_x) | (y << shift_y) | z` packing over the leaf-relative
+    /// coordinate, the inverse of [`ErasedLeafView::coord_of_bit`]. This is
+    /// also the voxel's index within its leaf — the `inflated_offset` the
+    /// accessor passes to [`Attributes`](crate::Attributes) methods. `coords`
+    /// must be within this leaf ([`ErasedLeafView::contains`]).
+    pub fn bit_of_coord(&self, coords: UVec3) -> u32 {
+        debug_assert!(self.contains(coords), "coords outside of the viewed leaf");
+        let cell = coords & self.extent_mask;
+        (cell.x << self.shift_x) | (cell.y << self.shift_y) | cell.z
+    }
+
     /// The leaf-relative coordinate of occupancy bit `index`: the inverse of
     /// the `(x << shift_x) | (y << shift_y) | z` packing.
     pub fn coord_of_bit(&self, index: u32) -> UVec3 {
@@ -995,7 +1034,7 @@ impl<'a> ErasedLeafView<'a> {
 /// one level up: leaves are yielded whole (as views over their occupancy
 /// words) instead of being scanned bit by bit, and children whose cells lie
 /// outside the box are never descended into.
-pub struct ErasedLeafViewIter<'a> {
+pub struct ErasedLeafViewIter<'a, T> {
     pools: &'a [Pool],
     /// Record for tree level `k` at `levels[k - 1]`, `k = 1..=root_level`;
     /// leaves (level 0) are yielded, never opened, and need no record.
@@ -1013,16 +1052,37 @@ pub struct ErasedLeafViewIter<'a> {
     leaf_shift_y: u32,
     leaf_mask_offset: u32,
     leaf_mask_words: u32,
+    /// Stamps [`ErasedLeafView::attribute_ptr`] from a leaf node's raw
+    /// bytes: [`no_attribute_ptr`] on a plain walk (`T = ()`),
+    /// [`leaf_attribute_ptr`] monomorphized for the tree's leaf type after
+    /// [`ErasedLeafViewIter::with_values`].
+    read_attribute_ptr: fn(*const u8) -> T,
     /// A hierarchy whose root is itself a leaf yields it here, once.
-    root_leaf: Option<ErasedLeafView<'a>>,
+    root_leaf: Option<ErasedLeafView<'a, T>>,
+}
+
+/// The projection of a plain [`TreeErased`] walk: no leaf value is read and
+/// every view's `attribute_ptr` is `()`.
+fn no_attribute_ptr(_node: *const u8) {}
+
+/// Reads the leaf value's [`AttributePtr<V>`] projection from the raw bytes
+/// of a leaf node of type `L`. [`ErasedLeafViewIter`] stamps views from raw
+/// node bytes after the leaf type has been erased; this function, stored as
+/// a plain fn pointer by [`ErasedLeafViewIter::with_values`] while `L` is
+/// still known, carries the typed read across that erasure.
+fn leaf_attribute_ptr<L: IsLeaf, V>(node: *const u8) -> V
+where
+    L::Value: AttributePtr<V>,
+{
+    unsafe { (*(node as *const L)).get_value().attribute_ptr() }
 }
 
 /// See [`ErasedVoxelIter`]'s impls: the raw pointers are borrows of live,
 /// unconditionally-`Sync` nodes.
-unsafe impl Send for ErasedLeafViewIter<'_> {}
-unsafe impl Sync for ErasedLeafViewIter<'_> {}
+unsafe impl<T: Send> Send for ErasedLeafViewIter<'_ , T> {}
+unsafe impl<T: Sync> Sync for ErasedLeafViewIter<'_ , T> {}
 
-impl<'a> ErasedLeafViewIter<'a> {
+impl<'a> ErasedLeafViewIter<'a, ()> {
     /// Walk the leaves of the tree rooted at `root`, whose non-root nodes
     /// live in `pools` (pools[k] holding level-k nodes, exactly as in
     /// [`crate::Tree`]), yielding views of leaves intersecting `range`
@@ -1048,6 +1108,7 @@ impl<'a> ErasedLeafViewIter<'a> {
                 root_leaf = Some(ErasedLeafView {
                     origin: UVec3::ZERO,
                     index: u32::MAX,
+                    attribute_ptr: (),
                     extent: leaf_extent,
                     extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
                     shift_x: leaf_fanout.y + leaf_fanout.z,
@@ -1081,16 +1142,63 @@ impl<'a> ErasedLeafViewIter<'a> {
             leaf_shift_y: leaf_fanout.z,
             leaf_mask_offset: leaf_meta.mask_offset,
             leaf_mask_words: leaf_meta.mask_words,
+            read_attribute_ptr: no_attribute_ptr,
             root_leaf,
+        }
+    }
+
+    /// Upgrades this plain walk into one whose views carry the leaf value's
+    /// projected attribute pointer: every view yielded from here on has
+    /// [`ErasedLeafView::attribute_ptr`] read from the viewed leaf node
+    /// through `L::Value`'s [`AttributePtr<V>`] implementation.
+    ///
+    /// `L` must be the leaf type of the tree this walk was created from —
+    /// its raw node bytes are reinterpreted as `L` to read the value. The
+    /// one caller, [`TreeWithValues`](crate::TreeWithValues)'s blanket impl,
+    /// passes [`TreeErasedLeaf::LeafType`](crate::TreeErasedLeaf::LeafType),
+    /// which is that type by definition.
+    pub(crate) fn with_values<L: IsLeaf, V>(self) -> ErasedLeafViewIter<'a, V>
+    where
+        L::Value: AttributePtr<V>,
+    {
+        let read_attribute_ptr = leaf_attribute_ptr::<L, V> as fn(*const u8) -> V;
+        ErasedLeafViewIter {
+            pools: self.pools,
+            levels: self.levels,
+            depth: self.depth,
+            root_level: self.root_level,
+            range: self.range,
+            leaf_extent: self.leaf_extent,
+            leaf_extent_mask: self.leaf_extent_mask,
+            leaf_shift_x: self.leaf_shift_x,
+            leaf_shift_y: self.leaf_shift_y,
+            leaf_mask_offset: self.leaf_mask_offset,
+            leaf_mask_words: self.leaf_mask_words,
+            read_attribute_ptr,
+            // The root leaf (if any) was already stamped with `()`; re-stamp
+            // it with the projection.
+            root_leaf: self.root_leaf.map(|view| ErasedLeafView {
+                origin: view.origin,
+                index: view.index,
+                attribute_ptr: read_attribute_ptr(view.node),
+                extent: view.extent,
+                extent_mask: view.extent_mask,
+                shift_x: view.shift_x,
+                shift_y: view.shift_y,
+                mask_offset: view.mask_offset,
+                mask_words: view.mask_words,
+                node: view.node,
+                _borrow: std::marker::PhantomData,
+            }),
         }
     }
 }
 
-impl<'a> Iterator for ErasedLeafViewIter<'a> {
-    type Item = ErasedLeafView<'a>;
+impl<'a, T> Iterator for ErasedLeafViewIter<'a, T> {
+    type Item = ErasedLeafView<'a, T>;
 
     #[inline(always)]
-    fn next(&mut self) -> Option<ErasedLeafView<'a>> {
+    fn next(&mut self) -> Option<ErasedLeafView<'a, T>> {
         if let Some(leaf) = self.root_leaf.take() {
             return Some(leaf);
         }
@@ -1140,16 +1248,18 @@ impl<'a> Iterator for ErasedLeafViewIter<'a> {
             };
 
             if level == 1 {
+                let node = unsafe { self.pools[0].get(child_ptr) };
                 return Some(ErasedLeafView {
                     origin,
                     index: child_ptr,
+                    attribute_ptr: (self.read_attribute_ptr)(node),
                     extent: self.leaf_extent,
                     extent_mask: self.leaf_extent_mask,
                     shift_x: self.leaf_shift_x,
                     shift_y: self.leaf_shift_y,
                     mask_offset: self.leaf_mask_offset,
                     mask_words: self.leaf_mask_words,
-                    node: unsafe { self.pools[0].get(child_ptr) },
+                    node,
                     _borrow: std::marker::PhantomData,
                 });
             }

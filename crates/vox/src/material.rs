@@ -7,7 +7,7 @@ use pumicite::{
     buffer::{BufferLike, ManagedBuffer},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct VoxLeafNode {
     /// 10 bits for X, Y, Z.
     coords: u32,
