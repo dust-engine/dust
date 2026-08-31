@@ -1,6 +1,6 @@
 use std::{mem::{ManuallyDrop, MaybeUninit}, ops::Deref};
 
-use glam::UVec3;
+use glam::{BVec3A, IVec3, UVec3, Vec3, Vec3A};
 
 use crate::{
     AabbU32, AttributePtr, Attributes, InternalNodeEntry, IsLeaf, Node, NodeMeta,
@@ -311,6 +311,16 @@ where
     fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_, ()> {
         ErasedLeafViewIter::new(&self.root, &self.pool, range)
     }
+
+    fn iter_leaf_views_along_ray(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        t0: f32,
+        t1: f32,
+    ) -> ErasedLeafViewRayIter<'_> {
+        ErasedLeafViewRayIter::new(&self.root, &self.pool, origin, dir, t0, t1)
+    }
 }
 
 impl<ROOT: Node> TreeErasedLeaf for Tree<ROOT>
@@ -350,6 +360,16 @@ where
 
     fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_, ()> {
         ErasedLeafViewIter::new(&self.root, &self.pool, range)
+    }
+
+    fn iter_leaf_views_along_ray(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        t0: f32,
+        t1: f32,
+    ) -> ErasedLeafViewRayIter<'_> {
+        ErasedLeafViewRayIter::new(&self.root, &self.pool, origin, dir, t0, t1)
     }
 }
 
@@ -497,6 +517,31 @@ pub trait TreeErased: Send + Sync + 'static {
     /// is a range of one voxel — every descent starts from the root either
     /// way.
     fn iter_leaf_views_in_range(&self, range: AabbU32) -> ErasedLeafViewIter<'_, ()>;
+
+    /// Iterate views of the leaves pierced by a ray, in the order the ray
+    /// reaches them.
+    ///
+    /// `origin` and `dir` are in voxel coordinates — the voxel at coordinate
+    /// `c` covers `[c, c + 1)` on each axis — and the walk covers ray
+    /// parameters `t` in `[t0, t1]`, where a parameter names the point
+    /// `origin + dir * t`. Each yielded item is `(t, view)`: the parameter at
+    /// which the ray enters the leaf's block (`t0` when it starts inside),
+    /// strictly increasing across items. Which voxels of a yielded leaf the
+    /// ray actually crosses is the caller's to walk, on the view's occupancy
+    /// bits.
+    ///
+    /// Empty space costs little: at every level, only children whose mask bit
+    /// is set are descended into, so a ray over a large empty region skips it
+    /// a whole subtree at a time — the same pruning
+    /// [`TreeErased::iter_leaf_views_in_range`] applies to a box, applied to
+    /// a ray.
+    fn iter_leaf_views_along_ray(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        t0: f32,
+        t1: f32,
+    ) -> ErasedLeafViewRayIter<'_>;
 }
 
 /// A [`TreeErased`] whose leaf values project an attribute pointer of type
@@ -609,6 +654,8 @@ struct LevelInfo {
     mask_z: u32,
     /// Extent of one child cell, in voxels.
     child_extent: UVec3,
+    /// Number of child cells along each axis (`1 << fanout_log2`).
+    fanout: UVec3,
     /// Byte offset of the child mask words within the node.
     mask_offset: u32,
     /// Number of `usize` words in the child mask.
@@ -618,6 +665,19 @@ struct LevelInfo {
 }
 
 impl LevelInfo {
+    /// Filler for the unused tail of a fixed-size level array; never read.
+    const EMPTY: Self = Self {
+        shift_x: 0,
+        shift_y: 0,
+        mask_y: 0,
+        mask_z: 0,
+        child_extent: UVec3::ONE,
+        fanout: UVec3::ONE,
+        mask_offset: 0,
+        mask_words: 0,
+        child_ptrs_offset: 0,
+    };
+
     fn new<V>(meta: &NodeMeta<V>) -> Self {
         let fanout = meta.fanout_log2;
         Self {
@@ -626,12 +686,23 @@ impl LevelInfo {
             mask_y: (1 << fanout.y) - 1,
             mask_z: (1 << fanout.z) - 1,
             child_extent: meta.child_extent,
+            fanout: UVec3::new(1 << fanout.x, 1 << fanout.y, 1 << fanout.z),
             mask_offset: meta.mask_offset,
             mask_words: meta.mask_words,
             child_ptrs_offset: meta.child_ptrs_offset,
         }
     }
 }
+
+/// The deepest hierarchy the hierarchy-erased iterators can walk, counted in
+/// internal levels above the leaves (`ROOT::LEVEL`; `hierarchy!(3, 3, 2, _)`
+/// has 2). Each iterator keeps its per-level records inline — a small
+/// fixed-size array instead of a heap allocation per traversal — so the
+/// bound is fixed: creating an erased iterator over a deeper hierarchy
+/// panics, and raising this constant is the fix. ([`ErasedVoxelIter`] sizes
+/// its array one longer, since it scans leaf occupancy as one more record on
+/// the same stack.)
+pub const MAX_ERASED_LEVELS: usize = 4;
 
 /// One level of the walk: an internal node whose child mask is being scanned.
 #[derive(Clone, Copy)]
@@ -673,14 +744,14 @@ unsafe fn mask_word(node: *const u8, info: &LevelInfo, idx: u32) -> usize {
 /// `trailing_zeros` on the current mask word, an index decode, and a pool
 /// lookup, whichever hierarchy produced the tree.
 ///
-/// The record stack is one boxed slice holding exactly `root_level` entries —
-/// the iterator's only allocation, sized by the hierarchy's actual depth with
-/// no depth limit (and elided entirely for a hierarchy whose root is a leaf).
+/// The record stack is a fixed-size inline array ([`MAX_ERASED_LEVELS`]), so
+/// creating the iterator allocates nothing.
 pub struct ErasedLeafIter<'a, L> {
     pools: &'a [Pool],
     /// Record for tree level `k` at `levels[k - 1]`, `k = 1..=root_level`;
     /// leaves (level 0) are yielded, never opened, and need no record.
-    levels: Box<[(LevelInfo, Frame)]>,
+    /// Entries past `root_level` are unused filler.
+    levels: [(LevelInfo, Frame); MAX_ERASED_LEVELS],
     /// Number of live frames; the deepest open level is
     /// `root_level + 1 - depth`.
     depth: u32,
@@ -703,9 +774,14 @@ impl<'a, L> ErasedLeafIter<'a, L> {
     where
         [(); ROOT::LEVEL + 1]: Sized,
     {
-        let mut records: Vec<(LevelInfo, Frame)> = (1..=ROOT::LEVEL)
-            .map(|level| (LevelInfo::new(&ROOT::META[level]), Frame::EMPTY))
-            .collect();
+        assert!(
+            ROOT::LEVEL <= MAX_ERASED_LEVELS,
+            "hierarchy deeper than the erased walks' inline record arrays; raise MAX_ERASED_LEVELS"
+        );
+        let mut records = [(LevelInfo::EMPTY, Frame::EMPTY); MAX_ERASED_LEVELS];
+        for level in 1..=ROOT::LEVEL {
+            records[level - 1].0 = LevelInfo::new(&ROOT::META[level]);
+        }
         let mut root_leaf = None;
         let mut depth = 0;
         if ROOT::LEVEL == 0 {
@@ -715,7 +791,9 @@ impl<'a, L> ErasedLeafIter<'a, L> {
             root_leaf = Some(unsafe { &*(root as *const ROOT as *const L) });
         } else {
             let node = root as *const ROOT as *const u8;
-            let (info, frame) = records.last_mut().unwrap();
+            // The root's record: the last *used* entry (the array's tail
+            // past it is filler).
+            let (info, frame) = &mut records[ROOT::LEVEL - 1];
             *frame = Frame {
                 node,
                 word: unsafe { mask_word(node, info, 0) },
@@ -726,7 +804,7 @@ impl<'a, L> ErasedLeafIter<'a, L> {
         }
         ErasedLeafIter {
             pools,
-            levels: records.into_boxed_slice(),
+            levels: records,
             depth,
             root_level: ROOT::LEVEL as u32,
             root_leaf,
@@ -810,8 +888,10 @@ impl<'a, L> Iterator for ErasedLeafIter<'a, L> {
 pub struct ErasedVoxelIter<'a> {
     pools: &'a [Pool],
     /// Record for tree level `k` at `levels[k]`, `k = 0..=root_level`: levels
-    /// above 0 scan child masks, level 0 scans leaf occupancy.
-    levels: Box<[(LevelInfo, Frame)]>,
+    /// above 0 scan child masks, level 0 scans leaf occupancy. Inline and
+    /// fixed-size, so creating the iterator allocates nothing; entries past
+    /// `root_level` are unused filler.
+    levels: [(LevelInfo, Frame); MAX_ERASED_LEVELS + 1],
     /// Number of live frames; the deepest open level is
     /// `root_level + 1 - depth`.
     depth: u32,
@@ -834,14 +914,20 @@ impl<'a> ErasedVoxelIter<'a> {
     where
         [(); ROOT::LEVEL + 1]: Sized,
     {
-        let mut records: Vec<(LevelInfo, Frame)> = (0..=ROOT::LEVEL)
-            .map(|level| (LevelInfo::new(&ROOT::META[level]), Frame::EMPTY))
-            .collect();
+        assert!(
+            ROOT::LEVEL <= MAX_ERASED_LEVELS,
+            "hierarchy deeper than the erased walks' inline record arrays; raise MAX_ERASED_LEVELS"
+        );
+        let mut records = [(LevelInfo::EMPTY, Frame::EMPTY); MAX_ERASED_LEVELS + 1];
+        for level in 0..=ROOT::LEVEL {
+            records[level].0 = LevelInfo::new(&ROOT::META[level]);
+        }
         // The root opens like any other node — for a hierarchy whose root is
         // itself a leaf, the walk simply starts (and ends) at level 0,
-        // scanning the root's occupancy words.
+        // scanning the root's occupancy words. Its record is the last *used*
+        // entry (the array's tail past it is filler).
         let node = root as *const ROOT as *const u8;
-        let (info, frame) = records.last_mut().unwrap();
+        let (info, frame) = &mut records[ROOT::LEVEL];
         *frame = Frame {
             node,
             word: unsafe { mask_word(node, info, 0) },
@@ -850,7 +936,7 @@ impl<'a> ErasedVoxelIter<'a> {
         };
         ErasedVoxelIter {
             pools,
-            levels: records.into_boxed_slice(),
+            levels: records,
             depth: 1,
             root_level: ROOT::LEVEL as u32,
         }
@@ -1071,7 +1157,10 @@ pub struct ErasedLeafViewIter<'a, T> {
     pools: &'a [Pool],
     /// Record for tree level `k` at `levels[k - 1]`, `k = 1..=root_level`;
     /// leaves (level 0) are yielded, never opened, and need no record.
-    levels: Box<[(LevelInfo, Frame)]>,
+    /// Inline and fixed-size ([`MAX_ERASED_LEVELS`]), so creating the
+    /// iterator allocates nothing; entries past `root_level` are unused
+    /// filler.
+    levels: [(LevelInfo, Frame); MAX_ERASED_LEVELS],
     /// Number of live frames; the deepest open level is
     /// `root_level + 1 - depth`.
     depth: u32,
@@ -1124,13 +1213,18 @@ impl<'a> ErasedLeafViewIter<'a, ()> {
     where
         [(); ROOT::LEVEL + 1]: Sized,
     {
+        assert!(
+            ROOT::LEVEL <= MAX_ERASED_LEVELS,
+            "hierarchy deeper than the erased walks' inline record arrays; raise MAX_ERASED_LEVELS"
+        );
         let leaf_meta = &ROOT::META[0];
         let leaf_fanout = leaf_meta.fanout_log2;
         let leaf_extent = <ROOT::LeafType as Node>::EXTENT;
 
-        let mut records: Vec<(LevelInfo, Frame)> = (1..=ROOT::LEVEL)
-            .map(|level| (LevelInfo::new(&ROOT::META[level]), Frame::EMPTY))
-            .collect();
+        let mut records = [(LevelInfo::EMPTY, Frame::EMPTY); MAX_ERASED_LEVELS];
+        for level in 1..=ROOT::LEVEL {
+            records[level - 1].0 = LevelInfo::new(&ROOT::META[level]);
+        }
         let mut root_leaf = None;
         let mut depth = 0;
         if ROOT::LEVEL == 0 {
@@ -1154,7 +1248,9 @@ impl<'a> ErasedLeafViewIter<'a, ()> {
             }
         } else {
             let node = root as *const ROOT as *const u8;
-            let (info, frame) = records.last_mut().unwrap();
+            // The root's record: the last *used* entry (the array's tail
+            // past it is filler).
+            let (info, frame) = &mut records[ROOT::LEVEL - 1];
             *frame = Frame {
                 node,
                 word: unsafe { mask_word(node, info, 0) },
@@ -1165,7 +1261,7 @@ impl<'a> ErasedLeafViewIter<'a, ()> {
         }
         ErasedLeafViewIter {
             pools,
-            levels: records.into_boxed_slice(),
+            levels: records,
             depth,
             root_level: ROOT::LEVEL as u32,
             range,
@@ -1305,6 +1401,343 @@ impl<'a, T> Iterator for ErasedLeafViewIter<'a, T> {
                 word: unsafe { mask_word(node, child_info, 0) },
                 word_idx: 0,
                 origin,
+            };
+            self.depth += 1;
+        }
+        None
+    }
+}
+
+/// One level of a ray walk: an internal node whose child cells the ray is
+/// stepping across.
+#[derive(Clone, Copy)]
+struct RayFrame {
+    /// Raw bytes of the node, read through the [`LevelInfo`] offsets.
+    node: *const u8,
+    /// Voxel coordinate of the node's minimum corner.
+    origin: UVec3,
+    /// The child cell examined next, in cells relative to the node (one unit
+    /// = one child). Steps of the walk move it one cell along one axis, so
+    /// it leaves `[0, fanout)` when the ray exits the node.
+    cell: IVec3,
+}
+
+impl RayFrame {
+    const EMPTY: Self = Self {
+        node: std::ptr::null(),
+        origin: UVec3::ZERO,
+        cell: IVec3::ZERO,
+    };
+}
+
+
+/// The ray parameter interval over which `origin + dir * t` lies inside the
+/// box `[min, min + extent)`, already intersected with `[t0, t1]` — the
+/// interval is empty (and the box missed) unless `t_in <= t_out`. Also
+/// returns, per axis, the parameter at which the ray crosses out of that
+/// axis's slab: the axis with the smallest crossing is the face through
+/// which the ray leaves the box, i.e. the neighbor to step to. A
+/// zero-direction axis never wins that comparison: its crossing is forced to
+/// `+inf` through `dir_finite`, the lane mask of axes with a nonzero
+/// direction.
+///
+/// All three axes compute at once, branch-free. `inv_dir` is the per-axis
+/// reciprocal of the direction, `±inf` on a zero axis. A product goes NaN
+/// exactly when a zero-direction axis' origin sits on one of its slab planes
+/// (`0 * inf`); such an axis constrains nothing, which the NaN select
+/// encodes. (The select, not the `min`/`max`, must decide this: SSE and NEON
+/// disagree on how min/max treat a NaN operand.)
+#[inline(always)]
+fn ray_box_t(
+    origin: Vec3A,
+    inv_dir: Vec3A,
+    dir_finite: BVec3A,
+    min: Vec3A,
+    extent: Vec3A,
+    t0: f32,
+    t1: f32,
+) -> (Vec3A, f32, f32) {
+    let near = (min - origin) * inv_dir;
+    let far = (min + extent - origin) * inv_dir;
+    let nan = near.is_nan_mask() | far.is_nan_mask();
+    let lo = Vec3A::select(nan, Vec3A::NEG_INFINITY, near.min(far));
+    let hi = Vec3A::select(nan, Vec3A::INFINITY, near.max(far));
+    let t_in = lo.max_element().max(t0);
+    let t_out = hi.min_element().min(t1);
+    let crossing = Vec3A::select(dir_finite, hi, Vec3A::INFINITY);
+    (crossing, t_in, t_out)
+}
+
+/// The child cell of the node at `node_origin` containing the ray point `p`,
+/// clamped into the node's `fanout` grid — the boundary-precision guard a
+/// grid ray walk needs, since `p` typically lies exactly on the node's face
+/// and rounding may put `floor` one cell outside.
+fn entry_cell(p: Vec3A, node_origin: UVec3, child_extent: UVec3, fanout: UVec3) -> IVec3 {
+    let local = (p - node_origin.as_vec3a()) / child_extent.as_vec3a();
+    local
+        .floor()
+        .as_ivec3()
+        .clamp(IVec3::ZERO, fanout.as_ivec3() - IVec3::ONE)
+}
+
+/// The iterator returned by [`crate::TreeErased::iter_leaf_views_along_ray`]:
+/// an [`ErasedLeafView`] of every leaf the ray pierces, front to back, each
+/// with the ray parameter at which the ray enters the leaf's block.
+///
+/// The walk keeps one [`RayFrame`] per open level and steps it cell by cell
+/// in the ray's order (the classic grid walk: leave the current cell through
+/// whichever face the ray crosses first). A cell whose child-mask bit is
+/// clear is stepped over in one comparison, whatever its size — at the top
+/// level one step skips a whole subtree of empty space — and a set bit either
+/// descends (internal child) or yields (leaf child).
+pub struct ErasedLeafViewRayIter<'a> {
+    pools: &'a [Pool],
+    /// Record for tree level `k` at `levels[k - 1]`, `k = 1..=root_level`;
+    /// leaves (level 0) are yielded, never opened, and need no record.
+    /// Inline and fixed-size ([`MAX_ERASED_LEVELS`]) so creating the iterator
+    /// allocates nothing; entries past `root_level` are unused filler.
+    levels: [(LevelInfo, RayFrame); MAX_ERASED_LEVELS],
+    /// Number of live frames; the deepest open level is
+    /// `root_level + 1 - depth`.
+    depth: u32,
+    root_level: u32,
+    /// The ray, in voxel coordinates, with the parameter range to cover.
+    origin: Vec3A,
+    dir: Vec3A,
+    /// Per-axis reciprocal of `dir` (`±inf` on zero axes), for slab tests.
+    inv_dir: Vec3A,
+    /// Lane mask of the axes whose direction is nonzero.
+    dir_finite: BVec3A,
+    /// Per-axis cell step: the sign of `dir`, `0` on zero axes.
+    step: IVec3,
+    t0: f32,
+    t1: f32,
+    /// The leaf-level constants stamped onto every yielded view.
+    leaf_extent: UVec3,
+    leaf_extent_mask: UVec3,
+    leaf_shift_x: u32,
+    leaf_shift_y: u32,
+    leaf_mask_offset: u32,
+    leaf_mask_words: u32,
+    /// A hierarchy whose root is itself a leaf yields it here, once.
+    root_leaf: Option<(f32, ErasedLeafView<'a, ()>)>,
+}
+
+/// See [`ErasedVoxelIter`]'s impls: the raw pointers are borrows of live,
+/// unconditionally-`Sync` nodes.
+unsafe impl Send for ErasedLeafViewRayIter<'_> {}
+unsafe impl Sync for ErasedLeafViewRayIter<'_> {}
+
+impl<'a> ErasedLeafViewRayIter<'a> {
+    /// Walk the leaves of the tree rooted at `root`, whose non-root nodes
+    /// live in `pools` (pools[k] holding level-k nodes, exactly as in
+    /// [`crate::Tree`]), yielding views of the leaves the ray pierces within
+    /// the parameter range `[t0, t1]`, in ray order.
+    pub(crate) fn new<ROOT: Node>(
+        root: &'a ROOT,
+        pools: &'a [Pool],
+        origin: Vec3,
+        dir: Vec3,
+        t0: f32,
+        t1: f32,
+    ) -> Self
+    where
+        [(); ROOT::LEVEL + 1]: Sized,
+    {
+        assert!(
+            ROOT::LEVEL <= MAX_ERASED_LEVELS,
+            "hierarchy deeper than the erased walks' inline record arrays; raise MAX_ERASED_LEVELS"
+        );
+        let leaf_meta = &ROOT::META[0];
+        let leaf_fanout = leaf_meta.fanout_log2;
+        let leaf_extent = <ROOT::LeafType as Node>::EXTENT;
+        let origin = Vec3A::from(origin);
+        let dir = Vec3A::from(dir);
+        let inv_dir = dir.recip();
+        let dir_finite = inv_dir.abs().cmplt(Vec3A::INFINITY);
+        let step = IVec3::new(
+            (dir.x > 0.0) as i32 - (dir.x < 0.0) as i32,
+            (dir.y > 0.0) as i32 - (dir.y < 0.0) as i32,
+            (dir.z > 0.0) as i32 - (dir.z < 0.0) as i32,
+        );
+
+        let mut records = [(LevelInfo::EMPTY, RayFrame::EMPTY); MAX_ERASED_LEVELS];
+        for level in 1..=ROOT::LEVEL {
+            records[level - 1].0 = LevelInfo::new(&ROOT::META[level]);
+        }
+        let mut root_leaf = None;
+        let mut depth = 0;
+        // Open the root over the interval the ray spends inside the tree's
+        // box; a ray that misses it leaves the walk empty.
+        let (_, t_in, t_out) = ray_box_t(
+            origin,
+            inv_dir,
+            dir_finite,
+            Vec3A::ZERO,
+            ROOT::EXTENT.as_vec3a(),
+            t0,
+            t1,
+        );
+        if t_in <= t_out {
+            if ROOT::LEVEL == 0 {
+                // The root is itself a leaf.
+                root_leaf = Some((
+                    t_in,
+                    ErasedLeafView {
+                        origin: UVec3::ZERO,
+                        index: u32::MAX,
+                        attribute_ptr: (),
+                        extent: leaf_extent,
+                        extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
+                        shift_x: leaf_fanout.y + leaf_fanout.z,
+                        shift_y: leaf_fanout.z,
+                        mask_offset: leaf_meta.mask_offset,
+                        mask_words: leaf_meta.mask_words,
+                        node: root as *const ROOT as *const u8,
+                        _borrow: std::marker::PhantomData,
+                    },
+                ));
+            } else {
+                // The root's record: the last *used* entry, at
+                // `ROOT::LEVEL - 1` (the array's tail past it is filler).
+                let (info, frame) = &mut records[ROOT::LEVEL - 1];
+                *frame = RayFrame {
+                    node: root as *const ROOT as *const u8,
+                    origin: UVec3::ZERO,
+                    cell: entry_cell(
+                        origin + dir * t_in,
+                        UVec3::ZERO,
+                        info.child_extent,
+                        info.fanout,
+                    ),
+                };
+                depth = 1;
+            }
+        }
+        ErasedLeafViewRayIter {
+            pools,
+            levels: records,
+            depth,
+            root_level: ROOT::LEVEL as u32,
+            origin,
+            dir,
+            inv_dir,
+            dir_finite,
+            step,
+            t0,
+            t1,
+            leaf_extent,
+            leaf_extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
+            leaf_shift_x: leaf_fanout.y + leaf_fanout.z,
+            leaf_shift_y: leaf_fanout.z,
+            leaf_mask_offset: leaf_meta.mask_offset,
+            leaf_mask_words: leaf_meta.mask_words,
+            root_leaf,
+        }
+    }
+}
+
+impl<'a> Iterator for ErasedLeafViewRayIter<'a> {
+    type Item = (f32, ErasedLeafView<'a, ()>);
+
+    fn next(&mut self) -> Option<(f32, ErasedLeafView<'a, ()>)> {
+        if let Some(leaf) = self.root_leaf.take() {
+            return Some(leaf);
+        }
+        while self.depth > 0 {
+            let level = (self.root_level + 1 - self.depth) as usize;
+            let (info, frame) = &mut self.levels[level - 1];
+            let info = *info;
+
+            let cell = frame.cell;
+            if cell.cmplt(IVec3::ZERO).any() || cell.cmpge(info.fanout.as_ivec3()).any() {
+                // The ray has left this node.
+                self.depth -= 1;
+                continue;
+            }
+
+            let cell_min = frame.origin + cell.as_uvec3() * info.child_extent;
+            let (crossing, t_in, t_out) = ray_box_t(
+                self.origin,
+                self.inv_dir,
+                self.dir_finite,
+                cell_min.as_vec3a(),
+                info.child_extent.as_vec3a(),
+                self.t0,
+                self.t1,
+            );
+
+            // The face through which the ray leaves this cell names the next
+            // cell; step there before descending, so the walk resumes past
+            // the current cell after a yield.
+            let first_crossing = crossing.min_element();
+            if !first_crossing.is_finite() {
+                // No axis makes forward progress (the ray runs parallel to
+                // every remaining slab): nothing further in this node.
+                self.depth -= 1;
+                continue;
+            }
+            let axis = crossing
+                .cmpeq(Vec3A::splat(first_crossing))
+                .bitmask()
+                .trailing_zeros();
+            match axis {
+                0 => frame.cell.x += self.step.x,
+                1 => frame.cell.y += self.step.y,
+                _ => frame.cell.z += self.step.z,
+            }
+
+            // Enter the cell only when the ray actually passes through it
+            // within the parameter range (the entry cell of a node is
+            // clamped, so the first examined cell can sit one off the ray's
+            // true path) and its child-mask bit says it is occupied.
+            if t_in > t_out {
+                continue;
+            }
+            let index = ((cell.x as u32) << info.shift_x)
+                | ((cell.y as u32) << info.shift_y)
+                | cell.z as u32;
+            let word = unsafe { mask_word(frame.node, &info, index / usize::BITS) };
+            if word & (1 << (index % usize::BITS)) == 0 {
+                continue;
+            }
+
+            // A set mask bit guarantees the entry holds an occupied pointer.
+            let child_ptr = unsafe {
+                (*(frame.node.add(info.child_ptrs_offset as usize) as *const InternalNodeEntry)
+                    .add(index as usize))
+                .occupied
+            };
+
+            if level == 1 {
+                let node = unsafe { self.pools[0].get(child_ptr) };
+                return Some((
+                    t_in,
+                    ErasedLeafView {
+                        origin: cell_min,
+                        index: child_ptr,
+                        attribute_ptr: (),
+                        extent: self.leaf_extent,
+                        extent_mask: self.leaf_extent_mask,
+                        shift_x: self.leaf_shift_x,
+                        shift_y: self.leaf_shift_y,
+                        mask_offset: self.leaf_mask_offset,
+                        mask_words: self.leaf_mask_words,
+                        node,
+                        _borrow: std::marker::PhantomData,
+                    },
+                ));
+            }
+            // Descend into an internal child, entering at the cell containing
+            // the point where the ray enters the child's block.
+            let child_level = level - 1;
+            let node = unsafe { self.pools[child_level].get(child_ptr) };
+            let entry = self.origin + self.dir * t_in;
+            let (child_info, child_frame) = &mut self.levels[child_level - 1];
+            *child_frame = RayFrame {
+                node,
+                origin: cell_min,
+                cell: entry_cell(entry, cell_min, child_info.child_extent, child_info.fanout),
             };
             self.depth += 1;
         }

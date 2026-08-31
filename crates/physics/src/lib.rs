@@ -63,11 +63,11 @@ pub use dispatcher::VdbDispatcher;
 use std::sync::Arc;
 
 use dust_vdb::{AabbU32, Accessor, AttributePtr, ErasedLeafView, IsLeaf, Node, TreeLike, TreeWithValues};
-use glam::UVec3;
+use glam::{UVec3, Vec3A};
 use parry3d::bounding_volume::{Aabb, BoundingSphere};
 use parry3d::mass_properties::MassProperties;
 use parry3d::math::{IVector, Real, Vector};
-use parry3d::query::details::{cast_local_ray_on_voxels, project_local_point_on_voxels};
+use parry3d::query::details::project_local_point_on_voxels;
 use parry3d::query::{PointProjection, PointQuery, Ray, RayCast, RayIntersection};
 use parry3d::shape::{
     AxisMask, FeatureId, QueriedVoxel, Shape, ShapeType, TypedShape, VoxelQuery, VoxelState,
@@ -431,13 +431,126 @@ impl dust_vdb::Attributes for VdbVoxelMaskAttributes {
 }
 
 impl RayCast for VdbShape {
+    /// Casts the ray using the tree itself as the acceleration structure,
+    /// where parry's `Voxels` shape uses a BVH over its chunks: the tree walk
+    /// ([`TreeErased::iter_leaf_views_along_ray`](dust_vdb::TreeErased::iter_leaf_views_along_ray))
+    /// hands out only the leaves the ray pierces, front to back — a clear
+    /// child-mask bit skips a whole subtree of empty space in one step — and
+    /// the loop below walks the voxels of each such leaf exactly the way
+    /// parry's generic `cast_local_ray_on_voxels` walks the whole domain, so
+    /// hit results (time of impact, normal, feature id, `solid` handling)
+    /// match it.
     fn cast_local_ray_and_get_normal(
         &self,
         ray: &Ray,
         max_time_of_impact: Real,
         solid: bool,
     ) -> Option<RayIntersection> {
-        cast_local_ray_on_voxels(self, ray, max_time_of_impact, solid)
+        // Clip to the shape's content bounds, as the generic caster does.
+        let (min_t, mut max_t) = self.local_aabb().clip_ray_parameters(ray)?;
+        if min_t > max_time_of_impact {
+            return None;
+        }
+        max_t = max_t.min(max_time_of_impact);
+
+        // The tree walk runs in voxel coordinates (the voxel at coordinate
+        // `c` spans `[c, c + 1)`). Dividing the ray's origin and direction by
+        // the per-axis voxel size maps local space onto them while keeping
+        // the ray parameter `t` identical in both spaces, so every `t` below
+        // is valid in both.
+        let origin = glam::Vec3::new(
+            ray.origin.x / self.voxel_size.x,
+            ray.origin.y / self.voxel_size.y,
+            ray.origin.z / self.voxel_size.z,
+        );
+        let dir = glam::Vec3::new(
+            ray.dir.x / self.voxel_size.x,
+            ray.dir.y / self.voxel_size.y,
+            ray.dir.z / self.voxel_size.z,
+        );
+
+        // Constants of the per-voxel walk below, laid out for
+        // three-axes-at-once math: the ray in local space, the reciprocal
+        // direction, the lane masks of positive and nonzero direction axes,
+        // and the per-axis voxel step.
+        let local_origin = Vec3A::new(ray.origin.x, ray.origin.y, ray.origin.z);
+        let local_dir = Vec3A::new(ray.dir.x, ray.dir.y, ray.dir.z);
+        let inv_local_dir = local_dir.recip();
+        let dir_positive = local_dir.cmpgt(Vec3A::ZERO);
+        let dir_finite = inv_local_dir.abs().cmplt(Vec3A::INFINITY);
+        let voxel_size = Vec3A::new(self.voxel_size.x, self.voxel_size.y, self.voxel_size.z);
+        let step = IVector::new(
+            (ray.dir.x > 0.0) as i32 - (ray.dir.x < 0.0) as i32,
+            (ray.dir.y > 0.0) as i32 - (ray.dir.y < 0.0) as i32,
+            (ray.dir.z > 0.0) as i32 - (ray.dir.z < 0.0) as i32,
+        );
+
+        for (leaf_t, leaf) in self.tree.iter_leaf_views_along_ray(origin, dir, min_t, max_t) {
+            // Start at the voxel where the ray enters this leaf's block,
+            // clamped into the block — the same boundary-precision guard the
+            // generic caster applies to its start voxel.
+            let entry = origin + dir * leaf_t;
+            let leaf_min = uvec_to_ivec(leaf.origin());
+            let leaf_max = leaf_min + uvec_to_ivec(leaf.extent()) - IVector::splat(1);
+            let mut key = IVector::new(
+                entry.x.floor() as i32,
+                entry.y.floor() as i32,
+                entry.z.floor() as i32,
+            )
+            .clamp(leaf_min, leaf_max);
+
+            loop {
+                if leaf.get(ivec_to_uvec(key)) {
+                    // A candidate: let the voxel's box decide the exact
+                    // impact. `None` (impact beyond `max_t`) keeps walking,
+                    // exactly like the generic caster.
+                    let aabb = self.voxel_aabb(key);
+                    if let Some(mut hit) = aabb.cast_local_ray_and_get_normal(ray, max_t, solid) {
+                        hit.feature = FeatureId::Face(self.linear_id_of(key));
+                        return Some(hit);
+                    }
+                }
+
+                // Find the next voxel to cast the ray on — the generic
+                // caster's decision, computed on all three axes at once: per
+                // axis, the parameter at which the ray crosses this voxel's
+                // far face (the high face on axes pointing positive, the low
+                // face otherwise), with crossings behind the origin and
+                // zero-direction axes pushed to `Real::MAX` so they never win
+                // the which-face-first comparison.
+                let voxel_min =
+                    Vec3A::new(key.x as Real, key.y as Real, key.z as Real) * voxel_size;
+                let far_face = Vec3A::select(dir_positive, voxel_min + voxel_size, voxel_min);
+                let exit = (far_face - local_origin) * inv_local_dir;
+                let exit = Vec3A::select(
+                    exit.cmplt(Vec3A::ZERO) | !dir_finite,
+                    Vec3A::splat(Real::MAX),
+                    exit,
+                );
+                let first_exit = exit.min_element();
+                if first_exit > max_t {
+                    // The ray's parameter budget ends inside this voxel;
+                    // nothing further can be hit.
+                    return None;
+                }
+                let axis = exit
+                    .cmpeq(Vec3A::splat(first_exit))
+                    .bitmask()
+                    .trailing_zeros();
+                match axis {
+                    0 => key.x += step.x,
+                    1 => key.y += step.y,
+                    _ => key.z += step.z,
+                }
+                if key.cmplt(leaf_min).any() || key.cmpgt(leaf_max).any() {
+                    // Left this leaf's block; the tree walk hands us the next
+                    // leaf the ray reaches, skipping whatever emptiness lies
+                    // between.
+                    break;
+                }
+            }
+        }
+        None
     }
 }
 
@@ -950,5 +1063,204 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    /// The cube of [`Self::voxel_query`] as a ready-made shape, with the
+    /// given voxel size.
+    fn cube_shape(voxel_size: Vector) -> VdbShape {
+        let mut tree = TestTree::new();
+        let mut attributes = (
+            VdbVoxelTypeAttributes::new(64),
+            VdbVoxelMaskAttributes::new(16, 512),
+        );
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        for x in 2..5 {
+            for y in 2..5 {
+                for z in 2..5 {
+                    let key = IVector::new(x, y, z);
+                    let state = expected_state(key);
+                    accessor.set(ivec_to_uvec(key), (state.voxel_type(), state));
+                }
+            }
+        }
+        drop(accessor);
+        let (type_attributes, mask_attributes) = attributes;
+        VdbShape::new(
+            Arc::new(tree.snapshot()),
+            Arc::new(type_attributes),
+            Some(Arc::new(mask_attributes)),
+            voxel_size,
+        )
+    }
+
+    /// Casts rays at the cube and checks impacts against the cube's geometry
+    /// (voxels 2..5 on every axis, so faces at 2 and 5 in voxel units).
+    #[test]
+    fn ray_cast() {
+        let shape = cube_shape(Vector::splat(1.0));
+
+        // An axis ray from outside hits the cube's face at x = 2.
+        let ray = Ray::new(Vector::new(-1.0, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
+        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        assert_eq!(hit.time_of_impact, 3.0);
+        assert_eq!(hit.normal, Vector::new(-1.0, 0.0, 0.0));
+        assert_eq!(
+            hit.feature,
+            FeatureId::Face(shape.linear_id_of(IVector::new(2, 3, 3)))
+        );
+
+        // From far away: the walk crosses a long run of absent leaves, which
+        // the tree skips instead of stepping voxel by voxel.
+        let ray = Ray::new(Vector::new(-1000.0, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
+        let hit = shape.cast_local_ray_and_get_normal(&ray, 2000.0, true).unwrap();
+        assert_eq!(hit.time_of_impact, 1002.0);
+
+        // Against the direction: hits the face at x = 5.
+        let ray = Ray::new(Vector::new(10.5, 3.5, 3.5), Vector::new(-1.0, 0.0, 0.0));
+        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        assert_eq!(hit.time_of_impact, 5.5);
+        assert_eq!(hit.normal, Vector::new(1.0, 0.0, 0.0));
+        assert_eq!(
+            hit.feature,
+            FeatureId::Face(shape.linear_id_of(IVector::new(4, 3, 3)))
+        );
+
+        // A parameter budget shorter than the distance is a miss.
+        let ray = Ray::new(Vector::new(-1.0, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
+        assert!(shape.cast_local_ray_and_get_normal(&ray, 2.0, true).is_none());
+
+        // Through the blocks of allocated leaves but off every occupied
+        // voxel: the walk yields those leaves, finds their crossed rows
+        // empty, and reports a miss.
+        let ray = Ray::new(Vector::new(-1.0, 1.5, 1.5), Vector::new(1.0, 0.0, 0.0));
+        assert!(
+            shape
+                .cast_local_ray_and_get_normal(&ray, 1000.0, true)
+                .is_none()
+        );
+
+        // A diagonal ray: crosses x = 2 at t = 0.5, y = 2 at t = 0.6, z = 2
+        // at t = 0.7, so it enters the corner voxel (2, 2, 2) through its
+        // z face.
+        let ray = Ray::new(Vector::new(1.5, 1.4, 1.3), Vector::new(1.0, 1.0, 1.0));
+        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        assert!((hit.time_of_impact - 0.7).abs() < 1.0e-5);
+        assert_eq!(hit.normal, Vector::new(0.0, 0.0, -1.0));
+        assert_eq!(
+            hit.feature,
+            FeatureId::Face(shape.linear_id_of(IVector::new(2, 2, 2)))
+        );
+
+        // From inside the cube, solid: immediate impact.
+        let ray = Ray::new(Vector::new(3.5, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
+        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        assert_eq!(hit.time_of_impact, 0.0);
+
+        // From inside, not solid: the boundary of the voxel containing the
+        // origin — the behavior of parry's generic caster today.
+        let hit = shape
+            .cast_local_ray_and_get_normal(&ray, 1000.0, false)
+            .unwrap();
+        assert_eq!(hit.time_of_impact, 0.5);
+
+        // Anisotropic voxels: the same cube with voxel size (2, 1, 0.5)
+        // spans x in [4, 10), y in [2, 5), z in [1, 2.5) of local space.
+        let shape = cube_shape(Vector::new(2.0, 1.0, 0.5));
+        let ray = Ray::new(Vector::new(-1.0, 3.5, 1.75), Vector::new(1.0, 0.0, 0.0));
+        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        assert_eq!(hit.time_of_impact, 5.0);
+        assert_eq!(hit.normal, Vector::new(-1.0, 0.0, 0.0));
+        assert_eq!(
+            hit.feature,
+            FeatureId::Face(shape.linear_id_of(IVector::new(2, 3, 3)))
+        );
+    }
+
+    /// Pits the tree-accelerated caster against a brute-force reference — the
+    /// nearest impact over *every* occupied voxel's box — on a three-level
+    /// tree (64³ domain) holding a slab plus scattered voxels, over a few
+    /// hundred pseudo-random rays. The two must agree exactly: both decide
+    /// each candidate with the same `Aabb::cast_local_ray_and_get_normal`
+    /// call, so any difference is a voxel the walk visited in the wrong order
+    /// or skipped.
+    #[test]
+    fn ray_cast_matches_brute_force() {
+        type DeepTree = Tree<hierarchy!(2, 2, 2, TestLeaf)>;
+        let mut tree = DeepTree::new();
+        let mut attributes = (
+            VdbVoxelTypeAttributes::new(64),
+            VdbVoxelMaskAttributes::new(16, 512),
+        );
+
+        // A small deterministic generator; the ray cast never reads voxel
+        // states, so the stored value just has to be non-default.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        let filler = VoxelState::with_filled_neighbors(AxisMask::empty());
+
+        let mut occupied = std::collections::HashSet::new();
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        for x in 10..30 {
+            for y in 12..14 {
+                for z in 5..40 {
+                    accessor.set(UVec3::new(x, y, z), (filler.voxel_type(), filler));
+                    occupied.insert((x, y, z));
+                }
+            }
+        }
+        for _ in 0..300 {
+            let coords = UVec3::new(next() % 64, next() % 64, next() % 64);
+            accessor.set(coords, (filler.voxel_type(), filler));
+            occupied.insert((coords.x, coords.y, coords.z));
+        }
+        drop(accessor);
+
+        let (type_attributes, mask_attributes) = attributes;
+        let shape = VdbShape::new(
+            Arc::new(tree.snapshot()),
+            Arc::new(type_attributes),
+            Some(Arc::new(mask_attributes)),
+            Vector::splat(1.0),
+        );
+        let occupied: Vec<IVector> = occupied
+            .into_iter()
+            .map(|(x, y, z)| IVector::new(x as i32, y as i32, z as i32))
+            .collect();
+
+        let mut frand = move |lo: f32, hi: f32| {
+            lo + (next() as f32 / u32::MAX as f32) * (hi - lo)
+        };
+        for _ in 0..200 {
+            let ray = Ray::new(
+                Vector::new(frand(-20.0, 84.0), frand(-20.0, 84.0), frand(-20.0, 84.0)),
+                Vector::new(frand(-1.0, 1.0), frand(-1.0, 1.0), frand(-1.0, 1.0)),
+            );
+            if ray.dir.length() < 1.0e-3 {
+                continue;
+            }
+            for max_t in [500.0, 30.0] {
+                let fast = shape.cast_local_ray_and_get_normal(&ray, max_t, true);
+                let slow = occupied
+                    .iter()
+                    .filter_map(|&key| {
+                        shape
+                            .voxel_aabb(key)
+                            .cast_local_ray_and_get_normal(&ray, max_t, true)
+                            .map(|hit| hit.time_of_impact)
+                    })
+                    .min_by(|a, b| a.partial_cmp(b).unwrap());
+                assert_eq!(
+                    fast.map(|hit| hit.time_of_impact),
+                    slow,
+                    "ray {:?} disagrees with the brute-force reference",
+                    ray,
+                );
+            }
+        }
     }
 }
