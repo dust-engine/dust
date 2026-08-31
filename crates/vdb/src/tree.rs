@@ -1409,7 +1409,7 @@ impl<'a, T> Iterator for ErasedLeafViewIter<'a, T> {
 }
 
 /// One level of a ray walk: an internal node whose child cells the ray is
-/// stepping across.
+/// stepping across, with the incremental state of the classic grid walk.
 #[derive(Clone, Copy)]
 struct RayFrame {
     /// Raw bytes of the node, read through the [`LevelInfo`] offsets.
@@ -1420,6 +1420,17 @@ struct RayFrame {
     /// = one child). Steps of the walk move it one cell along one axis, so
     /// it leaves `[0, fanout)` when the ray exits the node.
     cell: IVec3,
+    /// Ray parameter at which the ray enters `cell`.
+    t_enter: f32,
+    /// Per axis, the parameter at which the ray crosses out of `cell`
+    /// through that axis's far slab; `+inf` on zero-direction axes. The
+    /// smallest lane is the face the ray leaves `cell` through — the next
+    /// cell to step to — and a step advances that lane by `t_delta`,
+    /// replacing a per-cell slab test with one add.
+    t_max: Vec3A,
+    /// Per axis, the parameter width of one cell at this level:
+    /// `child_extent * |1 / dir|`.
+    t_delta: Vec3A,
 }
 
 impl RayFrame {
@@ -1427,19 +1438,18 @@ impl RayFrame {
         node: std::ptr::null(),
         origin: UVec3::ZERO,
         cell: IVec3::ZERO,
+        t_enter: 0.0,
+        t_max: Vec3A::ZERO,
+        t_delta: Vec3A::ZERO,
     };
 }
 
 
 /// The ray parameter interval over which `origin + dir * t` lies inside the
 /// box `[min, min + extent)`, already intersected with `[t0, t1]` — the
-/// interval is empty (and the box missed) unless `t_in <= t_out`. Also
-/// returns, per axis, the parameter at which the ray crosses out of that
-/// axis's slab: the axis with the smallest crossing is the face through
-/// which the ray leaves the box, i.e. the neighbor to step to. A
-/// zero-direction axis never wins that comparison: its crossing is forced to
-/// `+inf` through `dir_finite`, the lane mask of axes with a nonzero
-/// direction.
+/// interval is empty (and the box missed) unless `t_in <= t_out`. This is
+/// the walk's one full slab test, opening the tree's own box; inside the
+/// walk, cells advance incrementally through [`RayFrame::t_max`] instead.
 ///
 /// All three axes compute at once, branch-free. `inv_dir` is the per-axis
 /// reciprocal of the direction, `±inf` on a zero axis. A product goes NaN
@@ -1448,36 +1458,13 @@ impl RayFrame {
 /// encodes. (The select, not the `min`/`max`, must decide this: SSE and NEON
 /// disagree on how min/max treat a NaN operand.)
 #[inline(always)]
-fn ray_box_t(
-    origin: Vec3A,
-    inv_dir: Vec3A,
-    dir_finite: BVec3A,
-    min: Vec3A,
-    extent: Vec3A,
-    t0: f32,
-    t1: f32,
-) -> (Vec3A, f32, f32) {
+fn ray_box_t(origin: Vec3A, inv_dir: Vec3A, min: Vec3A, extent: Vec3A, t0: f32, t1: f32) -> (f32, f32) {
     let near = (min - origin) * inv_dir;
     let far = (min + extent - origin) * inv_dir;
     let nan = near.is_nan_mask() | far.is_nan_mask();
     let lo = Vec3A::select(nan, Vec3A::NEG_INFINITY, near.min(far));
     let hi = Vec3A::select(nan, Vec3A::INFINITY, near.max(far));
-    let t_in = lo.max_element().max(t0);
-    let t_out = hi.min_element().min(t1);
-    let crossing = Vec3A::select(dir_finite, hi, Vec3A::INFINITY);
-    (crossing, t_in, t_out)
-}
-
-/// The child cell of the node at `node_origin` containing the ray point `p`,
-/// clamped into the node's `fanout` grid — the boundary-precision guard a
-/// grid ray walk needs, since `p` typically lies exactly on the node's face
-/// and rounding may put `floor` one cell outside.
-fn entry_cell(p: Vec3A, node_origin: UVec3, child_extent: UVec3, fanout: UVec3) -> IVec3 {
-    let local = (p - node_origin.as_vec3a()) / child_extent.as_vec3a();
-    local
-        .floor()
-        .as_ivec3()
-        .clamp(IVec3::ZERO, fanout.as_ivec3() - IVec3::ONE)
+    (lo.max_element().max(t0), hi.min_element().min(t1))
 }
 
 /// The iterator returned by [`crate::TreeErased::iter_leaf_views_along_ray`]:
@@ -1508,10 +1495,19 @@ pub struct ErasedLeafViewRayIter<'a> {
     inv_dir: Vec3A,
     /// Lane mask of the axes whose direction is nonzero.
     dir_finite: BVec3A,
+    /// Lane mask of the axes whose direction is positive.
+    dir_positive: BVec3A,
     /// Per-axis cell step: the sign of `dir`, `0` on zero axes.
     step: IVec3,
     t0: f32,
     t1: f32,
+    /// Per level (indexed like `levels`): the reciprocal of the cell extent,
+    /// so entering a node multiplies instead of divides. Cell extents are
+    /// powers of two, so the reciprocal is exact.
+    child_extent_recip: [Vec3A; MAX_ERASED_LEVELS],
+    /// Per level (indexed like `levels`): [`RayFrame::t_delta`], which
+    /// depends only on the level's cell extent and the ray.
+    t_deltas: [Vec3A; MAX_ERASED_LEVELS],
     /// The leaf-level constants stamped onto every yielded view.
     leaf_extent: UVec3,
     leaf_extent_mask: UVec3,
@@ -1555,6 +1551,7 @@ impl<'a> ErasedLeafViewRayIter<'a> {
         let dir = Vec3A::from(dir);
         let inv_dir = dir.recip();
         let dir_finite = inv_dir.abs().cmplt(Vec3A::INFINITY);
+        let dir_positive = dir.cmpgt(Vec3A::ZERO);
         let step = IVec3::new(
             (dir.x > 0.0) as i32 - (dir.x < 0.0) as i32,
             (dir.y > 0.0) as i32 - (dir.y < 0.0) as i32,
@@ -1562,17 +1559,44 @@ impl<'a> ErasedLeafViewRayIter<'a> {
         );
 
         let mut records = [(LevelInfo::EMPTY, RayFrame::EMPTY); MAX_ERASED_LEVELS];
+        let mut child_extent_recip = [Vec3A::ONE; MAX_ERASED_LEVELS];
+        let mut t_deltas = [Vec3A::ZERO; MAX_ERASED_LEVELS];
         for level in 1..=ROOT::LEVEL {
-            records[level - 1].0 = LevelInfo::new(&ROOT::META[level]);
+            let info = LevelInfo::new(&ROOT::META[level]);
+            let cell_extent = info.child_extent.as_vec3a();
+            records[level - 1].0 = info;
+            child_extent_recip[level - 1] = cell_extent.recip();
+            t_deltas[level - 1] = cell_extent * inv_dir.abs();
         }
-        let mut root_leaf = None;
-        let mut depth = 0;
-        // Open the root over the interval the ray spends inside the tree's
-        // box; a ray that misses it leaves the walk empty.
-        let (_, t_in, t_out) = ray_box_t(
+        let mut iter = ErasedLeafViewRayIter {
+            pools,
+            levels: records,
+            depth: 0,
+            root_level: ROOT::LEVEL as u32,
             origin,
+            dir,
             inv_dir,
             dir_finite,
+            dir_positive,
+            step,
+            t0,
+            t1,
+            child_extent_recip,
+            t_deltas,
+            leaf_extent,
+            leaf_extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
+            leaf_shift_x: leaf_fanout.y + leaf_fanout.z,
+            leaf_shift_y: leaf_fanout.z,
+            leaf_mask_offset: leaf_meta.mask_offset,
+            leaf_mask_words: leaf_meta.mask_words,
+            root_leaf: None,
+        };
+        // Open the root over the interval the ray spends inside the tree's
+        // box; a ray that misses it leaves the walk empty.
+        let root_node = root as *const ROOT as *const u8;
+        let (t_in, t_out) = ray_box_t(
+            origin,
+            inv_dir,
             Vec3A::ZERO,
             ROOT::EXTENT.as_vec3a(),
             t0,
@@ -1581,7 +1605,7 @@ impl<'a> ErasedLeafViewRayIter<'a> {
         if t_in <= t_out {
             if ROOT::LEVEL == 0 {
                 // The root is itself a leaf.
-                root_leaf = Some((
+                iter.root_leaf = Some((
                     t_in,
                     ErasedLeafView {
                         origin: UVec3::ZERO,
@@ -1593,46 +1617,60 @@ impl<'a> ErasedLeafViewRayIter<'a> {
                         shift_y: leaf_fanout.z,
                         mask_offset: leaf_meta.mask_offset,
                         mask_words: leaf_meta.mask_words,
-                        node: root as *const ROOT as *const u8,
+                        node: root_node,
                         _borrow: std::marker::PhantomData,
                     },
                 ));
             } else {
                 // The root's record: the last *used* entry, at
                 // `ROOT::LEVEL - 1` (the array's tail past it is filler).
-                let (info, frame) = &mut records[ROOT::LEVEL - 1];
-                *frame = RayFrame {
-                    node: root as *const ROOT as *const u8,
-                    origin: UVec3::ZERO,
-                    cell: entry_cell(
-                        origin + dir * t_in,
-                        UVec3::ZERO,
-                        info.child_extent,
-                        info.fanout,
-                    ),
-                };
-                depth = 1;
+                let info = iter.levels[ROOT::LEVEL - 1].0;
+                iter.levels[ROOT::LEVEL - 1].1 =
+                    iter.enter_node(root_node, UVec3::ZERO, &info, ROOT::LEVEL - 1, t_in);
+                iter.depth = 1;
             }
         }
-        ErasedLeafViewRayIter {
-            pools,
-            levels: records,
-            depth,
-            root_level: ROOT::LEVEL as u32,
-            origin,
-            dir,
-            inv_dir,
-            dir_finite,
-            step,
-            t0,
-            t1,
-            leaf_extent,
-            leaf_extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
-            leaf_shift_x: leaf_fanout.y + leaf_fanout.z,
-            leaf_shift_y: leaf_fanout.z,
-            leaf_mask_offset: leaf_meta.mask_offset,
-            leaf_mask_words: leaf_meta.mask_words,
-            root_leaf,
+        iter
+    }
+
+    /// The state of a node's frame at the moment the ray enters it: the
+    /// entry cell — the cell containing the ray point at `t_enter`, clamped
+    /// into the node's grid, the boundary-precision guard a grid walk needs
+    /// since that point typically lies exactly on the node's face — and the
+    /// per-axis crossing parameters ([`RayFrame::t_max`], [`RayFrame::t_delta`])
+    /// the walk advances incrementally from there. `record` is the node's
+    /// index into the per-level arrays (`levels[record].0` is `info`).
+    fn enter_node(
+        &self,
+        node: *const u8,
+        node_origin: UVec3,
+        info: &LevelInfo,
+        record: usize,
+        t_enter: f32,
+    ) -> RayFrame {
+        let cell_extent = info.child_extent.as_vec3a();
+        let origin_f = node_origin.as_vec3a();
+        let p = self.origin + self.dir * t_enter;
+        let cell = ((p - origin_f) * self.child_extent_recip[record])
+            .floor()
+            .as_ivec3()
+            .clamp(IVec3::ZERO, info.fanout.as_ivec3() - IVec3::ONE);
+        // The entry cell's far boundary on each axis: the high face on axes
+        // pointing positive, the low face otherwise.
+        let offset = Vec3A::select(self.dir_positive, Vec3A::ONE, Vec3A::ZERO);
+        let boundary = origin_f + (cell.as_vec3a() + offset) * cell_extent;
+        let t_max = Vec3A::select(
+            self.dir_finite,
+            (boundary - self.origin) * self.inv_dir,
+            Vec3A::INFINITY,
+        );
+        RayFrame {
+            node,
+            origin: node_origin,
+            cell,
+            t_enter,
+            t_max,
+            t_delta: self.t_deltas[record],
         }
     }
 }
@@ -1650,61 +1688,73 @@ impl<'a> Iterator for ErasedLeafViewRayIter<'a> {
             let info = *info;
 
             let cell = frame.cell;
-            if cell.cmplt(IVec3::ZERO).any() || cell.cmpge(info.fanout.as_ivec3()).any() {
+            // Negative coordinates wrap to huge values, so one unsigned
+            // compare covers both sides of the grid.
+            if !cell.as_uvec3().cmplt(info.fanout).all() {
                 // The ray has left this node.
                 self.depth -= 1;
                 continue;
             }
+            if frame.t_enter > self.t1 {
+                // This cell — and, entry parameters being increasing, every
+                // later cell of this node — starts beyond the covered range.
+                self.depth -= 1;
+                continue;
+            }
 
-            let cell_min = frame.origin + cell.as_uvec3() * info.child_extent;
-            let (crossing, t_in, t_out) = ray_box_t(
-                self.origin,
-                self.inv_dir,
-                self.dir_finite,
-                cell_min.as_vec3a(),
-                info.child_extent.as_vec3a(),
-                self.t0,
-                self.t1,
-            );
-
-            // The face through which the ray leaves this cell names the next
-            // cell; step there before descending, so the walk resumes past
-            // the current cell after a yield.
-            let first_crossing = crossing.min_element();
-            if !first_crossing.is_finite() {
+            // Capture the cell, then advance the walk past it, so it
+            // resumes correctly after a yield. The cell's exit parameter is
+            // the nearest of the per-axis crossings, and one add keeps the
+            // stepped axis's crossing current — no per-cell slab test.
+            let node = frame.node;
+            let node_origin = frame.origin;
+            let t_in = frame.t_enter.max(self.t0);
+            // The face the ray leaves the cell through: a scalar three-way
+            // minimum, compiling to two compare/selects — where
+            // `Vec3A::min_element` plus a lane-mask argmin compiles to a
+            // serial chain several times as long. The indexed updates below
+            // stay branch-free: the frame lives in the `levels` array, so a
+            // lane is one addressed load/add/store.
+            let mut axis = 0;
+            let mut t_next = frame.t_max.x;
+            if frame.t_max.y < t_next {
+                axis = 1;
+                t_next = frame.t_max.y;
+            }
+            if frame.t_max.z < t_next {
+                axis = 2;
+                t_next = frame.t_max.z;
+            }
+            if !t_next.is_finite() {
                 // No axis makes forward progress (the ray runs parallel to
                 // every remaining slab): nothing further in this node.
                 self.depth -= 1;
                 continue;
             }
-            let axis = crossing
-                .cmpeq(Vec3A::splat(first_crossing))
-                .bitmask()
-                .trailing_zeros();
-            match axis {
-                0 => frame.cell.x += self.step.x,
-                1 => frame.cell.y += self.step.y,
-                _ => frame.cell.z += self.step.z,
-            }
+            frame.cell[axis] += self.step[axis];
+            frame.t_max[axis] += frame.t_delta[axis];
+            frame.t_enter = t_next;
 
-            // Enter the cell only when the ray actually passes through it
-            // within the parameter range (the entry cell of a node is
-            // clamped, so the first examined cell can sit one off the ray's
-            // true path) and its child-mask bit says it is occupied.
-            if t_in > t_out {
+            // Enter the captured cell only when the ray actually passes
+            // through it — its exit `t_next` not preceding its entry `t_in`;
+            // the entry cell of a node is clamped, so the first examined
+            // cell can sit one off the ray's true path — and its child-mask
+            // bit says it is occupied.
+            if t_in > t_next {
                 continue;
             }
             let index = ((cell.x as u32) << info.shift_x)
                 | ((cell.y as u32) << info.shift_y)
                 | cell.z as u32;
-            let word = unsafe { mask_word(frame.node, &info, index / usize::BITS) };
+            let word = unsafe { mask_word(node, &info, index / usize::BITS) };
             if word & (1 << (index % usize::BITS)) == 0 {
                 continue;
             }
+            let cell_min = node_origin + cell.as_uvec3() * info.child_extent;
 
             // A set mask bit guarantees the entry holds an occupied pointer.
             let child_ptr = unsafe {
-                (*(frame.node.add(info.child_ptrs_offset as usize) as *const InternalNodeEntry)
+                (*(node.add(info.child_ptrs_offset as usize) as *const InternalNodeEntry)
                     .add(index as usize))
                 .occupied
             };
@@ -1728,17 +1778,51 @@ impl<'a> Iterator for ErasedLeafViewRayIter<'a> {
                     },
                 ));
             }
-            // Descend into an internal child, entering at the cell containing
-            // the point where the ray enters the child's block.
             let child_level = level - 1;
-            let node = unsafe { self.pools[child_level].get(child_ptr) };
-            let entry = self.origin + self.dir * t_in;
-            let (child_info, child_frame) = &mut self.levels[child_level - 1];
-            *child_frame = RayFrame {
-                node,
-                origin: cell_min,
-                cell: entry_cell(entry, cell_min, child_info.child_extent, child_info.fanout),
-            };
+            let child_node = unsafe { self.pools[child_level].get(child_ptr) };
+            let child_info = self.levels[child_level - 1].0;
+
+            // Before opening the child, reject content the ray merely passes
+            // over. Inside the child, the ray's segment runs from its point
+            // at `t_in` to its point at the captured cell's exit — so the
+            // child cells it can touch span a known range on every axis (the
+            // endpoints' cells, widened by one against rounding). For a node
+            // of 8×8×8 children the child mask keeps one x-slice per word,
+            // with z in each byte and y selecting the byte, so "is any bit
+            // of that range set" is a handful of word ORs against one bit
+            // pattern. When none is, the ray cannot reach any child — think
+            // of a ray crossing high above floor content that sits in the
+            // same node — and the whole node is skipped without stepping
+            // through it.
+            if child_info.shift_x == 6 && child_info.shift_y == 3 {
+                let recip = self.child_extent_recip[child_level - 1];
+                let cell_min_f = cell_min.as_vec3a();
+                let p_in = (self.origin + self.dir * t_in - cell_min_f) * recip;
+                let p_out =
+                    (self.origin + self.dir * t_next.min(self.t1) - cell_min_f) * recip;
+                let widest = child_info.fanout.as_ivec3() - IVec3::ONE;
+                let lo = (p_in.min(p_out).floor().as_ivec3() - IVec3::ONE)
+                    .clamp(IVec3::ZERO, widest);
+                let hi = (p_in.max(p_out).floor().as_ivec3() + IVec3::ONE)
+                    .clamp(IVec3::ZERO, widest);
+                // Bits z in lo.z..=hi.z, replicated into the bytes y in
+                // lo.y..=hi.y (byte-aligned, so the multiply cannot carry).
+                let z_bits = (2u64 << hi.z) - (1u64 << lo.z);
+                let byte_repl = 0x0101_0101_0101_0101u64 >> (8 * (7 - (hi.y - lo.y)));
+                let touched = (z_bits * byte_repl) << (8 * lo.y);
+                let mut present = 0u64;
+                for x in lo.x..=hi.x {
+                    present |= unsafe { mask_word(child_node, &child_info, x as u32) } as u64;
+                }
+                if present & touched == 0 {
+                    continue;
+                }
+            }
+
+            // Descend into the child, entering at the parameter at which the
+            // ray entered its cell.
+            self.levels[child_level - 1].1 =
+                self.enter_node(child_node, cell_min, &child_info, child_level - 1, t_in);
             self.depth += 1;
         }
         None

@@ -479,6 +479,9 @@ impl RayCast for VdbShape {
         let dir_positive = local_dir.cmpgt(Vec3A::ZERO);
         let dir_finite = inv_local_dir.abs().cmplt(Vec3A::INFINITY);
         let voxel_size = Vec3A::new(self.voxel_size.x, self.voxel_size.y, self.voxel_size.z);
+        // The parameter width of one voxel per axis: how much a voxel's far
+        // crossing grows per step along that axis.
+        let t_delta = voxel_size * inv_local_dir.abs();
         let step = IVector::new(
             (ray.dir.x > 0.0) as i32 - (ray.dir.x < 0.0) as i32,
             (ray.dir.y > 0.0) as i32 - (ray.dir.y < 0.0) as i32,
@@ -499,6 +502,22 @@ impl RayCast for VdbShape {
             )
             .clamp(leaf_min, leaf_max);
 
+            // The starting voxel's far crossing per axis: the parameter at
+            // which the ray crosses its high face on axes pointing positive,
+            // its low face otherwise, `+inf` on zero-direction axes. From
+            // here each step advances one lane by `t_delta` — no per-voxel
+            // face arithmetic.
+            let mut t_max = {
+                let key_f = Vec3A::new(key.x as Real, key.y as Real, key.z as Real);
+                let offset = Vec3A::select(dir_positive, Vec3A::ONE, Vec3A::ZERO);
+                let far_face = (key_f + offset) * voxel_size;
+                Vec3A::select(
+                    dir_finite,
+                    (far_face - local_origin) * inv_local_dir,
+                    Vec3A::INFINITY,
+                )
+            };
+
             loop {
                 if leaf.get(ivec_to_uvec(key)) {
                     // A candidate: let the voxel's box decide the exact
@@ -511,37 +530,28 @@ impl RayCast for VdbShape {
                     }
                 }
 
-                // Find the next voxel to cast the ray on — the generic
-                // caster's decision, computed on all three axes at once: per
-                // axis, the parameter at which the ray crosses this voxel's
-                // far face (the high face on axes pointing positive, the low
-                // face otherwise), with crossings behind the origin and
-                // zero-direction axes pushed to `Real::MAX` so they never win
-                // the which-face-first comparison.
-                let voxel_min =
-                    Vec3A::new(key.x as Real, key.y as Real, key.z as Real) * voxel_size;
-                let far_face = Vec3A::select(dir_positive, voxel_min + voxel_size, voxel_min);
-                let exit = (far_face - local_origin) * inv_local_dir;
-                let exit = Vec3A::select(
-                    exit.cmplt(Vec3A::ZERO) | !dir_finite,
-                    Vec3A::splat(Real::MAX),
-                    exit,
-                );
-                let first_exit = exit.min_element();
-                if first_exit > max_t {
+                // Step to the voxel behind the nearest of the per-axis far
+                // crossings — the generic caster's decision, kept current
+                // with one add. The three-way minimum is scalar for the same
+                // reason as the tree walk's step: it compiles to two
+                // compare/selects instead of `min_element`'s serial chain.
+                let mut axis = 0;
+                let mut t_next = t_max.x;
+                if t_max.y < t_next {
+                    axis = 1;
+                    t_next = t_max.y;
+                }
+                if t_max.z < t_next {
+                    axis = 2;
+                    t_next = t_max.z;
+                }
+                if t_next > max_t {
                     // The ray's parameter budget ends inside this voxel;
                     // nothing further can be hit.
                     return None;
                 }
-                let axis = exit
-                    .cmpeq(Vec3A::splat(first_exit))
-                    .bitmask()
-                    .trailing_zeros();
-                match axis {
-                    0 => key.x += step.x,
-                    1 => key.y += step.y,
-                    _ => key.z += step.z,
-                }
+                key[axis] += step[axis];
+                t_max[axis] += t_delta[axis];
                 if key.cmplt(leaf_min).any() || key.cmpgt(leaf_max).any() {
                     // Left this leaf's block; the tree walk hands us the next
                     // leaf the ray reaches, skipping whatever emptiness lies
@@ -1178,15 +1188,22 @@ mod tests {
 
     /// Pits the tree-accelerated caster against a brute-force reference — the
     /// nearest impact over *every* occupied voxel's box — on a three-level
-    /// tree (64³ domain) holding a slab plus scattered voxels, over a few
-    /// hundred pseudo-random rays. The two must agree exactly: both decide
-    /// each candidate with the same `Aabb::cast_local_ray_and_get_normal`
-    /// call, so any difference is a voxel the walk visited in the wrong order
-    /// or skipped.
-    #[test]
-    fn ray_cast_matches_brute_force() {
-        type DeepTree = Tree<hierarchy!(2, 2, 2, TestLeaf)>;
-        let mut tree = DeepTree::new();
+    /// tree holding a slab plus scattered voxels, over a few hundred
+    /// pseudo-random rays. The two must agree exactly: both decide each
+    /// candidate with the same `Aabb::cast_local_ray_and_get_normal` call,
+    /// so any difference is a voxel the walk visited in the wrong order or
+    /// skipped.
+    ///
+    /// Instantiated for two hierarchies: 4³-fanout internal nodes (64³
+    /// domain), and 8³-fanout ones (256³ domain) — the shape whose child
+    /// masks the ray walk's pass-over rejection reads directly, so the
+    /// skipping is exercised against the reference too.
+    macro_rules! ray_cast_matches_brute_force {
+        ($name:ident, $root:ty) => {
+            #[test]
+            fn $name() {
+                type DeepTree = Tree<$root>;
+                let mut tree = DeepTree::new();
         let mut attributes = (
             VdbVoxelTypeAttributes::new(64),
             VdbVoxelMaskAttributes::new(16, 512),
@@ -1262,5 +1279,13 @@ mod tests {
                 );
             }
         }
+            }
+        };
     }
+
+    ray_cast_matches_brute_force!(ray_cast_matches_brute_force, hierarchy!(2, 2, 2, TestLeaf));
+    ray_cast_matches_brute_force!(
+        ray_cast_matches_brute_force_wide,
+        hierarchy!(3, 3, 2, TestLeaf)
+    );
 }
