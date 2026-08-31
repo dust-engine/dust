@@ -109,15 +109,50 @@ pub trait AttributePtr<P> {
     fn set_attribute_ptr(&mut self, ptr: P);
 }
 
-/// A leaf value that *is* the pointer: every single-channel tree where the
-/// leaf stores the channel's pointer directly.
-impl<P: Clone + Copy> AttributePtr<P> for P {
-    fn attribute_ptr(&self) -> P {
+impl<T> AttributePtr<()> for T {
+    fn attribute_ptr(&self) {}
+
+    fn set_attribute_ptr(&mut self, _ptr: ()) {}
+}
+
+impl AttributePtr<u32> for u32 {
+    fn attribute_ptr(&self) -> u32 {
         *self
     }
 
-    fn set_attribute_ptr(&mut self, ptr: P) {
+    fn set_attribute_ptr(&mut self, ptr: u32) {
         *self = ptr;
+    }
+}
+
+/// The unit type is an attribute storage with no actual data.
+impl Attributes for () {
+    type Ptr = ();
+    type Value = ();
+
+    fn get_attribute(&self, _leaf: u32, _ptr: &(), _fitted_offset: u32, _inflated_offset: u32) {}
+
+    fn set_attribute(
+        &mut self,
+        _leaf: u32,
+        _ptr: &(),
+        _fitted_offset: u32,
+        _inflated_offset: u32,
+        _value: (),
+    ) {
+    }
+
+    fn free_attributes(&mut self, _leaf: u32, _ptr: &(), _num_attributes: u32) {}
+
+    fn copy_attribute(
+        &mut self,
+        _original_leaf: u32,
+        _new_leaf: u32,
+        _ptr: &(),
+        _original_mask: &[usize],
+        _new_mask: &[usize],
+        _coords: &UVec3,
+    ) {
     }
 }
 

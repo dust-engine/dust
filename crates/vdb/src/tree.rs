@@ -3,7 +3,8 @@ use std::{mem::{ManuallyDrop, MaybeUninit}, ops::Deref};
 use glam::UVec3;
 
 use crate::{
-    AabbU32, AttributePtr, InternalNodeEntry, IsLeaf, Node, NodeMeta, pool::{Pool, PoolStorage},
+    AabbU32, AttributePtr, Attributes, InternalNodeEntry, IsLeaf, Node, NodeMeta,
+    pool::{Pool, PoolStorage},
 };
 
 pub struct Tree<ROOT: Node>
@@ -248,10 +249,18 @@ where
     [(); ROOT::LEVEL + 1]: Sized,
 {
     type Iterator<'a> = ROOT::LeafIterator<'a>;
+    type Root = ROOT;
 
     fn iter_leaf(&self) -> Self::Iterator<'_> {
         self.root
             .iter_leaf(&self.pool, UVec3::ZERO)
+    }
+
+    fn accessor<'a, A: Attributes>(&'a self, attributes: &'a A) -> crate::Accessor<'a, ROOT, A>
+    where
+        <ROOT::LeafType as IsLeaf>::Value: AttributePtr<A::Ptr>,
+    {
+        Tree::accessor(self, attributes)
     }
 }
 
@@ -260,10 +269,18 @@ where
     [(); ROOT::LEVEL + 1]: Sized,
 {
     type Iterator<'a> = ROOT::LeafIterator<'a>;
+    type Root = ROOT;
 
     fn iter_leaf(&self) -> Self::Iterator<'_> {
         self.root
             .iter_leaf(&self.pool, UVec3::ZERO)
+    }
+
+    fn accessor<'a, A: Attributes>(&'a self, attributes: &'a A) -> crate::Accessor<'a, ROOT, A>
+    where
+        <ROOT::LeafType as IsLeaf>::Value: AttributePtr<A::Ptr>,
+    {
+        TreeSnapshot::accessor(self, attributes)
     }
 }
 
@@ -366,6 +383,22 @@ where
 pub trait TreeLike: TreeErasedLeaf {
     /// Iterator returned by [`TreeLike::iter_leaf`]
     type Iterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)> where Self: 'a;
+
+    /// The hierarchy's root node type: the tree covers `Root::EXTENT`, and
+    /// its leaves are `Root::LeafType` — the same type as
+    /// [`TreeErasedLeaf::LeafType`], which the bound spells out.
+    type Root: Node<LeafType = Self::LeafType>;
+
+    /// A cached read accessor over this version — [`Tree::accessor`] and
+    /// [`TreeSnapshot::accessor`], reachable through the trait so a consumer
+    /// generic over `impl TreeLike` can do cached point lookups
+    /// ([`Accessor::leaf_view`](crate::Accessor::leaf_view), or
+    /// [`Accessor::get`](crate::Accessor::get) when `attributes` is a real
+    /// store). Pass `&()` as `attributes` for occupancy-only access.
+    fn accessor<'a, A: Attributes>(&'a self, attributes: &'a A) -> crate::Accessor<'a, Self::Root, A>
+    where
+        [(); Self::Root::LEVEL + 1]: Sized,
+        <Self::LeafType as IsLeaf>::Value: AttributePtr<A::Ptr>;
 
     /// Iterate the leaf nodes present in this tree, yielding each leaf with
     /// the tree-global coordinate of its minimum corner (a multiple of

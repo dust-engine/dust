@@ -32,6 +32,16 @@ impl dust_vdb::AttributePtr<u32> for VoxLeafNode {
     }
 }
 
+impl dust_vdb::AttributePtr<VoxLeafNode> for VoxLeafNode {
+    fn attribute_ptr(&self) -> VoxLeafNode {
+        self.clone()
+    }
+
+    fn set_attribute_ptr(&mut self, ptr: VoxLeafNode) {
+        *self = ptr;
+    }
+}
+
 #[derive(Asset, TypePath)]
 pub struct VoxMaterial {
     pub attribute_allocator: AttributeAllocator,

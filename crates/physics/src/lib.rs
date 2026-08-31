@@ -50,9 +50,11 @@
 //! [`Tree::reclaim_dropped_snapshots`]: dust_vdb::Tree::reclaim_dropped_snapshots
 //! [`Tree::restore`]: dust_vdb::Tree::restore
 
-// `hierarchy!` in the tests expands to const-generic expressions.
-#![cfg_attr(test, feature(generic_const_exprs))]
-#![cfg_attr(test, allow(incomplete_features))]
+// `VdbVoxelMaskAttributes::from_tree` is generic over the tree hierarchy and
+// carries its `[(); Root::LEVEL + 1]` bound; the tests' `hierarchy!` needs
+// the same feature.
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 mod dispatcher;
 
@@ -60,7 +62,7 @@ pub use dispatcher::VdbDispatcher;
 
 use std::sync::Arc;
 
-use dust_vdb::{AabbU32, ErasedLeafView, TreeWithValues};
+use dust_vdb::{AabbU32, Accessor, AttributePtr, ErasedLeafView, IsLeaf, Node, TreeLike, TreeWithValues};
 use glam::UVec3;
 use parry3d::bounding_volume::{Aabb, BoundingSphere};
 use parry3d::mass_properties::MassProperties;
@@ -270,6 +272,76 @@ impl VdbVoxelMaskAttributes {
                 max_allocation,
             ),
             values: Vec::new(),
+        }
+    }
+
+    /// Computes the full store for one tree version, deriving every occupied
+    /// voxel's [`VoxelState`] from occupancy alone: which of its six axis
+    /// neighbors are filled. In-leaf neighbors are bit tests on the leaf
+    /// being visited; a neighbor in another leaf is probed with
+    /// [`Accessor::get`](dust_vdb::Accessor::get) on an accessor carrying no
+    /// attribute store (`tree.accessor(&())` — `Some(())` means occupied),
+    /// so consecutive cross-leaf tests re-enter the tree at the lowest
+    /// common ancestor instead of descending from the root each time.
+    ///
+    /// Each leaf's states land at `ptr + rank`, where `ptr` is the leaf
+    /// value's projected `u32` attribute pointer and `rank` counts the leaf's
+    /// occupied voxels in occupancy-bit order — the same slots an
+    /// accessor-driven session fills. A store derived from a tree whose leaf
+    /// values carry live pointers therefore reads back identically to one
+    /// maintained during editing.
+    ///
+    /// The returned store is for reading (collider snapshots). Its allocator
+    /// is fresh and knows nothing about the ranges the values occupy, so do
+    /// not drive it through an editing session; the incrementally maintained
+    /// store owns that role.
+    pub fn from_tree<T: TreeLike + ?Sized>(tree: &T) -> Self
+    where
+        <T::LeafType as IsLeaf>::Value: AttributePtr<u32>,
+        <T::LeafType as IsLeaf>::Value: AttributePtr<()>,
+        [(); T::Root::LEVEL + 1]: Sized,
+    {
+        let mut accessor = tree.accessor(&());
+        let extent = tree.extent();
+        let mut values = Vec::new();
+        for (origin, leaf) in tree.iter_leaf() {
+            let ptr: u32 = leaf.get_value().attribute_ptr();
+            let ptr = ptr as usize;
+            let occupied = dust_vdb::mask_count_ones(leaf.get_occupancy().as_ref()) as usize;
+            if values.len() < ptr + occupied {
+                values.resize(ptr + occupied, VoxelState::EMPTY);
+            }
+            for (rank, coords) in leaf.iter(origin).enumerate() {
+                let key = uvec_to_ivec(coords);
+                let mut filled = AxisMask::empty();
+                for (dir, axis) in NEIGHBOR_DIRS {
+                    let neighbor = key + dir;
+                    let neighbor_filled = if neighbor.cmplt(IVector::ZERO).any() {
+                        // Coordinates below the tree's origin are empty.
+                        false
+                    } else {
+                        let neighbor = ivec_to_uvec(neighbor);
+                        if ((neighbor ^ origin) & !<T::LeafType as Node>::EXTENT_MASK)
+                            == UVec3::ZERO
+                        {
+                            leaf.get_occupancy_at(neighbor)
+                        } else if neighbor.cmpge(extent).any() {
+                            // `Accessor::get` assumes in-extent coordinates.
+                            false
+                        } else {
+                            accessor.get(neighbor).is_some()
+                        }
+                    };
+                    if neighbor_filled {
+                        filled |= axis;
+                    }
+                }
+                values[ptr + rank] = VoxelState::with_filled_neighbors(filled);
+            }
+        }
+        Self {
+            attribute_allocator: dust_vdb::AttributeAllocator::new_with_capacity(16, 512),
+            values,
         }
     }
 
@@ -777,13 +849,13 @@ mod tests {
     }
 
     /// Builds the cube through one accessor session driving both stores, and
-    /// wraps a snapshot of it into a shape holding the mask store.
+    /// wraps a snapshot of it into two shapes: one reading the
+    /// session-maintained mask store, one reading a store recomputed by
+    /// [`VdbVoxelMaskAttributes::from_tree`].
     ///
-    /// Coverage is range-walk only for now: point lookups (`voxel`,
-    /// `linear_id`) and the occupancy-derived `voxel_state` path (used by a
-    /// shape without the mask store) funnel through [`VdbShape::occupied`],
-    /// which is `todo!()` until point lookup gets a replacement for the
-    /// removed `TreeErased::leaf_view_at`.
+    /// Query coverage is range-walk only for now: the shape's point lookups
+    /// (`voxel`, `linear_id`) funnel through [`VdbShape::occupied`], which is
+    /// `todo!()` until they get their own accessor-backed path.
     #[test]
     fn voxel_query() {
         let mut tree = TestTree::new();
@@ -805,11 +877,23 @@ mod tests {
         drop(accessor);
 
         let (type_attributes, mask_attributes) = attributes;
-        let tree: Arc<dyn TreeWithValues<u32>> = Arc::new(tree.snapshot());
+        let snapshot = Arc::new(tree.snapshot());
+        // Recompute every state from occupancy alone. The leaf values carry
+        // the session's allocator pointers, so the derived store must fill
+        // exactly the slots the session-maintained store did.
+        let derived_mask_attributes = VdbVoxelMaskAttributes::from_tree(&*snapshot);
+        let tree: Arc<dyn TreeWithValues<u32>> = snapshot;
+        let type_attributes = Arc::new(type_attributes);
         let with_masks = VdbShape::new(
-            tree,
-            Arc::new(type_attributes),
+            tree.clone(),
+            type_attributes.clone(),
             Some(Arc::new(mask_attributes)),
+            Vector::splat(1.0),
+        );
+        let with_derived_masks = VdbShape::new(
+            tree,
+            type_attributes,
+            Some(Arc::new(derived_mask_attributes)),
             Vector::splat(1.0),
         );
 
@@ -832,6 +916,14 @@ mod tests {
             assert_eq!(voxel.center(), Vector::new(key.x as Real, key.y as Real, key.z as Real) + Vector::splat(0.5));
         }
         assert_eq!(seen.len(), 27);
+
+        // The store recomputed by `from_tree` reads back identically to the
+        // one the editing session maintained — including across the leaf
+        // boundaries the cube straddles, which exercise the accessor's
+        // cross-leaf point lookups.
+        for voxel in with_derived_masks.voxels() {
+            assert_eq!(voxel.voxel_state(), expected_state(voxel.grid_coords()));
+        }
 
         // A partial range: x in [3, 5), y and z in [0, 4) — the per-voxel
         // clip must cut the cube down to x in {3, 4}, y and z in {2, 3}.

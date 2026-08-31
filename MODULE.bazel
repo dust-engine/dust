@@ -77,7 +77,7 @@ single_version_override(
 )
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(edition = "2024", versions = ["nightly/2026-08-05"])
+rust.toolchain(edition = "2024", versions = ["nightly/2026-08-31"])
 use_repo(rust, "rust_toolchains")
 register_toolchains("@rust_toolchains//:all")
 
