@@ -1,4 +1,4 @@
-use std::{mem::{ManuallyDrop, MaybeUninit}, ops::Deref};
+use std::{collections::BinaryHeap, mem::{ManuallyDrop, MaybeUninit}, ops::Deref};
 
 use glam::{BVec3A, IVec3, UVec3, Vec3, Vec3A};
 
@@ -321,6 +321,14 @@ where
     ) -> ErasedLeafViewRayIter<'_> {
         ErasedLeafViewRayIter::new(&self.root, &self.pool, origin, dir, t0, t1)
     }
+
+    fn iter_leaf_views_near_point(
+        &self,
+        point: Vec3,
+        scale: Vec3,
+    ) -> ErasedLeafViewNearIter<'_> {
+        ErasedLeafViewNearIter::new(&self.root, &self.pool, point, scale)
+    }
 }
 
 impl<ROOT: Node> TreeErasedLeaf for Tree<ROOT>
@@ -370,6 +378,14 @@ where
         t1: f32,
     ) -> ErasedLeafViewRayIter<'_> {
         ErasedLeafViewRayIter::new(&self.root, &self.pool, origin, dir, t0, t1)
+    }
+
+    fn iter_leaf_views_near_point(
+        &self,
+        point: Vec3,
+        scale: Vec3,
+    ) -> ErasedLeafViewNearIter<'_> {
+        ErasedLeafViewNearIter::new(&self.root, &self.pool, point, scale)
     }
 }
 
@@ -542,6 +558,31 @@ pub trait TreeErased: Send + Sync + 'static {
         t0: f32,
         t1: f32,
     ) -> ErasedLeafViewRayIter<'_>;
+
+    /// Search for the leaves nearest to a point: yielded in nondecreasing
+    /// order of the distance between the point and each leaf's block, and
+    /// pruned to the leaves that could still hold the point's nearest voxel.
+    ///
+    /// `point` is in voxel coordinates — the voxel at coordinate `c` covers
+    /// `[c, c + 1)` on each axis — and `scale` converts per-axis voxel-space
+    /// differences into the caller's metric: pass the per-axis voxel size to
+    /// measure in the caller's local space, `Vec3::ONE` to measure in voxel
+    /// coordinates. Each yielded item is `(dist_sq, view)`: the squared
+    /// distance (in that metric) from `point` to the leaf's block — `0`
+    /// while the point lies inside the block — and the leaf's view.
+    ///
+    /// This is a nearest-neighbor frontier, not a full enumeration. Every
+    /// discovered block holds at least one voxel, so the nearest block's
+    /// *farthest* corner bounds the answer from above, and any block whose
+    /// nearest corner lies beyond that bound — provably unable to hold, or
+    /// tie for, the nearest voxel — is skipped, subtree and all. A consumer
+    /// tracking the best candidate over the yielded leaves' voxels can
+    /// therefore stop at the first block too far to beat it, and what it
+    /// never reads was never visited. The frontier's size varies with
+    /// occupancy, so — unlike the other erased walks — creating this
+    /// iterator allocates.
+    fn iter_leaf_views_near_point(&self, point: Vec3, scale: Vec3)
+    -> ErasedLeafViewNearIter<'_>;
 }
 
 /// A [`TreeErased`] whose leaf values project an attribute pointer of type
@@ -1824,6 +1865,382 @@ impl<'a> Iterator for ErasedLeafViewRayIter<'a> {
             self.levels[child_level - 1].1 =
                 self.enter_node(child_node, cell_min, &child_info, child_level - 1, t_in);
             self.depth += 1;
+        }
+        None
+    }
+}
+
+/// One block on the frontier of a near-point walk: a node or leaf that has
+/// been discovered (its parent's mask bit was set) but not yet opened or
+/// yielded, keyed by the distance from the query point to its block.
+struct NearEntry {
+    /// Squared distance from the query point to the entry's block, in the
+    /// caller's metric ([`ErasedLeafViewNearIter`]'s `scale`).
+    dist_sq: f32,
+    /// Tree level of the node: level-0 entries are leaves, yielded rather
+    /// than opened.
+    level: u32,
+    /// Pool index of a level-0 entry (`u32::MAX` for an out-of-pool root
+    /// leaf), stamped onto its view as [`ErasedLeafView::leaf_index`].
+    index: u32,
+    /// Voxel coordinate of the block's minimum corner.
+    origin: UVec3,
+    /// Raw bytes of the node, resolved from the pools when the entry was
+    /// pushed.
+    node: *const u8,
+}
+
+/// Ordered by distance alone, *reversed*: [`BinaryHeap`] pops its greatest
+/// entry, and the walk wants the nearest. Distances are nonnegative floats,
+/// so their bit patterns order exactly like their values.
+impl Ord for NearEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.dist_sq.to_bits().cmp(&self.dist_sq.to_bits())
+    }
+}
+
+impl PartialOrd for NearEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for NearEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.dist_sq.to_bits() == other.dist_sq.to_bits()
+    }
+}
+
+impl Eq for NearEntry {}
+
+/// Squared distance from `point` to the block `[origin, origin + extent)`,
+/// with both endpoints in voxel coordinates and the difference scaled
+/// per-axis by `scale` — `0` when the point lies inside the block. Clamping
+/// the point into the block finds the block's closest point, so this is
+/// exact for the block's closure, and a lower bound for the distance to
+/// anything stored inside it.
+#[inline(always)]
+fn block_dist_sq(point: Vec3A, scale: Vec3A, origin: UVec3, extent: UVec3) -> f32 {
+    let lo = origin.as_vec3a();
+    let hi = lo + extent.as_vec3a();
+    ((point.clamp(lo, hi) - point) * scale).length_squared()
+}
+
+/// Squared distance from `point` to the *farthest* corner of the block
+/// `[origin, origin + extent)`, measured like [`block_dist_sq`]. A block on
+/// the frontier holds at least one voxel somewhere in its extent (a clear
+/// mask bit never enters the frontier), so this is an upper bound on the
+/// distance from `point` to the nearest voxel — the bound the walk prunes
+/// against.
+#[inline(always)]
+fn block_far_dist_sq(point: Vec3A, scale: Vec3A, origin: UVec3, extent: UVec3) -> f32 {
+    let lo = origin.as_vec3a();
+    let hi = lo + extent.as_vec3a();
+    ((point - lo).abs().max((hi - point).abs()) * scale).length_squared()
+}
+
+/// The iterator returned by [`crate::TreeErased::iter_leaf_views_near_point`]:
+/// an [`ErasedLeafView`] of each leaf that could hold the query point's
+/// nearest voxel, in nondecreasing distance from the point to the leaf's
+/// block, each with that squared distance.
+///
+/// The walk is best-first — the tree playing the role a BVH plays for a
+/// nearest-neighbor query. The frontier holds the discovered, unopened
+/// blocks, nearest first. Popping an internal block pushes its occupied
+/// children (a clear mask bit never enters the frontier, so empty subtrees
+/// cost nothing); popping a leaf block yields it. A child's block lies
+/// inside its parent's, so its distance is no smaller, which is what makes
+/// the pops — and therefore the yields — nondecreasing.
+///
+/// Discovery doubles as pruning: a discovered block holds at least one
+/// voxel, so its farthest corner bounds the nearest-voxel distance from
+/// above ([`ErasedLeafViewNearIter::upper`]), and blocks whose nearest
+/// corner lies beyond the tightest such bound are dropped rather than
+/// pushed — without this, one opened node of a wide hierarchy (up to 8³
+/// children) would flood the frontier with blocks the consumer's own
+/// stopping rule discards unread.
+pub struct ErasedLeafViewNearIter<'a> {
+    pools: &'a [Pool],
+    /// Walk constants for level `k` at `levels[k - 1]`, `k = 1..=root_level`;
+    /// leaves (level 0) are yielded, never opened, and need no record.
+    /// Inline and fixed-size ([`MAX_ERASED_LEVELS`]); entries past
+    /// `root_level` are unused filler.
+    levels: [LevelInfo; MAX_ERASED_LEVELS],
+    /// The query point, in voxel coordinates.
+    point: Vec3A,
+    /// Per-axis factor from voxel-coordinate differences to the caller's
+    /// metric.
+    scale: Vec3A,
+    /// Every discovered, unopened block, nearest first.
+    frontier: BinaryHeap<NearEntry>,
+    /// The tightest proven upper bound (squared) on the distance from the
+    /// point to its nearest voxel: the smallest [`block_far_dist_sq`] of any
+    /// block discovered so far. A block whose *nearest* corner lies beyond
+    /// it cannot hold the nearest voxel — nor tie for it — and is pruned
+    /// instead of pushed or opened.
+    upper: f32,
+    /// The leaf-level constants stamped onto every yielded view.
+    leaf_extent: UVec3,
+    leaf_extent_mask: UVec3,
+    leaf_shift_x: u32,
+    leaf_shift_y: u32,
+    leaf_mask_offset: u32,
+    leaf_mask_words: u32,
+}
+
+/// See [`ErasedVoxelIter`]'s impls: the raw pointers are borrows of live,
+/// unconditionally-`Sync` nodes.
+unsafe impl Send for ErasedLeafViewNearIter<'_> {}
+unsafe impl Sync for ErasedLeafViewNearIter<'_> {}
+
+impl<'a> ErasedLeafViewNearIter<'a> {
+    /// Walk the leaves of the tree rooted at `root`, whose non-root nodes
+    /// live in `pools` (pools[k] holding level-k nodes, exactly as in
+    /// [`crate::Tree`]), nearest to `point` first.
+    pub(crate) fn new<ROOT: Node>(
+        root: &'a ROOT,
+        pools: &'a [Pool],
+        point: Vec3,
+        scale: Vec3,
+    ) -> Self
+    where
+        [(); ROOT::LEVEL + 1]: Sized,
+    {
+        assert!(
+            ROOT::LEVEL <= MAX_ERASED_LEVELS,
+            "hierarchy deeper than the erased walks' inline record arrays; raise MAX_ERASED_LEVELS"
+        );
+        let leaf_meta = &ROOT::META[0];
+        let leaf_fanout = leaf_meta.fanout_log2;
+        let mut levels = [LevelInfo::EMPTY; MAX_ERASED_LEVELS];
+        for level in 1..=ROOT::LEVEL {
+            levels[level - 1] = LevelInfo::new(&ROOT::META[level]);
+        }
+        let point = Vec3A::from(point);
+        let scale = Vec3A::from(scale);
+
+        // Sized for one opened node of a wide hierarchy without regrowth;
+        // pathological occupancy grows it like any `Vec`.
+        let mut frontier = BinaryHeap::with_capacity(128);
+        frontier.push(NearEntry {
+            dist_sq: block_dist_sq(point, scale, UVec3::ZERO, ROOT::EXTENT),
+            level: ROOT::LEVEL as u32,
+            index: u32::MAX,
+            origin: UVec3::ZERO,
+            node: root as *const ROOT as *const u8,
+        });
+
+        ErasedLeafViewNearIter {
+            pools,
+            levels,
+            point,
+            scale,
+            frontier,
+            upper: block_far_dist_sq(point, scale, UVec3::ZERO, ROOT::EXTENT),
+            leaf_extent: <ROOT::LeafType as Node>::EXTENT,
+            leaf_extent_mask: <ROOT::LeafType as Node>::EXTENT_MASK,
+            leaf_shift_x: leaf_fanout.y + leaf_fanout.z,
+            leaf_shift_y: leaf_fanout.z,
+            leaf_mask_offset: leaf_meta.mask_offset,
+            leaf_mask_words: leaf_meta.mask_words,
+        }
+    }
+}
+
+impl<'a> ErasedLeafViewNearIter<'a> {
+    /// First half of opening an internal block: tighten
+    /// [`ErasedLeafViewNearIter::upper`] with the farthest-corner bound
+    /// ([`block_far_dist_sq`]) of the block's occupied children.
+    ///
+    /// For the 8×8×8 node layout — one mask word per x-slice of 8×8 cells,
+    /// the layout the ray walk's fast path also exploits — two word-level
+    /// shortcuts avoid most per-bit sweeps. A word is skipped whole when
+    /// even the nearest point of its slab cannot improve the bound (the
+    /// slab's distance lower-bounds every cell in the word). And a *fully*
+    /// occupied word improves the bound exactly by its nearest cell's far
+    /// corner, no sweep needed: per axis, the farthest face of a cell is
+    /// `extent / 2 + |point - center|` away, so the cell with the nearest
+    /// center — the point's own cell coordinate, clamped into the slice —
+    /// has the smallest far corner. The word holding the point's nearest
+    /// cell goes first, so the bound is already tight when the remaining
+    /// words test their slabs against it.
+    fn tighten_upper(&mut self, entry: &NearEntry, info: &LevelInfo) {
+        // Local copies of everything the loops read: writes through the
+        // frontier's buffer (a separate allocation) stop the compiler from
+        // keeping `self`'s fields in registers otherwise, and `self.upper`
+        // would round-trip through memory on every child.
+        let point = self.point;
+        let scale = self.scale;
+        let mut upper = self.upper;
+        let cell_extent = info.child_extent;
+        let word_is_x_slice = info.shift_x == 6 && info.shift_y == 3;
+        let nearest_cell = ((point - entry.origin.as_vec3a()) / cell_extent.as_vec3a())
+            .floor()
+            .as_ivec3()
+            .clamp(IVec3::ZERO, info.fanout.as_ivec3() - IVec3::ONE)
+            .as_uvec3();
+        for i in 0..info.mask_words {
+            let word_idx = if word_is_x_slice {
+                // The permutation `nearest_cell.x, 0, 1, ..` (skipping
+                // `nearest_cell.x` where it would repeat).
+                if i == 0 {
+                    nearest_cell.x
+                } else if i <= nearest_cell.x {
+                    i - 1
+                } else {
+                    i
+                }
+            } else {
+                i
+            };
+            let word = unsafe { mask_word(entry.node, info, word_idx) };
+            if word == 0 {
+                continue;
+            }
+            if word_is_x_slice {
+                let slice_origin = entry.origin + UVec3::new(word_idx * cell_extent.x, 0, 0);
+                let slice_extent = UVec3::new(
+                    cell_extent.x,
+                    cell_extent.y * info.fanout.y,
+                    cell_extent.z * info.fanout.z,
+                );
+                if block_dist_sq(point, scale, slice_origin, slice_extent) >= upper {
+                    continue;
+                }
+                if word == usize::MAX {
+                    let cell = UVec3::new(word_idx, nearest_cell.y, nearest_cell.z);
+                    upper = upper.min(block_far_dist_sq(
+                        point,
+                        scale,
+                        entry.origin + cell * cell_extent,
+                        cell_extent,
+                    ));
+                    continue;
+                }
+            }
+            let mut word = word;
+            while word != 0 {
+                let bit = word.trailing_zeros();
+                word &= word - 1;
+                let index = word_idx * usize::BITS + bit;
+                let cell = UVec3 {
+                    x: index >> info.shift_x,
+                    y: (index >> info.shift_y) & info.mask_y,
+                    z: index & info.mask_z,
+                };
+                upper = upper.min(block_far_dist_sq(
+                    point,
+                    scale,
+                    entry.origin + cell * cell_extent,
+                    cell_extent,
+                ));
+            }
+        }
+        self.upper = upper;
+    }
+
+    /// Second half of opening an internal block: a frontier entry for every
+    /// child that can still hold — or tie for — the nearest voxel. Against a
+    /// wide fan-out (an 8³ node has up to 512 occupied children), this
+    /// pruning is what keeps the frontier, and the heap traffic, small; the
+    /// same slab test as in [`Self::tighten_upper`] drops whole words of
+    /// cells that the bound rules out.
+    fn push_children(&mut self, entry: &NearEntry, info: &LevelInfo, child_level: u32) {
+        // Split `self` so the frontier alone is borrowed mutably: the pushes
+        // below write through the frontier's buffer, and without the split
+        // the compiler must reload `point`, `scale`, `upper`, and the pool
+        // bounds from `self` after every push.
+        let point = self.point;
+        let scale = self.scale;
+        let upper = self.upper;
+        let pool = &self.pools[child_level as usize];
+        let frontier = &mut self.frontier;
+        let cell_extent = info.child_extent;
+        let word_is_x_slice = info.shift_x == 6 && info.shift_y == 3;
+        for word_idx in 0..info.mask_words {
+            let word = unsafe { mask_word(entry.node, info, word_idx) };
+            if word == 0 {
+                continue;
+            }
+            if word_is_x_slice {
+                let slice_origin = entry.origin + UVec3::new(word_idx * cell_extent.x, 0, 0);
+                let slice_extent = UVec3::new(
+                    cell_extent.x,
+                    cell_extent.y * info.fanout.y,
+                    cell_extent.z * info.fanout.z,
+                );
+                if block_dist_sq(point, scale, slice_origin, slice_extent) > upper {
+                    continue;
+                }
+            }
+            let mut word = word;
+            while word != 0 {
+                let bit = word.trailing_zeros();
+                word &= word - 1;
+                let index = word_idx * usize::BITS + bit;
+                let cell = UVec3 {
+                    x: index >> info.shift_x,
+                    y: (index >> info.shift_y) & info.mask_y,
+                    z: index & info.mask_z,
+                };
+                let origin = entry.origin + cell * cell_extent;
+                let dist_sq = block_dist_sq(point, scale, origin, cell_extent);
+                if dist_sq > upper {
+                    continue;
+                }
+                // A set mask bit guarantees the entry holds an occupied
+                // pointer.
+                let child_ptr = unsafe {
+                    (*(entry.node.add(info.child_ptrs_offset as usize)
+                        as *const InternalNodeEntry)
+                        .add(index as usize))
+                    .occupied
+                };
+                let node = unsafe { pool.get(child_ptr) };
+                frontier.push(NearEntry {
+                    dist_sq,
+                    level: child_level,
+                    index: child_ptr,
+                    origin,
+                    node,
+                });
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for ErasedLeafViewNearIter<'a> {
+    type Item = (f32, ErasedLeafView<'a, ()>);
+
+    fn next(&mut self) -> Option<(f32, ErasedLeafView<'a, ()>)> {
+        while let Some(entry) = self.frontier.pop() {
+            if entry.dist_sq > self.upper {
+                // `upper` tightened after this block was pushed: some other
+                // block's entire extent is nearer than this block's nearest
+                // corner, so nothing in it can be the nearest voxel.
+                continue;
+            }
+            if entry.level == 0 {
+                return Some((
+                    entry.dist_sq,
+                    ErasedLeafView {
+                        origin: entry.origin,
+                        index: entry.index,
+                        attribute_ptr: (),
+                        extent: self.leaf_extent,
+                        extent_mask: self.leaf_extent_mask,
+                        shift_x: self.leaf_shift_x,
+                        shift_y: self.leaf_shift_y,
+                        mask_offset: self.leaf_mask_offset,
+                        mask_words: self.leaf_mask_words,
+                        node: entry.node,
+                        _borrow: std::marker::PhantomData,
+                    },
+                ));
+            }
+            let info = self.levels[entry.level as usize - 1];
+            self.tighten_upper(&entry, &info);
+            self.push_children(&entry, &info, entry.level - 1);
         }
         None
     }

@@ -67,11 +67,10 @@ use glam::{UVec3, Vec3A};
 use parry3d::bounding_volume::{Aabb, BoundingSphere};
 use parry3d::mass_properties::MassProperties;
 use parry3d::math::{IVector, Real, Vector};
-use parry3d::query::details::project_local_point_on_voxels;
 use parry3d::query::{PointProjection, PointQuery, Ray, RayCast, RayIntersection};
 use parry3d::shape::{
-    AxisMask, FeatureId, QueriedVoxel, Shape, ShapeType, TypedShape, VoxelQuery, VoxelState,
-    VoxelType,
+    AxisMask, Cuboid, FeatureId, QueriedVoxel, Shape, ShapeType, TypedShape, VoxelQuery,
+    VoxelState, VoxelType,
 };
 
 /// A `'static` voxel collision shape over one [`TreeWithValues<u32>`](TreeWithValues)
@@ -566,13 +565,13 @@ impl RayCast for VdbShape {
 
 impl PointQuery for VdbShape {
     fn project_local_point(&self, pt: Vector, solid: bool) -> PointProjection {
-        project_local_point_on_voxels(self, pt, solid)
+        self.project_local_point_and_get_vox_id(pt, solid)
             .map(|(proj, _)| proj)
             .unwrap_or(PointProjection::new(false, Vector::splat(Real::MAX)))
     }
 
     fn project_local_point_and_get_feature(&self, pt: Vector) -> (PointProjection, FeatureId) {
-        project_local_point_on_voxels(self, pt, false)
+        self.project_local_point_and_get_vox_id(pt, false)
             .map(|(proj, id)| (proj, FeatureId::Face(id)))
             .unwrap_or((
                 PointProjection::new(false, Vector::splat(Real::MAX)),
@@ -689,6 +688,74 @@ impl VdbShape {
         let y = (id / e.z) % e.y;
         let x = id / (e.y * e.z);
         IVector::new(x as i32, y as i32, z as i32)
+    }
+
+    /// Projects `pt` (in the shape's local space) onto the nearest voxel,
+    /// returning the projection and the projected-onto voxel's stable
+    /// identifier ([`Self::linear_id_of`]) — `None` when the tree holds no
+    /// voxel. With `solid`, a point inside a filled voxel is its own
+    /// projection.
+    ///
+    /// This replaces parry's generic search (`project_local_point_on_voxels`
+    /// re-scans a growing box from scratch until it can prove optimality)
+    /// with the tree as the acceleration structure, the way parry's own
+    /// `Voxels` shape uses its internal chunk BVH: the tree walk
+    /// ([`TreeErased::iter_leaf_views_near_point`](dust_vdb::TreeErased::iter_leaf_views_near_point))
+    /// hands out leaf blocks nearest first, each candidate projection
+    /// shrinks the distance to beat, and the loop stops at the first block
+    /// too far to beat it — leaving everything farther, whole subtrees
+    /// included, unvisited. Within a yielded leaf the point is projected
+    /// onto every occupied voxel, the same scan parry's `Voxels` runs at
+    /// each of its BVH leaves (chunks).
+    ///
+    /// Like both parry searches, the non-solid projection of a point lying
+    /// inside the shape is approximated: the point lands on the boundary of
+    /// the closest voxel, which isn't necessarily on the boundary of the
+    /// union of all the voxels.
+    fn project_local_point_and_get_vox_id(
+        &self,
+        pt: Vector,
+        solid: bool,
+    ) -> Option<(PointProjection, u32)> {
+        let base_cuboid = Cuboid::new(self.voxel_size / 2.0);
+        // The tree walk runs in voxel coordinates (the voxel at coordinate
+        // `c` spans `[c, c + 1)`): dividing the point by the per-axis voxel
+        // size maps local space onto them, and passing the voxel size as the
+        // walk's `scale` makes the distances it yields local-space again —
+        // directly comparable with candidate distances measured on `pt`.
+        let point = glam::Vec3::new(
+            pt.x / self.voxel_size.x,
+            pt.y / self.voxel_size.y,
+            pt.z / self.voxel_size.z,
+        );
+        let scale = glam::Vec3::new(self.voxel_size.x, self.voxel_size.y, self.voxel_size.z);
+
+        let mut best: Option<(PointProjection, u32)> = None;
+        let mut best_dist_sq = Real::MAX;
+        for (block_dist_sq, leaf) in self.tree.iter_leaf_views_near_point(point, scale) {
+            if block_dist_sq >= best_dist_sq {
+                // Blocks come nearest first: every voxel not yet visited is
+                // at least this far from `pt`, so the candidate is optimal.
+                break;
+            }
+            for (word_index, &word) in leaf.occupancy_words().iter().enumerate() {
+                let mut word = word;
+                while word != 0 {
+                    let bit = word_index as u32 * usize::BITS + word.trailing_zeros();
+                    word &= word - 1;
+                    let key = uvec_to_ivec(leaf.origin() + leaf.coord_of_bit(bit));
+                    let center = self.voxel_center(key);
+                    let mut candidate = base_cuboid.project_local_point(pt - center, solid);
+                    candidate.point += center;
+                    let candidate_dist_sq = (candidate.point - pt).length_squared();
+                    if candidate_dist_sq < best_dist_sq {
+                        best = Some((candidate, self.linear_id_of(key)));
+                        best_dist_sq = candidate_dist_sq;
+                    }
+                }
+            }
+        }
+        best
     }
 }
 
@@ -1288,4 +1355,123 @@ mod tests {
         ray_cast_matches_brute_force_wide,
         hierarchy!(3, 3, 2, TestLeaf)
     );
+
+    /// The tree-accelerated point projection against parry's generic
+    /// reference search ([`project_local_point_on_voxels`]), over the ray
+    /// tests' scattered content and a batch of pseudo-random query points,
+    /// with an isotropic and an anisotropic voxel size.
+    ///
+    /// Both searches weigh the identical candidate set — every occupied
+    /// voxel — so the distances they settle on must agree exactly. The
+    /// projected points themselves are not compared: two voxels can tie on
+    /// distance, and the searches may resolve such a tie to different
+    /// voxels. The generic search's `solid` fast path needs
+    /// `VoxelQuery::voxel` (still `todo!()` here), so the solid
+    /// expectations are asserted directly instead of against the reference.
+    #[test]
+    fn point_projection_matches_reference() {
+        use parry3d::query::details::project_local_point_on_voxels;
+
+        type DeepTree = Tree<hierarchy!(2, 2, 2, TestLeaf)>;
+
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        let filler = VoxelState::with_filled_neighbors(AxisMask::empty());
+
+        for voxel_size in [Vector::splat(1.0), Vector::new(0.25, 1.0, 3.0)] {
+            let mut tree = DeepTree::new();
+            let mut attributes = (
+                VdbVoxelTypeAttributes::new(64),
+                VdbVoxelMaskAttributes::new(16, 512),
+            );
+            let mut occupied = std::collections::HashSet::new();
+            let mut accessor = tree.accessor_mut(&mut attributes);
+            for x in 10..30 {
+                for y in 12..14 {
+                    for z in 5..40 {
+                        accessor.set(UVec3::new(x, y, z), (filler.voxel_type(), filler));
+                        occupied.insert((x as i32, y as i32, z as i32));
+                    }
+                }
+            }
+            for _ in 0..300 {
+                let coords = UVec3::new(next() % 64, next() % 64, next() % 64);
+                accessor.set(coords, (filler.voxel_type(), filler));
+                occupied.insert((coords.x as i32, coords.y as i32, coords.z as i32));
+            }
+            drop(accessor);
+
+            let (type_attributes, mask_attributes) = attributes;
+            let shape = VdbShape::new(
+                Arc::new(tree.snapshot()),
+                Arc::new(type_attributes),
+                Some(Arc::new(mask_attributes)),
+                voxel_size,
+            );
+
+            for _ in 0..200 {
+                // Fractional voxel coordinates from below the domain to
+                // above it, scaled into local space. The `0.0137` keeps them
+                // off the integer grid, so no query point sits exactly on a
+                // voxel face — where `is_inside` is a knife edge.
+                let coords = glam::Vec3::new(
+                    (next() % 8000) as f32 / 100.0 - 8.0 + 0.0137,
+                    (next() % 8000) as f32 / 100.0 - 8.0 + 0.0137,
+                    (next() % 8000) as f32 / 100.0 - 8.0 + 0.0137,
+                );
+                let pt = Vector::new(
+                    coords.x * voxel_size.x,
+                    coords.y * voxel_size.y,
+                    coords.z * voxel_size.z,
+                );
+
+                let (ours, _) = shape.project_local_point_and_get_vox_id(pt, false).unwrap();
+                let (reference, _) = project_local_point_on_voxels(&shape, pt, false).unwrap();
+                assert_eq!(
+                    (ours.point - pt).length(),
+                    (reference.point - pt).length(),
+                    "non-solid distance at {pt:?}, voxel size {voxel_size:?}"
+                );
+                assert_eq!(ours.is_inside, reference.is_inside, "is_inside at {pt:?}");
+
+                // Solid: inside a filled voxel, the point is its own
+                // projection; anywhere else `solid` changes nothing.
+                let key = (
+                    coords.x.floor() as i32,
+                    coords.y.floor() as i32,
+                    coords.z.floor() as i32,
+                );
+                let (solid_proj, _) = shape.project_local_point_and_get_vox_id(pt, true).unwrap();
+                if occupied.contains(&key) {
+                    assert!(solid_proj.is_inside, "inside a filled voxel at {pt:?}");
+                    assert!(
+                        (solid_proj.point - pt).length() < 1e-4,
+                        "a solid projection from inside is the point itself, at {pt:?}"
+                    );
+                } else {
+                    assert_eq!(solid_proj.point, ours.point, "solid == non-solid at {pt:?}");
+                    assert_eq!(solid_proj.is_inside, ours.is_inside);
+                }
+            }
+        }
+
+        // A shape over an empty tree projects nothing.
+        let mut tree = DeepTree::new();
+        let empty = VdbShape::new(
+            Arc::new(tree.snapshot()),
+            Arc::new(VdbVoxelTypeAttributes::new(64)),
+            None,
+            Vector::splat(1.0),
+        );
+        assert!(
+            empty
+                .project_local_point_and_get_vox_id(Vector::splat(3.0), true)
+                .is_none()
+        );
+    }
 }
