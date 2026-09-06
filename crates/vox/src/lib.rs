@@ -34,6 +34,7 @@ use std::mem::MaybeUninit;
 mod geometry;
 mod loader;
 mod material;
+pub mod physics;
 
 pub use material::{VoxLeafNode, VoxMaterial};
 
@@ -45,6 +46,7 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 pub use loader::*;
 
 pub use geometry::VoxGeometry;
+pub use physics::VoxModelCollider;
 
 /// A single MagicaVoxel palette entry: the RGBA color plus the per-index PBR
 /// material attributes decoded from a `MATL` chunk. 256 of these form the
@@ -143,6 +145,11 @@ impl Template for VoxInstanceTemplate {
         context
             .entity
             .insert(TLASInstance::<dust_pbr::PbrInstanceData>::new(blas));
+        // The model's collider, if it has one, becomes the instance's.
+        if let Some(collider) = context.entity.world().get::<VoxModelCollider>(blas) {
+            let collider = collider.0.clone();
+            context.entity.insert(collider);
+        }
         Ok(VoxInstance)
     }
 

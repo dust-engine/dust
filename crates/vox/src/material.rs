@@ -1,4 +1,3 @@
-
 use bevy::{asset::Asset, math::UVec3, reflect::TypePath};
 use dust_vdb::{AttributeAllocator, Node};
 use pumicite::{

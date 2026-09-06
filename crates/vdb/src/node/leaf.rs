@@ -24,9 +24,10 @@ where
     /// A pointer to self.occupancy.count_ones() material values
     pub value: T,
 }
-impl<const LOG2: ConstUVec3, T: Default> Default for LeafNode<LOG2, T> 
+impl<const LOG2: ConstUVec3, T: Default> Default for LeafNode<LOG2, T>
 where
-    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized {
+    [(); size_of_grid(LOG2) / size_of::<usize>() / 8]: Sized,
+{
     fn default() -> Self {
         Self {
             occupancy: [0; size_of_grid(LOG2) / size_of::<usize>() / 8],
@@ -58,7 +59,8 @@ pub trait IsLeaf: Node {
             .expect("get_occupancy_at: coords out of bounds")
     }
     fn set_occupancy_at(&mut self, coords: UVec3, value: bool) {
-        let occupancy: &mut BitSlice<usize, Lsb0> = BitSlice::from_slice_mut(self.get_occupancy_mut().as_mut());
+        let occupancy: &mut BitSlice<usize, Lsb0> =
+            BitSlice::from_slice_mut(self.get_occupancy_mut().as_mut());
         let offset = Self::get_inflated_attribute_offset(coords);
         occupancy.set(offset as usize, value);
     }
@@ -69,7 +71,9 @@ pub trait IsLeaf: Node {
     fn get_fitted_attribute_offset(&self, coords: UVec3) -> u32;
     fn get_inflated_attribute_offset(coords: UVec3) -> u32;
 
-    type Iterator<'a>: Iterator<Item = UVec3> where Self: 'a;
+    type Iterator<'a>: Iterator<Item = UVec3>
+    where
+        Self: 'a;
     fn iter<'a>(&'a self, offset: UVec3) -> Self::Iterator<'a>;
 }
 
@@ -80,7 +84,8 @@ where
 {
     type Value = T;
     type Occupancy = [usize; size_of_grid(LOG2) / size_of::<usize>() / 8];
-    const MAX_OCCUPANCY: Self::Occupancy = [usize::MAX; size_of_grid(LOG2) / size_of::<usize>() / 8];
+    const MAX_OCCUPANCY: Self::Occupancy =
+        [usize::MAX; size_of_grid(LOG2) / size_of::<usize>() / 8];
     fn get_fitted_attribute_offset(&self, coords: UVec3) -> u32 {
         let coords = coords & Self::EXTENT_MASK;
         let voxel_id = (coords.x << (LOG2.y + LOG2.z)) | (coords.y << LOG2.z) | coords.z;

@@ -356,8 +356,11 @@ where
             // real parent edges all the way up. The clear above uniquified
             // this path, as the collapse requires.
             if moved.is_none() {
-                self.attributes
-                    .free_attributes(self.set_ptrs[0], &old_value, mask_count_ones(old_mask.as_ref()));
+                self.attributes.free_attributes(
+                    self.set_ptrs[0],
+                    &old_value,
+                    mask_count_ones(old_mask.as_ref()),
+                );
             }
             self.tree.root.collapse(&mut self.tree.pool, coords);
             // The collapse freed nodes that both caches now reference.
@@ -401,8 +404,11 @@ where
                 // range, then remove the leaf — and any ancestors that empty
                 // with it — from the tree. The write that made the leaf hot
                 // uniquified its path, as the collapse requires.
-                self.attributes
-                    .free_attributes(last_leaf, &old_attrib_ptr, ROOT::LeafType::SIZE as u32);
+                self.attributes.free_attributes(
+                    last_leaf,
+                    &old_attrib_ptr,
+                    ROOT::LeafType::SIZE as u32,
+                );
                 self.tree
                     .root
                     .collapse(&mut self.tree.pool, self.last_leaf_coords);
@@ -626,7 +632,9 @@ mod tests {
     use glam::UVec3;
 
     use super::{Attributes, lowest_common_ancestor_level};
-    use crate::{AttributePtr, IsLeaf, Node, Tree, TreeErased, TreeErasedLeaf, TreeLike, hierarchy};
+    use crate::{
+        AttributePtr, IsLeaf, Node, Tree, TreeErased, TreeErasedLeaf, TreeLike, hierarchy,
+    };
 
     #[derive(Default)]
     struct TestAttributes {
@@ -854,7 +862,9 @@ mod tests {
         assert_eq!(tree.pools()[1].count(), baseline_internal + 1);
 
         // Releasing the snapshot reclaims the pinned nodes and their attributes.
-        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         assert_eq!(tree.snapshot_count(), 0);
         assert_eq!(tree.pools()[0].count(), baseline_leaves);
         assert_eq!(tree.pools()[1].count(), baseline_internal);
@@ -957,11 +967,15 @@ mod tests {
         drop(accessor);
 
         // Releasing v1 must not disturb v2 or the working state.
-        tree.release_snapshot(snap_v1, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snap_v1, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         let mut v2 = snap_v2.accessor(&attributes);
         assert_eq!(v2.get(coords), Some(2));
         drop(v2);
-        tree.release_snapshot(snap_v2, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snap_v2, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
 
         let mut accessor = tree.accessor_mut(&mut attributes);
         assert_eq!(accessor.get(coords), Some(3));
@@ -999,7 +1013,9 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(0, 1, 0)), Some(13));
         drop(accessor);
 
-        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
     }
@@ -1043,7 +1059,9 @@ mod tests {
             reader.join().unwrap();
         });
 
-        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
     }
@@ -1133,7 +1151,9 @@ mod tests {
         drop(accessor);
 
         // Releasing the snapshot frees the nodes the clear left behind.
-        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
@@ -1174,7 +1194,9 @@ mod tests {
         drop(accessor);
         assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
 
-        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
 
@@ -1299,7 +1321,9 @@ mod tests {
         drop(accessor);
         assert_eq!(attributes.attribute_maps[1], vec![12, 13]);
 
-        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         assert_eq!(tree.pools()[0].count(), 1);
         assert_eq!(tree.pools()[1].count(), 1);
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
@@ -1405,7 +1429,9 @@ mod tests {
         assert_eq!(reader.get(UVec3::new(144, 1, 0)), None);
         drop(reader);
 
-        tree.release_snapshot(snapshot, |index, leaf| drop_leaf_attributes(&mut attributes, index, leaf));
+        tree.release_snapshot(snapshot, |index, leaf| {
+            drop_leaf_attributes(&mut attributes, index, leaf)
+        });
         assert_eq!(tree.pools()[0].refcounts.len(), 0);
         assert_eq!(tree.pools()[1].refcounts.len(), 0);
     }
@@ -1592,8 +1618,14 @@ mod tests {
             coords: &UVec3,
         ) -> Self::Ptr {
             self.copies.push((original_leaf, new_leaf));
-            self.inner
-                .copy_attribute(original_leaf, new_leaf, ptr, original_mask, new_mask, coords)
+            self.inner.copy_attribute(
+                original_leaf,
+                new_leaf,
+                ptr,
+                original_mask,
+                new_mask,
+                coords,
+            )
         }
     }
 
@@ -1668,9 +1700,7 @@ mod tests {
         // leaves and the snapshot's view of the old leaf keep theirs.
         let snapshot = tree.snapshot();
         let edited_before = view_at(&tree, UVec3::ZERO).unwrap().leaf_index();
-        let untouched_before = view_at(&tree, UVec3::new(144, 0, 0))
-            .unwrap()
-            .leaf_index();
+        let untouched_before = view_at(&tree, UVec3::new(144, 0, 0)).unwrap().leaf_index();
         let mut accessor = tree.accessor_mut(&mut attributes);
         accessor.set(UVec3::new(0, 1, 1), 42);
         drop(accessor);
@@ -1700,10 +1730,7 @@ mod tests {
             min: UVec3::ZERO,
             max: UVec3::splat(3),
         };
-        assert_eq!(
-            view_at(&tree, UVec3::ZERO).unwrap().leaf_index(),
-            u32::MAX
-        );
+        assert_eq!(view_at(&tree, UVec3::ZERO).unwrap().leaf_index(), u32::MAX);
         let views: Vec<_> = tree.iter_leaf_views_in_range(range).collect();
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].leaf_index(), u32::MAX);
@@ -1879,5 +1906,4 @@ mod tests {
         assert_eq!(accessor.get(UVec3::new(7, 200, 31)), Some(15));
         drop(accessor);
     }
-
 }

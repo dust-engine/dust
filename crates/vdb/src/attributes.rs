@@ -31,8 +31,21 @@ pub trait Attributes {
     /// when the range layout changes.
     ///
     /// Each implementation uses one and ignores the other.
-    fn get_attribute(&self, leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, inflated_offset: u32) -> Self::Value;
-    fn set_attribute(&mut self, leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, inflated_offset: u32, value: Self::Value);
+    fn get_attribute(
+        &self,
+        leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        inflated_offset: u32,
+    ) -> Self::Value;
+    fn set_attribute(
+        &mut self,
+        leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        inflated_offset: u32,
+        value: Self::Value,
+    );
     fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32);
 
     /// Allocate a new attribute range using the new mask. Then, copy the attributes from the attribute range
@@ -187,8 +200,10 @@ where
         inflated_offset: u32,
     ) -> Self::Value {
         (
-            self.0.get_attribute(leaf, &ptr.0, fitted_offset, inflated_offset),
-            self.1.get_attribute(leaf, &ptr.1, fitted_offset, inflated_offset),
+            self.0
+                .get_attribute(leaf, &ptr.0, fitted_offset, inflated_offset),
+            self.1
+                .get_attribute(leaf, &ptr.1, fitted_offset, inflated_offset),
         )
     }
 

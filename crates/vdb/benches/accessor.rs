@@ -29,7 +29,6 @@
 
 extern crate test;
 
-
 use dust_vdb::{AttributeAllocator, Attributes, Tree, hierarchy};
 use glam::UVec3;
 use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
@@ -93,11 +92,24 @@ impl Attributes for BenchAttributes {
     type Ptr = u32;
     type Value = u8;
 
-    fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, _inflated_offset: u32) -> Self::Value {
+    fn get_attribute(
+        &self,
+        _leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        _inflated_offset: u32,
+    ) -> Self::Value {
         self.arena[*ptr as usize + fitted_offset as usize]
     }
 
-    fn set_attribute(&mut self, _leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, _inflated_offset: u32, value: Self::Value) {
+    fn set_attribute(
+        &mut self,
+        _leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        _inflated_offset: u32,
+        value: Self::Value,
+    ) {
         self.arena[*ptr as usize + fitted_offset as usize] = value;
     }
 

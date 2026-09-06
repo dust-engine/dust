@@ -212,6 +212,19 @@ where
         // `flipped` so the manifolds come out in the caller's order.
         match (self.downcast(g1), self.downcast(g2)) {
             (Some(vdb1), Some(vdb2)) => {
+                // Parry's voxels-voxels algorithm pairs every surface voxel of one shape
+                // with every voxel of the other within `prediction`, so its cost grows
+                // with the cube of `prediction / voxel_size`. A physics engine asking for
+                // a large speculative distance (avian's swept CCD requests the
+                // time-of-impact distance, over a unit at 1/16-unit voxels) turns one
+                // call into tens of millions of pairs and seconds of work. Contacts are
+                // therefore predicted at most one voxel ahead here; anything faster is
+                // the engine's continuous collision detection's job.
+                let max_prediction = vdb1
+                    .voxel_size()
+                    .max_element()
+                    .max(vdb2.voxel_size().max_element());
+                let prediction = prediction.min(max_prediction);
                 contact_manifolds_voxels_voxels(
                     &self.full(),
                     pos12,
@@ -240,7 +253,7 @@ where
                     contact_manifolds_voxels_composite_shape(
                         &self.full(),
                         pos12,
-                    vdb1,
+                        vdb1,
                         composite2,
                         prediction,
                         manifolds,

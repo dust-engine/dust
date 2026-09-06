@@ -15,6 +15,10 @@ dust_vox = { path = "crates/vox" }
 dust_pbr = { path = "crates/pbr" }
 dust_app = { path = "crates/app" }
 dust_gfxdebug = { path = "crates/gfxdebug" }
+dust_physics = { path = "crates/physics" }
+# The local avian branch: adds the pluggable `QueryDispatcher` resource that routes
+# `VdbShape` pairs to `dust_physics::VdbDispatcher`.
+avian3d = { path = "../avian/crates/avian3d", default-features = false, features = ["3d", "parry-f32"] }
 pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3" }
 bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3" }
 pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3" }
@@ -25,6 +29,8 @@ dust_vox.workspace = true
 dust_pbr.workspace = true
 dust_app.workspace = true
 dust_gfxdebug.workspace = true
+dust_physics.workspace = true
+avian3d.workspace = true
 bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
@@ -47,6 +53,12 @@ features = [
 
 [patch.crates-io]
 ash = { git = "https://github.com/0xbeefd1ed/ash.git", branch = "meta" }
+# The local parry fork `dust_physics` is written against; avian must see the same
+# `Shape` trait, so its crates.io `parry3d` resolves to the same package.
+parry3d = { path = "../parry/crates/parry3d" }
+# glamx 0.3 re-pointed at glam 0.32, the version bevy_math uses, so avian can pass
+# bevy vectors to parry unchanged.
+glamx = { path = "../glamx" }
 bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
 bevy_app = { path = "../bevy/crates/bevy_app" }
 bevy_window = { path = "../bevy/crates/bevy_window" }

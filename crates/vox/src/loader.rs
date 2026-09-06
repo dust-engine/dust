@@ -14,7 +14,10 @@ use pumicite::{Allocator, ash::vk};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{VoxGeometry, VoxGpuMaterial, VoxInstanceTemplate, VoxMaterial, VoxModel, VoxPalette};
+use crate::{
+    VoxGeometry, VoxGpuMaterial, VoxInstanceTemplate, VoxMaterial, VoxModel, VoxModelCollider,
+    VoxPalette,
+};
 
 pub enum GraphScene {
     Node {
@@ -228,6 +231,16 @@ impl<'a> SceneGraphTraverser<'a> {
                         z: size.z,
                     },
                 );
+                if transform.scale.cmplt(Vec3::ZERO).any() {
+                    // The scene graph mirrors this instance. A `VdbShape` collider
+                    // scales its voxel size by the transform scale and cannot
+                    // represent a reflection.
+                    tracing::warn!(
+                        "Vox model {} is instanced with a mirrored transform (scale {:?}); its collider will not match",
+                        shape_model.model_id,
+                        transform.scale
+                    );
+                }
                 let reference = self.model_reference(shape_model.model_id);
                 out.push(GraphScene::Leaf {
                     transform,
@@ -379,15 +392,16 @@ impl AssetLoader for VoxLoader {
                 let handles = models
                     .par_iter()
                     .map(|(model_id, model)| {
-                        let (tree, attribute_allocator) =
+                        let (mut tree, attribute_allocator) =
                             self.model_to_tree(model, settings.unit_size);
-                        (*model_id, (tree, attribute_allocator))
+                        let collider = tree.collider();
+                        (*model_id, (tree, attribute_allocator, collider))
                     })
                     .collect_vec_list();
                 handles
                     .into_iter()
                     .flat_map(|a| a)
-                    .map(|(model_id, (tree, material))| {
+                    .map(|(model_id, (tree, material, collider))| {
                         let geometry =
                             load_context.add_labeled_asset(format!("Geometry{}", model_id), tree);
                         let material = load_context
@@ -400,6 +414,7 @@ impl AssetLoader for VoxLoader {
                                 material: {material},
                                 palette: {palette_handle.clone()},
                             }
+                            { template_value(VoxModelCollider(collider)) }
                         }
                     })
                     .collect()

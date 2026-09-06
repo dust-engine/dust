@@ -1,11 +1,21 @@
+// `dust_vdb`'s tree API carries `generic_const_exprs` bounds; the accessor calls in
+// `paint_rainbow_wedge` need the feature here too.
+#![feature(generic_const_exprs)]
+
 mod flycam;
 
 use std::time::Duration;
 
+use avian3d::parry::query::{DefaultQueryDispatcher, QueryDispatcher as _};
+use avian3d::prelude::*;
 use bevy::prelude::*;
+use bevy::scene::template_value;
 use bevy::scene::{CachedSceneAsset, CommandsSceneExt};
 use bevy_pumicite::CreateDevice;
-use dust_vox::{VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxModelBLASRebuild, VoxPalette};
+use dust_vox::{
+    VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxModelBLASRebuild, VoxModelCollider,
+    VoxPalette,
+};
 use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode};
 
 use crate::flycam::{FlyCamera, FlyCameraPlugin};
@@ -36,6 +46,7 @@ const RAINBOW_STRIPE_VALUES: [u8; RAINBOW_NUM_STRIPES as usize] = [1, 22, 43, 86
 #[derive(Resource)]
 struct RainbowDemo {
     model_entity: Entity,
+    instance_entity: Entity,
     geometry: Handle<VoxGeometry>,
     material: Handle<VoxMaterial>,
     palette: Handle<VoxPalette>,
@@ -61,6 +72,13 @@ pub fn run() {
     app.add_plugins(dust_pbr::PbrRenderPlugin)
         .add_plugins(dust_vox::VoxPlugin)
         .add_plugins(dust_gfxdebug::GfxDebugPlugin);
+
+    // Physics: avian, with `VdbShape` collider pairs routed to `dust_physics`.
+    // Loaded `.vox` instances come with colliders; see `dust_vox::physics`.
+    app.add_plugins(PhysicsPlugins::default())
+        .insert_resource(QueryDispatcher::new(Box::new(
+            dust_physics::VdbDispatcher::new().chain(DefaultQueryDispatcher),
+        )));
 
     let primary_window = app
         .world_mut()
@@ -94,22 +112,47 @@ pub fn run() {
 fn startup_system(mut commands: Commands) {
     // `queue_spawn_scene` rather than `spawn_scene`: the `.vox` files are scene
     // dependencies that have not loaded yet, and queueing waits for them.
-    commands.queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/castle.vox"));
+    commands
+        .queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/castle.vox"))
+        .insert(RigidBody::Static);
 
     let teapot_origin = Vec3::new(12.2, 26.0, 18.0);
     let mut teapot_transform = Transform::from_translation(teapot_origin);
     teapot_transform.scale = Vec3::splat(1.5);
 
+    // The teapots are placed through a parent entity holding the transform and the
+    // rigid body: a `.vox` scene's root carries its own `Transform`, which replaces
+    // whatever the entity had once the queued scene applies. The scene root sits at
+    // the parent's origin, and avian attaches the instances' colliders to the
+    // nearest ancestor body.
+    let moving_teapot = commands
+        .spawn((
+            MovingTeapot {
+                origin: teapot_origin,
+                radius: 56.0,
+                height: 18.0,
+                angular_speed: 0.6,
+                spin_speed: 1.4,
+            },
+            // Animated by `animate_teapot_system`: physics follows its transform.
+            RigidBody::Kinematic,
+            teapot_transform,
+        ))
+        .id();
     commands
         .queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/teapot.vox"))
-        .insert(MovingTeapot {
-            origin: teapot_origin,
-            radius: 56.0,
-            height: 18.0,
-            angular_speed: 0.6,
-            spin_speed: 1.4,
-        })
-        .insert(teapot_transform);
+        .insert(ChildOf(moving_teapot));
+
+    // A second teapot, dropped onto the castle under gravity.
+    let falling_teapot = commands
+        .spawn((
+            RigidBody::Dynamic,
+            Transform::from_translation(Vec3::new(12.2, 110.0, 18.0)),
+        ))
+        .id();
+    commands
+        .queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/teapot.vox"))
+        .insert(ChildOf(falling_teapot));
     return;
 }
 
@@ -188,6 +231,7 @@ fn setup_rainbow_demo(
     let mut geometry = VoxGeometry::new(allocator.clone(), 1.0);
     let mut material = VoxMaterial::new(allocator.clone());
     paint_rainbow_wedge(&mut geometry, &mut material, 0);
+    let collider = geometry.collider();
     let geometry = geometries.add(geometry);
     let material = materials.add(material);
     let palette =
@@ -202,17 +246,23 @@ fn setup_rainbow_demo(
                 prefer_fast_build: true,
                 enable_compaction: false,
             }
+            { template_value(VoxModelCollider(collider)) }
         })
         .id();
-    commands.spawn_scene(bsn! {
-        Transform::from_translation(RAINBOW_WORLD_TRANSLATION)
-        VoxInstance {
-            model: model_entity
-        }
-    });
+    // The instance takes its collider from the model. `update_rainbow_demo_system`
+    // keeps both current after every edit, like it requests the BLAS rebuild.
+    let instance_entity = commands
+        .spawn_scene(bsn! {
+            Transform::from_translation(RAINBOW_WORLD_TRANSLATION)
+            VoxInstance {
+                model: model_entity
+            }
+        })
+        .id();
 
     commands.insert_resource(RainbowDemo {
         model_entity,
+        instance_entity,
         geometry,
         material,
         palette,
@@ -251,6 +301,11 @@ fn update_rainbow_demo_system(
         let mut new_geometry = VoxGeometry::new(allocator.clone(), 1.0);
         let mut new_material = VoxMaterial::new(allocator.clone());
         paint_rainbow_wedge(&mut new_geometry, &mut new_material, 0);
+        let collider = new_geometry.collider();
+        commands
+            .entity(demo.model_entity)
+            .insert(VoxModelCollider(collider.clone()));
+        commands.entity(demo.instance_entity).insert(collider);
         let new_geometry = geometries.add(new_geometry);
         let new_material = materials.add(new_material);
         demo.geometry = new_geometry.clone();
@@ -279,6 +334,11 @@ fn update_rainbow_demo_system(
     };
 
     paint_rainbow_wedge(&mut geometry, &mut material, demo.progress);
+    let collider = geometry.collider();
+    commands
+        .entity(demo.model_entity)
+        .insert(VoxModelCollider(collider.clone()));
+    commands.entity(demo.instance_entity).insert(collider);
 
     demo.progress += 1;
     if demo.progress >= RAINBOW_WEDGES {

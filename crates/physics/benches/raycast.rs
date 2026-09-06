@@ -170,7 +170,11 @@ fn build_scene() -> Scene {
         // Between the floor top (4) and the tower top (36), clear of the
         // tower's z range: crosses the whole domain through empty space.
         miss.push(Ray::new(
-            Vector::new(0.5, 6.0 + (next() % 28) as Real, (next() % 90) as Real + 0.5),
+            Vector::new(
+                0.5,
+                6.0 + (next() % 28) as Real,
+                (next() % 90) as Real + 0.5,
+            ),
             Vector::new(1.0, 0.0, 0.0),
         ));
         // From the domain's top corner, sinking toward the tower's side.
@@ -229,7 +233,11 @@ fn bench_tree(b: &mut Bencher, rays: fn(&Scene) -> &Vec<Ray>) {
     let scene = scene();
     b.iter(|| {
         for ray in rays(scene) {
-            black_box(scene.shape.cast_local_ray_and_get_normal(ray, MAX_TOI, true));
+            black_box(
+                scene
+                    .shape
+                    .cast_local_ray_and_get_normal(ray, MAX_TOI, true),
+            );
         }
     });
 }

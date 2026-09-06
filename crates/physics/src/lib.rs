@@ -63,8 +63,8 @@ pub use dispatcher::VdbDispatcher;
 use std::sync::Arc;
 
 use dust_vdb::{
-    AabbU32, Accessor, AttributePtr, ErasedLeafView, ErasedLeafVoxelIter, IsLeaf, Node, TreeLike,
-    TreeWithValues,
+    AabbU32, Accessor, AttributePtr, Attributes, ErasedLeafView, ErasedLeafVoxelIter, IsLeaf, Node,
+    TreeLike, TreeWithValues,
 };
 use glam::{DMat3, DVec3, UVec3, Vec3A};
 use parry3d::bounding_volume::{Aabb, BoundingSphere};
@@ -191,16 +191,65 @@ impl VdbVoxelTypeAttributes {
             _ => unreachable!(),
         }
     }
+
+    /// Computes the full store for one tree version from a
+    /// [`VdbVoxelMaskAttributes`] store already derived for that version
+    /// ([`VdbVoxelMaskAttributes::from_tree`]): every occupied voxel's type is
+    /// its state's [`VoxelState::voxel_type`], written at the voxel's leaf pool
+    /// index and in-leaf bit — the same slots an accessor-driven session fills.
+    /// Like the mask store's `from_tree`, this is for building collider
+    /// snapshots, not for driving through an editing session.
+    ///
+    /// `tree` must be the version `masks` was derived from: the leaf values'
+    /// attribute pointers address `masks` exactly as [`QueriedVoxel::voxel_state`]
+    /// does.
+    pub fn from_masks(tree: &dyn TreeWithValues<u32>, masks: &VdbVoxelMaskAttributes) -> Self {
+        let leaf_extent = tree.leaf_extent();
+        let mut store = Self::new(leaf_extent.x * leaf_extent.y * leaf_extent.z);
+        let bounds = tree.aabb();
+        if bounds.is_empty() {
+            return store;
+        }
+        for leaf in tree.iter_leaf_views_in_range_with_values(bounds) {
+            let ptr = *leaf.attribute_ptr() as usize;
+            // `iter_voxels` runs in occupancy-bit order, so `rank` is the
+            // `fitted_offset` the mask store is indexed by.
+            for (rank, coords) in leaf.iter_voxels().enumerate() {
+                let state = masks.values[ptr + rank];
+                store.set_attribute(
+                    leaf.leaf_index(),
+                    &(),
+                    rank as u32,
+                    leaf.bit_of_coord(coords),
+                    state.voxel_type(),
+                );
+            }
+        }
+        store
+    }
 }
 
 impl dust_vdb::Attributes for VdbVoxelTypeAttributes {
     type Ptr = ();
     /// The type of the attribute values. For a MagicaVoxel grid, this would be a u8 palette index.
     type Value = parry3d::shape::VoxelType;
-    fn get_attribute(&self, index: u32, _ptr: &Self::Ptr, _fitted_offset: u32, inflated_offset: u32) -> Self::Value {
+    fn get_attribute(
+        &self,
+        index: u32,
+        _ptr: &Self::Ptr,
+        _fitted_offset: u32,
+        inflated_offset: u32,
+    ) -> Self::Value {
         self.voxel_type(index, inflated_offset)
     }
-    fn set_attribute(&mut self, index: u32, _ptr: &Self::Ptr, _fitted_offset: u32, inflated_offset: u32, value: Self::Value) {
+    fn set_attribute(
+        &mut self,
+        index: u32,
+        _ptr: &Self::Ptr,
+        _fitted_offset: u32,
+        inflated_offset: u32,
+        value: Self::Value,
+    ) {
         let code = match value {
             parry3d::shape::VoxelType::Interior => 0,
             parry3d::shape::VoxelType::Face => 1,
@@ -210,8 +259,7 @@ impl dust_vdb::Attributes for VdbVoxelTypeAttributes {
         };
         self.set_code(index, inflated_offset, code);
     }
-    fn free_attributes(&mut self, _index: u32, _ptr: &Self::Ptr, _num_attributes: u32) {
-    }
+    fn free_attributes(&mut self, _index: u32, _ptr: &Self::Ptr, _num_attributes: u32) {}
 
     fn copy_attribute(
         &mut self,
@@ -260,7 +308,7 @@ impl dust_vdb::Attributes for VdbVoxelTypeAttributes {
 /// stored a second time.
 pub struct VdbVoxelMaskAttributes {
     attribute_allocator: dust_vdb::AttributeAllocator,
-    values: Vec<VoxelState>
+    values: Vec<VoxelState>,
 }
 
 impl VdbVoxelMaskAttributes {
@@ -387,8 +435,7 @@ impl dust_vdb::Attributes for VdbVoxelMaskAttributes {
     }
 
     fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
-        self.attribute_allocator
-            .free(*ptr, num_attributes);
+        self.attribute_allocator.free(*ptr, num_attributes);
     }
 
     fn copy_attribute(
@@ -490,7 +537,10 @@ impl RayCast for VdbShape {
             (ray.dir.z > 0.0) as i32 - (ray.dir.z < 0.0) as i32,
         );
 
-        for (leaf_t, leaf) in self.tree.iter_leaf_views_along_ray(origin, dir, min_t, max_t) {
+        for (leaf_t, leaf) in self
+            .tree
+            .iter_leaf_views_along_ray(origin, dir, min_t, max_t)
+        {
             // Start at the voxel where the ray enters this leaf's block,
             // clamped into the block — the same boundary-precision guard the
             // generic caster applies to its start voxel.
@@ -848,7 +898,11 @@ impl VoxelQuery for VdbShape {
         }
     }
 
-    fn voxels_in_range(&self, mins: IVector, maxs: IVector) -> impl Iterator<Item = Self::Voxel<'_>> {
+    fn voxels_in_range(
+        &self,
+        mins: IVector,
+        maxs: IVector,
+    ) -> impl Iterator<Item = Self::Voxel<'_>> {
         // Voxels only exist within the tree's addressable extent; clip the
         // requested semi-open box `[mins, maxs)` to it.
         let lo = mins.max(IVector::ZERO);
@@ -877,7 +931,6 @@ impl VoxelQuery for VdbShape {
         = VdbVoxel<'a>
     where
         Self: 'a;
-
 }
 
 /// The number of occupied voxels before `coords` in `leaf`'s occupancy words
@@ -1004,8 +1057,6 @@ impl<'a> Iterator for LeafVoxels<'a> {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1124,10 +1175,7 @@ mod tests {
             Vector::splat(1.0),
         );
 
-        assert_eq!(
-            with_masks.domain(),
-            [IVector::splat(2), IVector::splat(5)]
-        );
+        assert_eq!(with_masks.domain(), [IVector::splat(2), IVector::splat(5)]);
 
         // Every voxel comes out of the full iteration exactly once, with the
         // type and state that were stored for it.
@@ -1140,7 +1188,10 @@ mod tests {
             assert_eq!(voxel.voxel_type(), state.voxel_type());
             assert_eq!(voxel.voxel_state(), state);
             assert_eq!(voxel.linear_id(), with_masks.linear_id_of(key));
-            assert_eq!(voxel.center(), Vector::new(key.x as Real, key.y as Real, key.z as Real) + Vector::splat(0.5));
+            assert_eq!(
+                voxel.center(),
+                Vector::new(key.x as Real, key.y as Real, key.z as Real) + Vector::splat(0.5)
+            );
         }
         assert_eq!(seen.len(), 27);
 
@@ -1215,7 +1266,9 @@ mod tests {
 
         // An axis ray from outside hits the cube's face at x = 2.
         let ray = Ray::new(Vector::new(-1.0, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
-        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        let hit = shape
+            .cast_local_ray_and_get_normal(&ray, 1000.0, true)
+            .unwrap();
         assert_eq!(hit.time_of_impact, 3.0);
         assert_eq!(hit.normal, Vector::new(-1.0, 0.0, 0.0));
         assert_eq!(
@@ -1226,12 +1279,16 @@ mod tests {
         // From far away: the walk crosses a long run of absent leaves, which
         // the tree skips instead of stepping voxel by voxel.
         let ray = Ray::new(Vector::new(-1000.0, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
-        let hit = shape.cast_local_ray_and_get_normal(&ray, 2000.0, true).unwrap();
+        let hit = shape
+            .cast_local_ray_and_get_normal(&ray, 2000.0, true)
+            .unwrap();
         assert_eq!(hit.time_of_impact, 1002.0);
 
         // Against the direction: hits the face at x = 5.
         let ray = Ray::new(Vector::new(10.5, 3.5, 3.5), Vector::new(-1.0, 0.0, 0.0));
-        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        let hit = shape
+            .cast_local_ray_and_get_normal(&ray, 1000.0, true)
+            .unwrap();
         assert_eq!(hit.time_of_impact, 5.5);
         assert_eq!(hit.normal, Vector::new(1.0, 0.0, 0.0));
         assert_eq!(
@@ -1241,7 +1298,11 @@ mod tests {
 
         // A parameter budget shorter than the distance is a miss.
         let ray = Ray::new(Vector::new(-1.0, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
-        assert!(shape.cast_local_ray_and_get_normal(&ray, 2.0, true).is_none());
+        assert!(
+            shape
+                .cast_local_ray_and_get_normal(&ray, 2.0, true)
+                .is_none()
+        );
 
         // Through the blocks of allocated leaves but off every occupied
         // voxel: the walk yields those leaves, finds their crossed rows
@@ -1257,7 +1318,9 @@ mod tests {
         // at t = 0.7, so it enters the corner voxel (2, 2, 2) through its
         // z face.
         let ray = Ray::new(Vector::new(1.5, 1.4, 1.3), Vector::new(1.0, 1.0, 1.0));
-        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        let hit = shape
+            .cast_local_ray_and_get_normal(&ray, 1000.0, true)
+            .unwrap();
         assert!((hit.time_of_impact - 0.7).abs() < 1.0e-5);
         assert_eq!(hit.normal, Vector::new(0.0, 0.0, -1.0));
         assert_eq!(
@@ -1267,7 +1330,9 @@ mod tests {
 
         // From inside the cube, solid: immediate impact.
         let ray = Ray::new(Vector::new(3.5, 3.5, 3.5), Vector::new(1.0, 0.0, 0.0));
-        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        let hit = shape
+            .cast_local_ray_and_get_normal(&ray, 1000.0, true)
+            .unwrap();
         assert_eq!(hit.time_of_impact, 0.0);
 
         // From inside, not solid: the boundary of the voxel containing the
@@ -1281,7 +1346,9 @@ mod tests {
         // spans x in [4, 10), y in [2, 5), z in [1, 2.5) of local space.
         let shape = cube_shape(Vector::new(2.0, 1.0, 0.5));
         let ray = Ray::new(Vector::new(-1.0, 3.5, 1.75), Vector::new(1.0, 0.0, 0.0));
-        let hit = shape.cast_local_ray_and_get_normal(&ray, 1000.0, true).unwrap();
+        let hit = shape
+            .cast_local_ray_and_get_normal(&ray, 1000.0, true)
+            .unwrap();
         assert_eq!(hit.time_of_impact, 5.0);
         assert_eq!(hit.normal, Vector::new(-1.0, 0.0, 0.0));
         assert_eq!(
@@ -1308,81 +1375,80 @@ mod tests {
             fn $name() {
                 type DeepTree = Tree<$root>;
                 let mut tree = DeepTree::new();
-        let mut attributes = (
-            VdbVoxelTypeAttributes::new(64),
-            VdbVoxelMaskAttributes::new(16, 512),
-        );
-
-        // A small deterministic generator; the ray cast never reads voxel
-        // states, so the stored value just has to be non-default.
-        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
-        let mut next = move || {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (state >> 33) as u32
-        };
-        let filler = VoxelState::with_filled_neighbors(AxisMask::empty());
-
-        let mut occupied = std::collections::HashSet::new();
-        let mut accessor = tree.accessor_mut(&mut attributes);
-        for x in 10..30 {
-            for y in 12..14 {
-                for z in 5..40 {
-                    accessor.set(UVec3::new(x, y, z), (filler.voxel_type(), filler));
-                    occupied.insert((x, y, z));
-                }
-            }
-        }
-        for _ in 0..300 {
-            let coords = UVec3::new(next() % 64, next() % 64, next() % 64);
-            accessor.set(coords, (filler.voxel_type(), filler));
-            occupied.insert((coords.x, coords.y, coords.z));
-        }
-        drop(accessor);
-
-        let (type_attributes, mask_attributes) = attributes;
-        let shape = VdbShape::new(
-            Arc::new(tree.snapshot()),
-            Arc::new(type_attributes),
-            Some(Arc::new(mask_attributes)),
-            Vector::splat(1.0),
-        );
-        let occupied: Vec<IVector> = occupied
-            .into_iter()
-            .map(|(x, y, z)| IVector::new(x as i32, y as i32, z as i32))
-            .collect();
-
-        let mut frand = move |lo: f32, hi: f32| {
-            lo + (next() as f32 / u32::MAX as f32) * (hi - lo)
-        };
-        for _ in 0..200 {
-            let ray = Ray::new(
-                Vector::new(frand(-20.0, 84.0), frand(-20.0, 84.0), frand(-20.0, 84.0)),
-                Vector::new(frand(-1.0, 1.0), frand(-1.0, 1.0), frand(-1.0, 1.0)),
-            );
-            if ray.dir.length() < 1.0e-3 {
-                continue;
-            }
-            for max_t in [500.0, 30.0] {
-                let fast = shape.cast_local_ray_and_get_normal(&ray, max_t, true);
-                let slow = occupied
-                    .iter()
-                    .filter_map(|&key| {
-                        shape
-                            .voxel_aabb(key)
-                            .cast_local_ray_and_get_normal(&ray, max_t, true)
-                            .map(|hit| hit.time_of_impact)
-                    })
-                    .min_by(|a, b| a.partial_cmp(b).unwrap());
-                assert_eq!(
-                    fast.map(|hit| hit.time_of_impact),
-                    slow,
-                    "ray {:?} disagrees with the brute-force reference",
-                    ray,
+                let mut attributes = (
+                    VdbVoxelTypeAttributes::new(64),
+                    VdbVoxelMaskAttributes::new(16, 512),
                 );
-            }
-        }
+
+                // A small deterministic generator; the ray cast never reads voxel
+                // states, so the stored value just has to be non-default.
+                let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+                let mut next = move || {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (state >> 33) as u32
+                };
+                let filler = VoxelState::with_filled_neighbors(AxisMask::empty());
+
+                let mut occupied = std::collections::HashSet::new();
+                let mut accessor = tree.accessor_mut(&mut attributes);
+                for x in 10..30 {
+                    for y in 12..14 {
+                        for z in 5..40 {
+                            accessor.set(UVec3::new(x, y, z), (filler.voxel_type(), filler));
+                            occupied.insert((x, y, z));
+                        }
+                    }
+                }
+                for _ in 0..300 {
+                    let coords = UVec3::new(next() % 64, next() % 64, next() % 64);
+                    accessor.set(coords, (filler.voxel_type(), filler));
+                    occupied.insert((coords.x, coords.y, coords.z));
+                }
+                drop(accessor);
+
+                let (type_attributes, mask_attributes) = attributes;
+                let shape = VdbShape::new(
+                    Arc::new(tree.snapshot()),
+                    Arc::new(type_attributes),
+                    Some(Arc::new(mask_attributes)),
+                    Vector::splat(1.0),
+                );
+                let occupied: Vec<IVector> = occupied
+                    .into_iter()
+                    .map(|(x, y, z)| IVector::new(x as i32, y as i32, z as i32))
+                    .collect();
+
+                let mut frand =
+                    move |lo: f32, hi: f32| lo + (next() as f32 / u32::MAX as f32) * (hi - lo);
+                for _ in 0..200 {
+                    let ray = Ray::new(
+                        Vector::new(frand(-20.0, 84.0), frand(-20.0, 84.0), frand(-20.0, 84.0)),
+                        Vector::new(frand(-1.0, 1.0), frand(-1.0, 1.0), frand(-1.0, 1.0)),
+                    );
+                    if ray.dir.length() < 1.0e-3 {
+                        continue;
+                    }
+                    for max_t in [500.0, 30.0] {
+                        let fast = shape.cast_local_ray_and_get_normal(&ray, max_t, true);
+                        let slow = occupied
+                            .iter()
+                            .filter_map(|&key| {
+                                shape
+                                    .voxel_aabb(key)
+                                    .cast_local_ray_and_get_normal(&ray, max_t, true)
+                                    .map(|hit| hit.time_of_impact)
+                            })
+                            .min_by(|a, b| a.partial_cmp(b).unwrap());
+                        assert_eq!(
+                            fast.map(|hit| hit.time_of_impact),
+                            slow,
+                            "ray {:?} disagrees with the brute-force reference",
+                            ray,
+                        );
+                    }
+                }
             }
         };
     }
@@ -1453,7 +1519,11 @@ mod tests {
 
         let block_volume = voxel_size.x * voxel_size.y * voxel_size.z;
         let expected_mass = keys.len() as Real * block_volume * density;
-        assert!((ours.mass() - expected_mass).abs() <= expected_mass * 1e-5, "mass {}", ours.mass());
+        assert!(
+            (ours.mass() - expected_mass).abs() <= expected_mass * 1e-5,
+            "mass {}",
+            ours.mass()
+        );
         assert!(
             (ours.mass() - reference.mass()).abs() <= expected_mass * 1e-5,
             "mass {} vs reference {}",
@@ -1468,7 +1538,9 @@ mod tests {
         );
         let ours_inertia = ours.reconstruct_inertia_matrix().to_cols_array();
         let reference_inertia = reference.reconstruct_inertia_matrix().to_cols_array();
-        let scale = reference_inertia.iter().fold(0.0 as Real, |m, v| m.max(v.abs()));
+        let scale = reference_inertia
+            .iter()
+            .fold(0.0 as Real, |m, v| m.max(v.abs()));
         for (a, b) in ours_inertia.iter().zip(&reference_inertia) {
             assert!(
                 (a - b).abs() <= scale * 1e-4,
@@ -1477,7 +1549,10 @@ mod tests {
         }
         // The arm makes the principal frame non-axis-aligned: the reconstructed
         // matrix must have off-diagonal terms, or the test isn't exercising them.
-        assert!(ours_inertia[1].abs() > scale * 1e-3, "inertia {ours_inertia:?} is diagonal");
+        assert!(
+            ours_inertia[1].abs() > scale * 1e-3,
+            "inertia {ours_inertia:?} is diagonal"
+        );
 
         let empty = shape_of(&[], voxel_size).mass_properties(density);
         assert_eq!(empty.mass(), 0.0);

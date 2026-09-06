@@ -12,13 +12,13 @@ pub mod pool;
 mod traversal;
 mod tree;
 
-pub use tree::*;
 pub use accessor::*;
 pub use attributes::{
     AttributeAllocator, AttributePtr, Attributes, IsDefault, MaskUnionIter, iter_mask_union,
     mask_count_ones,
 };
 pub use node::*;
+pub use tree::*;
 
 pub extern crate self as dust_vdb;
 

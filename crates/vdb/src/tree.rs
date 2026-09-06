@@ -1,4 +1,8 @@
-use std::{collections::BinaryHeap, mem::{ManuallyDrop, MaybeUninit}, ops::Deref};
+use std::{
+    collections::BinaryHeap,
+    mem::{ManuallyDrop, MaybeUninit},
+    ops::Deref,
+};
 
 use glam::{BVec3A, IVec3, UVec3, Vec3, Vec3A};
 
@@ -221,7 +225,6 @@ where
         num_dropped
     }
 
-
     /// Restore the tree to the state captured by `snapshot` (undo).
     ///
     /// The snapshot stays valid and must still be released eventually; an undo
@@ -252,8 +255,7 @@ where
     type Root = ROOT;
 
     fn iter_leaf(&self) -> Self::Iterator<'_> {
-        self.root
-            .iter_leaf(&self.pool, UVec3::ZERO)
+        self.root.iter_leaf(&self.pool, UVec3::ZERO)
     }
 
     fn accessor<'a, A: Attributes>(&'a self, attributes: &'a A) -> crate::Accessor<'a, ROOT, A>
@@ -272,8 +274,7 @@ where
     type Root = ROOT;
 
     fn iter_leaf(&self) -> Self::Iterator<'_> {
-        self.root
-            .iter_leaf(&self.pool, UVec3::ZERO)
+        self.root.iter_leaf(&self.pool, UVec3::ZERO)
     }
 
     fn accessor<'a, A: Attributes>(&'a self, attributes: &'a A) -> crate::Accessor<'a, ROOT, A>
@@ -322,11 +323,7 @@ where
         ErasedLeafViewRayIter::new(&self.root, &self.pool, origin, dir, t0, t1)
     }
 
-    fn iter_leaf_views_near_point(
-        &self,
-        point: Vec3,
-        scale: Vec3,
-    ) -> ErasedLeafViewNearIter<'_> {
+    fn iter_leaf_views_near_point(&self, point: Vec3, scale: Vec3) -> ErasedLeafViewNearIter<'_> {
         ErasedLeafViewNearIter::new(&self.root, &self.pool, point, scale)
     }
 }
@@ -380,11 +377,7 @@ where
         ErasedLeafViewRayIter::new(&self.root, &self.pool, origin, dir, t0, t1)
     }
 
-    fn iter_leaf_views_near_point(
-        &self,
-        point: Vec3,
-        scale: Vec3,
-    ) -> ErasedLeafViewNearIter<'_> {
+    fn iter_leaf_views_near_point(&self, point: Vec3, scale: Vec3) -> ErasedLeafViewNearIter<'_> {
         ErasedLeafViewNearIter::new(&self.root, &self.pool, point, scale)
     }
 }
@@ -418,7 +411,9 @@ where
 /// ```
 pub trait TreeLike: TreeErasedLeaf {
     /// Iterator returned by [`TreeLike::iter_leaf`]
-    type Iterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)> where Self: 'a;
+    type Iterator<'a>: Iterator<Item = (UVec3, &'a Self::LeafType)>
+    where
+        Self: 'a;
 
     /// The hierarchy's root node type: the tree covers `Root::EXTENT`, and
     /// its leaves are `Root::LeafType` — the same type as
@@ -431,7 +426,10 @@ pub trait TreeLike: TreeErasedLeaf {
     /// ([`Accessor::leaf_view`](crate::Accessor::leaf_view), or
     /// [`Accessor::get`](crate::Accessor::get) when `attributes` is a real
     /// store). Pass `&()` as `attributes` for occupancy-only access.
-    fn accessor<'a, A: Attributes>(&'a self, attributes: &'a A) -> crate::Accessor<'a, Self::Root, A>
+    fn accessor<'a, A: Attributes>(
+        &'a self,
+        attributes: &'a A,
+    ) -> crate::Accessor<'a, Self::Root, A>
     where
         [(); Self::Root::LEVEL + 1]: Sized,
         <Self::LeafType as IsLeaf>::Value: AttributePtr<A::Ptr>;
@@ -581,8 +579,7 @@ pub trait TreeErased: Send + Sync + 'static {
     /// never reads was never visited. The frontier's size varies with
     /// occupancy, so — unlike the other erased walks — creating this
     /// iterator allocates.
-    fn iter_leaf_views_near_point(&self, point: Vec3, scale: Vec3)
-    -> ErasedLeafViewNearIter<'_>;
+    fn iter_leaf_views_near_point(&self, point: Vec3, scale: Vec3) -> ErasedLeafViewNearIter<'_>;
 }
 
 /// A [`TreeErased`] whose leaf values project an attribute pointer of type
@@ -623,20 +620,14 @@ pub trait TreeWithValues<V>: TreeErased {
     /// Like [`TreeErased::iter_leaf_views_in_range`], with each yielded view
     /// additionally carrying the leaf value's projected attribute pointer
     /// ([`ErasedLeafView::attribute_ptr`]).
-    fn iter_leaf_views_in_range_with_values(
-        &self,
-        range: AabbU32,
-    ) -> ErasedLeafViewIter<'_, V>;
+    fn iter_leaf_views_in_range_with_values(&self, range: AabbU32) -> ErasedLeafViewIter<'_, V>;
 }
 
 impl<T: TreeErasedLeaf, V> TreeWithValues<V> for T
 where
     <T::LeafType as IsLeaf>::Value: AttributePtr<V>,
 {
-    fn iter_leaf_views_in_range_with_values(
-        &self,
-        range: AabbU32,
-    ) -> ErasedLeafViewIter<'_, V> {
+    fn iter_leaf_views_in_range_with_values(&self, range: AabbU32) -> ErasedLeafViewIter<'_, V> {
         // `LeafType` is exactly the leaf type of the tree the plain walk
         // iterates, which is what makes the byte reinterpretation inside
         // `with_values` correct.
@@ -1296,8 +1287,8 @@ where
 
 /// See [`ErasedVoxelIter`]'s impls: the raw pointers are borrows of live,
 /// unconditionally-`Sync` nodes.
-unsafe impl<T: Send> Send for ErasedLeafViewIter<'_ , T> {}
-unsafe impl<T: Sync> Sync for ErasedLeafViewIter<'_ , T> {}
+unsafe impl<T: Send> Send for ErasedLeafViewIter<'_, T> {}
+unsafe impl<T: Sync> Sync for ErasedLeafViewIter<'_, T> {}
 
 impl<'a> ErasedLeafViewIter<'a, ()> {
     /// Walk the leaves of the tree rooted at `root`, whose non-root nodes
@@ -1539,7 +1530,6 @@ impl RayFrame {
     };
 }
 
-
 /// The ray parameter interval over which `origin + dir * t` lies inside the
 /// box `[min, min + extent)`, already intersected with `[t0, t1]` — the
 /// interval is empty (and the box missed) unless `t_in <= t_out`. This is
@@ -1553,7 +1543,14 @@ impl RayFrame {
 /// encodes. (The select, not the `min`/`max`, must decide this: SSE and NEON
 /// disagree on how min/max treat a NaN operand.)
 #[inline(always)]
-fn ray_box_t(origin: Vec3A, inv_dir: Vec3A, min: Vec3A, extent: Vec3A, t0: f32, t1: f32) -> (f32, f32) {
+fn ray_box_t(
+    origin: Vec3A,
+    inv_dir: Vec3A,
+    min: Vec3A,
+    extent: Vec3A,
+    t0: f32,
+    t1: f32,
+) -> (f32, f32) {
     let near = (min - origin) * inv_dir;
     let far = (min + extent - origin) * inv_dir;
     let nan = near.is_nan_mask() | far.is_nan_mask();
@@ -1893,13 +1890,12 @@ impl<'a> Iterator for ErasedLeafViewRayIter<'a> {
                 let recip = self.child_extent_recip[child_level - 1];
                 let cell_min_f = cell_min.as_vec3a();
                 let p_in = (self.origin + self.dir * t_in - cell_min_f) * recip;
-                let p_out =
-                    (self.origin + self.dir * t_next.min(self.t1) - cell_min_f) * recip;
+                let p_out = (self.origin + self.dir * t_next.min(self.t1) - cell_min_f) * recip;
                 let widest = child_info.fanout.as_ivec3() - IVec3::ONE;
-                let lo = (p_in.min(p_out).floor().as_ivec3() - IVec3::ONE)
-                    .clamp(IVec3::ZERO, widest);
-                let hi = (p_in.max(p_out).floor().as_ivec3() + IVec3::ONE)
-                    .clamp(IVec3::ZERO, widest);
+                let lo =
+                    (p_in.min(p_out).floor().as_ivec3() - IVec3::ONE).clamp(IVec3::ZERO, widest);
+                let hi =
+                    (p_in.max(p_out).floor().as_ivec3() + IVec3::ONE).clamp(IVec3::ZERO, widest);
                 // Bits z in lo.z..=hi.z, replicated into the bytes y in
                 // lo.y..=hi.y (byte-aligned, so the multiply cannot carry).
                 let z_bits = (2u64 << hi.z) - (1u64 << lo.z);
@@ -2230,17 +2226,14 @@ impl<'a> ErasedLeafViewNearIter<'a> {
                 // One byte per (x, y) row of 8 z cells.
                 for y in 0..8usize {
                     let row = (word >> (8 * y)) & 0xff;
-                    if row == 0
-                        || tables.far[0][x] + tables.far[1][y] + tables.min_far_z >= upper
-                    {
+                    if row == 0 || tables.far[0][x] + tables.far[1][y] + tables.min_far_z >= upper {
                         continue;
                     }
                     let mut row = row;
                     while row != 0 {
                         let z = row.trailing_zeros() as usize;
                         row &= row - 1;
-                        upper =
-                            upper.min(tables.far[0][x] + tables.far[1][y] + tables.far[2][z]);
+                        upper = upper.min(tables.far[0][x] + tables.far[1][y] + tables.far[2][z]);
                     }
                 }
             } else {
@@ -2311,8 +2304,7 @@ impl<'a> ErasedLeafViewNearIter<'a> {
                 }
                 for y in 0..8usize {
                     let row = (word >> (8 * y)) & 0xff;
-                    if row == 0
-                        || tables.near[0][x] + tables.near[1][y] + tables.min_near_z > upper
+                    if row == 0 || tables.near[0][x] + tables.near[1][y] + tables.min_near_z > upper
                     {
                         continue;
                     }
@@ -2320,8 +2312,7 @@ impl<'a> ErasedLeafViewNearIter<'a> {
                     while row != 0 {
                         let z = row.trailing_zeros() as usize;
                         row &= row - 1;
-                        let dist_sq =
-                            tables.near[0][x] + tables.near[1][y] + tables.near[2][z];
+                        let dist_sq = tables.near[0][x] + tables.near[1][y] + tables.near[2][z];
                         if dist_sq > upper {
                             continue;
                         }
@@ -2384,8 +2375,13 @@ impl<'a> Iterator for ErasedLeafViewNearIter<'a> {
             }
             let info = self.levels[entry.level as usize - 1];
             // One table fill serves both halves of the open.
-            let tables =
-                axis_tables(self.point, self.scale, entry.origin, info.child_extent, info.fanout);
+            let tables = axis_tables(
+                self.point,
+                self.scale,
+                entry.origin,
+                info.child_extent,
+                info.fanout,
+            );
             self.tighten_upper(&entry, &info, &tables);
             self.push_children(&entry, &info, &tables, entry.level - 1);
         }

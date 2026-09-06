@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 dust_vdb.workspace = true
 dust_pbr.workspace = true
+dust_physics.workspace = true
+avian3d.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
 bevy.workspace = true

@@ -30,8 +30,9 @@
 
 extern crate test;
 
-
-use dust_vdb::{AttributeAllocator, Attributes, Tree, TreeErased, TreeErasedLeaf, TreeLike, hierarchy};
+use dust_vdb::{
+    AttributeAllocator, Attributes, Tree, TreeErased, TreeErasedLeaf, TreeLike, hierarchy,
+};
 use glam::UVec3;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use test::{Bencher, black_box};
@@ -79,11 +80,24 @@ impl Attributes for BenchAttributes {
     type Ptr = u32;
     type Value = u8;
 
-    fn get_attribute(&self, _leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, _inflated_offset: u32) -> Self::Value {
+    fn get_attribute(
+        &self,
+        _leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        _inflated_offset: u32,
+    ) -> Self::Value {
         self.arena[*ptr as usize + fitted_offset as usize]
     }
 
-    fn set_attribute(&mut self, _leaf: u32, ptr: &Self::Ptr, fitted_offset: u32, _inflated_offset: u32, value: Self::Value) {
+    fn set_attribute(
+        &mut self,
+        _leaf: u32,
+        ptr: &Self::Ptr,
+        fitted_offset: u32,
+        _inflated_offset: u32,
+        value: Self::Value,
+    ) {
         self.arena[*ptr as usize + fitted_offset as usize] = value;
     }
 
@@ -143,8 +157,7 @@ fn populate(coords: impl IntoIterator<Item = UVec3>) -> BenchTree {
 /// Every voxel of the `DENSE_EXTENT`³ box, in scan order.
 fn dense_tree() -> BenchTree {
     populate((0..DENSE_EXTENT).flat_map(|x| {
-        (0..DENSE_EXTENT)
-            .flat_map(move |y| (0..DENSE_EXTENT).map(move |z| UVec3::new(x, y, z)))
+        (0..DENSE_EXTENT).flat_map(move |y| (0..DENSE_EXTENT).map(move |z| UVec3::new(x, y, z)))
     }))
 }
 
