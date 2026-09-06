@@ -62,11 +62,14 @@ pub use dispatcher::VdbDispatcher;
 
 use std::sync::Arc;
 
-use dust_vdb::{AabbU32, Accessor, AttributePtr, ErasedLeafView, IsLeaf, Node, TreeLike, TreeWithValues};
-use glam::{UVec3, Vec3A};
+use dust_vdb::{
+    AabbU32, Accessor, AttributePtr, ErasedLeafView, ErasedLeafVoxelIter, IsLeaf, Node, TreeLike,
+    TreeWithValues,
+};
+use glam::{DMat3, DVec3, UVec3, Vec3A};
 use parry3d::bounding_volume::{Aabb, BoundingSphere};
 use parry3d::mass_properties::MassProperties;
-use parry3d::math::{IVector, Real, Vector};
+use parry3d::math::{IVector, Matrix, Real, Vector};
 use parry3d::query::{PointProjection, PointQuery, Ray, RayCast, RayIntersection};
 use parry3d::shape::{
     AxisMask, Cuboid, FeatureId, QueriedVoxel, Shape, ShapeType, TypedShape, VoxelQuery,
@@ -605,7 +608,71 @@ impl Shape for VdbShape {
     }
 
     fn mass_properties(&self, density: Real) -> MassProperties {
-        MassProperties::from_voxels(density, self)
+        // Every occupied voxel is one cuboid of the voxel size, and the shape's
+        // mass properties are their sum — what `MassProperties::from_voxels`
+        // computes for parry's own `Voxels` storage. Occupancy bits are the truth
+        // here: the type store never holds `VoxelType::Empty`, so there is no
+        // per-voxel emptiness test.
+        //
+        // Instead of visiting every voxel twice (once for the center of mass, once
+        // to shift each block's inertia to it), one pass over the leaves' occupancy
+        // words accumulates the sums the parallel axis theorem needs, and the shift
+        // is applied to the totals. With `n` occupied voxels of centers `c_i`, each
+        // of block mass `m` and inertia `I_block` about its own center, the inertia
+        // about `com = Σc_i / n` is
+        //
+        //     n·I_block + m·Σ(|r_i|²·1 − r_i·r_iᵀ),    r_i = c_i − com,
+        //
+        // and Σ r_i·r_iᵀ = Σ c_i·c_iᵀ − n·com·comᵀ, so `Σc_i` and `Σ c_i·c_iᵀ`
+        // suffice. They are summed in `f64` so large trees don't lose the
+        // off-diagonal terms to rounding.
+        let bounds = self.tree.aabb();
+        if bounds.is_empty() {
+            return MassProperties::default();
+        }
+        let size = DVec3::new(
+            self.voxel_size.x as f64,
+            self.voxel_size.y as f64,
+            self.voxel_size.z as f64,
+        );
+        let mut n: u64 = 0;
+        let mut sum_c = DVec3::ZERO;
+        let mut sum_cc = DMat3::ZERO;
+        for leaf in self.tree.iter_leaf_views_in_range(bounds) {
+            for coords in leaf.iter_voxels() {
+                let c = (coords.as_dvec3() + 0.5) * size;
+                n += 1;
+                sum_c += c;
+                sum_cc += DMat3::from_cols(c * c.x, c * c.y, c * c.z);
+            }
+        }
+        if n == 0 {
+            return MassProperties::default();
+        }
+
+        // The block: `MassProperties::from_cuboid` with the voxel's half extents.
+        let half = size / 2.0;
+        let block_mass = size.x * size.y * size.z * density as f64;
+        let block_inertia = DVec3::new(
+            half.y * half.y + half.z * half.z,
+            half.x * half.x + half.z * half.z,
+            half.x * half.x + half.y * half.y,
+        ) / 3.0
+            * block_mass;
+
+        let n_f = n as f64;
+        let com = sum_c / n_f;
+        // Σ r_i·r_iᵀ, from the raw second moments.
+        let rr = sum_cc - DMat3::from_cols(com * com.x, com * com.y, com * com.z) * n_f;
+        let inertia = DMat3::from_diagonal(block_inertia * n_f)
+            + (DMat3::from_diagonal(DVec3::splat(rr.x_axis.x + rr.y_axis.y + rr.z_axis.z)) - rr)
+                * block_mass;
+
+        MassProperties::with_inertia_matrix(
+            Vector::new(com.x as Real, com.y as Real, com.z as Real),
+            (block_mass * n_f) as Real,
+            Matrix::from_cols_array(&inertia.to_cols_array().map(|v| v as Real)),
+        )
     }
 
     fn shape_type(&self) -> ShapeType {
@@ -696,10 +763,9 @@ impl VdbShape {
     /// voxel. With `solid`, a point inside a filled voxel is its own
     /// projection.
     ///
-    /// This replaces parry's generic search (`project_local_point_on_voxels`
-    /// re-scans a growing box from scratch until it can prove optimality)
-    /// with the tree as the acceleration structure, the way parry's own
-    /// `Voxels` shape uses its internal chunk BVH: the tree walk
+    /// This is the search parry's own `Voxels` shape runs
+    /// (`Voxels::project_local_point_and_get_vox_id`), with the tree as the
+    /// acceleration structure in place of that shape's chunk BVH: the tree walk
     /// ([`TreeErased::iter_leaf_views_near_point`](dust_vdb::TreeErased::iter_leaf_views_near_point))
     /// hands out leaf blocks nearest first, each candidate projection
     /// shrinks the distance to beat, and the loop stops at the first block
@@ -708,7 +774,7 @@ impl VdbShape {
     /// onto every occupied voxel, the same scan parry's `Voxels` runs at
     /// each of its BVH leaves (chunks).
     ///
-    /// Like both parry searches, the non-solid projection of a point lying
+    /// Like parry's `Voxels` search, the non-solid projection of a point lying
     /// inside the shape is approximated: the point lands on the boundary of
     /// the closest voxel, which isn't necessarily on the boundary of the
     /// union of all the voxels.
@@ -738,20 +804,15 @@ impl VdbShape {
                 // at least this far from `pt`, so the candidate is optimal.
                 break;
             }
-            for (word_index, &word) in leaf.occupancy_words().iter().enumerate() {
-                let mut word = word;
-                while word != 0 {
-                    let bit = word_index as u32 * usize::BITS + word.trailing_zeros();
-                    word &= word - 1;
-                    let key = uvec_to_ivec(leaf.origin() + leaf.coord_of_bit(bit));
-                    let center = self.voxel_center(key);
-                    let mut candidate = base_cuboid.project_local_point(pt - center, solid);
-                    candidate.point += center;
-                    let candidate_dist_sq = (candidate.point - pt).length_squared();
-                    if candidate_dist_sq < best_dist_sq {
-                        best = Some((candidate, self.linear_id_of(key)));
-                        best_dist_sq = candidate_dist_sq;
-                    }
+            for coords in leaf.iter_voxels() {
+                let key = uvec_to_ivec(coords);
+                let center = self.voxel_center(key);
+                let mut candidate = base_cuboid.project_local_point(pt - center, solid);
+                candidate.point += center;
+                let candidate_dist_sq = (candidate.point - pt).length_squared();
+                if candidate_dist_sq < best_dist_sq {
+                    best = Some((candidate, self.linear_id_of(key)));
+                    best_dist_sq = candidate_dist_sq;
                 }
             }
         }
@@ -787,11 +848,6 @@ impl VoxelQuery for VdbShape {
         }
     }
 
-
-    fn linear_id(&self, key: IVector) -> Option<u32> {
-        todo!()
-    }
-
     fn voxels_in_range(&self, mins: IVector, maxs: IVector) -> impl Iterator<Item = Self::Voxel<'_>> {
         // Voxels only exist within the tree's addressable extent; clip the
         // requested semi-open box `[mins, maxs)` to it.
@@ -822,11 +878,6 @@ impl VoxelQuery for VdbShape {
     where
         Self: 'a;
 
-    fn voxel(&self, key: IVector) -> Option<Self::Voxel<'_>> {
-        // Point lookup — same missing piece as `VdbShape::occupied`.
-        let _ = key;
-        todo!()
-    }
 }
 
 /// The number of occupied voxels before `coords` in `leaf`'s occupancy words
@@ -902,15 +953,13 @@ impl<'a> QueriedVoxel<'a> for VdbVoxel<'a> {
     }
 }
 
-/// The per-leaf stage of [`VdbShape::voxels_in_range`]: walks the set bits of
-/// one leaf's occupancy words in order, yielding a [`VdbVoxel`] for each
-/// occupied voxel lying within the queried box.
+/// The per-leaf stage of [`VdbShape::voxels_in_range`]: walks one leaf's
+/// occupied voxels ([`ErasedLeafView::iter_voxels`]), yielding a [`VdbVoxel`]
+/// for each one lying within the queried box.
 struct LeafVoxels<'a> {
     shape: &'a VdbShape,
     leaf: ErasedLeafView<'a, u32>,
-    /// The not-yet-yielded set bits of the occupancy word at `word_index`.
-    word: usize,
-    word_index: u32,
+    voxels: ErasedLeafVoxelIter<'a>,
     /// The semi-open box `[lo, hi)` to clip against.
     lo: IVector,
     hi: IVector,
@@ -925,8 +974,7 @@ impl<'a> LeafVoxels<'a> {
         let end = origin + uvec_to_ivec(leaf.extent());
         Self {
             shape,
-            word: leaf.occupancy_words().first().copied().unwrap_or(0),
-            word_index: 0,
+            voxels: leaf.iter_voxels(),
             lo,
             hi,
             fully_inside: origin.cmpge(lo).all() && end.cmple(hi).all(),
@@ -940,18 +988,7 @@ impl<'a> Iterator for LeafVoxels<'a> {
 
     fn next(&mut self) -> Option<VdbVoxel<'a>> {
         loop {
-            if self.word == 0 {
-                self.word_index += 1;
-                let words = self.leaf.occupancy_words();
-                if self.word_index as usize >= words.len() {
-                    return None;
-                }
-                self.word = words[self.word_index as usize];
-                continue;
-            }
-            let bit = self.word_index * usize::BITS + self.word.trailing_zeros();
-            self.word &= self.word - 1;
-            let coords = self.leaf.origin() + self.leaf.coord_of_bit(bit);
+            let coords = self.voxels.next()?;
             if !self.fully_inside {
                 let key = uvec_to_ivec(coords);
                 if !(key.cmpge(self.lo).all() && key.cmplt(self.hi).all()) {
@@ -1356,122 +1393,94 @@ mod tests {
         hierarchy!(3, 3, 2, TestLeaf)
     );
 
-    /// The tree-accelerated point projection against parry's generic
-    /// reference search ([`project_local_point_on_voxels`]), over the ray
-    /// tests' scattered content and a batch of pseudo-random query points,
-    /// with an isotropic and an anisotropic voxel size.
-    ///
-    /// Both searches weigh the identical candidate set — every occupied
-    /// voxel — so the distances they settle on must agree exactly. The
-    /// projected points themselves are not compared: two voxels can tie on
-    /// distance, and the searches may resolve such a tie to different
-    /// voxels. The generic search's `solid` fast path needs
-    /// `VoxelQuery::voxel` (still `todo!()` here), so the solid
-    /// expectations are asserted directly instead of against the reference.
-    #[test]
-    fn point_projection_matches_reference() {
-        use parry3d::query::details::project_local_point_on_voxels;
-
-        type DeepTree = Tree<hierarchy!(2, 2, 2, TestLeaf)>;
-
-        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
-        let mut next = move || {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (state >> 33) as u32
-        };
-        let filler = VoxelState::with_filled_neighbors(AxisMask::empty());
-
-        for voxel_size in [Vector::splat(1.0), Vector::new(0.25, 1.0, 3.0)] {
-            let mut tree = DeepTree::new();
-            let mut attributes = (
-                VdbVoxelTypeAttributes::new(64),
-                VdbVoxelMaskAttributes::new(16, 512),
-            );
-            let mut occupied = std::collections::HashSet::new();
-            let mut accessor = tree.accessor_mut(&mut attributes);
-            for x in 10..30 {
-                for y in 12..14 {
-                    for z in 5..40 {
-                        accessor.set(UVec3::new(x, y, z), (filler.voxel_type(), filler));
-                        occupied.insert((x as i32, y as i32, z as i32));
-                    }
+    /// Builds a shape holding exactly `keys` (each stored with the state its
+    /// neighbors in `keys` imply), with the given voxel size.
+    fn shape_of(keys: &[IVector], voxel_size: Vector) -> VdbShape {
+        let set: std::collections::HashSet<[i32; 3]> =
+            keys.iter().map(|k| [k.x, k.y, k.z]).collect();
+        let mut tree = TestTree::new();
+        let mut attributes = (
+            VdbVoxelTypeAttributes::new(64),
+            VdbVoxelMaskAttributes::new(16, 512),
+        );
+        let mut accessor = tree.accessor_mut(&mut attributes);
+        for &key in keys {
+            let mut filled = AxisMask::empty();
+            for (dir, axis) in NEIGHBOR_DIRS {
+                let n = key + dir;
+                if set.contains(&[n.x, n.y, n.z]) {
+                    filled |= axis;
                 }
             }
-            for _ in 0..300 {
-                let coords = UVec3::new(next() % 64, next() % 64, next() % 64);
-                accessor.set(coords, (filler.voxel_type(), filler));
-                occupied.insert((coords.x as i32, coords.y as i32, coords.z as i32));
-            }
-            drop(accessor);
+            let state = VoxelState::with_filled_neighbors(filled);
+            accessor.set(ivec_to_uvec(key), (state.voxel_type(), state));
+        }
+        drop(accessor);
+        let (type_attributes, mask_attributes) = attributes;
+        VdbShape::new(
+            Arc::new(tree.snapshot()),
+            Arc::new(type_attributes),
+            Some(Arc::new(mask_attributes)),
+            voxel_size,
+        )
+    }
 
-            let (type_attributes, mask_attributes) = attributes;
-            let shape = VdbShape::new(
-                Arc::new(tree.snapshot()),
-                Arc::new(type_attributes),
-                Some(Arc::new(mask_attributes)),
-                voxel_size,
-            );
-
-            for _ in 0..200 {
-                // Fractional voxel coordinates from below the domain to
-                // above it, scaled into local space. The `0.0137` keeps them
-                // off the integer grid, so no query point sits exactly on a
-                // voxel face — where `is_inside` is a knife edge.
-                let coords = glam::Vec3::new(
-                    (next() % 8000) as f32 / 100.0 - 8.0 + 0.0137,
-                    (next() % 8000) as f32 / 100.0 - 8.0 + 0.0137,
-                    (next() % 8000) as f32 / 100.0 - 8.0 + 0.0137,
-                );
-                let pt = Vector::new(
-                    coords.x * voxel_size.x,
-                    coords.y * voxel_size.y,
-                    coords.z * voxel_size.z,
-                );
-
-                let (ours, _) = shape.project_local_point_and_get_vox_id(pt, false).unwrap();
-                let (reference, _) = project_local_point_on_voxels(&shape, pt, false).unwrap();
-                assert_eq!(
-                    (ours.point - pt).length(),
-                    (reference.point - pt).length(),
-                    "non-solid distance at {pt:?}, voxel size {voxel_size:?}"
-                );
-                assert_eq!(ours.is_inside, reference.is_inside, "is_inside at {pt:?}");
-
-                // Solid: inside a filled voxel, the point is its own
-                // projection; anywhere else `solid` changes nothing.
-                let key = (
-                    coords.x.floor() as i32,
-                    coords.y.floor() as i32,
-                    coords.z.floor() as i32,
-                );
-                let (solid_proj, _) = shape.project_local_point_and_get_vox_id(pt, true).unwrap();
-                if occupied.contains(&key) {
-                    assert!(solid_proj.is_inside, "inside a filled voxel at {pt:?}");
-                    assert!(
-                        (solid_proj.point - pt).length() < 1e-4,
-                        "a solid projection from inside is the point itself, at {pt:?}"
-                    );
-                } else {
-                    assert_eq!(solid_proj.point, ours.point, "solid == non-solid at {pt:?}");
-                    assert_eq!(solid_proj.is_inside, ours.is_inside);
+    /// Compares [`Shape::mass_properties`] against parry's
+    /// [`MassProperties::from_voxels`] on a `Voxels` holding the same keys: an
+    /// asymmetric shape (the cube of [`Self::voxel_query`] with an arm along
+    /// +x), so the inertia has off-diagonal terms, and non-uniform voxels, so
+    /// each axis is scaled differently. An empty tree has zero mass, not NaN.
+    #[test]
+    fn mass_properties_matches_reference() {
+        let mut keys = Vec::new();
+        for x in 2..5 {
+            for y in 2..5 {
+                for z in 2..5 {
+                    keys.push(IVector::new(x, y, z));
                 }
             }
         }
+        for x in 5..12 {
+            keys.push(IVector::new(x, 2, 3));
+        }
+        let voxel_size = Vector::new(0.5, 1.0, 2.0);
+        let density = 3.0;
 
-        // A shape over an empty tree projects nothing.
-        let mut tree = DeepTree::new();
-        let empty = VdbShape::new(
-            Arc::new(tree.snapshot()),
-            Arc::new(VdbVoxelTypeAttributes::new(64)),
-            None,
-            Vector::splat(1.0),
+        let shape = shape_of(&keys, voxel_size);
+        let ours = shape.mass_properties(density);
+        let reference =
+            MassProperties::from_voxels(density, &parry3d::shape::Voxels::new(voxel_size, &keys));
+
+        let block_volume = voxel_size.x * voxel_size.y * voxel_size.z;
+        let expected_mass = keys.len() as Real * block_volume * density;
+        assert!((ours.mass() - expected_mass).abs() <= expected_mass * 1e-5, "mass {}", ours.mass());
+        assert!(
+            (ours.mass() - reference.mass()).abs() <= expected_mass * 1e-5,
+            "mass {} vs reference {}",
+            ours.mass(),
+            reference.mass()
         );
         assert!(
-            empty
-                .project_local_point_and_get_vox_id(Vector::splat(3.0), true)
-                .is_none()
+            (ours.local_com - reference.local_com).length() <= 1e-4,
+            "com {:?} vs reference {:?}",
+            ours.local_com,
+            reference.local_com
         );
+        let ours_inertia = ours.reconstruct_inertia_matrix().to_cols_array();
+        let reference_inertia = reference.reconstruct_inertia_matrix().to_cols_array();
+        let scale = reference_inertia.iter().fold(0.0 as Real, |m, v| m.max(v.abs()));
+        for (a, b) in ours_inertia.iter().zip(&reference_inertia) {
+            assert!(
+                (a - b).abs() <= scale * 1e-4,
+                "inertia {ours_inertia:?} vs reference {reference_inertia:?}"
+            );
+        }
+        // The arm makes the principal frame non-axis-aligned: the reconstructed
+        // matrix must have off-diagonal terms, or the test isn't exercising them.
+        assert!(ours_inertia[1].abs() > scale * 1e-3, "inertia {ours_inertia:?} is diagonal");
+
+        let empty = shape_of(&[], voxel_size).mass_properties(density);
+        assert_eq!(empty.mass(), 0.0);
+        assert_eq!(empty.local_com, Vector::ZERO);
     }
 }

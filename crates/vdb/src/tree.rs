@@ -1185,6 +1185,60 @@ impl<'a, T> ErasedLeafView<'a, T> {
             z: index & self.extent_mask.z,
         }
     }
+
+    /// Iterates the leaf's occupied voxels as tree-global coordinates, in
+    /// occupancy-bit order (x-major, z fastest — the order of
+    /// [`ErasedLeafView::occupancy_words`]). This is the scan every consumer
+    /// of a whole leaf otherwise writes by hand: `trailing_zeros` on the
+    /// current word, clear the lowest set bit, decode with
+    /// [`ErasedLeafView::coord_of_bit`].
+    pub fn iter_voxels(&self) -> ErasedLeafVoxelIter<'a> {
+        let words = self.occupancy_words();
+        ErasedLeafVoxelIter {
+            words,
+            word: words.first().copied().unwrap_or(0),
+            word_index: 0,
+            origin: self.origin,
+            extent_mask: self.extent_mask,
+            shift_x: self.shift_x,
+            shift_y: self.shift_y,
+        }
+    }
+}
+
+/// The iterator returned by [`ErasedLeafView::iter_voxels`]: the occupied
+/// voxels of one leaf, as tree-global coordinates.
+pub struct ErasedLeafVoxelIter<'a> {
+    words: &'a [usize],
+    /// The not-yet-yielded set bits of `words[word_index]`.
+    word: usize,
+    word_index: u32,
+    origin: UVec3,
+    extent_mask: UVec3,
+    shift_x: u32,
+    shift_y: u32,
+}
+
+impl Iterator for ErasedLeafVoxelIter<'_> {
+    type Item = UVec3;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<UVec3> {
+        while self.word == 0 {
+            self.word_index += 1;
+            self.word = *self.words.get(self.word_index as usize)?;
+        }
+        let bit = self.word_index * usize::BITS + self.word.trailing_zeros();
+        self.word &= self.word - 1;
+        Some(
+            self.origin
+                + UVec3 {
+                    x: bit >> self.shift_x,
+                    y: (bit >> self.shift_y) & self.extent_mask.y,
+                    z: bit & self.extent_mask.z,
+                },
+        )
+    }
 }
 
 /// The iterator returned by [`crate::TreeErased::iter_leaf_views_in_range`]:
