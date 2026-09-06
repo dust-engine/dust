@@ -734,7 +734,7 @@ impl Shape for VdbShape {
     }
 
     fn ccd_thickness(&self) -> Real {
-        self.voxel_size.min_element()
+        self.compute_local_aabb().half_extents().min_element()
     }
 
     fn ccd_angular_thickness(&self) -> Real {
