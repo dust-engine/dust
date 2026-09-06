@@ -1939,6 +1939,75 @@ fn block_far_dist_sq(point: Vec3A, scale: Vec3A, origin: UVec3, extent: UVec3) -
     ((point - lo).abs().max((hi - point).abs()) * scale).length_squared()
 }
 
+/// Per-axis squared-distance tables for the child grid of one opened node.
+///
+/// The metric is axis-aligned, so a cell's squared distance to the query
+/// point decomposes into three independent per-axis contributions:
+/// `near[0][x] + near[1][y] + near[2][z]` equals [`block_dist_sq`] of the
+/// cell at `(x, y, z)` — computed with the same operations in the same
+/// order, so bit-identically — and the `far` tables likewise sum to
+/// [`block_far_dist_sq`]. One table fill (`fanout` entries per axis)
+/// replaces a clamp/multiply/square pipeline per cell with two adds, and
+/// the per-axis minima give O(1) lower bounds over every cell sharing an x
+/// (a mask word) or an (x, y) pair (a byte of it).
+struct AxisTables {
+    near: [[f32; 8]; 3],
+    far: [[f32; 8]; 3],
+    /// Minima of the used `near`/`far` entries of the y and z axes.
+    min_near_y: f32,
+    min_near_z: f32,
+    min_far_y: f32,
+    min_far_z: f32,
+}
+
+/// Fills [`AxisTables`] for cells `[origin + k * cell_extent,
+/// origin + (k + 1) * cell_extent)`, `k < fanout` per axis. `fanout` must
+/// not exceed 8 on any axis.
+fn axis_tables(
+    point: Vec3A,
+    scale: Vec3A,
+    origin: UVec3,
+    cell_extent: UVec3,
+    fanout: UVec3,
+) -> AxisTables {
+    let mut tables = AxisTables {
+        near: [[0.0; 8]; 3],
+        far: [[0.0; 8]; 3],
+        min_near_y: f32::INFINITY,
+        min_near_z: f32::INFINITY,
+        min_far_y: f32::INFINITY,
+        min_far_z: f32::INFINITY,
+    };
+    let point = point.to_array();
+    let scale = scale.to_array();
+    let origin = origin.to_array();
+    let cell_extent = cell_extent.to_array();
+    let fanout = fanout.to_array();
+    for axis in 0..3 {
+        let p = point[axis];
+        let s = scale[axis];
+        let e = cell_extent[axis] as f32;
+        let mut lo = origin[axis] as f32;
+        for k in 0..fanout[axis] as usize {
+            let hi = lo + e;
+            let near = (p.clamp(lo, hi) - p) * s;
+            let far = (p - lo).abs().max((hi - p).abs()) * s;
+            tables.near[axis][k] = near * near;
+            tables.far[axis][k] = far * far;
+            lo = hi;
+        }
+    }
+    for k in 0..fanout[1] as usize {
+        tables.min_near_y = tables.min_near_y.min(tables.near[1][k]);
+        tables.min_far_y = tables.min_far_y.min(tables.far[1][k]);
+    }
+    for k in 0..fanout[2] as usize {
+        tables.min_near_z = tables.min_near_z.min(tables.near[2][k]);
+        tables.min_far_z = tables.min_far_z.min(tables.far[2][k]);
+    }
+    tables
+}
+
 /// The iterator returned by [`crate::TreeErased::iter_leaf_views_near_point`]:
 /// an [`ErasedLeafView`] of each leaf that could hold the query point's
 /// nearest voxel, in nondecreasing distance from the point to the leaf's
@@ -2049,28 +2118,24 @@ impl<'a> ErasedLeafViewNearIter<'a> {
 
 impl<'a> ErasedLeafViewNearIter<'a> {
     /// First half of opening an internal block: tighten
-    /// [`ErasedLeafViewNearIter::upper`] with the farthest-corner bound
-    /// ([`block_far_dist_sq`]) of the block's occupied children.
+    /// [`ErasedLeafViewNearIter::upper`] with the farthest-corner bound of
+    /// every occupied child — each holds at least one voxel somewhere in
+    /// its cell.
     ///
-    /// For the 8×8×8 node layout — one mask word per x-slice of 8×8 cells,
-    /// the layout the ray walk's fast path also exploits — two word-level
-    /// shortcuts avoid most per-bit sweeps. A word is skipped whole when
-    /// even the nearest point of its slab cannot improve the bound (the
-    /// slab's distance lower-bounds every cell in the word). And a *fully*
-    /// occupied word improves the bound exactly by its nearest cell's far
-    /// corner, no sweep needed: per axis, the farthest face of a cell is
-    /// `extent / 2 + |point - center|` away, so the cell with the nearest
-    /// center — the point's own cell coordinate, clamped into the slice —
-    /// has the smallest far corner. The word holding the point's nearest
-    /// cell goes first, so the bound is already tight when the remaining
-    /// words test their slabs against it.
-    fn tighten_upper(&mut self, entry: &NearEntry, info: &LevelInfo) {
+    /// All distances come from one [`AxisTables`] fill: a cell is two adds,
+    /// and the per-axis minima bound a whole mask word (one x) or one byte
+    /// of it (one x, y pair) in O(1), so words and rows that cannot improve
+    /// the bound are skipped without touching their bits. The word holding
+    /// the point's nearest cell goes first, so the bound is already tight
+    /// when the rest test against it. The word-level structure exists on
+    /// the 8×8×8 node layout (the ray walk's fast path exploits the same
+    /// one); other layouts take the per-bit path.
+    fn tighten_upper(&mut self, entry: &NearEntry, info: &LevelInfo, tables: &AxisTables) {
         // Local copies of everything the loops read: writes through the
         // frontier's buffer (a separate allocation) stop the compiler from
         // keeping `self`'s fields in registers otherwise, and `self.upper`
         // would round-trip through memory on every child.
         let point = self.point;
-        let scale = self.scale;
         let mut upper = self.upper;
         let cell_extent = info.child_extent;
         let word_is_x_slice = info.shift_x == 6 && info.shift_y == 3;
@@ -2098,112 +2163,137 @@ impl<'a> ErasedLeafViewNearIter<'a> {
                 continue;
             }
             if word_is_x_slice {
-                let slice_origin = entry.origin + UVec3::new(word_idx * cell_extent.x, 0, 0);
-                let slice_extent = UVec3::new(
-                    cell_extent.x,
-                    cell_extent.y * info.fanout.y,
-                    cell_extent.z * info.fanout.z,
-                );
-                if block_dist_sq(point, scale, slice_origin, slice_extent) >= upper {
+                let x = word_idx as usize;
+                let word_bound = tables.far[0][x] + tables.min_far_y + tables.min_far_z;
+                if word_bound >= upper {
                     continue;
                 }
                 if word == usize::MAX {
-                    let cell = UVec3::new(word_idx, nearest_cell.y, nearest_cell.z);
-                    upper = upper.min(block_far_dist_sq(
-                        point,
-                        scale,
-                        entry.origin + cell * cell_extent,
-                        cell_extent,
-                    ));
+                    // Fully occupied: the bound is attained by some cell.
+                    upper = word_bound;
                     continue;
                 }
-            }
-            let mut word = word;
-            while word != 0 {
-                let bit = word.trailing_zeros();
-                word &= word - 1;
-                let index = word_idx * usize::BITS + bit;
-                let cell = UVec3 {
-                    x: index >> info.shift_x,
-                    y: (index >> info.shift_y) & info.mask_y,
-                    z: index & info.mask_z,
-                };
-                upper = upper.min(block_far_dist_sq(
-                    point,
-                    scale,
-                    entry.origin + cell * cell_extent,
-                    cell_extent,
-                ));
+                // One byte per (x, y) row of 8 z cells.
+                for y in 0..8usize {
+                    let row = (word >> (8 * y)) & 0xff;
+                    if row == 0
+                        || tables.far[0][x] + tables.far[1][y] + tables.min_far_z >= upper
+                    {
+                        continue;
+                    }
+                    let mut row = row;
+                    while row != 0 {
+                        let z = row.trailing_zeros() as usize;
+                        row &= row - 1;
+                        upper =
+                            upper.min(tables.far[0][x] + tables.far[1][y] + tables.far[2][z]);
+                    }
+                }
+            } else {
+                let mut word = word;
+                while word != 0 {
+                    let bit = word.trailing_zeros();
+                    word &= word - 1;
+                    let index = word_idx * usize::BITS + bit;
+                    let x = (index >> info.shift_x) as usize;
+                    let y = ((index >> info.shift_y) & info.mask_y) as usize;
+                    let z = (index & info.mask_z) as usize;
+                    upper = upper.min(tables.far[0][x] + tables.far[1][y] + tables.far[2][z]);
+                }
             }
         }
         self.upper = upper;
     }
 
     /// Second half of opening an internal block: a frontier entry for every
-    /// child that can still hold — or tie for — the nearest voxel. Against a
-    /// wide fan-out (an 8³ node has up to 512 occupied children), this
-    /// pruning is what keeps the frontier, and the heap traffic, small; the
-    /// same slab test as in [`Self::tighten_upper`] drops whole words of
-    /// cells that the bound rules out.
-    fn push_children(&mut self, entry: &NearEntry, info: &LevelInfo, child_level: u32) {
+    /// child that can still hold — or tie for — the nearest voxel. Same
+    /// [`AxisTables`] scheme as [`Self::tighten_upper`], on the `near`
+    /// tables: whole words and rows beyond the bound push nothing, and a
+    /// surviving cell's distance is two adds. Against a wide fan-out (an 8³
+    /// node has up to 512 occupied children), this is what keeps the
+    /// frontier, and the heap traffic, small.
+    fn push_children(
+        &mut self,
+        entry: &NearEntry,
+        info: &LevelInfo,
+        tables: &AxisTables,
+        child_level: u32,
+    ) {
         // Split `self` so the frontier alone is borrowed mutably: the pushes
         // below write through the frontier's buffer, and without the split
-        // the compiler must reload `point`, `scale`, `upper`, and the pool
-        // bounds from `self` after every push.
-        let point = self.point;
-        let scale = self.scale;
+        // the compiler must reload the bound and the pool from `self` after
+        // every push.
         let upper = self.upper;
         let pool = &self.pools[child_level as usize];
         let frontier = &mut self.frontier;
         let cell_extent = info.child_extent;
         let word_is_x_slice = info.shift_x == 6 && info.shift_y == 3;
+        let mut push = |dist_sq: f32, cell: UVec3, index: u32| {
+            let origin = entry.origin + cell * cell_extent;
+            // A set mask bit guarantees the entry holds an occupied pointer.
+            let child_ptr = unsafe {
+                (*(entry.node.add(info.child_ptrs_offset as usize) as *const InternalNodeEntry)
+                    .add(index as usize))
+                .occupied
+            };
+            let node = unsafe { pool.get(child_ptr) };
+            frontier.push(NearEntry {
+                dist_sq,
+                level: child_level,
+                index: child_ptr,
+                origin,
+                node,
+            });
+        };
         for word_idx in 0..info.mask_words {
             let word = unsafe { mask_word(entry.node, info, word_idx) };
             if word == 0 {
                 continue;
             }
             if word_is_x_slice {
-                let slice_origin = entry.origin + UVec3::new(word_idx * cell_extent.x, 0, 0);
-                let slice_extent = UVec3::new(
-                    cell_extent.x,
-                    cell_extent.y * info.fanout.y,
-                    cell_extent.z * info.fanout.z,
-                );
-                if block_dist_sq(point, scale, slice_origin, slice_extent) > upper {
+                let x = word_idx as usize;
+                if tables.near[0][x] + tables.min_near_y + tables.min_near_z > upper {
                     continue;
                 }
-            }
-            let mut word = word;
-            while word != 0 {
-                let bit = word.trailing_zeros();
-                word &= word - 1;
-                let index = word_idx * usize::BITS + bit;
-                let cell = UVec3 {
-                    x: index >> info.shift_x,
-                    y: (index >> info.shift_y) & info.mask_y,
-                    z: index & info.mask_z,
-                };
-                let origin = entry.origin + cell * cell_extent;
-                let dist_sq = block_dist_sq(point, scale, origin, cell_extent);
-                if dist_sq > upper {
-                    continue;
+                for y in 0..8usize {
+                    let row = (word >> (8 * y)) & 0xff;
+                    if row == 0
+                        || tables.near[0][x] + tables.near[1][y] + tables.min_near_z > upper
+                    {
+                        continue;
+                    }
+                    let mut row = row;
+                    while row != 0 {
+                        let z = row.trailing_zeros() as usize;
+                        row &= row - 1;
+                        let dist_sq =
+                            tables.near[0][x] + tables.near[1][y] + tables.near[2][z];
+                        if dist_sq > upper {
+                            continue;
+                        }
+                        let cell = UVec3::new(x as u32, y as u32, z as u32);
+                        push(dist_sq, cell, (x << 6 | y << 3 | z) as u32);
+                    }
                 }
-                // A set mask bit guarantees the entry holds an occupied
-                // pointer.
-                let child_ptr = unsafe {
-                    (*(entry.node.add(info.child_ptrs_offset as usize)
-                        as *const InternalNodeEntry)
-                        .add(index as usize))
-                    .occupied
-                };
-                let node = unsafe { pool.get(child_ptr) };
-                frontier.push(NearEntry {
-                    dist_sq,
-                    level: child_level,
-                    index: child_ptr,
-                    origin,
-                    node,
-                });
+            } else {
+                let mut word = word;
+                while word != 0 {
+                    let bit = word.trailing_zeros();
+                    word &= word - 1;
+                    let index = word_idx * usize::BITS + bit;
+                    let cell = UVec3 {
+                        x: index >> info.shift_x,
+                        y: (index >> info.shift_y) & info.mask_y,
+                        z: index & info.mask_z,
+                    };
+                    let dist_sq = tables.near[0][cell.x as usize]
+                        + tables.near[1][cell.y as usize]
+                        + tables.near[2][cell.z as usize];
+                    if dist_sq > upper {
+                        continue;
+                    }
+                    push(dist_sq, cell, index);
+                }
             }
         }
     }
@@ -2239,8 +2329,11 @@ impl<'a> Iterator for ErasedLeafViewNearIter<'a> {
                 ));
             }
             let info = self.levels[entry.level as usize - 1];
-            self.tighten_upper(&entry, &info);
-            self.push_children(&entry, &info, entry.level - 1);
+            // One table fill serves both halves of the open.
+            let tables =
+                axis_tables(self.point, self.scale, entry.origin, info.child_extent, info.fanout);
+            self.tighten_upper(&entry, &info, &tables);
+            self.push_children(&entry, &info, &tables, entry.level - 1);
         }
         None
     }
