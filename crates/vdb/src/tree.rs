@@ -1184,22 +1184,50 @@ impl<'a, T> ErasedLeafView<'a, T> {
     /// current word, clear the lowest set bit, decode with
     /// [`ErasedLeafView::coord_of_bit`].
     pub fn iter_voxels(&self) -> ErasedLeafVoxelIter<'a> {
+        self.iter_voxels_masked(())
+    }
+
+    /// [`ErasedLeafView::iter_voxels`] restricted by `mask`: each occupancy
+    /// word passes through [`OccupancyMask::mask`] as the scan reaches it, so
+    /// the voxels it clears are never decoded. This is how a consumer keeping
+    /// a per-voxel bit elsewhere (a type, a flag) iterates only the voxels
+    /// that have it, at the cost of one extra word operation per word rather
+    /// than one test per voxel.
+    pub fn iter_voxels_masked<M: OccupancyMask>(&self, mask: M) -> ErasedLeafVoxelIter<'a, M> {
         let words = self.occupancy_words();
         ErasedLeafVoxelIter {
             words,
-            word: words.first().copied().unwrap_or(0),
+            word: words.first().map_or(0, |&word| mask.mask(0, word)),
             word_index: 0,
             origin: self.origin,
             extent_mask: self.extent_mask,
             shift_x: self.shift_x,
             shift_y: self.shift_y,
+            mask,
         }
     }
 }
 
-/// The iterator returned by [`ErasedLeafView::iter_voxels`]: the occupied
+/// A per-word restriction of a leaf's occupancy, applied by
+/// [`ErasedLeafView::iter_voxels_masked`] as it loads each word. `()` is the
+/// identity: the plain [`ErasedLeafView::iter_voxels`].
+pub trait OccupancyMask {
+    /// `word` is occupancy word `word_index` of the leaf being iterated; the
+    /// result must be a subset of its bits.
+    fn mask(&self, word_index: u32, word: usize) -> usize;
+}
+
+impl OccupancyMask for () {
+    #[inline(always)]
+    fn mask(&self, _word_index: u32, word: usize) -> usize {
+        word
+    }
+}
+
+/// The iterator returned by [`ErasedLeafView::iter_voxels`] (and, with a
+/// non-trivial `M`, [`ErasedLeafView::iter_voxels_masked`]): the occupied
 /// voxels of one leaf, as tree-global coordinates.
-pub struct ErasedLeafVoxelIter<'a> {
+pub struct ErasedLeafVoxelIter<'a, M = ()> {
     words: &'a [usize],
     /// The not-yet-yielded set bits of `words[word_index]`.
     word: usize,
@@ -1208,16 +1236,19 @@ pub struct ErasedLeafVoxelIter<'a> {
     extent_mask: UVec3,
     shift_x: u32,
     shift_y: u32,
+    mask: M,
 }
 
-impl Iterator for ErasedLeafVoxelIter<'_> {
+impl<M: OccupancyMask> Iterator for ErasedLeafVoxelIter<'_, M> {
     type Item = UVec3;
 
     #[inline(always)]
     fn next(&mut self) -> Option<UVec3> {
         while self.word == 0 {
             self.word_index += 1;
-            self.word = *self.words.get(self.word_index as usize)?;
+            self.word = self
+                .mask
+                .mask(self.word_index, *self.words.get(self.word_index as usize)?);
         }
         let bit = self.word_index * usize::BITS + self.word.trailing_zeros();
         self.word &= self.word - 1;

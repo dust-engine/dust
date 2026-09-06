@@ -64,7 +64,7 @@ use std::sync::Arc;
 
 use dust_vdb::{
     AabbU32, Accessor, AttributePtr, Attributes, ErasedLeafView, ErasedLeafVoxelIter, IsLeaf, Node,
-    TreeLike, TreeWithValues,
+    OccupancyMask, TreeLike, TreeWithValues,
 };
 use glam::{DMat3, DVec3, UVec3, Vec3A};
 use parry3d::bounding_volume::{Aabb, BoundingSphere};
@@ -73,7 +73,7 @@ use parry3d::math::{IVector, Matrix, Real, Vector};
 use parry3d::query::{PointProjection, PointQuery, Ray, RayCast, RayIntersection};
 use parry3d::shape::{
     AxisMask, Cuboid, FeatureId, QueriedVoxel, Shape, ShapeType, TypedShape, VoxelQuery,
-    VoxelState, VoxelType,
+    VoxelState, VoxelType, VoxelTypes,
 };
 
 /// A `'static` voxel collision shape over one [`TreeWithValues<u32>`](TreeWithValues)
@@ -190,6 +190,49 @@ impl VdbVoxelTypeAttributes {
             3 => parry3d::shape::VoxelType::Vertex,
             _ => unreachable!(),
         }
+    }
+
+    /// The voxels of `leaf` whose stored type is in `types`, as a mask over the
+    /// leaf's occupancy word `word_index` (bit `i` set when the voxel at bit `i`
+    /// of that word qualifies). Unwritten positions decode as `Interior`, so the
+    /// result is only meaningful ANDed with the occupancy word — which is what
+    /// [`TypeMask`] does for [`VdbShape::voxels_in_range_of_types`].
+    ///
+    /// Two word loads and a few bit operations select the matching voxels of a
+    /// whole word, instead of decoding and testing every occupied voxel.
+    fn selection(&self, leaf: u32, word_index: u32, types: VoxelTypes) -> usize {
+        /// The `usize::BITS` bits of the concatenated `words` starting at bit `bit`,
+        /// LSB first; bits past the end of `words` read as zero.
+        fn bit_window(words: &[usize], bit: usize) -> usize {
+            let bits = usize::BITS as usize;
+            let word = bit / bits;
+            let shift = bit % bits;
+            let low = words.get(word).copied().unwrap_or(0) >> shift;
+            if shift == 0 {
+                low
+            } else {
+                low | words.get(word + 1).copied().unwrap_or(0) << (bits - shift)
+            }
+        }
+
+        let bit = leaf as usize * self.leaf_size as usize
+            + word_index as usize * usize::BITS as usize;
+        let low = bit_window(&self.bitmask1, bit);
+        let high = bit_window(&self.bitmask2, bit);
+        let mut selected = 0;
+        if types.contains(VoxelTypes::INTERIOR) {
+            selected |= !low & !high;
+        }
+        if types.contains(VoxelTypes::FACE) {
+            selected |= low & !high;
+        }
+        if types.contains(VoxelTypes::EDGE) {
+            selected |= !low & high;
+        }
+        if types.contains(VoxelTypes::VERTEX) {
+            selected |= low & high;
+        }
+        selected
     }
 
     /// Computes the full store for one tree version from a
@@ -903,6 +946,39 @@ impl VoxelQuery for VdbShape {
         mins: IVector,
         maxs: IVector,
     ) -> impl Iterator<Item = Self::Voxel<'_>> {
+        self.voxels_in_range_masked(mins, maxs, |_| ())
+    }
+
+    fn voxels_in_range_of_types(
+        &self,
+        mins: IVector,
+        maxs: IVector,
+        types: VoxelTypes,
+    ) -> impl Iterator<Item = Self::Voxel<'_>> {
+        self.voxels_in_range_masked(mins, maxs, move |leaf| TypeMask {
+            store: &self.voxel_type_attributes,
+            leaf: leaf.leaf_index(),
+            types,
+        })
+    }
+
+    type Voxel<'a>
+        = VdbVoxel<'a>
+    where
+        Self: 'a;
+}
+
+impl VdbShape {
+    /// [`VoxelQuery::voxels_in_range`] with each leaf's occupancy words passed
+    /// through the [`OccupancyMask`] that `mask` builds for the leaf (`()` for
+    /// the plain iteration, [`TypeMask`] for a type-filtered one), so voxels
+    /// the mask clears are never decoded.
+    fn voxels_in_range_masked<M: OccupancyMask>(
+        &self,
+        mins: IVector,
+        maxs: IVector,
+        mask: impl Fn(&ErasedLeafView<'_, u32>) -> M,
+    ) -> impl Iterator<Item = VdbVoxel<'_>> {
         // Voxels only exist within the tree's addressable extent; clip the
         // requested semi-open box `[mins, maxs)` to it.
         let lo = mins.max(IVector::ZERO);
@@ -924,13 +1000,8 @@ impl VoxelQuery for VdbShape {
         };
         self.tree
             .iter_leaf_views_in_range_with_values(range)
-            .flat_map(move |leaf| LeafVoxels::new(self, leaf, lo, hi))
+            .flat_map(move |leaf| LeafVoxels::new(self, leaf, lo, hi, mask(&leaf)))
     }
-
-    type Voxel<'a>
-        = VdbVoxel<'a>
-    where
-        Self: 'a;
 }
 
 /// The number of occupied voxels before `coords` in `leaf`'s occupancy words
@@ -1009,10 +1080,10 @@ impl<'a> QueriedVoxel<'a> for VdbVoxel<'a> {
 /// The per-leaf stage of [`VdbShape::voxels_in_range`]: walks one leaf's
 /// occupied voxels ([`ErasedLeafView::iter_voxels`]), yielding a [`VdbVoxel`]
 /// for each one lying within the queried box.
-struct LeafVoxels<'a> {
+struct LeafVoxels<'a, M> {
     shape: &'a VdbShape,
     leaf: ErasedLeafView<'a, u32>,
-    voxels: ErasedLeafVoxelIter<'a>,
+    voxels: ErasedLeafVoxelIter<'a, M>,
     /// The semi-open box `[lo, hi)` to clip against.
     lo: IVector,
     hi: IVector,
@@ -1021,13 +1092,35 @@ struct LeafVoxels<'a> {
     fully_inside: bool,
 }
 
-impl<'a> LeafVoxels<'a> {
-    fn new(shape: &'a VdbShape, leaf: ErasedLeafView<'a, u32>, lo: IVector, hi: IVector) -> Self {
+/// The [`OccupancyMask`] of a type-filtered iteration: one leaf's occupancy
+/// words restricted to the voxels whose stored type is in `types`
+/// ([`VdbVoxelTypeAttributes::selection`]).
+struct TypeMask<'a> {
+    store: &'a VdbVoxelTypeAttributes,
+    leaf: u32,
+    types: VoxelTypes,
+}
+
+impl OccupancyMask for TypeMask<'_> {
+    #[inline(always)]
+    fn mask(&self, word_index: u32, word: usize) -> usize {
+        word & self.store.selection(self.leaf, word_index, self.types)
+    }
+}
+
+impl<'a, M: OccupancyMask> LeafVoxels<'a, M> {
+    fn new(
+        shape: &'a VdbShape,
+        leaf: ErasedLeafView<'a, u32>,
+        lo: IVector,
+        hi: IVector,
+        mask: M,
+    ) -> Self {
         let origin = uvec_to_ivec(leaf.origin());
         let end = origin + uvec_to_ivec(leaf.extent());
         Self {
             shape,
-            voxels: leaf.iter_voxels(),
+            voxels: leaf.iter_voxels_masked(mask),
             lo,
             hi,
             fully_inside: origin.cmpge(lo).all() && end.cmple(hi).all(),
@@ -1036,7 +1129,7 @@ impl<'a> LeafVoxels<'a> {
     }
 }
 
-impl<'a> Iterator for LeafVoxels<'a> {
+impl<'a, M: OccupancyMask> Iterator for LeafVoxels<'a, M> {
     type Item = VdbVoxel<'a>;
 
     fn next(&mut self) -> Option<VdbVoxel<'a>> {
@@ -1557,5 +1650,42 @@ mod tests {
         let empty = shape_of(&[], voxel_size).mass_properties(density);
         assert_eq!(empty.mass(), 0.0);
         assert_eq!(empty.local_com, Vector::ZERO);
+    }
+
+    /// [`VoxelQuery::voxels_in_range_of_types`] yields exactly the voxels of
+    /// the plain iteration whose type is in the set, for every set of types and
+    /// for ranges both covering and cutting the cube (which holds every type).
+    #[test]
+    fn type_filter_matches_unfiltered() {
+        let shape = cube_shape(Vector::splat(1.0));
+        let ranges = [
+            (IVector::splat(-100), IVector::splat(100)),
+            (IVector::new(3, 0, 0), IVector::new(5, 4, 4)),
+            (IVector::splat(3), IVector::splat(3)),
+        ];
+        let key = |voxel: &VdbVoxel| {
+            let k = voxel.grid_coords();
+            (k.x, k.y, k.z)
+        };
+        for bits in 0..32u8 {
+            let types = VoxelTypes::from_bits_truncate(bits);
+            for (mins, maxs) in ranges {
+                let filtered: Vec<_> = shape
+                    .voxels_in_range_of_types(mins, maxs, types)
+                    .map(|v| key(&v))
+                    .collect();
+                let expected: Vec<_> = shape
+                    .voxels_in_range(mins, maxs)
+                    .filter(|v| types.contains_type(v.voxel_type()))
+                    .map(|v| key(&v))
+                    .collect();
+                assert_eq!(filtered, expected, "types {types:?} range {mins:?}..{maxs:?}");
+            }
+        }
+        // The cube exercises every type: the full-domain filters are not all trivial.
+        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::INTERIOR).count(), 1);
+        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::FACE).count(), 6);
+        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::EDGE).count(), 12);
+        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::VERTEX).count(), 8);
     }
 }
