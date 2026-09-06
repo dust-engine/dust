@@ -264,7 +264,7 @@ impl<'a> SceneGraphTraverser<'a> {
             if size.z % 2 == 0 { 0.0 } else { 0.5 },
             if size.y % 2 == 0 { 0.0 } else { -0.5 },
         );
-        offset = quat.mul_vec3a(offset); // If another seam shows up in the future, try multiplying this with `scale`
+        offset = quat.mul_vec3a(offset) * scale;
         let center = quat * (size.xzy().as_vec3a() / 2.0);
         // BLAS AABBs are in object-space units of `unit_size` per voxel cell, but
         // `translation`, `center`, and `offset` are computed in voxel-grid units

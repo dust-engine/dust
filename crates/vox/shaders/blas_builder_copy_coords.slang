@@ -32,7 +32,7 @@ void main(
     uint coords = src[threadID].coords;
 
     VkAabbPositionsKHR aabbPositions;
-    if (coords == !0) {
+    if (coords == 0xFFFFFFFFu) {
         aabbPositions.minX = 0.0 / 0.0;
         aabbPositions.minY = 0.0;
         aabbPositions.minZ = 0.0;
