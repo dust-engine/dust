@@ -16,6 +16,7 @@ dust_pbr = { path = "crates/pbr" }
 dust_app = { path = "crates/app" }
 dust_gfxdebug = { path = "crates/gfxdebug" }
 dust_physics = { path = "crates/physics" }
+dust_character = { path = "crates/character" }
 # The local avian branch: adds the pluggable `QueryDispatcher` resource that routes
 # `VdbShape` pairs to `dust_physics::VdbDispatcher`.
 avian3d = { path = "../avian/crates/avian3d", default-features = false, features = ["3d", "parry-f32"] }
@@ -30,6 +31,7 @@ dust_pbr.workspace = true
 dust_app.workspace = true
 dust_gfxdebug.workspace = true
 dust_physics.workspace = true
+dust_character.workspace = true
 avian3d.workspace = true
 bevy.workspace = true
 pumicite.workspace = true

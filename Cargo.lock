@@ -1956,6 +1956,7 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "dust_app",
+ "dust_character",
  "dust_gfxdebug",
  "dust_pbr",
  "dust_physics",
@@ -1975,6 +1976,14 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "pumicite",
  "runfiles",
+]
+
+[[package]]
+name = "dust_character"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bevy",
 ]
 
 [[package]]

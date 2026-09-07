@@ -2,8 +2,6 @@
 // `paint_rainbow_wedge` need the feature here too.
 #![feature(generic_const_exprs)]
 
-mod flycam;
-
 use std::time::Duration;
 
 use avian3d::parry::query::{DefaultQueryDispatcher, QueryDispatcher as _};
@@ -18,7 +16,8 @@ use dust_vox::{
 };
 use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode};
 
-use crate::flycam::{FlyCamera, FlyCameraPlugin};
+use bevy::window::PrimaryWindow;
+use dust_character::{Character, CharacterCamera, CharacterPlugin, View, ViewChanged};
 
 #[derive(Component)]
 struct MovingTeapot {
@@ -66,8 +65,6 @@ pub fn run() {
         .add_plugins(bevy_pumicite::PumicitePlugin::default())
         .add_plugins(bevy_pumicite::swapchain::SwapchainPlugin);
 
-    app.add_plugins(FlyCameraPlugin);
-
     // Dust plugins
     app.add_plugins(dust_pbr::PbrRenderPlugin)
         .add_plugins(dust_vox::VoxPlugin)
@@ -78,7 +75,8 @@ pub fn run() {
     app.add_plugins(PhysicsPlugins::default())
         .insert_resource(QueryDispatcher::new(Box::new(
             dust_physics::VdbDispatcher::new().chain(DefaultQueryDispatcher),
-        )));
+        )))
+        .add_plugins(CharacterPlugin);
 
     let primary_window = app
         .world_mut()
@@ -91,8 +89,7 @@ pub fn run() {
         .insert((
             dust_pbr::camera::Camera::default(),
             GlobalTransform::default(),
-            Transform::from_translation(Vec3::new(12.2, 30.61, 14.45)),
-            FlyCamera::default(),
+            Transform::default(),
         ))
         .insert(bevy_pumicite::swapchain::SwapchainConfig {
             image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
@@ -109,7 +106,15 @@ pub fn run() {
     app.run();
 }
 
-fn startup_system(mut commands: Commands) {
+/// Marks the character's visible placeholder body, present only in third person.
+#[derive(Component)]
+struct CharacterBody;
+
+/// teapot.vox is 126x80x61 voxels at 1/16 unit, so 3.8 units tall; this brings
+/// it down to the capsule's 1.8.
+const CHARACTER_BODY_SCALE: f32 = 0.47;
+
+fn startup_system(mut commands: Commands, primary_window: Single<Entity, With<PrimaryWindow>>) {
     // `queue_spawn_scene` rather than `spawn_scene`: the `.vox` files are scene
     // dependencies that have not loaded yet, and queueing waits for them.
     commands
@@ -153,7 +158,54 @@ fn startup_system(mut commands: Commands) {
     commands
         .queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/teapot.vox"))
         .insert(ChildOf(falling_teapot));
-    return;
+
+    // The player: a capsule dropped onto the castle roof, driving the window's
+    // render camera. Starts in first person, so no body is spawned until the
+    // view toggles; `on_view_changed` handles that.
+    let character = Character::default();
+    let collider = character.collider();
+    let character = commands
+        .spawn((
+            character,
+            collider,
+            Transform::from_translation(Vec3::new(12.2, 40.0, 18.0)),
+        ))
+        .observe(on_view_changed)
+        .id();
+    commands
+        .entity(*primary_window)
+        .insert(CharacterCamera(character));
+}
+
+fn on_view_changed(
+    event: On<ViewChanged>,
+    bodies: Query<(Entity, &ChildOf), With<CharacterBody>>,
+    mut commands: Commands,
+) {
+    match event.view {
+        View::FirstPerson => {
+            for (body, child_of) in &bodies {
+                if child_of.parent() == event.entity {
+                    commands.entity(body).despawn();
+                }
+            }
+        }
+        View::ThirdPerson => {
+            // Placeholder body: the teapot, centred on the capsule. Its instance
+            // colliders attach to the character's kinematic body; the controller
+            // excludes them from its own casts.
+            let body = commands
+                .spawn((
+                    CharacterBody,
+                    Transform::from_scale(Vec3::splat(CHARACTER_BODY_SCALE)),
+                    ChildOf(event.entity),
+                ))
+                .id();
+            commands
+                .queue_spawn_scene(CachedSceneAsset::from("bazel://dust/assets/teapot.vox"))
+                .insert(ChildOf(body));
+        }
+    }
 }
 
 fn animate_teapot_system(time: Res<Time>, mut teapots: Query<(&MovingTeapot, &mut Transform)>) {
