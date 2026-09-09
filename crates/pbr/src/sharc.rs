@@ -117,6 +117,16 @@ impl FinalGatherPush {
     }
 }
 
+/// The SHARC state the RT passes read, bundled so systems that also take the
+/// camera, jitter and history stay under Bevy's parameter limit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct SharcSystemParams<'w> {
+    pub config: Res<'w, SharcConfig>,
+    pub frame_state: Res<'w, SharcFrameState>,
+    pub debug: Res<'w, SharcDebugState>,
+    pub resources: Option<ResMut<'w, SharcResources>>,
+}
+
 // ─── Phase 2: SHARC Update / Resolve pipeline ──────────────────────────────
 
 /// Tunable knobs that drive the SHARC passes (AGENTS.md §10).

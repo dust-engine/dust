@@ -267,7 +267,7 @@ fn upscaler_image(
     view: GPURefMut<'_, impl ImageViewLike>,
 ) -> UpscalerImage {
     // SAFETY: only handles and metadata are read.
-    let (image, view) = unsafe { (image.unwrap(), view.unwrap()) };
+    let (image, view) = unsafe { (image.get_unchecked(), view.get_unchecked()) };
     UpscalerImage {
         image: image.vk_handle(),
         view: view.vk_handle(),
@@ -337,7 +337,7 @@ pub(crate) fn upscaler_evaluate(
                 vk::ImageLayout::GENERAL,
                 0..1,
                 0..1,
-                true,
+                false, // to be able to read colors from previous frames
             );
             encoder.emit_barriers();
             let corner = |extent: UVec2| vk::Offset3D {
@@ -440,7 +440,7 @@ pub(crate) fn upscaler_evaluate(
             vk::ImageLayout::GENERAL,
             0..1,
             0..1,
-            true,
+            false, // to be able to read colors from prev frames
         );
         encoder.emit_barriers();
 

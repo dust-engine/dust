@@ -28,9 +28,8 @@ use bevy_pumicite::{
 };
 use bytemuck::{Pod, Zeroable};
 use pumicite::{
-    Allocator, HasDevice,
+    Allocator, HasDevice, Sampler,
     ash::vk::{self, TaggedStructure},
-    buffer::BufferLike,
     debug::DebugObject,
     image::{FullImageView, Image, ImageExt, SrgbImageView, SwizzledImageView},
     rtx::ShaderBindingTable,
@@ -318,10 +317,7 @@ fn render(
     // visualization (vox_pbr.slang). Bindings 14..17 are statically referenced
     // by the primary pipeline, so the resources must be bound every frame —
     // `SharcDebugPlugin` creates them at startup, so they are always present.
-    mut sharc_resources: Option<ResMut<sharc::SharcResources>>,
-    sharc_config: Res<sharc::SharcConfig>,
-    sharc_frame_state: Res<sharc::SharcFrameState>,
-    sharc_debug: Res<sharc::SharcDebugState>,
+    mut sharc: sharc::SharcSystemParams,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single_mut() else {
@@ -348,7 +344,7 @@ fn render(
         tracing::warn!("Frame not rendered; missing HDR target");
         return;
     };
-    let Some(sharc_resources) = sharc_resources.as_deref_mut() else {
+    let Some(sharc_resources) = sharc.resources.as_deref_mut() else {
         tracing::warn!("Frame not rendered; missing SHARC resources");
         return;
     };
@@ -362,9 +358,9 @@ fn render(
     // SHARC constants for the primary closest hit's debug query. Debug fields
     // come from `SharcDebugState`; the rest mirrors the cache passes.
     let mut sharc_constants =
-        sharc::build_sharc_constants(&sharc_config, &sharc_frame_state, transform.translation());
-    sharc_constants.debug_mode = sharc_debug.mode.as_u32();
-    sharc_constants.debug_brightness = sharc_debug.brightness;
+        sharc::build_sharc_constants(&sharc.config, &sharc.frame_state, transform.translation());
+    sharc_constants.debug_mode = sharc.debug.mode.as_u32();
+    sharc_constants.debug_brightness = sharc.debug.brightness;
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
@@ -601,8 +597,13 @@ pub struct HdrRenderTargetViews {
     /// full view feeds the normal G-buffer; the alpha-broadcast swizzle view
     /// feeds the roughness G-buffer.
     pub normal: SwizzledImageView<FullImageView<Image>>,
-    /// R32_SFLOAQT
+    /// R32_SFLOAT, render resolution. Reverse-infinite-Z hardware depth
+    /// (`near / linearViewZ`: 1 = near, 0 = sky; UI pixels store 1). Written
+    /// by the primary pass this frame.
     pub depth: FullImageView<Image>,
+    /// Last frame's `depth`, for the screen trace's history depth test.
+    /// `ensure_hdr_target` swaps the two images once per frame.
+    pub depth_prev: FullImageView<Image>,
     /// R16G16_SFLOAT. Screen-space motion vectors in pixels
     /// (currentPixel - prevPixel). Written by the primary RT pass.
     pub motion_vectors: FullImageView<Image>,
@@ -612,7 +613,11 @@ pub struct HdrRenderTargetViews {
     /// physically correct demodulation input.
     pub specular_albedo: FullImageView<Image>,
 
-    // R16G16B16A16_SFLOAT. Stores denoised (and potentially upscaled) raw light.
+    /// R16G16B16A16_SFLOAT, display resolution. Denoised (and potentially
+    /// upscaled) raw radiance. Within a frame the screen trace reads it as
+    /// last frame's lit image (the radiance source for on-screen gather
+    /// hits) before the upscaler overwrites it, so one image serves as both
+    /// output and history; the upscaler keeps its own temporal state.
     pub hdr_denoised_output: FullImageView<Image>,
 
     /// R16_SFLOAT, 1×1. Auto-exposure scale: multiplying the HDR color by this
@@ -631,6 +636,7 @@ pumicite::project_fields! {
         albedo: UintImageView<SrgbImageView<FullImageView<Image>>>,
         normal: SwizzledImageView<FullImageView<Image>>,
         depth: FullImageView<Image>,
+        depth_prev: FullImageView<Image>,
         motion_vectors: FullImageView<Image>,
         specular_albedo: FullImageView<Image>,
         hdr_denoised_output: FullImageView<Image>,
@@ -646,9 +652,14 @@ pub struct HdrRenderTarget {
     pub albedo_state: ResourceState,
     pub normal_state: ResourceState,
     pub depth_state: ResourceState,
+    pub depth_prev_state: ResourceState,
     pub sdr_target_state: ResourceState,
     pub hdr_target_state: ResourceState,
     pub hdr_denoised_target_state: ResourceState,
+    /// Bilinear, clamp-to-edge. Samples the history color.
+    pub linear_clamp_sampler: Sampler,
+    /// Nearest, clamp-to-edge. Samples the HZB and the history depth.
+    pub point_clamp_sampler: Sampler,
     pub motion_vectors_state: ResourceState,
     pub specular_albedo_state: ResourceState,
     pub exposure_state: ResourceState,
@@ -835,7 +846,7 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
 
 fn ensure_hdr_target(
     mut commands: Commands,
-    hdr_target: Option<Res<HdrRenderTarget>>,
+    hdr_target: Option<ResMut<HdrRenderTarget>>,
     allocator: Res<Allocator>,
     swapchain_images: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
     mut perf_panel: Option<ResMut<PerformancePanel>>,
@@ -858,6 +869,13 @@ fn ensure_hdr_target(
         None => true,
     };
     if !needs_realloc {
+        let mut hdr = hdr_target.unwrap();
+        let hdr = &mut *hdr;
+        // Swap the states
+        std::mem::swap(&mut hdr.depth_state, &mut hdr.depth_prev_state);
+        // SAFETY: only image handles move between fields; nothing is freed.
+        let views = unsafe { hdr.view.get_mut_unchecked() };
+        std::mem::swap(&mut views.depth, &mut views.depth_prev);
         return;
     }
 
@@ -1018,18 +1036,20 @@ fn ensure_hdr_target(
     )
     .unwrap();
 
-    let depth = Image::new_device(
-        allocator.clone(),
-        &vk::ImageCreateInfo {
-            format: vk::Format::R32_SFLOAT,
-            ..render_create_info
-        },
-    )
-    .unwrap()
-    .with_name(c"G-Buffer Depth")
-    .create_full_view()
-    .unwrap()
-    .with_name(c"G-Buffer Depth View");
+    let [depth, depth_prev] = [c"G-Buffer Depth 0", c"G-Buffer Depth 1"].map(|name| {
+        Image::new_device(
+            allocator.clone(),
+            &vk::ImageCreateInfo {
+                format: vk::Format::R32_SFLOAT,
+                ..render_create_info
+            },
+        )
+        .unwrap()
+        .with_name(name)
+        .create_full_view()
+        .unwrap()
+        .with_name(name)
+    });
 
     let motion_vectors = Image::new_device(
         allocator.clone(),
@@ -1081,12 +1101,33 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"Auto-Exposure Scale View");
 
+    let clamp_sampler = |filter: vk::Filter, mipmap_mode: vk::SamplerMipmapMode| {
+        Sampler::new(
+            allocator.device().clone(),
+            &vk::SamplerCreateInfo {
+                mag_filter: filter,
+                min_filter: filter,
+                mipmap_mode,
+                address_mode_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                address_mode_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                address_mode_w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                // Full mip range: the HZB is sampled per explicit level.
+                max_lod: vk::LOD_CLAMP_NONE,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+    let linear_clamp_sampler = clamp_sampler(vk::Filter::LINEAR, vk::SamplerMipmapMode::LINEAR);
+    let point_clamp_sampler = clamp_sampler(vk::Filter::NEAREST, vk::SamplerMipmapMode::NEAREST);
+
     let view = GPUMutex::new(HdrRenderTargetViews {
         hdr_output,
         sdr_target,
         albedo,
         normal,
         depth,
+        depth_prev,
         motion_vectors,
         specular_albedo,
         hdr_denoised_output,
@@ -1099,6 +1140,7 @@ fn ensure_hdr_target(
         albedo_state: Default::default(),
         normal_state: Default::default(),
         depth_state: Default::default(),
+        depth_prev_state: Default::default(),
         sdr_target_state: Default::default(),
         hdr_target_state: Default::default(),
         motion_vectors_state: Default::default(),
@@ -1108,6 +1150,8 @@ fn ensure_hdr_target(
         display_extent: extent,
         render_extent,
         hdr_denoised_target_state: Default::default(),
+        linear_clamp_sampler,
+        point_clamp_sampler,
     });
 }
 
@@ -1349,10 +1393,7 @@ pub(crate) fn final_gather_pass(
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut frame_index: Local<u32>,
     jitter: Res<JitterState>,
-    sharc_debug: Res<sharc::SharcDebugState>,
-    sharc_config: Res<sharc::SharcConfig>,
-    sharc_frame_state: Res<sharc::SharcFrameState>,
-    mut sharc_resources: Option<ResMut<sharc::SharcResources>>,
+    mut sharc: sharc::SharcSystemParams,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
@@ -1376,7 +1417,7 @@ pub(crate) fn final_gather_pass(
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
-    let Some(sharc_resources) = sharc_resources.as_deref_mut() else {
+    let Some(sharc_resources) = sharc.resources.as_deref_mut() else {
         return;
     };
     gather_sbt.push_raygen(0, 0, |_| {});
@@ -1386,11 +1427,11 @@ pub(crate) fn final_gather_pass(
     // written by the jittered primary ray, so we must reuse the same jitter.
     let uniform = build_camera_uniform(camera, transform, None, jitter.offset);
     let mut sharc_constants =
-        sharc::build_sharc_constants(&sharc_config, &sharc_frame_state, transform.translation());
+        sharc::build_sharc_constants(&sharc.config, &sharc.frame_state, transform.translation());
     // Carry the debug mode so the gather CHS/miss suppress their HDR writes
     // while a debug view owns the output. Final-gather still runs in that case
     // to keep the cache seeded (its CHS keeps pushing candidates on misses).
-    sharc_constants.debug_mode = sharc_debug.mode.as_u32();
+    sharc_constants.debug_mode = sharc.debug.mode.as_u32();
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
@@ -1398,7 +1439,7 @@ pub(crate) fn final_gather_pass(
     *frame_index = frame_index.wrapping_add(1);
     // Ping-pong pool indices for this frame.
     let (sharc_pool_read_idx, sharc_pool_write_idx) =
-        sharc::SharcResources::pool_indices(sharc_frame_state.frame_index);
+        sharc::SharcResources::pool_indices(sharc.frame_state.frame_index);
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, gather_sbt.layout(), |slice| {
