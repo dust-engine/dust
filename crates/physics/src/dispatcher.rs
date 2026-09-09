@@ -222,8 +222,9 @@ where
                 // the engine's continuous collision detection's job.
                 let max_prediction = vdb1
                     .voxel_size()
+                    .abs()
                     .max_element()
-                    .max(vdb2.voxel_size().max_element());
+                    .max(vdb2.voxel_size().abs().max_element());
                 let prediction = prediction.min(max_prediction);
                 contact_manifolds_voxels_voxels(
                     &self.full(),

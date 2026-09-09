@@ -231,16 +231,6 @@ impl<'a> SceneGraphTraverser<'a> {
                         z: size.z,
                     },
                 );
-                if transform.scale.cmplt(Vec3::ZERO).any() {
-                    // The scene graph mirrors this instance. A `VdbShape` collider
-                    // scales its voxel size by the transform scale and cannot
-                    // represent a reflection.
-                    tracing::warn!(
-                        "Vox model {} is instanced with a mirrored transform (scale {:?}); its collider will not match",
-                        shape_model.model_id,
-                        transform.scale
-                    );
-                }
                 let reference = self.model_reference(shape_model.model_id);
                 out.push(GraphScene::Leaf {
                     transform,

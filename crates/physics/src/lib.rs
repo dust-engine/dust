@@ -99,6 +99,7 @@ pub struct VdbShape {
     tree: Arc<dyn TreeWithValues<u32>>,
     voxel_type_attributes: Arc<VdbVoxelTypeAttributes>,
     voxel_mask_attributes: Option<Arc<VdbVoxelMaskAttributes>>,
+    /// Signed; a negative component mirrors the geometry along that axis.
     voxel_size: Vector,
 }
 
@@ -215,8 +216,8 @@ impl VdbVoxelTypeAttributes {
             }
         }
 
-        let bit = leaf as usize * self.leaf_size as usize
-            + word_index as usize * usize::BITS as usize;
+        let bit =
+            leaf as usize * self.leaf_size as usize + word_index as usize * usize::BITS as usize;
         let low = bit_window(&self.bitmask1, bit);
         let high = bit_window(&self.bitmask2, bit);
         let mut selected = 0;
@@ -568,16 +569,16 @@ impl RayCast for VdbShape {
         let local_origin = Vec3A::new(ray.origin.x, ray.origin.y, ray.origin.z);
         let local_dir = Vec3A::new(ray.dir.x, ray.dir.y, ray.dir.z);
         let inv_local_dir = local_dir.recip();
-        let dir_positive = local_dir.cmpgt(Vec3A::ZERO);
+        let dir_positive = Vec3A::from(dir).cmpgt(Vec3A::ZERO);
         let dir_finite = inv_local_dir.abs().cmplt(Vec3A::INFINITY);
         let voxel_size = Vec3A::new(self.voxel_size.x, self.voxel_size.y, self.voxel_size.z);
         // The parameter width of one voxel per axis: how much a voxel's far
         // crossing grows per step along that axis.
-        let t_delta = voxel_size * inv_local_dir.abs();
+        let t_delta = voxel_size.abs() * inv_local_dir.abs();
         let step = IVector::new(
-            (ray.dir.x > 0.0) as i32 - (ray.dir.x < 0.0) as i32,
-            (ray.dir.y > 0.0) as i32 - (ray.dir.y < 0.0) as i32,
-            (ray.dir.z > 0.0) as i32 - (ray.dir.z < 0.0) as i32,
+            (dir.x > 0.0) as i32 - (dir.x < 0.0) as i32,
+            (dir.y > 0.0) as i32 - (dir.y < 0.0) as i32,
+            (dir.z > 0.0) as i32 - (dir.z < 0.0) as i32,
         );
 
         for (leaf_t, leaf) in self
@@ -744,8 +745,9 @@ impl Shape for VdbShape {
         }
 
         // The block: `MassProperties::from_cuboid` with the voxel's half extents.
-        let half = size / 2.0;
-        let block_mass = size.x * size.y * size.z * density as f64;
+        let extent = size.abs();
+        let half = extent / 2.0;
+        let block_mass = extent.element_product() * density as f64;
         let block_inertia = DVec3::new(
             half.y * half.y + half.z * half.z,
             half.x * half.x + half.z * half.z,
@@ -810,6 +812,8 @@ impl VdbShape {
     /// neighbors — in-leaf neighbors on the leaf's own occupancy words, others by
     /// one tree descent each — which is fine for most objects; highly dynamic
     /// objects with many contacts benefit from the stored form.
+    ///
+    /// A negative `voxel_size` component mirrors the geometry along that axis.
     pub fn new(
         tree: Arc<dyn TreeWithValues<u32>>,
         voxel_type_attributes: Arc<VdbVoxelTypeAttributes>,
@@ -824,10 +828,11 @@ impl VdbShape {
         }
     }
 
-    /// The size of each voxel along each local coordinate axis.
+    /// The signed size of each voxel along each local coordinate axis.
     pub fn voxel_size(&self) -> Vector {
         self.voxel_size
     }
+
     /// The stable identifier of the voxel at `key`, as used for parry [`FeatureId`]s and
     /// contact-manifold sub-shape ids.
     ///
@@ -876,7 +881,7 @@ impl VdbShape {
         pt: Vector,
         solid: bool,
     ) -> Option<(PointProjection, u32)> {
-        let base_cuboid = Cuboid::new(self.voxel_size / 2.0);
+        let base_cuboid = Cuboid::new(self.voxel_size.abs() / 2.0);
         // The tree walk runs in voxel coordinates (the voxel at coordinate
         // `c` spans `[c, c + 1)`): dividing the point by the per-axis voxel
         // size maps local space onto them, and passing the voxel size as the
@@ -887,7 +892,7 @@ impl VdbShape {
             pt.y / self.voxel_size.y,
             pt.z / self.voxel_size.z,
         );
-        let scale = glam::Vec3::new(self.voxel_size.x, self.voxel_size.y, self.voxel_size.z);
+        let scale = self.voxel_size.abs();
 
         let mut best: Option<(PointProjection, u32)> = None;
         let mut best_dist_sq = Real::MAX;
@@ -1652,6 +1657,138 @@ mod tests {
         assert_eq!(empty.local_com, Vector::ZERO);
     }
 
+    /// A shape with negative voxel sizes matches parry's `Voxels` of the same
+    /// keys and sizes. The keys are the cube-plus-arm of
+    /// [`Self::mass_properties_matches_reference`], mirrored on x and z.
+    #[test]
+    fn negative_voxel_size_matches_reference() {
+        let mut keys = Vec::new();
+        for x in 2..5 {
+            for y in 2..5 {
+                for z in 2..5 {
+                    keys.push(IVector::new(x, y, z));
+                }
+            }
+        }
+        for x in 5..12 {
+            keys.push(IVector::new(x, 2, 3));
+        }
+        let voxel_size = Vector::new(-0.5, 1.0, -2.0);
+
+        let shape = shape_of(&keys, voxel_size);
+        let reference = parry3d::shape::Voxels::new(voxel_size, &keys);
+        // `Voxels` reports a chunk-aligned domain; ours is tight.
+        let (lo, hi) = keys
+            .iter()
+            .fold((IVector::MAX, IVector::MIN), |(lo, hi), &k| {
+                (lo.min(k), hi.max(k + IVector::ONE))
+            });
+        assert_eq!(shape.domain(), [lo, hi]);
+        assert_eq!(shape.local_aabb(), reference.voxel_range_aabb(lo, hi));
+
+        let mut seen = std::collections::HashSet::new();
+        for voxel in shape.voxels() {
+            let key = voxel.grid_coords();
+            assert!(seen.insert((key.x, key.y, key.z)), "{key:?} twice");
+            assert_eq!(voxel.center(), reference.voxel_center(key), "{key:?}");
+            assert_eq!(
+                voxel.voxel_state(),
+                reference.voxel_state(key).unwrap(),
+                "{key:?}"
+            );
+            assert_eq!(
+                voxel.voxel_type(),
+                reference.voxel_state(key).unwrap().voxel_type()
+            );
+            assert_eq!(shape.key_of_linear_id(voxel.linear_id()), key);
+        }
+        assert_eq!(seen.len(), keys.len());
+
+        let (mins, maxs) = (IVector::new(7, 0, 0), IVector::new(11, 16, 4));
+        let mut ours: Vec<[i32; 3]> = shape
+            .voxels_in_range(mins, maxs)
+            .map(|v| v.grid_coords().to_array())
+            .collect();
+        let mut theirs: Vec<[i32; 3]> = reference
+            .voxels_in_range(mins, maxs)
+            .map(|v| v.grid_coords().to_array())
+            .collect();
+        ours.sort();
+        theirs.sort();
+        assert_eq!(ours, theirs);
+        assert_eq!(ours.len(), 4);
+
+        let density = 3.0;
+        let ours = shape.mass_properties(density);
+        let theirs = MassProperties::from_voxels(density, &reference);
+        assert!((ours.mass() - theirs.mass()).abs() <= theirs.mass() * 1e-5);
+        assert!(ours.mass() > 0.0);
+        assert!((ours.local_com - theirs.local_com).length() <= 1e-4);
+        let a = ours.reconstruct_inertia_matrix().to_cols_array();
+        let b = theirs.reconstruct_inertia_matrix().to_cols_array();
+        let scale = b.iter().fold(0.0 as Real, |m, v| m.max(v.abs()));
+        for (x, y) in a.iter().zip(&b) {
+            assert!((x - y).abs() <= scale * 1e-4, "inertia {a:?} vs {b:?}");
+        }
+
+        // The shape spans x in [-6, -1], y in [2, 5], z in [-10, -4].
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut frand = move |lo: f32, hi: f32| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            lo + ((state >> 33) as f32 / u32::MAX as f32) * (hi - lo)
+        };
+        let axis_ray = Ray::new(Vector::new(5.0, 2.5, -5.0), Vector::new(-1.0, 0.0, 0.0));
+        let hit = shape
+            .cast_local_ray_and_get_normal(&axis_ray, 1000.0, true)
+            .unwrap();
+        assert_eq!(hit.time_of_impact, 6.0);
+        assert_eq!(hit.normal, Vector::new(1.0, 0.0, 0.0));
+        assert_eq!(
+            hit.feature,
+            FeatureId::Face(shape.linear_id_of(IVector::new(2, 2, 2)))
+        );
+        for _ in 0..300 {
+            let ray = Ray::new(
+                Vector::new(frand(-12.0, 6.0), frand(-4.0, 10.0), frand(-16.0, 2.0)),
+                Vector::new(frand(-1.0, 1.0), frand(-1.0, 1.0), frand(-1.0, 1.0)),
+            );
+            if ray.dir.length() < 1.0e-3 {
+                continue;
+            }
+            for solid in [true, false] {
+                let ours = shape.cast_local_ray_and_get_normal(&ray, 100.0, solid);
+                let theirs = reference.cast_local_ray_and_get_normal(&ray, 100.0, solid);
+                assert_eq!(
+                    ours.map(|h| (h.time_of_impact, h.normal)),
+                    theirs.map(|h| (h.time_of_impact, h.normal)),
+                    "ray {ray:?} solid {solid}"
+                );
+            }
+        }
+
+        // A non-solid projection from inside lands on a face two voxels
+        // share, and which one wins the tie decides `is_inside`; both
+        // implementations keep the first candidate in their own order.
+        for _ in 0..300 {
+            let pt = Vector::new(frand(-12.0, 6.0), frand(-4.0, 10.0), frand(-16.0, 2.0));
+            for solid in [true, false] {
+                let ours = shape.project_local_point(pt, solid);
+                let theirs = reference.project_local_point(pt, solid);
+                if solid {
+                    assert_eq!(ours.is_inside, theirs.is_inside, "point {pt:?}");
+                }
+                assert!(
+                    (ours.point - theirs.point).length() <= 1e-4,
+                    "point {pt:?} solid {solid}: {:?} vs {:?}",
+                    ours.point,
+                    theirs.point
+                );
+            }
+        }
+    }
+
     /// [`VoxelQuery::voxels_in_range_of_types`] yields exactly the voxels of
     /// the plain iteration whose type is in the set, for every set of types and
     /// for ranges both covering and cutting the cube (which holds every type).
@@ -1679,13 +1816,36 @@ mod tests {
                     .filter(|v| types.contains_type(v.voxel_type()))
                     .map(|v| key(&v))
                     .collect();
-                assert_eq!(filtered, expected, "types {types:?} range {mins:?}..{maxs:?}");
+                assert_eq!(
+                    filtered, expected,
+                    "types {types:?} range {mins:?}..{maxs:?}"
+                );
             }
         }
         // The cube exercises every type: the full-domain filters are not all trivial.
-        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::INTERIOR).count(), 1);
-        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::FACE).count(), 6);
-        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::EDGE).count(), 12);
-        assert_eq!(shape.voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::VERTEX).count(), 8);
+        assert_eq!(
+            shape
+                .voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::INTERIOR)
+                .count(),
+            1
+        );
+        assert_eq!(
+            shape
+                .voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::FACE)
+                .count(),
+            6
+        );
+        assert_eq!(
+            shape
+                .voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::EDGE)
+                .count(),
+            12
+        );
+        assert_eq!(
+            shape
+                .voxels_in_range_of_types(IVector::ZERO, IVector::splat(16), VoxelTypes::VERTEX)
+                .count(),
+            8
+        );
     }
 }
