@@ -20,10 +20,10 @@ dust_character = { path = "crates/character" }
 # The local avian branch: adds the pluggable `QueryDispatcher` resource that routes
 # `VdbShape` pairs to `dust_physics::VdbDispatcher`.
 avian3d = { path = "../avian/crates/avian3d", default-features = false, features = ["3d", "parry-f32"] }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3" }
-pumicite_super_resolution = { git = "https://github.com/dust-engine/pumicite_super_resolution.git", rev = "81985bf31b949dfd36fa73b4d73bedd12ca694ba" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "084e39cd38f7c34dff24bac6dad2eb3d9a464054" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "084e39cd38f7c34dff24bac6dad2eb3d9a464054" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "084e39cd38f7c34dff24bac6dad2eb3d9a464054" }
+pumicite_super_resolution = { git = "https://github.com/dust-engine/pumicite_super_resolution.git", rev = "061c7543d7009e0b21af4df0f1c3c9fdfb761cc1" }
 
 [dependencies]
 dust_vox.workspace = true
@@ -61,36 +61,30 @@ parry3d = { path = "../parry/crates/parry3d" }
 # glamx 0.3 re-pointed at glam 0.32, the version bevy_math uses, so avian can pass
 # bevy vectors to parry unchanged.
 glamx = { path = "../glamx" }
-bevy_ecs = { path = "../bevy/crates/bevy_ecs" }
-bevy_app = { path = "../bevy/crates/bevy_app" }
-bevy_window = { path = "../bevy/crates/bevy_window" }
-bevy_platform = { path = "../bevy/crates/bevy_platform" }
-bevy_utils = { path = "../bevy/crates/bevy_utils" }
-bevy_transform = { path = "../bevy/crates/bevy_transform" }
-bevy_time = { path = "../bevy/crates/bevy_time" }
-bevy_tasks = { path = "../bevy/crates/bevy_tasks" }
-bevy_reflect = { path = "../bevy/crates/bevy_reflect" }
-bevy_ptr = { path = "../bevy/crates/bevy_ptr" }
-bevy_math = { path = "../bevy/crates/bevy_math" }
-bevy_log = { path = "../bevy/crates/bevy_log" }
-bevy_input = { path = "../bevy/crates/bevy_input" }
-bevy_diagnostic = { path = "../bevy/crates/bevy_diagnostic" }
-bevy_derive = { path = "../bevy/crates/bevy_derive" }
-bevy_winit = { path = "../bevy/crates/bevy_winit" }
-bevy_internal = { path = "../bevy/crates/bevy_internal" }
-bevy_asset = { path = "../bevy/crates/bevy_asset" }
-bevy_camera = { path = "../bevy/crates/bevy_camera" }
-bevy_scene = { path = "../bevy/crates/bevy_scene" }
-bevy = { path = "../bevy" }
+bevy_ecs = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_app = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_window = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_platform = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_utils = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_transform = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_time = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_tasks = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_reflect = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_ptr = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_math = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_log = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_input = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_diagnostic = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_derive = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_winit = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_internal = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_asset = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_camera = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy_scene = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
+bevy = { git = "https://github.com/dust-engine/bevy.git", rev = "1ba1ee2f535289714e1fafe55e462b68d21b4fc0" }
 
 [patch."https://github.com/ash-rs/ash.git"]
 ash = { git = "https://github.com/0xbeefd1ed/ash", branch = "meta" }
-
-# If overriding pumicite, use cargo to build the project. Bazel wouldn't support this.
-[patch."https://github.com/dust-engine/pumicite.git"]
-pumicite = { path = "../pumicite" }
-bevy_pumicite = { path = "../pumicite/crates/bevy" }
-pumicite_egui = { path = "../pumicite/crates/egui" }
 
 [profile.release]
 debug = true

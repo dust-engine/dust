@@ -168,7 +168,7 @@ fn startup_system(mut commands: Commands, primary_window: Single<Entity, With<Pr
         .spawn((
             character,
             collider,
-            Transform::from_translation(Vec3::new(12.2, 40.0, 18.0)),
+            Transform::from_translation(Vec3::new(14.0, 40.0, 18.0)),
         ))
         .observe(on_view_changed)
         .id();

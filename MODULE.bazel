@@ -31,7 +31,7 @@ bazel_dep(name = "pumicite_super_resolution", version = "0.1.0")
 git_override(
     module_name = "pumicite_super_resolution",
     remote = "https://github.com/dust-engine/pumicite_super_resolution.git",
-    commit = "81985bf31b949dfd36fa73b4d73bedd12ca694ba",
+    commit = "061c7543d7009e0b21af4df0f1c3c9fdfb761cc1",
 )
 
 # -----------------------------------------------------------------------------
@@ -61,18 +61,28 @@ new_git_repository(
 # Rust assetbuild dependency
 # -----------------------------------------------------------------------------
 
-bazel_dep(name = "rules_rust", version = "0.70.0")
+bazel_dep(name = "rules_rust", version = "0.74.0")
 
-# Backport bazelbuild/rules_rust#3953: when transform_sources relocates a crate
-# with mixed generated/source files into bazel-out (here: crates/pbr, whose
-# compile_data includes the generated shader layout), CARGO_MANIFEST_DIR still
-# pointed at the original source dir. Bevy's derive macros read Cargo.toml from
-# there at expansion time and panic ("Cargo manifest does not exist") under the
-# macOS/Linux sandbox. The patch derives CARGO_MANIFEST_DIR from the relocated
-# crate root. Drop once the fix is released.
+# Two local patches on rules_rust:
+#
+# * rules_rust_splice_external_path_deps.patch: crate_universe splices the root
+#   Cargo.toml into a temporary directory (whose entries are symlinks back into
+#   this workspace) before running `cargo metadata`. Relative `path` dependencies
+#   that leave the workspace (`../avian`, `../parry`, the `[patch]` entries) then
+#   resolve against the temp dir and cargo fails with "failed to read
+#   <tmp>/../avian/crates/avian3d/Cargo.toml". The patch rewrites such escaping
+#   paths in the spliced root manifest to absolute paths. Not fixed upstream
+#   (bazelbuild/rules_rust#2906 was closed without a fix).
+# * rules_rust_bootstrap_cargo_bazel.patch: the release ships a prebuilt
+#   `cargo-bazel` binary, which would not contain the fix above. Emptying the
+#   download table makes rules_rust build `cargo-bazel` from its (patched)
+#   sources via `@cargo_bazel_bootstrap` instead. One-time cost per output base.
 single_version_override(
     module_name = "rules_rust",
-    patches = ["//third_party:patches/rules_rust_cargo_manifest_dir.patch"],
+    patches = [
+        "//third_party:patches/rules_rust_splice_external_path_deps.patch",
+        "//third_party:patches/rules_rust_bootstrap_cargo_bazel.patch",
+    ],
     patch_strip = 1,
 )
 
@@ -113,7 +123,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "1ebb1d8aa8a889e96095f42efd589d7a4bb0c8d3")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "084e39cd38f7c34dff24bac6dad2eb3d9a464054")
 crate.annotation(
     crate = "pumicite_cli",
     repositories = ["bindeps"],
