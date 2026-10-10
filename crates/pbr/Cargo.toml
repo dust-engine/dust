@@ -8,9 +8,21 @@ bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
 pumicite_egui.workspace = true
-pumicite_super_resolution.workspace = true
 dust_app.workspace = true
 dust_gfxdebug.workspace = true
 tracing = "0.1"
 bytemuck = "1.25"
 glam = "0.32"
+
+# DLSS Ray Reconstruction. Links the NVIDIA NGX SDK, which only the Bazel build
+# provides; it enables this feature on Windows and Linux.
+[features]
+dlss = []
+
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+runfiles = "0.2"
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2 = "0.6"
+objc2-metal = "0.3.2"
+objc2-metal-fx = "0.3.2"

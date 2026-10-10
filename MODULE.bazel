@@ -27,13 +27,6 @@ git_override(
     commit = "91b9e9a26615000f86322c2798f0e06ecf11219a",
 )
 
-bazel_dep(name = "pumicite_super_resolution", version = "0.1.0")
-git_override(
-    module_name = "pumicite_super_resolution",
-    remote = "https://github.com/dust-engine/pumicite_super_resolution.git",
-    commit = "061c7543d7009e0b21af4df0f1c3c9fdfb761cc1",
-)
-
 # -----------------------------------------------------------------------------
 # shader-slang Rust bindings (external git repo with custom BUILD overlay)
 # -----------------------------------------------------------------------------
@@ -107,14 +100,6 @@ crate.annotation(
     override_target_lib = "@rules_rust//rust/runfiles",
 )
 
-crate.annotation(
-    crate = "pumicite_super_resolution",
-    repositories = ["crates"],
-    gen_build_script = "off",
-    deps = [
-        "@@//third_party:super_resolution_backend",
-    ],
-)
 crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
     manifests = ["//:Cargo.toml"],
@@ -137,6 +122,17 @@ crate.annotation(
 )
 crate.from_specs(name = "bindeps")
 use_repo(crate, "bindeps")
+
+# -----------------------------------------------------------------------------
+# NVIDIA DLSS SDK: NGX headers, static libraries, and the Ray Reconstruction
+# runtime libraries (see crates/pbr/src/upscaler/dlss).
+# -----------------------------------------------------------------------------
+new_git_repository(
+    name = "dlss",
+    remote = "https://github.com/NVIDIA/DLSS.git",
+    commit = "a291cc7d2cc642a51566f3dfd5376f635cd1b284",
+    build_file = "//third_party:dlss.BUILD.bazel",
+)
 
 # -----------------------------------------------------------------------------
 # NVIDIA SHARC

@@ -12,8 +12,11 @@ filegroup(
         "//crates/pbr/shaders/sky_atmosphere:runtime",
         "//crates/pbr/shaders/sharc:runtime",
         "//crates/vox/shaders:runtime",
-        "@pumicite_super_resolution//:backend_runtime",
-    ],
+    ] + select({
+        # The DLSS Ray Reconstruction runtime library NGX loads (Windows/Linux).
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@dlss//:dlssd_runtime"],
+    }),
 )
 
 cargo_toml_env_vars(

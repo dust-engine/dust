@@ -1,5 +1,6 @@
 load("@crates//:defs.bzl", "all_crate_deps", "aliases")
 load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -9,7 +10,16 @@ cargo_toml_env_vars(
     src = "Cargo.toml",
 )
 
-
+# Linkable wrappers around the NGX SDK's `static inline` DLSS-RR helpers, bound
+# by `src/upscaler/dlss/sys.rs`.
+cc_library(
+    name = "ngx_helpers",
+    srcs = ["src/upscaler/dlss/ngx_helpers.c"],
+    deps = [
+        "@dlss//:dlss_headers",
+        "@vulkan_sdk//:vulkan_headers",
+    ],
+)
 
 rust_library(
     name = "dust_pbr",
@@ -22,11 +32,22 @@ rust_library(
     ],
     edition = "2024",
     aliases = aliases(),
+    # DLSS on Windows and Linux; macOS uses MetalFX instead.
+    crate_features = select({
+        "@platforms//os:macos": [],
+        "//conditions:default": ["dlss"],
+    }),
     deps = all_crate_deps(normal = True) + [
         "//third_party/ffx:ffx_lpm_cpu",
         "//crates/app:dust_app",
         "//crates/gfxdebug:dust_gfxdebug",
-    ],
+    ] + select({
+        "@platforms//os:macos": [],
+        "//conditions:default": [
+            ":ngx_helpers",
+            "@dlss//:dlss",
+        ],
+    }),
     rustc_env_files = [
         ":cargo_toml_env_vars",
         "//:bazel_bin_env",

@@ -18,9 +18,3 @@ cc_library(
         "@vulkan_sdk//:vulkan_headers",
     ],
 )
-
-# Visibility bridge for the pumicite_super_resolution crate's backend link deps.
-alias(
-    name = "super_resolution_backend",
-    actual = "@pumicite_super_resolution//:backend",
-)

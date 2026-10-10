@@ -1,0 +1,43 @@
+// The DLSS Ray Reconstruction create/evaluate entry points are `static inline`
+// helper macros in `nvsdk_ngx_helpers_dlssd_vk.h`, so they are not exported by
+// the NGX static library. These wrappers give them linkable symbols for the
+// Rust FFI in `sys.rs`.
+
+#include <vulkan/vulkan.h>
+
+#include "nvsdk_ngx_helpers.h"
+#include "nvsdk_ngx_helpers_vk.h"
+#include "nvsdk_ngx_helpers_dlssd.h"
+#include "nvsdk_ngx_helpers_dlssd_vk.h"
+
+NVSDK_NGX_Result dust_ngx_vulkan_create_dlssd_ext1(
+    VkDevice in_device,
+    VkCommandBuffer in_cmd_list,
+    unsigned int in_creation_node_mask,
+    unsigned int in_visibility_node_mask,
+    NVSDK_NGX_Handle **pp_out_handle,
+    NVSDK_NGX_Parameter *p_in_params,
+    NVSDK_NGX_DLSSD_Create_Params *p_in_dlssd_create_params)
+{
+    return NGX_VULKAN_CREATE_DLSSD_EXT1(
+        in_device,
+        in_cmd_list,
+        in_creation_node_mask,
+        in_visibility_node_mask,
+        pp_out_handle,
+        p_in_params,
+        p_in_dlssd_create_params);
+}
+
+NVSDK_NGX_Result dust_ngx_vulkan_evaluate_dlssd_ext(
+    VkCommandBuffer in_cmd_list,
+    NVSDK_NGX_Handle *p_in_handle,
+    NVSDK_NGX_Parameter *p_in_params,
+    NVSDK_NGX_VK_DLSSD_Eval_Params *p_in_dlssd_eval_params)
+{
+    return NGX_VULKAN_EVALUATE_DLSSD_EXT(
+        in_cmd_list,
+        p_in_handle,
+        p_in_params,
+        p_in_dlssd_eval_params);
+}

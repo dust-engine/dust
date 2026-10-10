@@ -61,7 +61,7 @@ pub fn run() {
         .add_plugins(bevy::DefaultPlugins)
         .add_plugins(bevy_pumicite::SurfacePlugin::default())
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())
-        .add_plugins(dust_pbr::super_resolution::SuperResolutionSetupPlugin)
+        .add_plugins(dust_pbr::upscaler::UpscalerSetupPlugin)
         .add_plugins(bevy_pumicite::PumicitePlugin::default())
         .add_plugins(bevy_pumicite::swapchain::SwapchainPlugin);
 

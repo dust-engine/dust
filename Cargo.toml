@@ -23,7 +23,6 @@ avian3d = { path = "../avian/crates/avian3d", default-features = false, features
 pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "4e1ccbe45e09975cedcd08077af311479d73ac87" }
 bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "4e1ccbe45e09975cedcd08077af311479d73ac87" }
 pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "4e1ccbe45e09975cedcd08077af311479d73ac87" }
-pumicite_super_resolution = { git = "https://github.com/dust-engine/pumicite_super_resolution.git", rev = "061c7543d7009e0b21af4df0f1c3c9fdfb761cc1" }
 
 [dependencies]
 dust_vox.workspace = true
@@ -94,6 +93,3 @@ opt-level = 3
 
 [profile.dev]
 panic = "abort"
-
-[patch."https://github.com/dust-engine/pumicite_super_resolution.git"]
-pumicite_super_resolution = { path = "../pumicite_super_resolution" }
