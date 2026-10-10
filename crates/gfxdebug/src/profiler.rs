@@ -27,24 +27,31 @@
 //! dynamically grabs the next two free slots (start + stop), wrapping at the
 //! end of the pool and reusing slots whose frame has already been read back.
 //! There is no fixed per-frame budget — a frame uses as many slots as it has
-//! scopes. Slots are reset from the host with `vkResetQueryPool`
-//! ([`QueryPool::host_reset`]) immediately before reuse, which is safe because
-//! the ring only reuses slots that belong to already-completed frames.
+//! scopes. Slots are reset from the host with `vkResetQueryPool` immediately
+//! before reuse, which is safe because the ring only reuses slots that belong
+//! to already-completed frames.
+//!
+//! The pool is shared slot-by-slot between the host and every in-flight frame,
+//! so it is not wrapped in a [`GPUMutex`](pumicite::sync::GPUMutex): a
+//! `GPUMutex` hands the *whole* pool to one owner at a time, and the host could
+//! then only read results once no frame at all is in flight. Instead the pool
+//! is an `Arc<QueryPool>`, accessed through pumicite's `_unchecked` query
+//! methods, and `scope_begin` / `free_frame` uphold the per-slot ownership
+//! those methods require.
 //!
 //! When the in-flight working set genuinely doesn't fit (readback fell behind
 //! or a frame has an unusually large number of scopes), the pool is
-//! reallocated at a larger capacity. The pool lives inside a [`GPUMutex`] and
-//! every timestamp write [`CommandEncoder::lock`]s it, so the old pool is
-//! retired safely: dropping the `GPUMutex` defers its destruction until the GPU
-//! stops referencing it.
+//! reallocated at a larger capacity. Every command buffer that writes a
+//! timestamp [`CommandEncoder::retain`]s a clone of the `Arc`, so dropping the
+//! old pool defers its destruction until the GPU stops referencing it.
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::Arc};
 
 use bevy::prelude::*;
 use bevy_pumicite::{CreateDevice, DefaultRenderSet};
 use pumicite::{
     Device, Instance, ash::vk, command::CommandEncoder, physical_device::PhysicalDevice,
-    query::QueryPool, sync::GPUMutex, utils::AsVkHandle,
+    query::QueryPool, utils::AsVkHandle,
 };
 
 /// Initial pool size in timestamp slots. Grows on demand.
@@ -117,9 +124,9 @@ pub struct GpuProfiler {
     /// Mask for the queue's valid timestamp bits.
     valid_mask: u64,
 
-    /// The timestamp pool, guarded so it can be locked onto submissions and
-    /// retired safely. `None` only if allocation failed.
-    pool: Option<GPUMutex<QueryPool>>,
+    /// The timestamp pool, shared with in-flight command buffers (see the
+    /// module docs). `None` only if allocation failed.
+    pool: Option<Arc<QueryPool>>,
     /// Current pool size in slots.
     capacity: u32,
     /// Next free slot in the ring.
@@ -155,9 +162,9 @@ impl GpuProfiler {
                 QueryPool::new(device.clone(), vk::QueryType::TIMESTAMP, INITIAL_CAPACITY).ok()
             })
             .flatten()
-            .map(|qp| {
+            .map(|mut qp| {
                 qp.host_reset(0..INITIAL_CAPACITY);
-                GPUMutex::new(qp)
+                Arc::new(qp)
             });
         let supported = timestamps_ok && pool.is_some();
         Self {
@@ -194,7 +201,7 @@ impl GpuProfiler {
     /// the first frame that is not yet available (frames complete in order).
     fn resolve_pending(&mut self) {
         // Take the pool out so `self` can be mutated freely while reading. The
-        // GPUMutex is moved, not dropped, so no GPU sync is disturbed.
+        // `Arc` is moved, not dropped, so the pool stays alive.
         let Some(pool) = self.pool.take() else {
             return;
         };
@@ -257,18 +264,23 @@ impl GpuProfiler {
         let slots = frame.slots();
         self.live_slots -= slots;
         let end = frame.start + slots;
-        if end <= self.capacity {
-            pool.host_reset(frame.start..end);
-        } else {
-            // The frame's arc wrapped the end of the ring; reset both parts.
-            pool.host_reset(frame.start..self.capacity);
-            pool.host_reset(0..end - self.capacity);
+        // SAFETY: `frame` was just read back with every timestamp available, so
+        // the GPU is done with its slots, and the ring hands them to no other
+        // frame until they are freed here.
+        unsafe {
+            if end <= self.capacity {
+                pool.host_reset_unchecked(frame.start..end);
+            } else {
+                // The frame's arc wrapped the end of the ring; reset both parts.
+                pool.host_reset_unchecked(frame.start..self.capacity);
+                pool.host_reset_unchecked(0..end - self.capacity);
+            }
         }
     }
 
-    /// Reallocates the pool, larger than before, retiring the old one. The old
-    /// `GPUMutex` is dropped here; pumicite defers its destruction until the GPU
-    /// is done with it. Pending readbacks reference the old pool and are lost.
+    /// Reallocates the pool, larger than before, retiring the old one. Our `Arc`
+    /// to the old pool is dropped here; command buffers still using it hold
+    /// their own clones. Pending readbacks reference the old pool and are lost.
     fn grow(&mut self) {
         // Already at the ceiling with a working pool: nothing more to do.
         if self.pool.is_some() && self.capacity >= MAX_CAPACITY {
@@ -280,13 +292,13 @@ impl GpuProfiler {
         } else {
             self.capacity.saturating_mul(2).min(MAX_CAPACITY)
         };
-        if let Ok(pool) =
+        if let Ok(mut pool) =
             QueryPool::new(self.device.clone(), vk::QueryType::TIMESTAMP, new_capacity)
         {
             // Reset every query once before first use. The old pool (and its
-            // pending readbacks) is retired via the GPUMutex drop.
+            // pending readbacks) is retired via the `Arc` drop.
             pool.host_reset(0..new_capacity);
-            self.pool = Some(GPUMutex::new(pool));
+            self.pool = Some(Arc::new(pool));
             self.capacity = new_capacity;
             self.head = 0;
             self.live_slots = 0;
@@ -321,8 +333,13 @@ impl GpuProfiler {
         // `capacity` is even and `head` advances by 2, so a pair always fits
         // before the ring end — no straddling, no wasted slots.
         let start = self.head;
-        let pool = encoder.lock(self.pool.as_ref()?, TS_STAGE);
-        encoder.write_timestamp(pool, TS_STAGE, start);
+        // `retain` keeps the pool alive until this command buffer completes, even
+        // if `grow` drops our `Arc` first.
+        let pool = encoder.retain(self.pool.as_ref()?.clone()).deref_inner();
+        // SAFETY: this command buffer owns the two slots handed out here: no
+        // other frame gets them, and the host resets them only after their
+        // results come back available.
+        unsafe { encoder.write_timestamp_unchecked(pool, TS_STAGE, start) };
 
         self.head = start + 2;
         if self.head == self.capacity {
@@ -337,8 +354,9 @@ impl GpuProfiler {
         let Some(pool) = self.pool.as_ref() else {
             return;
         };
-        let pool = encoder.lock(pool, TS_STAGE);
-        encoder.write_timestamp(pool, TS_STAGE, start + 1);
+        let pool = encoder.retain(pool.clone()).deref_inner();
+        // SAFETY: as in `scope_begin`; `start + 1` is the second slot it handed out.
+        unsafe { encoder.write_timestamp_unchecked(pool, TS_STAGE, start + 1) };
         self.current.scopes.push(ScopeRecord { label, start });
     }
 }
@@ -460,7 +478,7 @@ fn gpu_profiler_end_frame(profiler: Option<ResMut<GpuProfiler>>) {
 
     // If readback has fallen this far behind, the frames piling up may still be
     // in flight — resetting/reusing their slots would be unsafe, so ask for a
-    // fresh pool next frame (the old one is retired via its GPUMutex).
+    // fresh pool next frame (the old one is retired via its `Arc` drop).
     if profiler.pending.len() > MAX_PENDING {
         profiler.overflowed = true;
     }

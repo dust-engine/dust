@@ -25,11 +25,11 @@ use bytemuck::{Pod, Zeroable};
 use dust_pbr::PbrRenderState;
 use dust_pbr::sharc::SharcPipelines;
 use dust_vdb::hierarchy;
+use pumicite::Allocator;
 use pumicite::ash::{VkResult, vk};
-use pumicite::buffer::{Buffer, BufferLike, ManagedBuffer};
+use pumicite::buffer::ManagedBuffer;
+use pumicite::command::GPURefMut;
 use pumicite::device::DeviceBuilder;
-use pumicite::{Allocator, Device};
-use std::mem::MaybeUninit;
 
 mod geometry;
 mod loader;
@@ -467,7 +467,9 @@ fn sync_buffers_system(
             match event {
                 AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                     let material = materials.get(*id).unwrap();
-                    material.buffer.flush(encoder);
+                    unsafe {
+                        GPURefMut::new_unchecked(&material.buffer).flush(encoder);
+                    }
                 }
                 _ => (),
             }
@@ -476,7 +478,9 @@ fn sync_buffers_system(
             match event {
                 AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                     let palette = palettes.get(*id).unwrap();
-                    palette.0.flush(encoder);
+                    unsafe {
+                        GPURefMut::new_unchecked(&palette.0).flush(encoder);
+                    }
                 }
                 _ => (),
             }

@@ -6,7 +6,6 @@ use bevy_pumicite::{
 use bytemuck::NoUninit;
 use pumicite::{
     ash::vk,
-    buffer::BufferLike,
     image::ImageLike,
     tracking::Access,
     types::format::{ColorSpace, ColorSpacePrimaries, ColorSpaceTransferFunction},
@@ -15,7 +14,7 @@ use pumicite::{
 
 use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
 
-use crate::{HdrRenderTarget, PbrRenderState, camera::Camera};
+use crate::{HdrRenderTarget, HdrRenderTargetViewsExt, PbrRenderState, camera::Camera};
 
 unsafe extern "C" {
     fn dust_lpm_setup(
@@ -343,7 +342,7 @@ pub(crate) fn autoexposure_pass(
 
         // HDR scene radiance: read
         encoder.use_image_resource(
-            &views.hdr_output,
+            views.hdr_output(),
             &mut hdr.state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
@@ -355,7 +354,7 @@ pub(crate) fn autoexposure_pass(
         // Contents are undefined right after (re)creation, hence the discard on
         // the first frame — the shader ignores the previous value then.
         encoder.use_image_resource(
-            &views.exposure,
+            views.exposure(),
             &mut hdr.exposure_state,
             Access {
                 stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -369,8 +368,8 @@ pub(crate) fn autoexposure_pass(
         );
         encoder.emit_barriers();
 
-        let pipeline = encoder.retain(pipeline);
-        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+        let pipeline = encoder.retain(pipeline).deref_inner();
+        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::COMPUTE,
@@ -385,12 +384,12 @@ pub(crate) fn autoexposure_pass(
                 .image_info(&[
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: views.hdr_output.full_view().vk_handle(),
+                        image_view: views.hdr_output().full_view().vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: views.exposure.full_view().vk_handle(),
+                        image_view: views.exposure().full_view().vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
                 ]),
@@ -474,7 +473,7 @@ pub(crate) fn tonemap_pass(
 
         // HDR intermediary: read
         encoder.use_image_resource(
-            &render_target_views.hdr_denoised_output,
+            render_target_views.hdr_denoised_output(),
             &mut hdr.hdr_denoised_target_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
@@ -484,7 +483,7 @@ pub(crate) fn tonemap_pass(
         );
         // SDR target: read (egui / occluding content)
         encoder.use_image_resource(
-            &render_target_views.sdr_target,
+            render_target_views.sdr_target(),
             &mut hdr.sdr_target_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
@@ -494,7 +493,7 @@ pub(crate) fn tonemap_pass(
         );
         // Auto-exposure scale: read
         encoder.use_image_resource(
-            &render_target_views.exposure,
+            render_target_views.exposure(),
             &mut hdr.exposure_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
@@ -514,8 +513,8 @@ pub(crate) fn tonemap_pass(
         );
         encoder.emit_barriers();
 
-        let pipeline = encoder.retain(pipeline);
-        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+        let pipeline = encoder.retain(pipeline).deref_inner();
+        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::COMPUTE,
@@ -531,7 +530,7 @@ pub(crate) fn tonemap_pass(
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
                         image_view: render_target_views
-                            .hdr_denoised_output
+                            .hdr_denoised_output()
                             .full_view()
                             .vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
@@ -543,7 +542,11 @@ pub(crate) fn tonemap_pass(
                     },
                     vk::DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: render_target_views.sdr_target.full_view().vk_handle(),
+                        image_view: render_target_views
+                            .sdr_target()
+                            .deref_inner()
+                            .full_view()
+                            .vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
                 ]),
@@ -564,7 +567,7 @@ pub(crate) fn tonemap_pass(
                 }
                 .image_info(&[vk::DescriptorImageInfo {
                     sampler: vk::Sampler::null(),
-                    image_view: render_target_views.exposure.full_view().vk_handle(),
+                    image_view: render_target_views.exposure().full_view().vk_handle(),
                     image_layout: vk::ImageLayout::GENERAL,
                 }]),
             ],

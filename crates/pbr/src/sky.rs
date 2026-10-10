@@ -18,7 +18,7 @@ use bevy::window::PrimaryWindow;
 
 use bevy_pumicite::CreateDevice;
 use bevy_pumicite::prelude::*;
-use pumicite::buffer::RingBufferSuballocation;
+use pumicite::buffer::SharedRingBufferSuballocation;
 use pumicite::device::DeviceBuilder;
 use pumicite::{
     Sampler,
@@ -268,7 +268,7 @@ pub struct AtmosphereLUTs {
     pub sky_view: LutImage,
     pub luts_initialized: bool,
     pub sampler: Sampler,
-    pub param_buffer: Option<RingBufferSuballocation>,
+    pub param_buffer: Option<SharedRingBufferSuballocation>,
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<Allocator>) {
@@ -345,7 +345,7 @@ fn create_lut_image(
     name_image: &CStr,
     name_view: &CStr,
 ) -> LutImage {
-    let image = Image::new_private(
+    let image = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             image_type: vk::ImageType::TYPE_2D,
@@ -464,7 +464,7 @@ fn prepare_atmosphere_uniform(
         .unwrap()
         .copy_from_slice(bytemuck::bytes_of(&atmosphere.params));
 
-    atmosphere_luts.param_buffer = Some(buffer);
+    atmosphere_luts.param_buffer = Some(buffer.shared());
 }
 
 fn compute_luts(
@@ -497,7 +497,9 @@ fn compute_luts(
     atmosphere_luts.luts_initialized = true;
 
     state.record(|encoder| {
-        let buffer = encoder.retain(atmosphere_param_uniform_buffer);
+        let buffer = encoder
+            .retain(atmosphere_param_uniform_buffer)
+            .deref_inner();
 
         let transmittance_view = encoder.lock(
             &atmosphere_luts.transmittance.view,
@@ -516,8 +518,10 @@ fn compute_luts(
             );
             encoder.emit_barriers();
 
-            let pipeline = encoder.retain(transmittance_pipeline.clone().into_inner());
-            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+            let pipeline = encoder
+                .retain(transmittance_pipeline.clone().into_inner())
+                .deref_inner();
+            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
             encoder.push_descriptor_set(
                 vk::PipelineBindPoint::COMPUTE,
@@ -583,8 +587,10 @@ fn compute_luts(
             );
             encoder.emit_barriers();
 
-            let pipeline = encoder.retain(multi_scattering_pipeline.clone().into_inner());
-            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+            let pipeline = encoder
+                .retain(multi_scattering_pipeline.clone().into_inner())
+                .deref_inner();
+            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
             encoder.push_descriptor_set(
                 vk::PipelineBindPoint::COMPUTE,
@@ -677,8 +683,10 @@ fn compute_luts(
             );
             encoder.emit_barriers();
 
-            let pipeline = encoder.retain(sky_view_pipeline.clone().into_inner());
-            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+            let pipeline = encoder
+                .retain(sky_view_pipeline.clone().into_inner())
+                .deref_inner();
+            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
             let multi_scattering_image_info = vk::DescriptorImageInfo {
                 image_view: multi_scattering_view.full_view().vk_handle(),

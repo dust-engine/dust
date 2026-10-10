@@ -197,9 +197,11 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
             let Some(device_buffer) = device_buffer else {
                 return SmallVec::new();
             };
-            let device_buffer = recorder.retain(device_buffer);
+            let device_buffer = recorder.retain(device_buffer).deref_inner();
             let coords_buffer = recorder.retain(coords_buffer.unwrap());
-            let copy_coords_pipeline = recorder.retain(copy_coords_pipeline.into_inner());
+            let copy_coords_pipeline = recorder
+                .retain(copy_coords_pipeline.into_inner())
+                .deref_inner();
             recorder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, copy_coords_pipeline);
             recorder.push_descriptor_set(
                 vk::PipelineBindPoint::COMPUTE,
@@ -240,7 +242,7 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
                 z: 1,
             });
             [bevy_pumicite::rtx::blas::BLASBuildGeometry::Aabbs {
-                buffer: coords_buffer,
+                buffer: coords_buffer.readonly(),
                 stride: size_of::<vk::AabbPositionsKHR>() as u64,
                 flags: vk::GeometryFlagsKHR::OPAQUE,
                 primitive_count,

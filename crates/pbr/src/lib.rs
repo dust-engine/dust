@@ -30,8 +30,9 @@ use pumicite::{
     Allocator, Device, HasDevice,
     ash::vk::{self, TaggedStructure},
     buffer::BufferLike,
+    command::GPURefMut,
     debug::DebugObject,
-    image::{FullImageView, Image, ImageExt, ImageLike, SrgbImageView, SwizzledImageView},
+    image::{FullImageView, Image, ImageExt, SrgbImageView, SwizzledImageView},
     physical_device::PhysicalDevice,
     pipeline::PipelineCache,
     rtx::ShaderBindingTable,
@@ -378,15 +379,15 @@ fn render(
             });
 
         let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
-        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer);
+        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer).deref_inner();
 
-        let pipeline = encoder.retain(pipeline);
+        let pipeline = encoder.retain(pipeline).deref_inner();
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         let per_instance_buf = encoder.lock(
             per_instance_mutex,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
-        encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
+        encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, pipeline);
 
         // HDR intermediary at binding 1
         let render_target_views =
@@ -404,7 +405,7 @@ fn render(
 
         // HDR target: write (discard previous contents)
         encoder.use_image_resource(
-            &render_target_views.hdr_output,
+            render_target_views.hdr_output(),
             &mut hdr.state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
@@ -414,7 +415,7 @@ fn render(
         );
         // Albedo G-buffer: write (discard previous contents)
         encoder.use_image_resource(
-            &render_target_views.albedo,
+            render_target_views.albedo(),
             &mut hdr.albedo_state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
@@ -424,7 +425,7 @@ fn render(
         );
         // Normal G-buffer: write (discard previous contents)
         encoder.use_image_resource(
-            &render_target_views.normal,
+            render_target_views.normal(),
             &mut hdr.normal_state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
@@ -434,7 +435,7 @@ fn render(
         );
         // Specular-albedo G-buffer: write (discard previous contents)
         encoder.use_image_resource(
-            &render_target_views.specular_albedo,
+            render_target_views.specular_albedo(),
             &mut hdr.specular_albedo_state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
@@ -444,7 +445,7 @@ fn render(
         );
         // Depth G-buffer: write (discard previous contents)
         encoder.use_image_resource(
-            &render_target_views.depth,
+            render_target_views.depth(),
             &mut hdr.depth_state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
@@ -454,7 +455,7 @@ fn render(
         );
         // Motion vectors G-buffer: write (discard previous contents)
         encoder.use_image_resource(
-            &render_target_views.motion_vectors,
+            render_target_views.motion_vectors(),
             &mut hdr.motion_vectors_state,
             Access::RTX_WRITE,
             vk::ImageLayout::GENERAL,
@@ -466,7 +467,7 @@ fn render(
         // written by the primary closest-hit when a SHARC per-surface debug
         // overlay is active (it paints the visualization into this layer).
         encoder.use_image_resource(
-            &render_target_views.sdr_target,
+            render_target_views.sdr_target(),
             &mut hdr.sdr_target_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -548,15 +549,21 @@ fn render(
         params
             .scene_bvh(tlas)
             .uniforms(uniform)
-            .output_texture(render_target_views.hdr_output.full_view())
-            .gbuffer_albedo_linear(render_target_views.albedo.full_view())
-            .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
-            .gbuffer_albedo_uint(render_target_views.albedo.uint_view())
-            .gbuffer_normal_texture(render_target_views.normal.full_view())
-            .gbuffer_depth_texture(render_target_views.depth.full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
-            .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
-            .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
+            .output_texture(render_target_views.hdr_output().full_view())
+            .gbuffer_albedo_linear(
+                render_target_views
+                    .albedo()
+                    .deref_inner()
+                    .deref_inner()
+                    .full_view(),
+            )
+            .gbuffer_albedo_srgb(render_target_views.albedo().deref_inner().srgb_view())
+            .gbuffer_albedo_uint(render_target_views.albedo().uint_view())
+            .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
+            .gbuffer_depth_texture(render_target_views.depth().full_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
+            .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
+            .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
             .sky_transmittance_lut(transmittance_view.full_view())
             .sky_sky_view_lut(sky_view.full_view())
@@ -622,6 +629,22 @@ pub struct HdrRenderTargetViews {
     /// so all three agree on one exposure.
     pub exposure: FullImageView<Image>,
 }
+
+pumicite::project_fields! {
+    /// Per-image projections of a locked [`HdrRenderTargetViews`] token.
+    pub trait HdrRenderTargetViewsExt for impl[] HdrRenderTargetViews {
+        hdr_output: FullImageView<Image>,
+        sdr_target: SrgbImageView<FullImageView<Image>>,
+        albedo: UintImageView<SrgbImageView<FullImageView<Image>>>,
+        normal: SwizzledImageView<FullImageView<Image>>,
+        depth: FullImageView<Image>,
+        motion_vectors: FullImageView<Image>,
+        specular_albedo: FullImageView<Image>,
+        hdr_denoised_output: FullImageView<Image>,
+        exposure: FullImageView<Image>,
+    }
+}
+
 
 #[derive(Resource)]
 pub struct HdrRenderTarget {
@@ -1072,7 +1095,7 @@ fn upscaler_evaluate(
         };
 
         encoder.use_image_resource(
-            &views.hdr_output,
+            views.hdr_output(),
             &mut hdr.state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -1081,7 +1104,7 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &views.albedo,
+            views.albedo(),
             &mut hdr.albedo_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -1090,7 +1113,7 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &views.normal,
+            views.normal(),
             &mut hdr.normal_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -1099,7 +1122,7 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &views.depth,
+            views.depth(),
             &mut hdr.depth_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -1108,7 +1131,7 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &views.motion_vectors,
+            views.motion_vectors(),
             &mut hdr.motion_vectors_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -1117,7 +1140,7 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &views.specular_albedo,
+            views.specular_albedo(),
             &mut hdr.specular_albedo_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -1126,7 +1149,7 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &views.exposure,
+            views.exposure(),
             &mut hdr.exposure_state,
             read_access,
             vk::ImageLayout::GENERAL,
@@ -1135,7 +1158,7 @@ fn upscaler_evaluate(
             false,
         );
         encoder.use_image_resource(
-            &views.hdr_denoised_output,
+            views.hdr_denoised_output(),
             &mut hdr.hdr_denoised_target_state,
             write_access,
             vk::ImageLayout::GENERAL,
@@ -1149,22 +1172,22 @@ fn upscaler_evaluate(
         // through; the image's layout is already tracked into `GENERAL` above.
         // Every view is the full-image view except the albedo, sampled through
         // its sRGB view to match the diffuse-albedo format the denoiser expects.
-        let color_info = sr_image_info(&views.hdr_output, views.hdr_output.full_view());
+        let color_info = sr_image_info(views.hdr_output(), views.hdr_output().full_view());
         let output_info = sr_image_info(
-            &views.hdr_denoised_output,
-            views.hdr_denoised_output.full_view(),
+            views.hdr_denoised_output(),
+            views.hdr_denoised_output().full_view(),
         );
-        let depth_info = sr_image_info(&views.depth, views.depth.full_view());
+        let depth_info = sr_image_info(views.depth(), views.depth().full_view());
         let motion_img_info =
-            sr_image_info(&views.motion_vectors, views.motion_vectors.full_view());
-        let normal_info = sr_image_info(&views.normal, views.normal.full_view());
+            sr_image_info(views.motion_vectors(), views.motion_vectors().full_view());
+        let normal_info = sr_image_info(views.normal(), views.normal().deref_inner().full_view());
         // Roughness is packed in `normal.w`; feed it via the normal image's
         // alpha-broadcast swizzle view so every channel reads the packed value.
-        let roughness_info = sr_image_info(&views.normal, views.normal.swizzled_view());
-        let diffuse_info = sr_image_info(&views.albedo, views.albedo.srgb_view());
+        let roughness_info = sr_image_info(views.normal(), views.normal().swizzled_view());
+        let diffuse_info = sr_image_info(views.albedo(), views.albedo().deref_inner().srgb_view());
         let specular_info =
-            sr_image_info(&views.specular_albedo, views.specular_albedo.full_view());
-        let exposure_img_info = sr_image_info(&views.exposure, views.exposure.full_view());
+            sr_image_info(views.specular_albedo(), views.specular_albedo().full_view());
+        let exposure_img_info = sr_image_info(views.exposure(), views.exposure().full_view());
 
         let motion = SuperResolutionDispatchMotionInfo {
             motion_vectors_image_info: Some(&motion_img_info),
@@ -1231,9 +1254,18 @@ fn upscaler_evaluate(
 /// dust keeps every super-resolution G-buffer in `GENERAL` layout with no
 /// sub-region offset.
 fn sr_image_info<'a>(
-    image: &'a dyn pumicite::image::ImageLike,
-    view: &'a dyn pumicite::image::ImageViewLike,
+    image: GPURefMut<'a, impl pumicite::image::ImageLike + 'a>,
+    view: GPURefMut<'a, impl pumicite::image::ImageViewLike + 'a>,
 ) -> SuperResolutionImageInfo<'a> {
+    // SAFETY: the upscaler reads only handles and metadata (extent, format)
+    // through these references, which `unwrap` permits. The pointer casts
+    // restore the tokens' own lifetime `'a`, which `unwrap` ties to the local.
+    let (image, view) = unsafe {
+        (
+            &*(image.unwrap() as *const _),
+            &*(view.unwrap() as *const _),
+        )
+    };
     SuperResolutionImageInfo {
         image,
         view,
@@ -1326,7 +1358,7 @@ fn ensure_hdr_target(
         ..base_create_info
     };
 
-    let hdr_output = Image::new_private(
+    let hdr_output = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16B16A16_SFLOAT,
@@ -1339,7 +1371,7 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"HDR Render Target View");
 
-    let hdr_denoised_output = Image::new_private(
+    let hdr_denoised_output = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16B16A16_SFLOAT,
@@ -1352,7 +1384,7 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"HDR Denoised Render Target View");
 
-    let sdr_target = Image::new_private(
+    let sdr_target = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             flags: vk::ImageCreateFlags::MUTABLE_FORMAT,
@@ -1374,7 +1406,7 @@ fn ensure_hdr_target(
     .create_srgb_view(vk::ImageUsageFlags::SAMPLED)
     .unwrap();
 
-    let albedo = Image::new_private(
+    let albedo = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             flags: vk::ImageCreateFlags::MUTABLE_FORMAT,
@@ -1402,7 +1434,7 @@ fn ensure_hdr_target(
     // is packed in `normal.w`. Alongside the full view (world-space normal) we
     // build an alpha-broadcast swizzle view (`{r,g,b,a} <- A`) that presents that
     // packed roughness on every channel, sampled as the roughness G-buffer.
-    let normal = Image::new_private(
+    let normal = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16B16A16_SFLOAT,
@@ -1425,7 +1457,7 @@ fn ensure_hdr_target(
     )
     .unwrap();
 
-    let depth = Image::new_private(
+    let depth = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R32_SFLOAT,
@@ -1438,7 +1470,7 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"G-Buffer Depth View");
 
-    let motion_vectors = Image::new_private(
+    let motion_vectors = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16_SFLOAT,
@@ -1451,7 +1483,7 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"G-Buffer Motion Vectors View");
 
-    let specular_albedo = Image::new_private(
+    let specular_albedo = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R8G8B8A8_UNORM,
@@ -1470,7 +1502,7 @@ fn ensure_hdr_target(
     // 1×1 exposure scale shared by the upscaler and the tonemap pass. Sized
     // independently of both resolutions; recreated with the rest of the target
     // only for simplicity.
-    let exposure = Image::new_private(
+    let exposure = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16_SFLOAT,
@@ -1575,22 +1607,22 @@ fn shadow_pass(
             });
 
         let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
-        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer);
+        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer).deref_inner();
 
-        let pipeline = encoder.retain(pipeline);
+        let pipeline = encoder.retain(pipeline).deref_inner();
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         let per_instance_buf = encoder.lock(
             per_instance_mutex,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
-        encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
+        encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, pipeline);
 
         let render_target_views =
             encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         // HDR: read-write (miss shader reads current value and adds sun contribution)
         encoder.use_image_resource(
-            &render_target_views.hdr_output,
+            render_target_views.hdr_output(),
             &mut hdr.state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1604,7 +1636,7 @@ fn shadow_pass(
         );
         // Albedo: sampled read through sRGB view (written by primary pass)
         encoder.use_image_resource(
-            &render_target_views.albedo,
+            render_target_views.albedo(),
             &mut hdr.albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1617,7 +1649,7 @@ fn shadow_pass(
         );
         // Normal: read (written by primary pass)
         encoder.use_image_resource(
-            &render_target_views.normal,
+            render_target_views.normal(),
             &mut hdr.normal_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1630,7 +1662,7 @@ fn shadow_pass(
         );
         // Specular albedo: read (written by primary pass)
         encoder.use_image_resource(
-            &render_target_views.specular_albedo,
+            render_target_views.specular_albedo(),
             &mut hdr.specular_albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1643,7 +1675,7 @@ fn shadow_pass(
         );
         // Depth: read (written by primary pass)
         encoder.use_image_resource(
-            &render_target_views.depth,
+            render_target_views.depth(),
             &mut hdr.depth_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1699,15 +1731,23 @@ fn shadow_pass(
             PbrPipelineParams::new()
                 .scene_bvh(tlas)
                 .uniforms(uniform)
-                .output_texture(render_target_views.hdr_output.full_view())
-                .gbuffer_albedo_linear(render_target_views.albedo.full_view())
-                .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
-                .gbuffer_albedo_uint(render_target_views.albedo.uint_view())
-                .gbuffer_normal_texture(render_target_views.normal.full_view())
-                .gbuffer_depth_texture(render_target_views.depth.full_view())
-                .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
-                .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
-                .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
+                .output_texture(render_target_views.hdr_output().full_view())
+                .gbuffer_albedo_linear(
+                    render_target_views
+                        .albedo()
+                        .deref_inner()
+                        .deref_inner()
+                        .full_view(),
+                )
+                .gbuffer_albedo_srgb(render_target_views.albedo().deref_inner().srgb_view())
+                .gbuffer_albedo_uint(render_target_views.albedo().uint_view())
+                .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
+                .gbuffer_depth_texture(render_target_views.depth().full_view())
+                .gbuffer_occlusion_texture(
+                    render_target_views.sdr_target().deref_inner().full_view(),
+                )
+                .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
+                .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
                 .sky_atmosphere_params(atmo_buffer)
                 .sky_transmittance_lut(transmittance_view.full_view())
                 .sky_sky_view_lut(sky_view.full_view())
@@ -1805,22 +1845,22 @@ pub(crate) fn final_gather_pass(
             });
 
         let uniform = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniform));
-        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer);
+        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer).deref_inner();
 
-        let pipeline = encoder.retain(pipeline);
+        let pipeline = encoder.retain(pipeline).deref_inner();
         let tlas = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         let per_instance_buf = encoder.lock(
             per_instance_mutex,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
-        encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, &pipeline);
+        encoder.bind_pipeline(vk::PipelineBindPoint::RAY_TRACING_KHR, pipeline);
 
         let render_target_views =
             encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         // HDR: read-write (additive indirect contribution)
         encoder.use_image_resource(
-            &render_target_views.hdr_output,
+            render_target_views.hdr_output(),
             &mut hdr.state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1834,7 +1874,7 @@ pub(crate) fn final_gather_pass(
         );
         // Albedo: sampled read through sRGB view
         encoder.use_image_resource(
-            &render_target_views.albedo,
+            render_target_views.albedo(),
             &mut hdr.albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1847,7 +1887,7 @@ pub(crate) fn final_gather_pass(
         );
         // Normal: read
         encoder.use_image_resource(
-            &render_target_views.normal,
+            render_target_views.normal(),
             &mut hdr.normal_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1860,7 +1900,7 @@ pub(crate) fn final_gather_pass(
         );
         // Specular albedo: read
         encoder.use_image_resource(
-            &render_target_views.specular_albedo,
+            render_target_views.specular_albedo(),
             &mut hdr.specular_albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -1873,7 +1913,7 @@ pub(crate) fn final_gather_pass(
         );
         // Depth: read
         encoder.use_image_resource(
-            &render_target_views.depth,
+            render_target_views.depth(),
             &mut hdr.depth_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -2017,14 +2057,20 @@ pub(crate) fn final_gather_pass(
         params
             .scene_bvh(tlas)
             .uniforms(uniform)
-            .output_texture(render_target_views.hdr_output.full_view())
-            .gbuffer_albedo_linear(render_target_views.albedo.full_view())
-            .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
-            .gbuffer_normal_texture(render_target_views.normal.full_view())
-            .gbuffer_depth_texture(render_target_views.depth.full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
-            .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
-            .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
+            .output_texture(render_target_views.hdr_output().full_view())
+            .gbuffer_albedo_linear(
+                render_target_views
+                    .albedo()
+                    .deref_inner()
+                    .deref_inner()
+                    .full_view(),
+            )
+            .gbuffer_albedo_srgb(render_target_views.albedo().deref_inner().srgb_view())
+            .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
+            .gbuffer_depth_texture(render_target_views.depth().full_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
+            .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
+            .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
             .sky_transmittance_lut(transmittance_view.full_view())
             .sky_sky_view_lut(sky_view.full_view())
@@ -2087,7 +2133,7 @@ fn start_occluding_render_pass(
             encoder.lock(&hdr.view, vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT);
 
         encoder.use_image_resource(
-            &render_target_views.sdr_target,
+            render_target_views.sdr_target(),
             &mut hdr.sdr_target_state,
             Access::COLOR_ATTACHMENT_WRITE,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -2103,7 +2149,7 @@ fn start_occluding_render_pass(
                     .clear(Vec4::new(0.0, 0.0, 0.0, 0.0))
                     .image_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
                     .store(true)
-                    .view(render_target_views.sdr_target.full_view());
+                    .view(render_target_views.sdr_target().deref_inner().full_view());
                 // Use linear view for egui. egui does all the interpolation in srgb space.
             })
             .render_area(

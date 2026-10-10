@@ -15,7 +15,7 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 use pumicite::ash::vk;
-use pumicite::buffer::{Buffer, BufferLike};
+use pumicite::buffer::Buffer;
 use pumicite::sync::GPUMutex;
 use pumicite::tracking::{Access, ResourceState};
 use pumicite::utils::AsVkHandle;
@@ -33,7 +33,8 @@ use std::ops::Deref;
 use crate::camera::Camera;
 use crate::sky::AtmosphereLUTs;
 use crate::{
-    HdrRenderTarget, PbrInstanceData, PbrPipelineParams, PbrRenderSet, build_camera_uniform,
+    HdrRenderTarget, HdrRenderTargetViewsExt, PbrInstanceData, PbrPipelineParams, PbrRenderSet,
+    build_camera_uniform,
 };
 
 // ─── SHARC debug visualization ─────────────────────────────────────────────
@@ -248,21 +249,21 @@ fn create_sharc_resources(
     let usage = vk::BufferUsageFlags::STORAGE_BUFFER
         | vk::BufferUsageFlags::TRANSFER_DST
         | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
-    let hash_entries = Buffer::new_private(
+    let hash_entries = Buffer::new_device(
         allocator.clone(),
         n * SharcResources::STRIDE_HASH_ENTRIES,
         16,
         usage,
     )
     .expect("SHARC hash entries buffer");
-    let accumulation = Buffer::new_private(
+    let accumulation = Buffer::new_device(
         allocator.clone(),
         n * SharcResources::STRIDE_ACCUMULATION,
         16,
         usage,
     )
     .expect("SHARC accumulation buffer");
-    let resolved = Buffer::new_private(
+    let resolved = Buffer::new_device(
         allocator.clone(),
         n * SharcResources::STRIDE_RESOLVED,
         16,
@@ -270,18 +271,18 @@ fn create_sharc_resources(
     )
     .expect("SHARC resolved buffer");
     // One u32 lock/occupancy flag per hash entry (no-64-bit-atomics insert path).
-    let lock = Buffer::new_private(allocator.clone(), n * SharcResources::STRIDE_KEY, 16, usage)
+    let lock = Buffer::new_device(allocator.clone(), n * SharcResources::STRIDE_KEY, 16, usage)
         .expect("SHARC lock buffer");
     let pool = [(); 2].map(|_| {
         let cap = pool_capacity as u64;
-        let candidates = Buffer::new_private(
+        let candidates = Buffer::new_device(
             allocator.clone(),
             cap * SharcResources::STRIDE_CANDIDATE,
             16,
             usage,
         )
         .expect("SHARC candidate pool buffer");
-        let keys = Buffer::new_private(
+        let keys = Buffer::new_device(
             allocator.clone(),
             cap * SharcResources::STRIDE_KEY,
             16,
@@ -629,7 +630,7 @@ fn record_sharc_rt(
     sbt: &mut pumicite::rtx::ShaderBindingTable,
     cam_uniform: crate::Uniforms,
     sharc_constants: SharcConstantsRaw,
-    atmosphere_uniform_buffer: pumicite::buffer::RingBufferSuballocation,
+    atmosphere_uniform_buffer: pumicite::buffer::SharedRingBufferSuballocation,
     per_instance_mutex: &GPUMutex<pumicite::buffer::RingBufferSuballocation>,
     tlas: &GPUMutex<bevy_pumicite::rtx::tlas::TLASInner>,
     hdr: &mut HdrRenderTarget,
@@ -650,9 +651,9 @@ fn record_sharc_rt(
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&cam_uniform));
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
-        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer);
+        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer).deref_inner();
 
-        let pipeline = encoder.retain(pipeline);
+        let pipeline = encoder.retain(pipeline).deref_inner();
         let tlas_locked = encoder.lock(tlas, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
         let per_instance_buf = encoder.lock(
             per_instance_mutex,
@@ -702,7 +703,7 @@ fn record_sharc_rt(
             encoder.lock(&hdr.view, vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR);
 
         encoder.use_image_resource(
-            &render_target_views.hdr_output,
+            render_target_views.hdr_output(),
             &mut hdr.state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -715,7 +716,7 @@ fn record_sharc_rt(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.albedo,
+            render_target_views.albedo(),
             &mut hdr.albedo_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -727,7 +728,7 @@ fn record_sharc_rt(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.normal,
+            render_target_views.normal(),
             &mut hdr.normal_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -739,7 +740,7 @@ fn record_sharc_rt(
             false,
         );
         encoder.use_image_resource(
-            &render_target_views.depth,
+            render_target_views.depth(),
             &mut hdr.depth_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
@@ -824,14 +825,20 @@ fn record_sharc_rt(
         params
             .scene_bvh(tlas_locked)
             .uniforms(cam_buffer)
-            .output_texture(render_target_views.hdr_output.full_view())
-            .gbuffer_albedo_linear(render_target_views.albedo.full_view())
-            .gbuffer_albedo_srgb(render_target_views.albedo.srgb_view())
-            .gbuffer_normal_texture(render_target_views.normal.full_view())
-            .gbuffer_depth_texture(render_target_views.depth.full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
-            .gbuffer_motion_vector_texture(render_target_views.motion_vectors.full_view())
-            .gbuffer_specular_albedo(render_target_views.specular_albedo.full_view())
+            .output_texture(render_target_views.hdr_output().full_view())
+            .gbuffer_albedo_linear(
+                render_target_views
+                    .albedo()
+                    .deref_inner()
+                    .deref_inner()
+                    .full_view(),
+            )
+            .gbuffer_albedo_srgb(render_target_views.albedo().deref_inner().srgb_view())
+            .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
+            .gbuffer_depth_texture(render_target_views.depth().full_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
+            .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
+            .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
             .sky_transmittance_lut(transmittance_view.full_view())
             .sky_sky_view_lut(sky_view.full_view())
@@ -925,8 +932,8 @@ fn sharc_resolve_pass(
         encoder.use_buffer_resource(lock_buf, &mut resources.lock_state, rw);
         encoder.emit_barriers();
 
-        let pipeline = encoder.retain(pipeline.clone());
-        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+        let pipeline = encoder.retain(pipeline.clone()).deref_inner();
+        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
         let cb_info = [vk::DescriptorBufferInfo {
             buffer: constants_buffer.vk_handle(),
@@ -1074,7 +1081,7 @@ fn sharc_debug_overlay_pass(
             );
 
             encoder.use_image_resource(
-                &render_target_views.sdr_target,
+                render_target_views.sdr_target(),
                 &mut hdr.sdr_target_state,
                 Access {
                     stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -1097,14 +1104,16 @@ fn sharc_debug_overlay_pass(
             }
             encoder.emit_barriers();
 
-            let splat = encoder.retain(splat.clone());
-            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &splat);
+            let splat = encoder.retain(splat.clone()).deref_inner();
+            encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, splat);
             // Partial bind: camera (1), occlusion (7), constants (18) and the
             // pool read slots (19/20) the splat shader samples.
             let mut params = PbrPipelineParams::new();
             params
                 .uniforms(cam_buffer)
-                .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
+                .gbuffer_occlusion_texture(
+                    render_target_views.sdr_target().deref_inner().full_view(),
+                )
                 .sharc_g_sharc_constants(constants_buffer)
                 .sharc_g_sharc_candidates_read(cand_buf)
                 .sharc_g_sharc_keys_read(keys_buf);
@@ -1151,7 +1160,7 @@ fn sharc_debug_overlay_pass(
         // scene + egui; we overwrite only the populated-cell pixels, so it's
         // read-modify-write storage access.
         encoder.use_image_resource(
-            &render_target_views.sdr_target,
+            render_target_views.sdr_target(),
             &mut hdr.sdr_target_state,
             Access {
                 stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -1173,15 +1182,15 @@ fn sharc_debug_overlay_pass(
         );
         encoder.emit_barriers();
 
-        let pipeline = encoder.retain(pipeline.clone());
-        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, &pipeline);
+        let pipeline = encoder.retain(pipeline.clone()).deref_inner();
+        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
         // Partial bind via the generated helper: the occupancy view reads only
         // the occlusion image (7), hash entries (15) and constants (18) — the
         // dirty-bit tracking leaves every other slot in the layout untouched.
         let mut params = PbrPipelineParams::new();
         params
-            .gbuffer_occlusion_texture(render_target_views.sdr_target.full_view())
+            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
             .sharc_g_sharc_hash_entries(hash_buf)
             .sharc_g_sharc_constants(constants_buffer);
         encoder.push_descriptor_set(

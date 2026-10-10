@@ -20,9 +20,9 @@ dust_character = { path = "crates/character" }
 # The local avian branch: adds the pluggable `QueryDispatcher` resource that routes
 # `VdbShape` pairs to `dust_physics::VdbDispatcher`.
 avian3d = { path = "../avian/crates/avian3d", default-features = false, features = ["3d", "parry-f32"] }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "084e39cd38f7c34dff24bac6dad2eb3d9a464054" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "084e39cd38f7c34dff24bac6dad2eb3d9a464054" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "084e39cd38f7c34dff24bac6dad2eb3d9a464054" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "4e1ccbe45e09975cedcd08077af311479d73ac87" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "4e1ccbe45e09975cedcd08077af311479d73ac87" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "4e1ccbe45e09975cedcd08077af311479d73ac87" }
 pumicite_super_resolution = { git = "https://github.com/dust-engine/pumicite_super_resolution.git", rev = "061c7543d7009e0b21af4df0f1c3c9fdfb761cc1" }
 
 [dependencies]
@@ -94,3 +94,6 @@ opt-level = 3
 
 [profile.dev]
 panic = "abort"
+
+[patch."https://github.com/dust-engine/pumicite_super_resolution.git"]
+pumicite_super_resolution = { path = "../pumicite_super_resolution" }
