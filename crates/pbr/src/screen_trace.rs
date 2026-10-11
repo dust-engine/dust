@@ -58,6 +58,10 @@ pub struct ScreenTraceConfig {
     /// Off: every surface pixel traces a hardware ray from the surface, as
     /// before the screen trace existed (A/B reference).
     pub enabled: bool,
+    /// No hardware gather rays and no SHARC passes: the screen trace resolves
+    /// every pixel, with the sky as the fallback for rays that leave the
+    /// screen (SCREEN_TRACE_FLAG_SCREEN_ONLY). For GPUs short on ray budget.
+    pub screen_only: bool,
     pub max_iterations: u32,
     pub relative_depth_thickness: f32,
     pub history_depth_thickness: f32,
@@ -75,13 +79,15 @@ pub struct ScreenTraceConfig {
 }
 
 impl Default for ScreenTraceConfig {
-    /// The defaults, with `DUST_SCREEN_TRACE=0|1`, `DUST_SCREEN_TRACE_ITER`,
+    /// The defaults, with `DUST_SCREEN_TRACE=0|1`, `DUST_SCREEN_ONLY=0|1`,
+    /// `DUST_SCREEN_TRACE_ITER`,
     /// `DUST_SCREEN_TRACE_OCCUPANCY` and `DUST_SCREEN_TRACE_DEBUG=0..3` (the
     /// `ScreenTraceDebugMode` order) honored for headless captures.
     fn default() -> Self {
         let env_u32 = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u32>().ok());
         Self {
             enabled: env_u32("DUST_SCREEN_TRACE").is_none_or(|v| v != 0),
+            screen_only: env_u32("DUST_SCREEN_ONLY").is_some_and(|v| v != 0),
             max_iterations: env_u32("DUST_SCREEN_TRACE_ITER").unwrap_or(50),
             relative_depth_thickness: 0.02,
             history_depth_thickness: 0.005,
@@ -129,6 +135,7 @@ pub(crate) struct ScreenTraceConstantsRaw {
 // `SCREEN_TRACE_FLAG_*` in pbr_common.slang.
 const FLAG_ENABLED: u32 = 1 << 0;
 const FLAG_HISTORY_VALID: u32 = 1 << 1;
+const FLAG_SCREEN_ONLY: u32 = 1 << 2;
 /// Number of host-visible copies of the compaction count kept in flight.
 const READBACK_SLOTS: usize = 3;
 
@@ -182,6 +189,19 @@ impl ScreenTraceSystemParams<'_> {
     pub fn active(&self) -> bool {
         self.config.enabled && self.state.resources.is_some() && self.hzb.resources.is_some()
     }
+}
+
+impl ScreenTraceConfig {
+    /// Whether the hardware gather (and with it the SHARC cache) runs: not in
+    /// screen-only mode, where nothing queries or feeds the cache.
+    pub fn hardware_gather(&self) -> bool {
+        !(self.enabled && self.screen_only)
+    }
+}
+
+/// Run condition of the final gather and the SHARC passes.
+pub(crate) fn hardware_gather_enabled(config: Res<ScreenTraceConfig>) -> bool {
+    config.hardware_gather()
 }
 
 pub struct ScreenTracePlugin;
@@ -346,6 +366,9 @@ pub(crate) fn build_screen_trace_constants(
     if history_valid {
         flags |= FLAG_HISTORY_VALID;
     }
+    if config.screen_only {
+        flags |= FLAG_SCREEN_ONLY;
+    }
     ScreenTraceConstantsRaw {
         hzb_uv_factor: uv_factor.to_array(),
         hzb_inv_uv_factor: (1.0 / uv_factor).to_array(),
@@ -400,7 +423,7 @@ fn screen_trace_pass(
     swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
     jitter: Res<crate::JitterState>,
     mut profiler: Option<ResMut<GpuProfiler>>,
-    atmosphere_luts: Res<AtmosphereLUTs>,
+    mut atmosphere_luts: ResMut<AtmosphereLUTs>,
 ) {
     // A fresh seed every frame, whether or not the trace runs: the hardware
     // gather reads it too.
@@ -414,6 +437,9 @@ fn screen_trace_pass(
         return;
     };
     let Ok((camera, transform)) = swapchain_images.single() else {
+        return;
+    };
+    let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.clone() else {
         return;
     };
     // Both passes or neither: the gather must not consume a list the
@@ -451,6 +477,16 @@ fn screen_trace_pass(
         let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
         let hzb_image = encoder.lock(&hzb.image, vk::PipelineStageFlags2::COMPUTE_SHADER);
         let trace_hit = encoder.lock(&res.trace_hit, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        // Sky, for the screen-only misses.
+        let atmo_buffer = encoder.retain(atmosphere_uniform_buffer).deref_inner();
+        let transmittance_view = encoder.lock(
+            &atmosphere_luts.transmittance.view,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+        let sky_view = encoder.lock(
+            &atmosphere_luts.sky_view.view,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
 
         // HDR: read-modify-write (adds the screen hits' lighting).
         encoder.use_image_resource(
@@ -536,6 +572,24 @@ fn screen_trace_pass(
             0..1,
             true,
         );
+        encoder.use_image_resource(
+            transmittance_view,
+            &mut atmosphere_luts.transmittance.state,
+            compute_sampled_read(),
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            0..1,
+            0..1,
+            false,
+        );
+        encoder.use_image_resource(
+            sky_view,
+            &mut atmosphere_luts.sky_view.state,
+            compute_sampled_read(),
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            0..1,
+            0..1,
+            false,
+        );
         encoder.emit_barriers();
 
         let pipeline = encoder.retain(pipeline).deref_inner();
@@ -549,6 +603,9 @@ fn screen_trace_pass(
             .gbuffer_motion_vector_texture(views.motion_vectors().full_view())
             .hzb_texture(hzb_image.deref_inner().full_view())
             .prev_scene_color(views.hdr_denoised_output().full_view())
+            .sky_atmosphere_params(atmo_buffer)
+            .sky_transmittance_lut(transmittance_view.full_view())
+            .sky_sky_view_lut(sky_view.full_view())
             .sky_linear_sampler(&atmosphere_luts.sampler)
             .prev_depth_texture(views.depth_prev().full_view())
             .screen_trace(constants_buffer)
@@ -580,6 +637,11 @@ fn compact_traces_pass(
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     if !params.state.traced_this_frame {
+        return;
+    }
+    // Nothing traces the list.
+    if params.config.screen_only {
+        params.state.hardware_rays = None;
         return;
     }
     let Some(hdr) = hdr_target else {
@@ -807,8 +869,15 @@ fn screen_trace_ui(
         .default_pos([330.0, 20.0])
         .show(ctx, |ui| {
             ui.checkbox(&mut config.enabled, "Screen-space gather trace");
+            ui.add_enabled(
+                config.enabled,
+                egui::Checkbox::new(&mut config.screen_only, "Screen only (no hardware rays, no SHARC)"),
+            );
             if let Some(state) = state.as_deref() {
                 match (state.hardware_rays, hdr_target.as_deref()) {
+                    _ if config.enabled && config.screen_only => {
+                        ui.label("Hardware rays: none (misses take the sky)");
+                    }
                     (Some(rays), Some(hdr)) if config.enabled => {
                         let pixels = hdr.render_extent.x * hdr.render_extent.y;
                         ui.label(format!(

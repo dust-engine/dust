@@ -3,11 +3,11 @@ module pbr_common;
 __exported import sharc;
 
 public struct SkyAtmosphereParams {
-[Stages(STAGE_RAYGEN | STAGE_MISS)]
+[Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_COMPUTE)]
     public ConstantBuffer<AtmosphereParams> atmosphereParams;
-[Stages(STAGE_RAYGEN | STAGE_MISS)]
+[Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_COMPUTE)]
     public Texture2D<float4> transmittanceLUT;
-[Stages(STAGE_RAYGEN | STAGE_MISS)]
+[Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_COMPUTE)]
     public Texture2D<float4> skyViewLUT;
 [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_COMPUTE)]
     public SamplerState linearSampler;
@@ -347,6 +347,10 @@ public struct ScreenTraceConstants {
 public static const uint SCREEN_TRACE_FLAG_ENABLED = 1u << 0;
 // Last frame's depth and color are complete (FrameHistory::valid).
 public static const uint SCREEN_TRACE_FLAG_HISTORY_VALID = 1u << 1;
+// Screen-only gather: no hardware rays follow, so the screen trace resolves
+// every pixel itself. Uncertain hits are accepted, misses take the sky
+// radiance along the ray, and rejected hits contribute nothing.
+public static const uint SCREEN_TRACE_FLAG_SCREEN_ONLY = 1u << 2;
 
 // ── Trace record (one uint per pixel in `traceHit`) ─────────────────────
 //

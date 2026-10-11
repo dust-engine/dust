@@ -31,6 +31,7 @@ use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
 use std::ops::Deref;
 
 use crate::camera::Camera;
+use crate::screen_trace::ScreenTraceConfig;
 use crate::sky::AtmosphereLUTs;
 use crate::{
     HdrRenderTarget, HdrRenderTargetViewsExt, PbrInstanceData, PbrPipelineParams, PbrRenderSet,
@@ -353,12 +354,15 @@ impl Plugin for SharcDebugPlugin {
             PostUpdate,
             (
                 create_sharc_sbts.before(PbrRenderSet),
+                ensure_sharc_resources.before(PbrRenderSet),
                 clear_sharc_buffers
                     .in_set(DefaultRenderSet)
+                    .run_if(crate::screen_trace::hardware_gather_enabled)
                     .after(PbrRenderSet)
                     .after(crate::shadow_pass),
                 sharc_update_pass
                     .in_set(DefaultRenderSet)
+                    .run_if(crate::screen_trace::hardware_gather_enabled)
                     .after(clear_sharc_buffers)
                     .after(create_sharc_sbts)
                     // Update consumes this frame's read pool but ALSO writes
@@ -370,6 +374,7 @@ impl Plugin for SharcDebugPlugin {
                     .after(crate::final_gather_pass),
                 sharc_resolve_pass
                     .in_set(DefaultRenderSet)
+                    .run_if(crate::screen_trace::hardware_gather_enabled)
                     .after(sharc_update_pass),
                 // Debug overlay writes the visualization into occlusionTexture
                 // (== sdr_target), which tonemap then composites onto the
@@ -389,13 +394,9 @@ impl Plugin for SharcDebugPlugin {
 
 pub fn setup_sharc(
     mut commands: Commands,
-    allocator: Res<Allocator>,
     asset_server: Res<AssetServer>,
     mut pipeline_manager: ResMut<RtxPipelineManager>,
-    config: Res<SharcConfig>,
 ) {
-    let resources = create_sharc_resources(&allocator, config.entries_num, config.pool_capacity);
-    commands.insert_resource(resources);
 
     let update_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/pbr/shaders/sharc/sharc_update.rtx.pipeline.bin");
@@ -416,6 +417,28 @@ pub fn setup_sharc(
     pipeline_manager.add_library_for_pipeline(&res.update_pipeline, update_library);
 
     commands.insert_resource(res);
+}
+
+/// Keeps `SharcResources` only while the hardware gather uses the cache. In
+/// screen-only mode the resource is removed; each buffer's `GPUMutex` defers
+/// the free until the GPU is done with it. Coming back, the cache is created
+/// anew, and `needs_clear` makes `clear_sharc_buffers` zero it.
+fn ensure_sharc_resources(
+    mut commands: Commands,
+    resources: Option<Res<SharcResources>>,
+    screen_trace: Res<ScreenTraceConfig>,
+    config: Res<SharcConfig>,
+    allocator: Res<Allocator>,
+) {
+    match (screen_trace.hardware_gather(), resources.is_some()) {
+        (true, false) => commands.insert_resource(create_sharc_resources(
+            &allocator,
+            config.entries_num,
+            config.pool_capacity,
+        )),
+        (false, true) => commands.remove_resource::<SharcResources>(),
+        _ => {}
+    }
 }
 
 fn create_sharc_sbts(

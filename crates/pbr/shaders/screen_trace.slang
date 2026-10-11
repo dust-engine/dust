@@ -281,10 +281,11 @@ void main(uint3 threadId: SV_DispatchThreadID) {
     }
 
     HzbTrace trace = traceHzb(rayOrigin, rayDir, params.uniforms.far);
+    bool screenOnly = (st.flags & SCREEN_TRACE_FLAG_SCREEN_ONLY) != 0;
 
     bool accepted = false;
     bool rejected = false;
-    if (trace.hit && !trace.uncertain) {
+    if (trace.hit && (!trace.uncertain || screenOnly)) {
         uint2 hitPixel = min(uint2(trace.hitUVZ.xy * float2(screenSize)), screenSize - 1);
         // Where the hit pixel's surface was last frame: the motion-vector
         // G-buffer already folds camera and per-instance motion. It stores
@@ -327,6 +328,14 @@ void main(uint3 threadId: SV_DispatchThreadID) {
         } else {
             rejected = true;
         }
+    } else if (!trace.hit && screenOnly) {
+        // The ray left the screen unoccluded as far as the trace could see:
+        // take the sky, as the gather miss shader would.
+        float3 skyLuminance = params.sky.atmosphereParams.solar_illuminance
+            * params.sky.sampleScatteredTransfer(rayDir);
+        float3 albedo = params.gbuffer.albedoSRGB[pixel].rgb;
+        float4 current = params.outputTexture[pixel];
+        params.outputTexture[pixel] = float4(current.rgb + albedo * skyLuminance, current.a);
     }
 
     // Resume distance of the hardware ray: the hit (accepted, uncertain or

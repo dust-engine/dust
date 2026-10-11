@@ -205,6 +205,7 @@ impl Plugin for PbrRenderPlugin {
                     .after(create_sbt),
                 final_gather_pass
                     .in_set(DefaultRenderSet)
+                    .run_if(screen_trace::hardware_gather_enabled)
                     .after(PbrRenderSet)
                     .after(shadow_pass)
                     .after(create_sbt)
@@ -326,9 +327,10 @@ fn render(
     mut prev_camera: Local<PreviousCameraState>,
     jitter: Res<JitterState>,
     // SHARC cache, queried by the primary closest hit for the debug
-    // visualization (vox_pbr.slang). Bindings 14..17 are statically referenced
-    // by the primary pipeline, so the resources must be bound every frame —
-    // `SharcDebugPlugin` creates them at startup, so they are always present.
+    // visualization (vox_pbr.slang). The primary pipeline statically
+    // references the cache bindings, so something must be bound every frame:
+    // the cache buffers, or null descriptors in screen-only mode, where
+    // `ensure_sharc_resources` frees them.
     mut sharc: sharc::SharcSystemParams,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
@@ -356,10 +358,7 @@ fn render(
         tracing::warn!("Frame not rendered; missing HDR target");
         return;
     };
-    let Some(sharc_resources) = sharc.resources.as_deref_mut() else {
-        tracing::warn!("Frame not rendered; missing SHARC resources");
-        return;
-    };
+    let sharc_resources = sharc.resources.as_deref_mut();
     sbt.push_raygen(0, 0, |_| {});
     sbt.push_miss(0, 1, |_| {});
     let uniform = build_camera_uniform(camera, transform, Some(&mut prev_camera), jitter.offset);
@@ -513,39 +512,42 @@ fn render(
         // here; Update/Resolve declare R/W on the same buffers, so the tracker
         // inserts a barrier from last frame's Resolve. The candidate pool is not
         // touched by the query, so it is left unbound.
-        let sharc_hash_buf = encoder.lock(
-            &sharc_resources.hash_entries,
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-        );
-        let sharc_accum_buf = encoder.lock(
-            &sharc_resources.accumulation,
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-        );
-        let sharc_resolved_buf = encoder.lock(
-            &sharc_resources.resolved,
-            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-        );
+        let sharc_bufs = sharc_resources.map(|sharc_resources| {
+            let sharc_hash_buf = encoder.lock(
+                &sharc_resources.hash_entries,
+                vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            );
+            let sharc_accum_buf = encoder.lock(
+                &sharc_resources.accumulation,
+                vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            );
+            let sharc_resolved_buf = encoder.lock(
+                &sharc_resources.resolved,
+                vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            );
+            let sharc_rt_read = Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            };
+            encoder.use_buffer_resource(
+                sharc_hash_buf,
+                &mut sharc_resources.hash_entries_state,
+                sharc_rt_read,
+            );
+            encoder.use_buffer_resource(
+                sharc_accum_buf,
+                &mut sharc_resources.accumulation_state,
+                sharc_rt_read,
+            );
+            encoder.use_buffer_resource(
+                sharc_resolved_buf,
+                &mut sharc_resources.resolved_state,
+                sharc_rt_read,
+            );
+            (sharc_hash_buf, sharc_accum_buf, sharc_resolved_buf)
+        });
         let sharc_constants_buf =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&sharc_constants));
-        let sharc_rt_read = Access {
-            stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
-            access: vk::AccessFlags2::SHADER_STORAGE_READ,
-        };
-        encoder.use_buffer_resource(
-            sharc_hash_buf,
-            &mut sharc_resources.hash_entries_state,
-            sharc_rt_read,
-        );
-        encoder.use_buffer_resource(
-            sharc_accum_buf,
-            &mut sharc_resources.accumulation_state,
-            sharc_rt_read,
-        );
-        encoder.use_buffer_resource(
-            sharc_resolved_buf,
-            &mut sharc_resources.resolved_state,
-            sharc_rt_read,
-        );
 
         encoder.emit_barriers();
 
@@ -573,13 +575,18 @@ fn render(
             .sky_sky_view_lut(sky_view.full_view())
             .sky_linear_sampler(&atmosphere_luts.sampler)
             .per_instance_data(per_instance_buf)
-            // Bind the SHARC buffers through the generated helper too, so their
-            // binding numbers track the shader reflection automatically instead of
-            // hand-numbered WriteDescriptorSets.
-            .sharc_g_sharc_hash_entries(sharc_hash_buf)
-            .sharc_g_sharc_accumulation(sharc_accum_buf)
-            .sharc_g_sharc_resolved(sharc_resolved_buf)
             .sharc_g_sharc_constants(sharc_constants_buf);
+        if let Some((sharc_hash_buf, sharc_accum_buf, sharc_resolved_buf)) = sharc_bufs {
+            params
+                .sharc_g_sharc_hash_entries(sharc_hash_buf)
+                .sharc_g_sharc_accumulation(sharc_accum_buf)
+                .sharc_g_sharc_resolved(sharc_resolved_buf);
+        } else {
+            params
+                .sharc_g_sharc_hash_entries_null()
+                .sharc_g_sharc_accumulation_null()
+                .sharc_g_sharc_resolved_null();
+        }
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
