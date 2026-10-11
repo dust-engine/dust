@@ -277,7 +277,12 @@ impl Plugin for VoxPlugin {
                 .after(dust_pbr::sharc::setup_sharc),
         );
 
-        app.add_systems(PostUpdate, write_sbt_entries.in_set(dust_pbr::PbrRenderSet));
+        app.add_systems(
+            PostUpdate,
+            write_sbt_entries
+                .in_set(dust_pbr::PbrRenderSet)
+                .in_set(bevy_pumicite::rtx::tlas::TLASBuilderSet::<dust_pbr::PbrInstanceData>::default()),
+        );
     }
 }
 
