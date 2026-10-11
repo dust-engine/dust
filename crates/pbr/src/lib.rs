@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod hzb;
 pub mod sharc;
 pub mod sky;
 pub mod tonemap;
@@ -161,6 +162,7 @@ impl Plugin for PbrRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup.after(CreateDevice));
         app.add_systems(Startup, setup_upscaler.after(CreateDevice));
+        app.add_systems(Startup, hzb::setup_hzb.after(CreateDevice));
         app.init_resource::<JitterState>();
         app.init_resource::<RenderQualitySettings>();
         app.init_resource::<UpscalerSessionState>();
@@ -187,10 +189,18 @@ impl Plugin for PbrRenderPlugin {
                     .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
                     .after(OccludingRenderPass)
                     .after(create_sbt),
+                hzb::ensure_hzb_resources
+                    .in_set(DefaultRenderSet)
+                    .after(ensure_hdr_target),
+                hzb::hzb_build_pass
+                    .in_set(DefaultRenderSet)
+                    .after(render)
+                    .after(hzb::ensure_hzb_resources),
                 shadow_pass
                     .in_set(DefaultRenderSet)
                     .after(PbrRenderSet)
                     .after(render)
+                    .after(hzb::hzb_build_pass)
                     .after(create_sbt),
                 final_gather_pass
                     .in_set(DefaultRenderSet)

@@ -161,6 +161,34 @@ ron2bin(
     type = "compute-pipeline",
 )
 
+# Closest-depth HZB build: one compute dispatch for the whole mip chain
+# (hzb_build.slang). Own layout, auto-derived from the shader's bindings.
+slang_shader(
+    name = "hzb_build",
+    srcs = ["hzb_build.slang"],
+    out = "hzb_build.spv",
+    profile = "cs_6_6",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
+slang_playout(
+    name = "hzb_build_layout",
+    srcs = ["hzb_build.slang"],
+    out = "hzb_build.playout.bin",
+    set_attrs = ["0:push_descriptor"],
+)
+
+ron2bin(
+    name = "hzb_build_comp_pipeline",
+    src = "hzb_build.comp.pipeline.ron",
+    out = "hzb_build.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+
 glsl_shader(
     name = "tonemap",
     src = "tonemap.glsl",
@@ -219,6 +247,9 @@ filegroup(
         ":sharc_debug",
         ":sharc_debug_comp_pipeline",
         ":sharc_debug_candidate_splat_comp_pipeline",
+        ":hzb_build",
+        ":hzb_build_layout",
+        ":hzb_build_comp_pipeline",
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",

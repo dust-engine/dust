@@ -1,0 +1,10 @@
+// Closest-depth HZB build (hzb_build.slang). Own layout, auto-derived by
+// slang_playout from the shader's global bindings.
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/hzb_build.spv",
+        entry_point: "main",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/hzb_build.playout.bin"),
+    disable_optimization: false,
+)
