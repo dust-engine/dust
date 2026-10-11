@@ -19,6 +19,7 @@ rust_library(
     aliases = aliases(),
     deps = all_crate_deps(normal = True) + [
         "//crates/pbr:dust_pbr",
+        "//crates/physics:dust_physics",
         "//crates/vdb:dust_vdb",
     ],
     rustc_env_files = [":cargo_toml_env_vars"],

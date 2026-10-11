@@ -999,7 +999,7 @@ source = "git+https://github.com/dust-engine/bevy.git?branch=release-0.20.0#12cf
 [[package]]
 name = "bevy_pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=e7531eb6b590e64885d1c61827f44f443c19403e#e7531eb6b590e64885d1c61827f44f443c19403e"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
 dependencies = [
  "async-lock",
  "bevy_app",
@@ -1414,12 +1414,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "block"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a"
-
-[[package]]
 name = "block-pseudorand"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1649,36 +1643,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "cocoa"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6140449f97a6e97f9511815c5632d84c8aacf8ac271ad77c559218161a1373c"
-dependencies = [
- "bitflags 1.3.2",
- "block",
- "cocoa-foundation",
- "core-foundation",
- "core-graphics",
- "foreign-types",
- "libc",
- "objc",
-]
-
-[[package]]
-name = "cocoa-foundation"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c6234cbb2e4c785b456c0644748b1ac416dd045799740356f8363dfe00c93f7"
-dependencies = [
- "bitflags 1.3.2",
- "block",
- "core-foundation",
- "core-graphics-types",
- "libc",
- "objc",
 ]
 
 [[package]]
@@ -3301,15 +3265,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "malloc_buf"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3542,15 +3497,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "objc"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "915b1b472bc21c53464d6c8461c9d3af805ba1ef837e1cac254428f4a77177b1"
-dependencies = [
- "malloc_buf",
 ]
 
 [[package]]
@@ -4224,7 +4170,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 [[package]]
 name = "pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=e7531eb6b590e64885d1c61827f44f443c19403e#e7531eb6b590e64885d1c61827f44f443c19403e"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
 dependencies = [
  "ash",
  "bevy_asset",
@@ -4242,7 +4188,7 @@ dependencies = [
  "portable-atomic",
  "pumicite_types",
  "raw-window-handle",
- "raw-window-metal 0.4.0",
+ "raw-window-metal",
  "serde",
  "smallvec",
  "tracing",
@@ -4252,7 +4198,7 @@ dependencies = [
 [[package]]
 name = "pumicite_egui"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=e7531eb6b590e64885d1c61827f44f443c19403e#e7531eb6b590e64885d1c61827f44f443c19403e"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -4270,7 +4216,7 @@ dependencies = [
 [[package]]
 name = "pumicite_types"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=e7531eb6b590e64885d1c61827f44f443c19403e#e7531eb6b590e64885d1c61827f44f443c19403e"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
 dependencies = [
  "ash",
  "glam",
@@ -4392,18 +4338,6 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
-
-[[package]]
-name = "raw-window-metal"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76e8caa82e31bb98fee12fa8f051c94a6aa36b07cddb03f0d4fc558988360ff1"
-dependencies = [
- "cocoa",
- "core-graphics",
- "objc",
- "raw-window-handle",
-]
 
 [[package]]
 name = "raw-window-metal"
@@ -5796,7 +5730,7 @@ dependencies = [
  "profiling",
  "range-alloc",
  "raw-window-handle",
- "raw-window-metal 1.1.0",
+ "raw-window-metal",
  "renderdoc-sys",
  "smallvec",
  "static_assertions",

@@ -1,0 +1,173 @@
+diff --git a/crate_universe/src/context/crate_context.rs b/crate_universe/src/context/crate_context.rs
+index 8e14efe..c2f6be0 100644
+--- a/crate_universe/src/context/crate_context.rs
++++ b/crate_universe/src/context/crate_context.rs
+@@ -388,6 +388,11 @@ pub(crate) struct CrateContext {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub(crate) license_file: Option<String>,
+ 
++    /// The workspace manifest a git crate in a checkout subdirectory inherits
++    /// `*.workspace = true` fields from, relative to the crate's repository.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub(crate) cargo_workspace_manifest: Option<String>,
++
+     /// Additional text to add to the generated BUILD file.
+     #[serde(skip_serializing_if = "Option::is_none")]
+     #[serde(default)]
+@@ -513,6 +518,22 @@ impl CrateContext {
+             sources_are_present,
+         )?;
+ 
++        // Sources redirected into the checkout (see `git_checkout_crate_root`) may
++        // `include_str!` files next to them.
++        if targets.iter().any(|rule| match rule {
++            Rule::Library(attrs)
++            | Rule::ProcMacro(attrs)
++            | Rule::Binary(attrs)
++            | Rule::BuildScript(attrs) => attrs
++                .crate_root
++                .as_ref()
++                .is_some_and(|root| root.starts_with(".tmp_git_root/")),
++        }) {
++            common_attrs
++                .compile_data_glob
++                .insert(".tmp_git_root/**".to_owned());
++        }
++
+         // Parse the library crate name from the set of included targets
+         let library_target_name = {
+             let lib_targets: Vec<&TargetAttributes> = targets
+@@ -594,6 +615,7 @@ impl CrateContext {
+             license: package.license.clone(),
+             license_ids,
+             license_file,
++            cargo_workspace_manifest: Self::git_workspace_manifest(&package.manifest_path),
+             package_url,
+             repository,
+             targets,
+@@ -874,6 +896,66 @@ impl CrateContext {
+             .unwrap_or(default_generate_build_script)
+     }
+ 
++    /// The checkout root of a package inside a cargo git checkout
++    /// (`{CARGO_HOME}/git/checkouts/[name]-[hash]/[short-sha]`).
++    fn git_checkout_root(manifest_path: &camino::Utf8Path) -> Option<Utf8PathBuf> {
++        let components: Vec<&str> = manifest_path.components().map(|c| c.as_str()).collect();
++        let git = components
++            .windows(2)
++            .position(|w| w[0] == "git" && w[1] == "checkouts")?;
++        Some(components.get(..git + 4)?.iter().collect())
++    }
++
++    /// For a git crate in a checkout subdirectory, the nearest ancestor manifest
++    /// with a `[workspace]` table (as cargo finds it), relative to the crate's
++    /// repository: `git_repository` with a `strip_prefix` keeps the whole checkout
++    /// under `.tmp_git_root/`.
++    fn git_workspace_manifest(manifest_path: &camino::Utf8Path) -> Option<String> {
++        let checkout_root = Self::git_checkout_root(manifest_path)?;
++        let package_dir = manifest_path.parent()?;
++        if package_dir == checkout_root {
++            return None;
++        }
++        package_dir
++            .ancestors()
++            .skip(1)
++            .take_while(|dir| dir.starts_with(&checkout_root))
++            .find(|dir| {
++                std::fs::read_to_string(dir.join("Cargo.toml"))
++                    .ok()
++                    .and_then(|text| text.parse::<toml::Table>().ok())
++                    .is_some_and(|table| table.contains_key("workspace"))
++            })
++            .map(|dir| {
++                let relative = dir.strip_prefix(&checkout_root).unwrap().join("Cargo.toml");
++                format!(".tmp_git_root/{relative}")
++            })
++    }
++
++    /// For a package inside a cargo git checkout
++    /// (`{CARGO_HOME}/git/checkouts/[name]-[hash]/[short-sha]/...`), returns `src_path`
++    /// relative to the checkout root, prefixed with `.tmp_git_root/`.
++    fn git_checkout_crate_root(
++        manifest_path: &camino::Utf8Path,
++        src_path: &camino::Utf8Path,
++    ) -> Option<String> {
++        let checkout_root = Self::git_checkout_root(manifest_path)?;
++
++        // Lexically resolve `..`; cargo reports `src_path` unnormalized.
++        let mut src = Utf8PathBuf::new();
++        for component in src_path.components() {
++            match component {
++                camino::Utf8Component::ParentDir => {
++                    src.pop();
++                }
++                camino::Utf8Component::CurDir => {}
++                other => src.push(other),
++            }
++        }
++        let relative = src.strip_prefix(&checkout_root).ok()?;
++        Some(format!(".tmp_git_root/{relative}"))
++    }
++
+     /// Collect all Bazel targets that should be generated for a particular Package
+     fn collect_targets(
+         node: &Node,
+@@ -909,6 +991,16 @@ impl CrateContext {
+                         // Normalize the path so that it always renders the same regardless of platform
+                         |root| root.to_string_lossy().replace('\\', "/"),
+                     );
++                    // A git crate in a subdirectory may point its target outside that
++                    // subdirectory (avian's `[lib] path = "../../src/lib.rs"`). Bazel labels
++                    // cannot contain `..`, but `git_repository` with a `strip_prefix` keeps the
++                    // whole checkout under `.tmp_git_root/`, so point there instead.
++                    let crate_root = match crate_root {
++                        Some(root) if root.starts_with("../") => {
++                            Some(Self::git_checkout_crate_root(&package.manifest_path, &target.src_path).unwrap_or(root))
++                        }
++                        other => other,
++                    };
+ 
+                     // Conditionally check to see if the dependencies is a build-script target
+                     if include_build_scripts && matches!(kind, cargo_metadata::TargetKind::CustomBuild) {
+diff --git a/crate_universe/src/rendering.rs b/crate_universe/src/rendering.rs
+index fb33d59..9561c37 100644
+--- a/crate_universe/src/rendering.rs
++++ b/crate_universe/src/rendering.rs
+@@ -604,6 +604,7 @@ impl Renderer {
+             starlark.push(Starlark::CargoTomlEnvVars(CargoTomlEnvVars {
+                 name: "cargo_toml_env_vars".to_owned(),
+                 src: "Cargo.toml".to_owned(),
++                workspace: krate.cargo_workspace_manifest.clone(),
+             }));
+         }
+ 
+@@ -1150,12 +1151,16 @@ fn make_data_with_exclude(
+         ".tmp_git_root/**/*",
+     ];
+ 
++    // Unless the crate explicitly includes its git checkout.
++    let includes_checkout = include.iter().any(|i| i.starts_with(".tmp_git_root/"));
++
+     Data {
+         glob: Glob {
+             allow_empty: true,
+             include,
+             exclude: COMMON_GLOB_EXCLUDES
+                 .iter()
++                .filter(|&&glob| !(includes_checkout && glob == ".tmp_git_root/**/*"))
+                 .map(|&glob| glob.to_owned())
+                 .chain(exclude)
+                 .collect(),
+diff --git a/crate_universe/src/utils/starlark.rs b/crate_universe/src/utils/starlark.rs
+index 5bbf571..cc3194b 100644
+--- a/crate_universe/src/utils/starlark.rs
++++ b/crate_universe/src/utils/starlark.rs
+@@ -155,6 +155,8 @@ pub(crate) struct CargoBuildScript {
+ pub(crate) struct CargoTomlEnvVars {
+     pub(crate) name: String,
+     pub(crate) src: String,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub(crate) workspace: Option<String>,
+ }
+ 
+ #[derive(Serialize)]

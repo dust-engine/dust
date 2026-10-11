@@ -56,7 +56,7 @@ new_git_repository(
 
 bazel_dep(name = "rules_rust", version = "0.74.0")
 
-# Two local patches on rules_rust:
+# Local patches on rules_rust:
 #
 # * rules_rust_splice_external_path_deps.patch: crate_universe splices the root
 #   Cargo.toml into a temporary directory (whose entries are symlinks back into
@@ -70,10 +70,18 @@ bazel_dep(name = "rules_rust", version = "0.74.0")
 #   `cargo-bazel` binary, which would not contain the fix above. Emptying the
 #   download table makes rules_rust build `cargo-bazel` from its (patched)
 #   sources via `@cargo_bazel_bootstrap` instead. One-time cost per output base.
+# * rules_rust_git_subdir_crates.patch: for a git crate in a checkout
+#   subdirectory, git_repository's `strip_prefix` keeps the full checkout under
+#   `.tmp_git_root/`. The patch uses it for (a) a target source outside the
+#   crate directory (avian3d's `../../src/lib.rs` is otherwise rendered as an
+#   invalid `..` label) and (b) the workspace manifest that `*.workspace = true`
+#   fields inherit from (parry3d's `readme.workspace` otherwise fails
+#   `cargo_toml_env_vars`).
 single_version_override(
     module_name = "rules_rust",
     patches = [
         "//third_party:patches/rules_rust_splice_external_path_deps.patch",
+        "//third_party:patches/rules_rust_git_subdir_crates.patch",
         "//third_party:patches/rules_rust_bootstrap_cargo_bazel.patch",
     ],
     patch_strip = 1,
@@ -108,7 +116,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "e7531eb6b590e64885d1c61827f44f443c19403e")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "14c1b8a930972106a83a71abd5173968a632e44b")
 crate.annotation(
     crate = "pumicite_cli",
     repositories = ["bindeps"],
