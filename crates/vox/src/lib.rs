@@ -3,19 +3,16 @@
 
 use bevy::ecs::entity::Entity;
 use bevy::ecs::reflect::ReflectComponent;
-use bevy::ecs::schedule::{IntoScheduleConfigs, Schedules};
-use bevy::ecs::template::{
-    EntityTemplate, FnTemplate, FromTemplate, SceneEntityReference, TemplateContext,
-};
+use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::ecs::template::{EntityTemplate, FromTemplate, TemplateContext};
 use bevy::math::U8Vec4;
 use bevy::prelude::*;
 use bevy::reflect::Reflect;
-use bevy::scene::{RelatedScenes, ResolveContext, ResolveSceneError, ResolvedScene, Scene};
 use bevy::{
     asset::{Asset, Handle},
-    ecs::{bundle::Bundle, component::Component},
+    ecs::component::Component,
     reflect::TypePath,
-    transform::components::{GlobalTransform, Transform},
+    transform::components::Transform,
 };
 use bevy_pumicite::rtx::RtxPipelineManager;
 use bevy_pumicite::rtx::tlas::TLASInstance;
@@ -279,9 +276,9 @@ impl Plugin for VoxPlugin {
 
         app.add_systems(
             PostUpdate,
-            write_sbt_entries
-                .in_set(dust_pbr::PbrRenderSet)
-                .in_set(bevy_pumicite::rtx::tlas::TLASBuilderSet::<dust_pbr::PbrInstanceData>::default()),
+            write_sbt_entries.in_set(dust_pbr::PbrRenderSet).in_set(
+                bevy_pumicite::rtx::tlas::TLASBuilderSet::<dust_pbr::PbrInstanceData>::default(),
+            ),
         );
     }
 }

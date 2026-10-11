@@ -2,9 +2,9 @@
 //! G-buffer by `hzb_build.slang` (one dispatch for the whole mip chain).
 
 use bevy::prelude::*;
+use bevy_pumicite::SubmissionState;
 use bevy_pumicite::prelude::ComputePipeline;
 use bevy_pumicite::staging::UniformRingBuffer;
-use bevy_pumicite::SubmissionState;
 use bytemuck::{Pod, Zeroable};
 use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
 use pumicite::ash::vk;
@@ -68,7 +68,11 @@ pub struct HzbState {
     pub resources: Option<HzbResources>,
 }
 
-pub(crate) fn setup_hzb(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<Allocator>) {
+pub(crate) fn setup_hzb(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    allocator: Res<Allocator>,
+) {
     let depth_sampler = Sampler::new(
         allocator.device().clone(),
         &vk::SamplerCreateInfo {

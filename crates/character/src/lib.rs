@@ -16,7 +16,6 @@
 //! while the cursor is grabbed.
 
 use avian3d::character_controller::prelude::*;
-use avian3d::math::*;
 use avian3d::prelude::*;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;

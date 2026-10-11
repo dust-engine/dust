@@ -1,10 +1,6 @@
 use bevy::{asset::Asset, math::UVec3, reflect::TypePath};
-use dust_vdb::{AttributeAllocator, Node};
-use pumicite::{
-    Allocator,
-    ash::vk,
-    buffer::{BufferLike, ManagedBuffer},
-};
+use dust_vdb::AttributeAllocator;
+use pumicite::{Allocator, ash::vk, buffer::ManagedBuffer};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VoxLeafNode {

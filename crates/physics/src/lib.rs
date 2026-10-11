@@ -63,7 +63,7 @@ pub use dispatcher::VdbDispatcher;
 use std::sync::Arc;
 
 use dust_vdb::{
-    AabbU32, Accessor, AttributePtr, Attributes, ErasedLeafView, ErasedLeafVoxelIter, IsLeaf, Node,
+    AabbU32, AttributePtr, Attributes, ErasedLeafView, ErasedLeafVoxelIter, IsLeaf, Node,
     OccupancyMask, TreeLike, TreeWithValues,
 };
 use glam::{DMat3, DVec3, UVec3, Vec3A};
@@ -478,7 +478,7 @@ impl dust_vdb::Attributes for VdbVoxelMaskAttributes {
         self.values[*ptr as usize + fitted_offset as usize] = value;
     }
 
-    fn free_attributes(&mut self, leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
+    fn free_attributes(&mut self, _leaf: u32, ptr: &Self::Ptr, num_attributes: u32) {
         self.attribute_allocator.free(*ptr, num_attributes);
     }
 

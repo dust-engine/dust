@@ -128,7 +128,8 @@ pub struct UpscalerSessionState {
 
 pub(crate) fn ensure_upscaler_session(
     // Only DLSS records work when a session is created.
-    #[cfg_attr(not(feature = "dlss"), allow(unused_mut, unused_variables))] mut ctx: SubmissionState,
+    #[cfg_attr(not(feature = "dlss"), allow(unused_mut, unused_variables))]
+    mut ctx: SubmissionState,
     upscaler: Option<Res<Upscaler>>,
     mut state: ResMut<UpscalerSessionState>,
     hdr_target: Option<Res<HdrRenderTarget>>,
@@ -158,14 +159,17 @@ pub(crate) fn ensure_upscaler_session(
         Upscaler::Dlss(ngx) => {
             let mut created = None;
             ctx.record(|encoder| {
-                created = Some(ngx.create_ray_reconstruction(encoder, render_extent, display_extent));
+                created =
+                    Some(ngx.create_ray_reconstruction(encoder, render_extent, display_extent));
             });
-            created.unwrap().map(UpscalerSession::Dlss).map_err(|e| e.to_string())
+            created
+                .unwrap()
+                .map(UpscalerSession::Dlss)
+                .map_err(|e| e.to_string())
         }
         #[cfg(target_vendor = "apple")]
-        Upscaler::MetalFx => {
-            metalfx::DenoisedScaler::new(&device, render_extent, display_extent).map(UpscalerSession::MetalFx)
-        }
+        Upscaler::MetalFx => metalfx::DenoisedScaler::new(&device, render_extent, display_extent)
+            .map(UpscalerSession::MetalFx),
         Upscaler::Blit => Ok(UpscalerSession::Blit),
     };
     let session = match session {
@@ -459,7 +463,10 @@ pub(crate) fn upscaler_evaluate(
                 views.motion_vectors(),
                 views.motion_vectors().full_view(),
             ),
-            diffuse_albedo: upscaler_image(views.albedo(), views.albedo().deref_inner().srgb_view()),
+            diffuse_albedo: upscaler_image(
+                views.albedo(),
+                views.albedo().deref_inner().srgb_view(),
+            ),
             specular_albedo: upscaler_image(
                 views.specular_albedo(),
                 views.specular_albedo().full_view(),
@@ -471,12 +478,16 @@ pub(crate) fn upscaler_evaluate(
             world_to_view,
             view_to_clip,
         };
-        encoder.timing_scope(profiler.as_deref_mut(), "super-resolution", |encoder| match session {
-            #[cfg(feature = "dlss")]
-            UpscalerSession::Dlss(dlss) => dlss.dispatch(encoder, &inputs),
-            #[cfg(target_vendor = "apple")]
-            UpscalerSession::MetalFx(scaler) => scaler.dispatch(encoder, &inputs),
-            UpscalerSession::Blit => unreachable!(),
-        });
+        encoder.timing_scope(
+            profiler.as_deref_mut(),
+            "super-resolution",
+            |encoder| match session {
+                #[cfg(feature = "dlss")]
+                UpscalerSession::Dlss(dlss) => dlss.dispatch(encoder, &inputs),
+                #[cfg(target_vendor = "apple")]
+                UpscalerSession::MetalFx(scaler) => scaler.dispatch(encoder, &inputs),
+                UpscalerSession::Blit => unreachable!(),
+            },
+        );
     });
 }

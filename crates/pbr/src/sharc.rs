@@ -397,7 +397,6 @@ pub fn setup_sharc(
     asset_server: Res<AssetServer>,
     mut pipeline_manager: ResMut<RtxPipelineManager>,
 ) {
-
     let update_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/pbr/shaders/sharc/sharc_update.rtx.pipeline.bin");
     let resolve_pipeline: Handle<ComputePipeline> =

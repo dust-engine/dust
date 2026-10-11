@@ -9,18 +9,16 @@ use bevy::prelude::UVec2;
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2_metal::{
-    MTL4CompilerDescriptor, MTLCreateSystemDefaultDevice, MTLDevice, MTLPixelFormat, MTLTexture,
-};
+use objc2_metal::{MTL4CompilerDescriptor, MTLDevice, MTLPixelFormat, MTLTexture};
 use objc2_metal_fx::{
     MTL4FXTemporalDenoisedScaler, MTLFXTemporalDenoisedScalerBase,
     MTLFXTemporalDenoisedScalerDescriptor,
 };
-use pumicite::prelude::AsMTLDevice;
-use pumicite::{HasDevice, Device};
 use pumicite::ash::{self, vk};
 use pumicite::command::CommandEncoder;
+use pumicite::prelude::AsMTLDevice;
 use pumicite::utils::metal::AsMTLCommandBuffer;
+use pumicite::{Device, HasDevice};
 
 use super::{UpscalerImage, UpscalerInputs};
 
@@ -28,9 +26,7 @@ use super::{UpscalerImage, UpscalerInputs};
 pub fn is_supported(device: &Device) -> bool {
     let device = device.mtl_device();
     // SAFETY: `supportsMetal4FX` only inspects the device.
-    unsafe {
-        MTLFXTemporalDenoisedScalerDescriptor::supportsMetal4FX(device)
-    }
+    unsafe { MTLFXTemporalDenoisedScalerDescriptor::supportsMetal4FX(device) }
 }
 
 /// A denoised scaler for one pair of render and display resolutions.
@@ -45,7 +41,11 @@ unsafe impl Sync for DenoisedScaler {}
 impl DenoisedScaler {
     /// Creates a scaler from `render_extent` inputs to `display_extent`. The
     /// texture formats match the images `ensure_hdr_target` allocates.
-    pub fn new(device: &Device, render_extent: UVec2, display_extent: UVec2) -> Result<Self, String> {
+    pub fn new(
+        device: &Device,
+        render_extent: UVec2,
+        display_extent: UVec2,
+    ) -> Result<Self, String> {
         let device = device.mtl_device();
         let compiler = device
             .newCompilerWithDescriptor_error(&MTL4CompilerDescriptor::new())

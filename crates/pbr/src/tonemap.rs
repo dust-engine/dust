@@ -6,9 +6,8 @@ use bevy_pumicite::{
 use bytemuck::NoUninit;
 use pumicite::{
     ash::vk,
-    image::ImageLike,
     tracking::Access,
-    types::format::{ColorSpace, ColorSpacePrimaries, ColorSpaceTransferFunction},
+    types::format::{ColorSpace, ColorSpacePrimaries},
     utils::AsVkHandle,
 };
 

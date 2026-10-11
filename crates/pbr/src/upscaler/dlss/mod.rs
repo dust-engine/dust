@@ -17,11 +17,11 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::{App, Res, ResMut, Startup, UVec2};
 use bevy_pumicite::CreateDevice;
 use dust_app::ApplicationSettings;
+use pumicite::Device;
 use pumicite::ash::vk;
 use pumicite::command::CommandEncoder;
 use pumicite::device::DeviceBuilder;
 use pumicite::utils::AsVkHandle;
-use pumicite::Device;
 use tracing::{debug, error, info, warn};
 
 use super::{UpscalerImage, UpscalerInputs};
@@ -36,7 +36,11 @@ type NgxResult<T> = Result<T, sys::NVSDK_NGX_Result>;
 
 impl sys::NVSDK_NGX_Result {
     fn result(self) -> NgxResult<()> {
-        if self == Self::Success { Ok(()) } else { Err(self) }
+        if self == Self::Success {
+            Ok(())
+        } else {
+            Err(self)
+        }
     }
 
     /// Symbolic name from `nvsdk_ngx_defs.h`.
@@ -112,10 +116,7 @@ pub(super) fn add_vulkan_extensions(app: &mut App) {
         }
     }
 
-    app.add_systems(
-        Startup,
-        enable_device_extensions.before(CreateDevice),
-    );
+    app.add_systems(Startup, enable_device_extensions.before(CreateDevice));
 }
 
 fn enable_device_extensions(
@@ -282,9 +283,7 @@ impl Ngx {
 
         let app_data = encode_path(&app_data_path(settings));
         let search_dir = runtime_library_dir().map(|dir| encode_path(&dir));
-        let mut search_dir_ptr = search_dir
-            .as_ref()
-            .map_or(ptr::null(), |dir| dir.as_ptr());
+        let mut search_dir_ptr = search_dir.as_ref().map_or(ptr::null(), |dir| dir.as_ptr());
 
         let quiet = sys::NVSDK_NGX_LoggingInfo {
             LoggingCallback: None,
@@ -452,7 +451,8 @@ unsafe impl Sync for RayReconstruction {}
 
 impl Drop for RayReconstruction {
     fn drop(&mut self) {
-        if let Err(e) = unsafe { sys::NVSDK_NGX_VULKAN_ReleaseFeature(self.handle.as_ptr()) }.result()
+        if let Err(e) =
+            unsafe { sys::NVSDK_NGX_VULKAN_ReleaseFeature(self.handle.as_ptr()) }.result()
         {
             warn!(target: "ngx", "Releasing the DLSS feature failed: {e}");
         }

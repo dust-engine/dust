@@ -13,7 +13,6 @@ include!(concat!(
 
 use std::ops::Deref;
 
-
 use tonemap::{autoexposure_pass, tonemap_pass};
 
 use bevy::ecs::schedule::IntoScheduleConfigs;
@@ -40,7 +39,7 @@ use pumicite::{
     utils::glam_to_vk_transform,
 };
 use pumicite::{device::DeviceBuilder, image::UintImageView};
-use pumicite_egui::{EguiPrimaryContextPass, EguiRenderSet};
+use pumicite_egui::EguiRenderSet;
 
 use dust_gfxdebug::{GpuProfiler, GpuTimerCommands, PerformancePanel};
 
@@ -50,8 +49,7 @@ use crate::{
     camera::Camera,
     sky::{AtmosphereLUTs, SkyAtmosphereLUTRenderSet},
     upscaler::{
-        Upscaler, UpscalerSessionState, ensure_upscaler_session, setup_upscaler,
-        upscaler_evaluate,
+        Upscaler, UpscalerSessionState, ensure_upscaler_session, setup_upscaler, upscaler_evaluate,
     },
 };
 
@@ -666,7 +664,6 @@ pumicite::project_fields! {
     }
 }
 
-
 #[derive(Resource)]
 pub struct HdrRenderTarget {
     pub view: GPUMutex<HdrRenderTargetViews>,
@@ -1178,7 +1175,6 @@ fn shadow_pass(
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<JitterState>,
-    sharc_debug: Res<sharc::SharcDebugState>,
     mut frame_index: Local<u32>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
