@@ -94,7 +94,7 @@ fn select_upscaler(device: &Device, settings: &ApplicationSettings) -> Upscaler 
         Err(reason) => tracing::info!("DLSS Ray Reconstruction unavailable: {reason}"),
     }
     #[cfg(target_vendor = "apple")]
-    if metalfx::is_supported() {
+    if metalfx::is_supported(device) {
         return Upscaler::MetalFx;
     } else {
         tracing::info!("MetalFX temporal denoised scaler unsupported on this GPU");
@@ -132,6 +132,7 @@ pub(crate) fn ensure_upscaler_session(
     upscaler: Option<Res<Upscaler>>,
     mut state: ResMut<UpscalerSessionState>,
     hdr_target: Option<Res<HdrRenderTarget>>,
+    device: Res<Device>,
 ) {
     let (Some(upscaler), Some(hdr)) = (upscaler, hdr_target) else {
         return;
@@ -163,7 +164,7 @@ pub(crate) fn ensure_upscaler_session(
         }
         #[cfg(target_vendor = "apple")]
         Upscaler::MetalFx => {
-            metalfx::DenoisedScaler::new(render_extent, display_extent).map(UpscalerSession::MetalFx)
+            metalfx::DenoisedScaler::new(&device, render_extent, display_extent).map(UpscalerSession::MetalFx)
         }
         Upscaler::Blit => Ok(UpscalerSession::Blit),
     };

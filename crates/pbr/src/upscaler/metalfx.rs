@@ -16,28 +16,25 @@ use objc2_metal_fx::{
     MTL4FXTemporalDenoisedScaler, MTLFXTemporalDenoisedScalerBase,
     MTLFXTemporalDenoisedScalerDescriptor,
 };
-use pumicite::HasDevice;
+use pumicite::prelude::AsMTLDevice;
+use pumicite::{HasDevice, Device};
 use pumicite::ash::{self, vk};
 use pumicite::command::CommandEncoder;
 use pumicite::utils::metal::AsMTLCommandBuffer;
 
 use super::{UpscalerImage, UpscalerInputs};
 
-/// The Metal device the scaler runs on. The system default device is the GPU
-/// the Vulkan driver runs on, so it need not be bridged out of Vulkan.
-fn metal_device() -> Option<Retained<ProtocolObject<dyn MTLDevice>>> {
-    MTLCreateSystemDefaultDevice()
-}
-
 /// Whether this GPU supports the Metal 4 temporal denoised scaler.
-pub(crate) fn is_supported() -> bool {
+pub fn is_supported(device: &Device) -> bool {
+    let device = device.mtl_device();
     // SAFETY: `supportsMetal4FX` only inspects the device.
-    metal_device().is_some_and(|device| unsafe {
-        MTLFXTemporalDenoisedScalerDescriptor::supportsMetal4FX(&device)
-    })
+    unsafe {
+        MTLFXTemporalDenoisedScalerDescriptor::supportsMetal4FX(device)
+    }
 }
 
 /// A denoised scaler for one pair of render and display resolutions.
+#[derive(Clone)]
 pub(crate) struct DenoisedScaler(Retained<ProtocolObject<dyn MTL4FXTemporalDenoisedScaler>>);
 
 // SAFETY: the scaler is only configured and encoded from one render system at
@@ -48,8 +45,8 @@ unsafe impl Sync for DenoisedScaler {}
 impl DenoisedScaler {
     /// Creates a scaler from `render_extent` inputs to `display_extent`. The
     /// texture formats match the images `ensure_hdr_target` allocates.
-    pub(crate) fn new(render_extent: UVec2, display_extent: UVec2) -> Result<Self, String> {
-        let device = metal_device().ok_or("no Metal device")?;
+    pub fn new(device: &Device, render_extent: UVec2, display_extent: UVec2) -> Result<Self, String> {
+        let device = device.mtl_device();
         let compiler = device
             .newCompilerWithDescriptor_error(&MTL4CompilerDescriptor::new())
             .map_err(|e| format!("creating a Metal 4 compiler failed: {e}"))?;
@@ -115,6 +112,10 @@ impl DenoisedScaler {
             scaler.setDepthReversed(true);
             scaler.encodeToCommandBuffer(encoder.buffer().mtl_command_buffer());
         }
+        // Metal 4 command buffers do not retain what they use: keep the
+        // scaler's internal resources alive until this command buffer
+        // completes, even if `ensure_upscaler_session` replaces the session.
+        encoder.retain(self.clone());
     }
 }
 
