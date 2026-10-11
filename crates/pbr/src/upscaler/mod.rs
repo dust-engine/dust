@@ -315,6 +315,9 @@ pub(crate) fn upscaler_evaluate(
         Vec4::new(0.0, 0.0, camera.depth.start, 0.0),
     );
     let jitter = jitter.offset;
+    // Everything below records unconditionally, so `hdr_denoised_output`
+    // holds a complete frame for next frame's screen trace.
+    hdr_target.denoised_written = true;
 
     ctx.record(move |encoder| {
         let hdr = &mut *hdr_target;

@@ -1,0 +1,12 @@
+// Screen-space gather trace compute pass (screen_trace.slang, entry `compact`).
+// Shares the ray-tracing pipeline layout (pbr.playout.bin): it binds the
+// G-buffers, HZB, history and trace buffers through the same `params`
+// ParameterBlock the RT pipelines use.
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/screen_trace.spv",
+        entry_point: "compact",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+    disable_optimization: false,
+)

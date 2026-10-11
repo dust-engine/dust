@@ -13,9 +13,9 @@ PipelineLayout(
                 bindings: [
                     Binding(binding: 0,  ty: AccelerationStructure, stages: [RayGen]),
                     Binding(binding: 1,  ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // camera uniforms
-                    Binding(binding: 2,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // output
+                    Binding(binding: 2,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // output
                     Binding(binding: 3,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (linear view)
-                    Binding(binding: 4,  ty: SampledImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (sRGB view)
+                    Binding(binding: 4,  ty: SampledImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // albedo (sRGB view)
                     Binding(binding: 5,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit]),           // albedo (Uint view)
                     Binding(binding: 6,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // normal
                     Binding(binding: 7,  ty: StorageImage,          stages: [RayGen, Miss, ClosestHit, Compute]),  // depth
@@ -25,7 +25,7 @@ PipelineLayout(
                     Binding(binding: 11, ty: UniformBuffer,         stages: [RayGen, Miss]),                       // atmosphere
                     Binding(binding: 12, ty: SampledImage,          stages: [RayGen, Miss]),                       // transmittance LUT
                     Binding(binding: 13, ty: SampledImage,          stages: [RayGen, Miss]),                       // sky-view LUT
-                    Binding(binding: 14, ty: Sampler,               stages: [RayGen, Miss]),                       // linear sampler
+                    Binding(binding: 14, ty: Sampler,               stages: [RayGen, Miss, Compute]),              // linear sampler
                     Binding(binding: 15, ty: StorageBuffer,         stages: [ClosestHit]),                         // per-instance transforms
                     Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC hashEntries
                     Binding(binding: 17, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),           // SHARC accumulation
@@ -36,6 +36,15 @@ PipelineLayout(
                     Binding(binding: 22, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // candidates_write
                     Binding(binding: 23, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // keys_write
                     Binding(binding: 24, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC lock/occupancy (no-64-bit-atomics insert path)
+                    // Screen-space gather trace (pbr_common.slang, screen_trace.slang).
+                    // 32 bindings in all: the push-descriptor limit of the Apple driver.
+                    Binding(binding: 25, ty: SampledImage,          stages: [RayGen, Compute]),                    // HZB
+                    Binding(binding: 26, ty: SampledImage,          stages: [RayGen, Compute]),                    // previous scene color
+                    Binding(binding: 27, ty: SampledImage,          stages: [RayGen, Compute]),                    // previous depth
+                    Binding(binding: 28, ty: UniformBuffer,         stages: [RayGen, Compute]),                    // ScreenTraceConstants
+                    Binding(binding: 29, ty: StorageImage,          stages: [RayGen, Compute]),                    // trace hit records
+                    Binding(binding: 30, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // compacted trace texels
+                    Binding(binding: 31, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // compacted trace args (indirect)
                 ]
             )
         ),

@@ -94,6 +94,7 @@ void intersectionShader(uniform VoxModelParams params) {
 // outcompete bright ones for pool slots.
 [shader("closesthit")]
 void closestHitShader(uniform VoxModelParams model,
+                      inout FinalGatherPayload payload,
                       in HitAttribute hitAttr) {
     int8_t3 faceNormal = hitAttr.getNormal();
     // Raw hit point + world normal: used to trace the Update rays from this
@@ -107,7 +108,9 @@ void closestHitShader(uniform VoxModelParams model,
     VoxModelCell cell = model.voxelCellInfo(hitAttr.voxelId);
     uint64_t key = params.sharc.cellKey(InstanceIndex(), cell.coords, hitAttr.normal, cell.centerWorldSpace());
 
-    uint2 pixel = DispatchRaysIndex().xy;
+    // The gather dispatch is 1D over the screen trace's compacted list, so
+    // the pixel comes from the payload (see finalGatherRayGenShader).
+    uint2 pixel = payload.pixel;
     float3 primaryAlbedo = params.gbuffer.albedoSRGB[pixel].rgb;
 
     // Query the resolved radiance + the cell's current sample count by key.

@@ -92,6 +92,21 @@ ron2bin(
     type = "raytracing-pipeline",
 )
 
+# The gather ray direction, shared by the screen trace and the hardware
+# gather so both passes follow the same ray (gather_common.slang).
+slang_shader(
+    name = "gather_module",
+    srcs = ["gather_common.slang"],
+    out = "gather_common.slang-module",
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        ":pbr_module",
+        ":sharc_module",
+        ":random.slang",
+    ],
+    opts = ["-emit-ir"],
+)
+
 slang_shader(
     name = "final_gather",
     srcs = ["final_gather.slang"],
@@ -99,6 +114,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":sharc_module",
+        ":gather_module",
         ":random.slang",
         "@sharc//:sharc_headers",
     ],
@@ -158,6 +174,58 @@ ron2bin(
     name = "sharc_debug_candidate_splat_comp_pipeline",
     src = "sharc_debug_candidate_splat.comp.pipeline.ron",
     out = "sharc_debug_candidate_splat.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+
+# Screen-space gather trace, compaction and debug overlay: three compute entry
+# points in one module (screen_trace.slang), all on the RT pipeline layout.
+slang_shader(
+    name = "screen_trace",
+    srcs = ["screen_trace.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        ":pbr_module",
+        ":sharc_module",
+        ":gather_module",
+        ":random.slang",
+    ],
+    out = "screen_trace.spv",
+    profile = "sm_6_6",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+        "-fvk-use-entrypoint-name",
+        "-entry",
+        "main",
+        "-stage",
+        "compute",
+        "-entry",
+        "compact",
+        "-stage",
+        "compute",
+        "-entry",
+        "debugOverlay",
+        "-stage",
+        "compute",
+    ],
+)
+ron2bin(
+    name = "screen_trace_comp_pipeline",
+    src = "screen_trace.comp.pipeline.ron",
+    out = "screen_trace.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+ron2bin(
+    name = "screen_trace_compact_comp_pipeline",
+    src = "screen_trace_compact.comp.pipeline.ron",
+    out = "screen_trace_compact.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+ron2bin(
+    name = "screen_trace_debug_comp_pipeline",
+    src = "screen_trace_debug.comp.pipeline.ron",
+    out = "screen_trace_debug.comp.pipeline.bin",
     type = "compute-pipeline",
 )
 
@@ -250,6 +318,10 @@ filegroup(
         ":hzb_build",
         ":hzb_build_layout",
         ":hzb_build_comp_pipeline",
+        ":screen_trace",
+        ":screen_trace_comp_pipeline",
+        ":screen_trace_compact_comp_pipeline",
+        ":screen_trace_debug_comp_pipeline",
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",

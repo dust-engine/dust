@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod hzb;
+pub mod screen_trace;
 pub mod sharc;
 pub mod sky;
 pub mod tonemap;
@@ -29,7 +30,7 @@ use bevy_pumicite::{
 };
 use bytemuck::{Pod, Zeroable};
 use pumicite::{
-    Allocator, HasDevice, Sampler,
+    Allocator,
     ash::vk::{self, TaggedStructure},
     debug::DebugObject,
     image::{FullImageView, Image, ImageExt, SrgbImageView, SwizzledImageView},
@@ -238,6 +239,7 @@ impl Plugin for PbrRenderPlugin {
 
         app.add_plugins(sky::SkyPlugin);
         app.add_plugins(sharc::SharcDebugPlugin);
+        app.add_plugins(screen_trace::ScreenTracePlugin);
         app.configure_sets(
             PostUpdate,
             SkyAtmosphereLUTRenderSet
@@ -371,6 +373,9 @@ fn render(
         sharc::build_sharc_constants(&sharc.config, &sharc.frame_state, transform.translation());
     sharc_constants.debug_mode = sharc.debug.mode.as_u32();
     sharc_constants.debug_brightness = sharc.debug.brightness;
+    // Everything below records unconditionally, so next frame's `depth_prev`
+    // holds a complete depth buffer.
+    hdr.depth_written = true;
     ctx.record(move |encoder| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
@@ -666,10 +671,16 @@ pub struct HdrRenderTarget {
     pub sdr_target_state: ResourceState,
     pub hdr_target_state: ResourceState,
     pub hdr_denoised_target_state: ResourceState,
-    /// Bilinear, clamp-to-edge. Samples the history color.
-    pub linear_clamp_sampler: Sampler,
-    /// Nearest, clamp-to-edge. Samples the HZB and the history depth.
-    pub point_clamp_sampler: Sampler,
+    /// `depth_prev` and `hdr_denoised_output` hold last frame's images. False
+    /// on the first frame after (re)creation and on any frame whose
+    /// predecessor did not record both the primary pass and the upscaler
+    /// (pipelines or session still loading), when they are undefined.
+    pub history_valid: bool,
+    /// `render` recorded this frame's primary pass (`depth` is written).
+    pub depth_written: bool,
+    /// `upscaler_evaluate` recorded this frame (`hdr_denoised_output` is
+    /// written).
+    pub denoised_written: bool,
     pub motion_vectors_state: ResourceState,
     pub specular_albedo_state: ResourceState,
     pub exposure_state: ResourceState,
@@ -886,6 +897,9 @@ fn ensure_hdr_target(
         // SAFETY: only image handles move between fields; nothing is freed.
         let views = unsafe { hdr.view.get_mut_unchecked() };
         std::mem::swap(&mut views.depth, &mut views.depth_prev);
+        hdr.history_valid = hdr.depth_written && hdr.denoised_written;
+        hdr.depth_written = false;
+        hdr.denoised_written = false;
         return;
     }
 
@@ -1111,26 +1125,6 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"Auto-Exposure Scale View");
 
-    let clamp_sampler = |filter: vk::Filter, mipmap_mode: vk::SamplerMipmapMode| {
-        Sampler::new(
-            allocator.device().clone(),
-            &vk::SamplerCreateInfo {
-                mag_filter: filter,
-                min_filter: filter,
-                mipmap_mode,
-                address_mode_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                address_mode_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                address_mode_w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                // Full mip range: the HZB is sampled per explicit level.
-                max_lod: vk::LOD_CLAMP_NONE,
-                ..Default::default()
-            },
-        )
-        .unwrap()
-    };
-    let linear_clamp_sampler = clamp_sampler(vk::Filter::LINEAR, vk::SamplerMipmapMode::LINEAR);
-    let point_clamp_sampler = clamp_sampler(vk::Filter::NEAREST, vk::SamplerMipmapMode::NEAREST);
-
     let view = GPUMutex::new(HdrRenderTargetViews {
         hdr_output,
         sdr_target,
@@ -1160,8 +1154,9 @@ fn ensure_hdr_target(
         display_extent: extent,
         render_extent,
         hdr_denoised_target_state: Default::default(),
-        linear_clamp_sampler,
-        point_clamp_sampler,
+        history_valid: false,
+        depth_written: false,
+        denoised_written: false,
     });
 }
 
@@ -1401,10 +1396,10 @@ pub(crate) fn final_gather_pass(
     swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-    mut frame_index: Local<u32>,
     jitter: Res<JitterState>,
     mut sharc: sharc::SharcSystemParams,
     mut profiler: Option<ResMut<GpuProfiler>>,
+    mut screen_trace: screen_trace::ScreenTraceSystemParams,
 ) {
     let Ok((camera, transform)) = swapchain_images.single() else {
         return;
@@ -1430,6 +1425,24 @@ pub(crate) fn final_gather_pass(
     let Some(sharc_resources) = sharc.resources.as_deref_mut() else {
         return;
     };
+    // Screen trace: when it ran this frame, the gather only traces the pixels
+    // the screen trace could not resolve, resuming from where it stopped.
+    let screen_traced = screen_trace.state.traced_this_frame;
+    let gather_frame_index = screen_trace.state.frame_index;
+    let st_state = &mut *screen_trace.state;
+    let (Some(st_res), Some(hzb_res)) = (
+        st_state.resources.as_mut(),
+        screen_trace.hzb.resources.as_mut(),
+    ) else {
+        return;
+    };
+    let screen_trace_constants = screen_trace::build_screen_trace_constants(
+        &screen_trace.config,
+        hzb_res,
+        gather_frame_index,
+        hdr.history_valid,
+        screen_traced,
+    );
     gather_sbt.push_raygen(0, 0, |_| {});
     gather_sbt.push_miss(0, 1, |_| {});
     // Final-gather doesn't reproject, but it reconstructs world position from
@@ -1445,8 +1458,7 @@ pub(crate) fn final_gather_pass(
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };
-    let push = sharc::FinalGatherPush::new(*frame_index);
-    *frame_index = frame_index.wrapping_add(1);
+    let push = sharc::FinalGatherPush::new(gather_frame_index);
     // Ping-pong pool indices for this frame.
     let (sharc_pool_read_idx, sharc_pool_write_idx) =
         sharc::SharcResources::pool_indices(sharc.frame_state.frame_index);
@@ -1655,6 +1667,46 @@ pub(crate) fn final_gather_pass(
             sharc_rt_write,
         );
 
+        // Screen-trace records and the compacted dispatch list.
+        let screen_trace_constants_buf = uniform_ring_buffer
+            .create_uniform(encoder, bytemuck::bytes_of(&screen_trace_constants));
+        let trace_hit = encoder.lock(
+            &st_res.trace_hit,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let compacted_texels = encoder.lock(
+            &st_res.compacted_texels,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        let compacted_args = encoder.lock(
+            &st_res.compacted_args,
+            vk::PipelineStageFlags2::DRAW_INDIRECT,
+        );
+        if screen_traced {
+            encoder.use_image_resource(
+                trace_hit,
+                &mut st_res.trace_hit_state,
+                sharc_rt_read,
+                vk::ImageLayout::GENERAL,
+                0..1,
+                0..1,
+                false,
+            );
+            encoder.use_buffer_resource(
+                compacted_texels,
+                &mut st_res.compacted_texels_state,
+                sharc_rt_read,
+            );
+            encoder.use_buffer_resource(
+                compacted_args,
+                &mut st_res.compacted_args_state,
+                Access {
+                    stage: vk::PipelineStageFlags2::DRAW_INDIRECT,
+                    access: vk::AccessFlags2::INDIRECT_COMMAND_READ,
+                },
+            );
+        }
+
         encoder.memory_barrier(
             Access::COPY_WRITE,
             Access {
@@ -1678,6 +1730,7 @@ pub(crate) fn final_gather_pass(
                     .full_view(),
             )
             .gbuffer_albedo_srgb(render_target_views.albedo().deref_inner().srgb_view())
+            .gbuffer_albedo_uint(render_target_views.albedo().uint_view())
             .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
             .gbuffer_depth_texture(render_target_views.depth().full_view())
             .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
@@ -1697,7 +1750,11 @@ pub(crate) fn final_gather_pass(
             .sharc_g_sharc_candidates_read(pool_read_candidates_buf)
             .sharc_g_sharc_keys_read(pool_read_keys_buf)
             .sharc_g_sharc_candidates_write(pool_write_candidates_buf)
-            .sharc_g_sharc_keys_write(pool_write_keys_buf);
+            .sharc_g_sharc_keys_write(pool_write_keys_buf)
+            .screen_trace(screen_trace_constants_buf)
+            .trace_hit(trace_hit.full_view())
+            .compacted_trace_texels(compacted_texels)
+            .compacted_trace_args(compacted_args);
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
             pipeline.layout(),
@@ -1713,16 +1770,21 @@ pub(crate) fn final_gather_pass(
         );
 
         encoder.timing_scope(profiler.as_deref_mut(), "final gather ray", |encoder| {
-            encoder.trace_rays(
-                gather_sbt,
-                0,
-                sbt_buffer,
-                UVec3 {
-                    x: hdr.render_extent.x,
-                    y: hdr.render_extent.y,
-                    z: 1,
-                },
-            );
+            if screen_traced {
+                // 1D over the compacted list; the count comes from the GPU.
+                encoder.trace_rays_indirect(gather_sbt, 0, sbt_buffer, compacted_args, 0);
+            } else {
+                encoder.trace_rays(
+                    gather_sbt,
+                    0,
+                    sbt_buffer,
+                    UVec3 {
+                        x: hdr.render_extent.x,
+                        y: hdr.render_extent.y,
+                        z: 1,
+                    },
+                );
+            }
         });
     });
 }
