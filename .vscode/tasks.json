@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "bazel: build runtime assets",
+      "type": "shell",
+      "command": "bazel",
+      "args": [
+        "build",
+        "//:runtime_assets",
+        "//crates/pbr/shaders:pbr_module_layout_macro"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

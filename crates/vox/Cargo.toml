@@ -22,4 +22,4 @@ serde = "1"
 
 [dev-dependencies]
 dust_physics = { path = "../physics" }
-parry3d = { path = "../../../parry/crates/parry3d" }
+parry3d = { git = "https://github.com/0xbeefd1ed/parry.git", branch = "generic-voxels" }

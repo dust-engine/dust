@@ -12,7 +12,7 @@ dust_app.workspace = true
 dust_gfxdebug.workspace = true
 tracing = "0.1"
 bytemuck = "1.25"
-glam = "0.32"
+glam = "0.33"
 
 # DLSS Ray Reconstruction. Links the NVIDIA NGX SDK, which only the Bazel build
 # provides; it enables this feature on Windows and Linux.

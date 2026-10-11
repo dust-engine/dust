@@ -35,7 +35,7 @@ use parry3d::query::details::{
 use parry3d::query::{
     ClosestPoints, Contact, ContactManifold, ContactManifoldsWorkspace, DefaultQueryDispatcher,
     NonlinearRigidMotion, PersistentQueryDispatcher, QueryDispatcher, QueryDispatcherChain,
-    ShapeCastHit, ShapeCastOptions, Unsupported,
+    ShapeCastHit, ShapeCastOptions, ShapeDistance, ShapeIntersection, Unsupported,
 };
 use parry3d::shape::{Ball, Shape};
 
@@ -76,7 +76,7 @@ impl QueryDispatcher for VdbDispatcher {
         pos12: &Pose,
         g1: &dyn Shape,
         g2: &dyn Shape,
-    ) -> Result<bool, Unsupported> {
+    ) -> Result<ShapeIntersection, Unsupported> {
         if let Some(vdb1) = self.downcast(g1) {
             Ok(intersection_test_voxels_shape(
                 &self.full(),
@@ -98,7 +98,12 @@ impl QueryDispatcher for VdbDispatcher {
 
     // Parry's own dispatcher does not implement `distance`, `contact`, or
     // `closest_points` for voxel shapes either; keep parity and let the chain decide.
-    fn distance(&self, _: &Pose, _: &dyn Shape, _: &dyn Shape) -> Result<Real, Unsupported> {
+    fn distance(
+        &self,
+        _: &Pose,
+        _: &dyn Shape,
+        _: &dyn Shape,
+    ) -> Result<ShapeDistance, Unsupported> {
         Err(Unsupported)
     }
 
@@ -194,8 +199,8 @@ impl QueryDispatcher for VdbDispatcher {
 impl<ManifoldData, ContactData> PersistentQueryDispatcher<ManifoldData, ContactData>
     for VdbDispatcher
 where
-    ManifoldData: Default + Clone,
-    ContactData: Default + Copy,
+    ManifoldData: Default + Clone + Send + Sync,
+    ContactData: Default + Copy + Send + Sync,
 {
     fn contact_manifolds(
         &self,

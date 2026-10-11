@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "dust (release)",
+      "preLaunchTask": "bazel: build runtime assets",
+      "cargo": {
+        "args": ["build", "--release", "--bin=dust", "--package=dust"],
+        "filter": { "name": "dust", "kind": "bin" }
+      },
+      "cwd": "${workspaceFolder}",
+      "env": { "BAZEL_BIN": "${workspaceFolder}/bazel-bin" }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "dust (dev)",
+      "preLaunchTask": "bazel: build runtime assets",
+      "cargo": {
+        "args": ["build", "--bin=dust", "--package=dust"],
+        "filter": { "name": "dust", "kind": "bin" }
+      },
+      "cwd": "${workspaceFolder}",
+      "env": { "BAZEL_BIN": "${workspaceFolder}/bazel-bin" }
+    }
+  ]
+}

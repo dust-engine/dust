@@ -1,7 +1,6 @@
 mod bazel_asset;
 
 use bevy::prelude::*;
-use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode, tracking::Access};
 
 #[derive(Resource)]
 pub struct ApplicationSettings {

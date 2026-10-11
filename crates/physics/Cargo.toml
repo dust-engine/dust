@@ -5,6 +5,6 @@ edition = "2024"
 
 [dependencies]
 dust_vdb = { workspace = true }
-glam = "^0.32"
-parry3d = { path = "../../../parry/crates/parry3d" }
+glam = "^0.33"
+parry3d = { git = "https://github.com/0xbeefd1ed/parry.git", branch = "generic-voxels" }
 bitvec = "1"

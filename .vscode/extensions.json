@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "shader-slang.slang-language-extension",
+    "BazelBuild.vscode-bazel",
+    "vadimcn.vscode-lldb"
+  ],
+  "unwantedRecommendations": []
+}

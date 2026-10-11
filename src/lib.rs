@@ -7,7 +7,6 @@ use std::time::Duration;
 use avian3d::parry::query::{DefaultQueryDispatcher, QueryDispatcher as _};
 use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy::scene::template_value;
 use bevy::scene::{CachedSceneAsset, CommandsSceneExt};
 use bevy_pumicite::CreateDevice;
 use dust_vox::{
@@ -298,7 +297,7 @@ fn setup_rainbow_demo(
                 prefer_fast_build: true,
                 enable_compaction: false,
             }
-            { template_value(VoxModelCollider(collider)) }
+            ~{ VoxModelCollider(collider) }
         })
         .id();
     // The instance takes its collider from the model. `update_rainbow_demo_system`

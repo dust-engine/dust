@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use bevy::ecs::name::Name;
 use bevy::ecs::template::{EntityTemplate, SceneEntityReference};
-use bevy::scene::{NameEntityReference, RelatedScenes, Scene, ScenePatch, bsn, template_value};
+use bevy::scene::{NameEntityReference, RelatedScenes, Scene, ScenePatch, bsn};
 use bevy::{
     asset::AssetLoader,
     math::{U8Vec4, Vec3A},
@@ -41,7 +40,7 @@ impl Scene for GraphScene {
                 children,
             } => {
                 scene.push_template(transform);
-                RelatedScenes::<ChildOf, _>::new(children).resolve(context, scene);
+                RelatedScenes::<Children>::new(children).resolve(context, scene)?;
                 Ok(())
             }
             Self::Leaf { transform, model } => {
@@ -398,13 +397,13 @@ impl AssetLoader for VoxLoader {
                             .add_labeled_asset(format!("Material{}", model_id), material);
 
                         bsn! {
-                            { NameEntityReference { name: Name(format!("Model{model_id}").into()), reference: model_references[&model_id] } }
+                            @{ NameEntityReference { name: Name(format!("Model{model_id}").into()), reference: model_references[&model_id] } }
                             VoxModel {
                                 geometry: {geometry},
                                 material: {material},
                                 palette: {palette_handle.clone()},
                             }
-                            { template_value(VoxModelCollider(collider)) }
+                            ~{ VoxModelCollider(collider) }
                         }
                     })
                     .collect()
