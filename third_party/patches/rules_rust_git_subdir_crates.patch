@@ -81,7 +81,7 @@ index 8e14efe..c2f6be0 100644
 +            })
 +            .map(|dir| {
 +                let relative = dir.strip_prefix(&checkout_root).unwrap().join("Cargo.toml");
-+                format!(".tmp_git_root/{relative}")
++                format!(".tmp_git_root/{}", relative.as_str().replace('\\', "/"))
 +            })
 +    }
 +
@@ -106,7 +106,7 @@ index 8e14efe..c2f6be0 100644
 +            }
 +        }
 +        let relative = src.strip_prefix(&checkout_root).ok()?;
-+        Some(format!(".tmp_git_root/{relative}"))
++        Some(format!(".tmp_git_root/{}", relative.as_str().replace('\\', "/")))
 +    }
 +
      /// Collect all Bazel targets that should be generated for a particular Package

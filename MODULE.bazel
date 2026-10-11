@@ -97,7 +97,7 @@ crate.annotation(
     crate = "vk-mem",
     repositories = ["crates"],
     gen_build_script = "off",
-    deps = ["@@//third_party:vma"],
+    link_deps = ["@@//third_party:vma"],
 )
 # `runfiles` is only needed for cargo builds. Bazel ships its own copy at
 # @rules_rust//rust/runfiles, so redirect the crates.io target there to avoid
@@ -126,7 +126,7 @@ crate.annotation(
     crate = "shader-slang-sys",
     repositories = ["bindeps"],
     gen_build_script = "off",
-    deps = ["@@//third_party:slang"],
+    link_deps = ["@@//third_party:slang"],
 )
 crate.from_specs(name = "bindeps")
 use_repo(crate, "bindeps")

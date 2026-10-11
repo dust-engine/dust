@@ -38,10 +38,10 @@ rust_library(
         "//conditions:default": ["dlss"],
     }),
     deps = all_crate_deps(normal = True) + [
-        "//third_party/ffx:ffx_lpm_cpu",
         "//crates/app:dust_app",
         "//crates/gfxdebug:dust_gfxdebug",
-    ] + select({
+    ],
+    link_deps = ["//third_party/ffx:ffx_lpm_cpu"] + select({
         "@platforms//os:macos": [],
         "//conditions:default": [
             ":ngx_helpers",
