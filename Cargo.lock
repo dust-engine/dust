@@ -999,7 +999,7 @@ source = "git+https://github.com/dust-engine/bevy.git?branch=release-0.20.0#12cf
 [[package]]
 name = "bevy_pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
 dependencies = [
  "async-lock",
  "bevy_app",
@@ -1609,7 +1609,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa8876b300ab35ba921adea3dfd70157a46249b33f95c9084ae5709785478946"
 dependencies = [
  "clap_builder",
- "clap_derive",
 ]
 
 [[package]]
@@ -1618,22 +1617,8 @@ version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0797fb7aeb1406c84efac526901f7ec3ead2124f946b494e72879d4b54704d"
 dependencies = [
- "anstream",
  "anstyle",
  "clap_lex",
- "strsim",
-]
-
-[[package]]
-name = "clap_derive"
-version = "4.6.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9c751b79415d4e559e3d1fcf128e09e720eb673a06d26cf6f392d37d75b66e0"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn 3.0.8",
 ]
 
 [[package]]
@@ -2091,7 +2076,6 @@ dependencies = [
  "dust_physics",
  "dust_vox",
  "pumicite",
- "pumicite_cli",
 ]
 
 [[package]]
@@ -2232,18 +2216,6 @@ checksum = "52c8d4141cf0f60fb2f7aefaf352d3ffa5171ef0ab09731c64391801e95e48f1"
 dependencies = [
  "bytemuck",
 ]
-
-[[package]]
-name = "embedded-io"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
-
-[[package]]
-name = "embedded-io"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "ena"
@@ -2791,12 +2763,6 @@ dependencies = [
  "portable-atomic",
  "stable_deref_trait",
 ]
-
-[[package]]
-name = "heck"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermit-abi"
@@ -4127,8 +4093,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
 dependencies = [
  "cobs",
- "embedded-io 0.4.0",
- "embedded-io 0.6.1",
  "heapless 0.7.17",
  "serde",
 ]
@@ -4206,7 +4170,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 [[package]]
 name = "pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
 dependencies = [
  "ash",
  "bevy_asset",
@@ -4232,23 +4196,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumicite_cli"
-version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
-dependencies = [
- "clap",
- "postcard",
- "proc-macro2",
- "pumicite_types",
- "quote",
- "ron",
- "shader-slang",
-]
-
-[[package]]
 name = "pumicite_egui"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -4266,7 +4216,7 @@ dependencies = [
 [[package]]
 name = "pumicite_types"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=14c1b8a930972106a83a71abd5173968a632e44b#14c1b8a930972106a83a71abd5173968a632e44b"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
 dependencies = [
  "ash",
  "glam",
@@ -4715,19 +4665,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shader-slang"
-version = "0.1.0"
-source = "git+https://github.com/0xbeefd1ed/slang-rs.git?rev=ae22fbc0ffb1c17560c9132d4675757d3287f284#ae22fbc0ffb1c17560c9132d4675757d3287f284"
-dependencies = [
- "shader-slang-sys",
-]
-
-[[package]]
-name = "shader-slang-sys"
-version = "0.1.0"
-source = "git+https://github.com/0xbeefd1ed/slang-rs.git?rev=ae22fbc0ffb1c17560c9132d4675757d3287f284#ae22fbc0ffb1c17560c9132d4675757d3287f284"
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4913,12 +4850,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "strsim"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"

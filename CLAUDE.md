@@ -6,10 +6,26 @@ Dust is a Rust-based 3D voxel rendering engine using physically-based ray tracin
 
 Hybrid Bazel + Cargo build. Bazel is the primary build system.
 
-- **Build all:** `bazelisk build -c opt  //...`
-- **Run:** `bazelisk run -c opt //:dust`
+- **Build all:** `bazel build -c opt  //...`
+- **Run:** `bazel run -c opt //:dust`
 - **Cargo build:** `cargo build` (alternative, but Bazel handles shader compilation and asset bundling)
+  - Build rust dependencies with bazel first
+    `bazel build //third_party/ffx:ffx_lpm_cpu //crates/pbr/shaders:pbr_module_layout_macro //:runtime_assets`
 - **Run tests:** `cargo test` (vdb crate has dev-dependency on rand for tests)
+
+### pumicite
+
+We own pumicite (`dust-engine/pumicite`, local checkout at `../pumicite`), so fix bugs there rather than working around them in dust. Committed `Cargo.toml` must pin `pumicite` to a pushed commit hash (`rev`). To develop against local pumicite changes, add a `[patch]` section and build with cargo:
+
+```toml
+[patch."https://github.com/dust-engine/pumicite.git"]
+pumicite = { path = "../pumicite" }
+bevy_pumicite = { path = "../pumicite/crates/bevy" }
+pumicite_egui = { path = "../pumicite/crates/egui" }
+pumicite_types = { path = "../pumicite/crates/types" }
+```
+
+Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without it. Before committing dust, push the pumicite commit, bump the three `rev`s, and remove the `[patch]`.
 
 ## Architecture
 
