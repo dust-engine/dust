@@ -24,9 +24,6 @@ avian3d = { git = "https://github.com/0xbeefd1ed/avian.git", branch = "main", de
 pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
 bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
 pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
-# The version pumicite_egui is built on, so both resolve to the same crate and share
-# its resource types (e.g. `EguiWantsInput`).
-bevy_egui = { version = "0.43", default-features = false }
 
 [dependencies]
 dust_vox.workspace = true

@@ -19,7 +19,9 @@
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use dust_profiler::GpuProfiler;
-use pumicite_egui::{EguiContext, EguiPrimaryContextPass, PrimaryEguiContext, egui};
+use pumicite_egui::{
+    EguiContext, EguiGlobalSettings, EguiPrimaryContextPass, PrimaryEguiContext, egui,
+};
 
 use crate::PerformancePanel;
 
@@ -33,6 +35,12 @@ pub struct DevToolsPlugin;
 impl Plugin for DevToolsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DevTools>();
+        // Keys typed into DevTools, such as into the console's prompt, and
+        // clicks on it shouldn't also reach the game: bevy_egui clears them
+        // from `ButtonInput` while egui wants them.
+        app.world_mut()
+            .get_resource_or_init::<EguiGlobalSettings>()
+            .enable_absorb_bevy_input_system = true;
         app.add_systems(Update, toggle_devtools);
         app.add_systems(EguiPrimaryContextPass, draw_devtools);
     }
@@ -197,7 +205,7 @@ pub(crate) fn draw_devtools(world: &mut World) {
 
 /// Tab strip, then the selected tab's contents.
 fn devtools_contents(ui: &mut egui::Ui, world: &mut World, devtools: &mut DevTools) {
-    ui.horizontal(|ui| {
+    let tab_bar = ui.horizontal(|ui| {
         // Right-to-left first, so the controls claim their space and the tabs
         // get whatever width is left.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -247,7 +255,16 @@ fn devtools_contents(ui: &mut egui::Ui, world: &mut World, devtools: &mut DevToo
             });
         });
     });
-    ui.separator();
+    // A line right along the tab bar's bottom edge, where `ui.separator()`
+    // would leave the item spacing and half its own height above its line.
+    // Centering the line half its width below the edge keeps it off the tabs'
+    // pixels.
+    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+    ui.painter().hline(
+        ui.max_rect().x_range(),
+        tab_bar.response.rect.bottom() + stroke.width / 2.0,
+        stroke,
+    );
 
     let Some(tab) = devtools.tabs.get(devtools.selected) else {
         ui.weak("No debug panels registered.");
@@ -351,7 +368,7 @@ const ICON_SIZE: egui::Vec2 = egui::vec2(24.0, 24.0);
 /// A square button whose icon is drawn by `paint` around the button's center.
 /// The icons are painted rather than typed because egui's default fonts don't
 /// reliably carry glyphs like ⋮ and ✕.
-fn icon_button(
+pub(crate) fn icon_button(
     ui: &mut egui::Ui,
     paint: fn(&egui::Painter, egui::Pos2, egui::Stroke),
 ) -> egui::Response {

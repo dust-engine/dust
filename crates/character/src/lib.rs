@@ -12,15 +12,14 @@
 //!
 //! Controls: WASD to move, Space to jump (or fly up), Left Control to fly down,
 //! Left Shift to sprint, F to toggle flying, V to toggle first/third person,
-//! Left Click to grab the cursor (unless the click lands on egui UI), Escape to
-//! release it. Mouse look only runs while the cursor is grabbed.
+//! Left Click to grab the cursor, Escape to release it. Mouse look only runs
+//! while the cursor is grabbed.
 
 use avian3d::character_controller::prelude::*;
 use avian3d::prelude::*;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use bevy_egui::input::EguiWantsInput;
 
 pub struct CharacterPlugin;
 
@@ -434,8 +433,6 @@ fn look_and_camera(
     mouse_motion: Res<AccumulatedMouseMotion>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
-    // Absent when no egui plugin is installed, as in the tests.
-    egui_input: Option<Res<EguiWantsInput>>,
     children: Query<&Children>,
     spatial_query: SpatialQuery,
     mut commands: Commands,
@@ -443,9 +440,7 @@ fn look_and_camera(
     if keys.just_pressed(KeyCode::Escape) {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
-    } else if mouse_buttons.just_pressed(MouseButton::Left)
-        && !egui_input.is_some_and(|input| input.wants_any_pointer_input())
-    {
+    } else if mouse_buttons.just_pressed(MouseButton::Left) {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
     }

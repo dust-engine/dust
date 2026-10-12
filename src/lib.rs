@@ -57,7 +57,10 @@ pub fn run() {
     let mut app = bevy::app::App::new();
 
     app.add_plugins(dust_app::DustApp)
-        .add_plugins(bevy::DefaultPlugins)
+        .add_plugins(bevy::DefaultPlugins.set(bevy::log::LogPlugin {
+            custom_layer: dust_devtools::console_layer,
+            ..default()
+        }))
         .add_plugins(bevy_pumicite::SurfacePlugin::default())
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())
         .add_plugins(dust_pbr::upscaler::UpscalerSetupPlugin)
