@@ -18,7 +18,7 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bevy_pumicite::{CreateDevice, SubmissionState};
 use dust_app::ApplicationSettings;
-use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
+use dust_profiler::{GpuProfiler, GpuTimerCommands};
 use pumicite::Device;
 use pumicite::ash::vk;
 use pumicite::command::GPURefMut;

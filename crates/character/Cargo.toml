@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 bevy.workspace = true
 avian3d.workspace = true
+bevy_egui.workspace = true

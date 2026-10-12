@@ -10,8 +10,8 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "dust_gfxdebug",
-    crate_name = "dust_gfxdebug",
+    name = "dust_profiler",
+    crate_name = "dust_profiler",
     crate_root = "src/lib.rs",
     srcs = glob(["src/**/*.rs"]),
     edition = "2024",

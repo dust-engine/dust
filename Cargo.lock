@@ -2071,7 +2071,7 @@ dependencies = [
  "bevy_pumicite",
  "dust_app",
  "dust_character",
- "dust_gfxdebug",
+ "dust_devtools",
  "dust_pbr",
  "dust_physics",
  "dust_vox",
@@ -2098,15 +2098,16 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy",
+ "bevy_egui",
 ]
 
 [[package]]
-name = "dust_gfxdebug"
+name = "dust_devtools"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_pumicite",
- "pumicite",
+ "dust_pbr",
+ "dust_profiler",
  "pumicite_egui",
 ]
 
@@ -2118,7 +2119,7 @@ dependencies = [
  "bevy_pumicite",
  "bytemuck",
  "dust_app",
- "dust_gfxdebug",
+ "dust_profiler",
  "glam",
  "objc2 0.6.5",
  "objc2-metal 0.3.2",
@@ -2137,6 +2138,15 @@ dependencies = [
  "dust_vdb",
  "glam",
  "parry3d",
+]
+
+[[package]]
+name = "dust_profiler"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_pumicite",
+ "pumicite",
 ]
 
 [[package]]

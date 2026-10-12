@@ -11,7 +11,7 @@ use pumicite::{
     utils::AsVkHandle,
 };
 
-use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
+use dust_profiler::{GpuProfiler, GpuTimerCommands};
 
 use crate::{HdrRenderTarget, HdrRenderTargetViewsExt, PbrRenderState, camera::Camera};
 

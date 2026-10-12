@@ -6,7 +6,7 @@ use bevy_pumicite::SubmissionState;
 use bevy_pumicite::prelude::ComputePipeline;
 use bevy_pumicite::staging::UniformRingBuffer;
 use bytemuck::{Pod, Zeroable};
-use dust_gfxdebug::{GpuProfiler, GpuTimerCommands};
+use dust_profiler::{GpuProfiler, GpuTimerCommands};
 use pumicite::ash::vk;
 use pumicite::buffer::Buffer;
 use pumicite::debug::DebugObject;

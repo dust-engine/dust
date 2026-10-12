@@ -3,15 +3,16 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
+use dust_pbr::HdrRenderTarget;
+use dust_profiler::GpuProfiler;
 use pumicite_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
-use crate::profiler::GpuProfiler;
+use crate::devtools::{DevTools, draw_devtools};
 
 /// Number of recent frames retained for statistics and the history graph.
 const HISTORY_LEN: usize = 120;
 
-/// Adds the "Performance" egui window and the system that feeds it frame
-/// timings.
+/// Adds the performance overlay and the system that feeds it frame timings.
 ///
 /// Requires a primary egui context to already exist (provided by the renderer
 /// plugins). It deliberately does not add `EguiPlugin` so it can be combined
@@ -23,31 +24,22 @@ impl Plugin for PerformancePanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PerformancePanel>();
         app.add_systems(Update, record_frame_time);
-        app.add_systems(EguiPrimaryContextPass, performance_panel_ui);
+        app.add_systems(
+            EguiPrimaryContextPass,
+            performance_overlay.after(draw_devtools),
+        );
     }
 }
 
-/// Frame-rate history plus renderer-reported figures, shown in the Performance
-/// panel.
-///
-/// Other crates feed it with `Option<ResMut<PerformancePanel>>` and call e.g.
-/// [`PerformancePanel::report_resolution`]; the `Option` makes reporting a
-/// no-op when the `gfxdebug` plugin isn't installed (the resource won't exist),
-/// so it adds no hard dependency on this crate's plugin being present.
+/// Frame-rate history, shown in the performance overlay.
 #[derive(Resource)]
 pub struct PerformancePanel {
-    /// Whether the window is currently shown. Toggled by the window's close
-    /// button; left public so an app can hide/show it programmatically.
+    /// Whether the overlay is shown. Toggled from the DevTools ⋮ menu; left
+    /// public so an app can hide/show it programmatically.
     pub open: bool,
     /// Recent frame durations in seconds, oldest at the front, newest at the
     /// back. Capped at [`HISTORY_LEN`].
     frame_times: VecDeque<f32>,
-    /// Most recently reported internal render resolution, in pixels (the
-    /// resolution the scene is ray-traced at, before DLSS upscaling).
-    render_resolution: Option<UVec2>,
-    /// Most recently reported display/output resolution, in pixels (the
-    /// swapchain resolution DLSS upscales to).
-    display_resolution: Option<UVec2>,
 }
 
 impl Default for PerformancePanel {
@@ -55,8 +47,6 @@ impl Default for PerformancePanel {
         Self {
             open: true,
             frame_times: VecDeque::with_capacity(HISTORY_LEN),
-            render_resolution: None,
-            display_resolution: None,
         }
     }
 }
@@ -67,13 +57,6 @@ impl PerformancePanel {
             self.frame_times.pop_front();
         }
         self.frame_times.push_back(dt);
-    }
-
-    pub fn report_render_resolutions(&mut self, resolution: UVec2) {
-        self.render_resolution = Some(resolution);
-    }
-    pub fn report_display_resolutions(&mut self, resolution: UVec2) {
-        self.display_resolution = Some(resolution);
     }
 
     /// Duration of the most recent frame, in milliseconds.
@@ -116,72 +99,89 @@ fn record_frame_time(time: Res<Time>, mut panel: ResMut<PerformancePanel>) {
     }
 }
 
-/// Draws the performance window.
-fn performance_panel_ui(
+/// Draws the overlay, semi-transparent, in the top-left corner of
+/// [`DevTools::scene_rect`].
+fn performance_overlay(
     mut contexts: EguiContexts,
-    mut panel: ResMut<PerformancePanel>,
-    mut profiler: Option<ResMut<GpuProfiler>>,
+    panel: Res<PerformancePanel>,
+    profiler: Option<Res<GpuProfiler>>,
+    hdr_target: Option<Res<HdrRenderTarget>>,
+    devtools: Option<Res<DevTools>>,
 ) {
+    if !panel.open {
+        return;
+    }
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-
-    // `open` is copied out so the window can drive its close button while the
-    // closure still borrows `panel` to read stats; written back afterwards.
-    let mut open = panel.open;
-    egui::Window::new("Performance")
-        .open(&mut open)
-        .default_width(240.0)
+    let scene = devtools.map_or_else(|| ctx.viewport_rect(), |devtools| devtools.scene_rect);
+    egui::Area::new(egui::Id::new("performance_overlay"))
+        .fixed_pos(scene.min + egui::vec2(8.0, 8.0))
+        // Clicks go through to the scene.
+        .interactable(false)
         .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new(format!("{:.0} FPS", panel.current_fps()))
-                    .heading()
-                    .strong(),
-            );
-            ui.label(format!("Frame: {:.2} ms", panel.last_frame_ms()));
-
-            ui.separator();
-
-            ui.label(format!("Average: {:.0} FPS", panel.average_fps()));
-            ui.label(format!("Worst: {:.2} ms", panel.max_frame_ms()));
-
-            if let Some(res) = panel.display_resolution {
-                ui.label(format!("Display: {} × {}", res.x, res.y));
-            }
-            if let Some(res) = panel.render_resolution {
-                let scale = match panel.display_resolution {
-                    Some(display) if display.x > 0 => res.x as f32 / display.x as f32,
-                    _ => 1.0,
-                };
-                ui.label(format!(
-                    "Render: {} × {} ({:.0}%)",
-                    res.x,
-                    res.y,
-                    scale * 100.0
-                ));
-            }
-
-            ui.add_space(6.0);
-            frame_time_graph(ui, &panel);
-
-            if let Some(profiler) = profiler.as_deref_mut() {
-                ui.add_space(6.0);
-                ui.separator();
-                gpu_timings(ui, profiler);
-            }
+            egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(240))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    // The graphs fill `available_width()`, which an `Area`
+                    // doesn't bound on its own.
+                    ui.set_width(240.0);
+                    performance_panel_ui(ui, &panel, profiler.as_deref(), hdr_target.as_deref());
+                });
         });
-    panel.open = open;
+}
+
+/// Draws the overlay's contents.
+fn performance_panel_ui(
+    ui: &mut egui::Ui,
+    panel: &PerformancePanel,
+    profiler: Option<&GpuProfiler>,
+    hdr_target: Option<&HdrRenderTarget>,
+) {
+    ui.label(
+        egui::RichText::new(format!("{:.0} FPS", panel.current_fps()))
+            .heading()
+            .strong(),
+    );
+    ui.label(format!("Frame: {:.2} ms", panel.last_frame_ms()));
+
+    ui.separator();
+
+    ui.label(format!("Average: {:.0} FPS", panel.average_fps()));
+    ui.label(format!("Worst: {:.2} ms", panel.max_frame_ms()));
+
+    let display_resolution = hdr_target.map(|hdr| hdr.display_extent);
+    if let Some(res) = display_resolution {
+        ui.label(format!("Display: {} × {}", res.x, res.y));
+    }
+    if let Some(res) = hdr_target.map(|hdr| hdr.render_extent) {
+        let scale = match display_resolution {
+            Some(display) if display.x > 0 => res.x as f32 / display.x as f32,
+            _ => 1.0,
+        };
+        ui.label(format!(
+            "Render: {} × {} ({:.0}%)",
+            res.x,
+            res.y,
+            scale * 100.0
+        ));
+    }
+
+    ui.add_space(6.0);
+    frame_time_graph(ui, panel);
+
+    if let Some(profiler) = profiler {
+        ui.add_space(6.0);
+        ui.separator();
+        gpu_timings(ui, profiler);
+    }
 }
 
 /// Draws the per-operation GPU timing breakdown.
-fn gpu_timings(ui: &mut egui::Ui, profiler: &mut GpuProfiler) {
-    ui.horizontal(|ui| {
-        ui.heading("GPU");
-        ui.add_enabled(
-            profiler.is_supported(),
-            egui::Checkbox::new(&mut profiler.enabled, "Enabled"),
-        );
-    });
+fn gpu_timings(ui: &mut egui::Ui, profiler: &GpuProfiler) {
+    ui.heading("GPU");
 
     if !profiler.is_supported() {
         ui.label("Timestamp queries unsupported on this device.");

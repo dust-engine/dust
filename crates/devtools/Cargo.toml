@@ -1,0 +1,10 @@
+[package]
+name = "dust_devtools"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy.workspace = true
+pumicite_egui.workspace = true
+dust_pbr.workspace = true
+dust_profiler.workspace = true

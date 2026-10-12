@@ -24,7 +24,6 @@ use pumicite::{
     Sampler,
     image::{FullImageView, Image},
 };
-use pumicite_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 // LUT dimensions (must match shader constants)
 const TRANSMITTANCE_WIDTH: u32 = 256;
@@ -70,7 +69,6 @@ impl Plugin for SkyPlugin {
 
         // Systems
         app.add_systems(Startup, setup.after(CreateDevice));
-        app.add_systems(EguiPrimaryContextPass, egui_ui);
         app.add_systems(
             PostUpdate,
             (prepare_atmosphere_uniform, compute_luts)
@@ -86,22 +84,22 @@ pub struct SkyAtmosphereLUTRenderSet;
 // Atmosphere parameters - must match shader struct layout exactly
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Zeroable, bytemuck::Pod, Debug)]
-struct AtmosphereParams {
+pub struct AtmosphereParams {
     // Planet geometry (km)
     bottom_radius: f32,
     top_radius: f32,
     _pad0: [f32; 2],
 
     // Rayleigh scattering
-    rayleigh_scattering: [f32; 3],
+    pub rayleigh_scattering: [f32; 3],
     rayleigh_density_exp_scale: f32,
 
     // Mie scattering
-    mie_scattering: [f32; 3],
+    pub mie_scattering: [f32; 3],
     mie_density_exp_scale: f32,
 
-    mie_extinction: [f32; 3],
-    mie_phase_g: f32,
+    pub mie_extinction: [f32; 3],
+    pub mie_phase_g: f32,
 
     mie_absorption: [f32; 3],
     _pad1: f32,
@@ -116,7 +114,7 @@ struct AtmosphereParams {
     absorption_density_1_linear_term: f32,
 
     // Ground
-    ground_albedo: [f32; 3],
+    pub ground_albedo: [f32; 3],
     _pad2: f32,
 
     // Sun
@@ -223,13 +221,13 @@ impl AtmosphereParams {
 
 #[derive(Clone, PartialEq, Resource)]
 pub struct AtmosphereState {
-    params: AtmosphereParams,
-    sun_elevation: f32, // radians
-    sun_azimuth: f32,   // radians
+    pub params: AtmosphereParams,
+    pub sun_elevation: f32, // radians
+    pub sun_azimuth: f32,   // radians
 }
 
 impl AtmosphereState {
-    fn sync_sun_direction(&mut self) {
+    pub fn sync_sun_direction(&mut self) {
         self.params.sun_direction = [
             self.sun_azimuth.cos() * self.sun_elevation.cos(),
             self.sun_elevation.sin(),
@@ -373,82 +371,6 @@ fn create_lut_image(
         view,
         state: Default::default(),
     }
-}
-
-fn egui_ui(mut contexts: EguiContexts, mut atmosphere: ResMut<AtmosphereState>) {
-    let mut next = atmosphere.as_ref().clone();
-
-    egui::Window::new("Sky Atmosphere")
-        .default_width(300.0)
-        .show(contexts.ctx_mut().unwrap(), |ui| {
-            ui.heading("Sun");
-            let elevation_changed = ui
-                .add(egui::Slider::new(&mut next.sun_elevation, -0.5..=1.57).text("Elevation"))
-                .changed();
-            let azimuth_changed = ui
-                .add(egui::Slider::new(&mut next.sun_azimuth, -3.14..=3.14).text("Azimuth"))
-                .changed();
-            if elevation_changed || azimuth_changed {
-                next.sync_sun_direction();
-            }
-
-            ui.separator();
-            ui.heading("Rayleigh Scattering");
-
-            let base_rayleigh = [0.005802f32, 0.013558, 0.033100];
-            let mut rayleigh_factor = next.params.rayleigh_scattering[0] / base_rayleigh[0];
-            if ui
-                .add(egui::Slider::new(&mut rayleigh_factor, 0.0..=2.0).text("Factor"))
-                .changed()
-            {
-                next.params.rayleigh_scattering = [
-                    base_rayleigh[0] * rayleigh_factor,
-                    base_rayleigh[1] * rayleigh_factor,
-                    base_rayleigh[2] * rayleigh_factor,
-                ];
-            }
-
-            ui.separator();
-            ui.heading("Mie Scattering");
-
-            let base_mie_scattering = 0.003996f32;
-            let base_mie_extinction = 0.004440f32;
-            let mut mie_factor = next.params.mie_scattering[0] / base_mie_scattering;
-            if ui
-                .add(egui::Slider::new(&mut mie_factor, 0.0..=2.0).text("Factor"))
-                .changed()
-            {
-                next.params.mie_scattering = [base_mie_scattering * mie_factor; 3];
-                next.params.mie_extinction = [base_mie_extinction * mie_factor; 3];
-            }
-
-            ui.add(egui::Slider::new(&mut next.params.mie_phase_g, 0.0..=0.999).text("Phase G"));
-
-            ui.separator();
-            ui.heading("Ground");
-
-            let mut albedo = next.params.ground_albedo[0];
-            if ui
-                .add(egui::Slider::new(&mut albedo, 0.0..=1.0).text("Albedo"))
-                .changed()
-            {
-                next.params.ground_albedo = [albedo; 3];
-            }
-
-            ui.separator();
-            if ui.button("Reset to Earth Defaults").clicked() {
-                next = AtmosphereState::default();
-            }
-
-            ui.separator();
-            ui.label("Controls:");
-            ui.label("WASD - Move camera");
-            ui.label("Right mouse - Look around");
-            ui.label("Arrow keys - Sun position");
-            ui.label("Shift - Move faster");
-        });
-
-    let _ = atmosphere.set_if_neq(next);
 }
 
 fn prepare_atmosphere_uniform(

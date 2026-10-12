@@ -41,7 +41,7 @@ use pumicite::{
 use pumicite::{device::DeviceBuilder, image::UintImageView};
 use pumicite_egui::EguiRenderSet;
 
-use dust_gfxdebug::{GpuProfiler, GpuTimerCommands, PerformancePanel};
+use dust_profiler::{GpuProfiler, GpuTimerCommands};
 
 use bevy_pumicite::prelude::ComputePipeline;
 
@@ -874,7 +874,6 @@ fn ensure_hdr_target(
     hdr_target: Option<ResMut<HdrRenderTarget>>,
     allocator: Res<Allocator>,
     swapchain_images: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
-    mut perf_panel: Option<ResMut<PerformancePanel>>,
     quality_settings: Res<RenderQualitySettings>,
     upscaler: Option<Res<Upscaler>>,
 ) {
@@ -925,11 +924,6 @@ fn ensure_hdr_target(
         }
         None => extent,
     };
-
-    if let Some(panel) = perf_panel.as_deref_mut() {
-        panel.report_display_resolutions(extent);
-        panel.report_render_resolutions(render_extent);
-    }
 
     // Shared image parameters; only `extent` (and per-image format/usage/flags)
     // differ between the display-resolution and render-resolution targets.

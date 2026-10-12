@@ -1,5 +1,5 @@
 [package]
-name = "dust_gfxdebug"
+name = "dust_profiler"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,4 +7,3 @@ edition = "2024"
 bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
-pumicite_egui.workspace = true

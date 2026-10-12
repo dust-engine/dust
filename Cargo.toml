@@ -14,7 +14,8 @@ dust_vdb = { path = "crates/vdb" }
 dust_vox = { path = "crates/vox" }
 dust_pbr = { path = "crates/pbr" }
 dust_app = { path = "crates/app" }
-dust_gfxdebug = { path = "crates/gfxdebug" }
+dust_devtools = { path = "crates/devtools" }
+dust_profiler = { path = "crates/profiler" }
 dust_physics = { path = "crates/physics" }
 dust_character = { path = "crates/character" }
 # The local avian branch: adds the pluggable `QueryDispatcher` resource that routes
@@ -23,12 +24,15 @@ avian3d = { git = "https://github.com/0xbeefd1ed/avian.git", branch = "main", de
 pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
 bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
 pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
+# The version pumicite_egui is built on, so both resolve to the same crate and share
+# its resource types (e.g. `EguiWantsInput`).
+bevy_egui = { version = "0.43", default-features = false }
 
 [dependencies]
 dust_vox.workspace = true
 dust_pbr.workspace = true
 dust_app.workspace = true
-dust_gfxdebug.workspace = true
+dust_devtools.workspace = true
 dust_physics.workspace = true
 dust_character.workspace = true
 avian3d.workspace = true

@@ -67,7 +67,7 @@ pub fn run() {
     // Dust plugins
     app.add_plugins(dust_pbr::PbrRenderPlugin)
         .add_plugins(dust_vox::VoxPlugin)
-        .add_plugins(dust_gfxdebug::GfxDebugPlugin);
+        .add_plugins(dust_devtools::GfxDebugPlugin);
 
     // Physics: avian, with `VdbShape` collider pairs routed to `dust_physics`.
     // Loaded `.vox` instances come with colliders; see `dust_vox::physics`.

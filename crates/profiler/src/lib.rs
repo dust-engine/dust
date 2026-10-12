@@ -17,9 +17,9 @@
 //! });
 //! ```
 //!
-//! `timing_scope` takes `Option<&mut GpuProfiler>`, so when the `gfxdebug`
-//! plugin isn't installed (the resource is absent → `None`) or the profiler is
-//! toggled off, the scope just runs the closure and records nothing.
+//! `timing_scope` takes `Option<&mut GpuProfiler>`, so when [`GpuProfilerPlugin`]
+//! isn't installed (the resource is absent → `None`) or the profiler is toggled
+//! off, the scope just runs the closure and records nothing.
 //!
 //! ## Query pool as a dynamic ring
 //!
