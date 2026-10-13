@@ -81,7 +81,7 @@ void closestHitShader(
         } else { // HashCollisions
             dbgColor = params.sharc.debugHashCollisionsByKey(key);
         }
-        float4 outColor = float4(dbgColor * params.sharc.g_sharcConstants.debugBrightness, 1.0);
+        float3 outColor = dbgColor * params.sharc.g_sharcConstants.debugBrightness;
 
         // occlusionTexture is display-resolution but this pass runs at render
         // resolution (DispatchRaysIndex/Dimensions), so each render-res thread
@@ -97,7 +97,7 @@ void closestHitShader(
         uint2 hi = (idx + uint2(1, 1)) * dispDims / renderDims;
         for (uint y = lo.y; y < hi.y; ++y) {
             for (uint x = lo.x; x < hi.x; ++x) {
-                params.gbuffer.occlusionTexture[uint2(x, y)] = outColor;
+                params.gbuffer.writeOverlay(uint2(x, y), outColor);
             }
         }
     }

@@ -426,5 +426,5 @@ void debugOverlay(uint3 threadId: SV_DispatchThreadID) {
     } else {
         return;
     }
-    params.gbuffer.occlusionTexture[px] = float4(color, 1.0);
+    params.gbuffer.writeOverlay(px, color);
 }

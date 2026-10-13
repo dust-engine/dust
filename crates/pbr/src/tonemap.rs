@@ -539,16 +539,17 @@ pub(crate) fn tonemap_pass(
                         image_view: swapchain_target.linear_view().vk_handle(),
                         image_layout: vk::ImageLayout::GENERAL,
                     },
-                    vk::DescriptorImageInfo {
-                        sampler: vk::Sampler::null(),
-                        image_view: render_target_views
-                            .sdr_target()
-                            .deref_inner()
-                            .full_view()
-                            .vk_handle(),
-                        image_layout: vk::ImageLayout::GENERAL,
-                    },
                 ]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 2,
+                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                    ..Default::default()
+                }
+                .image_info(&[vk::DescriptorImageInfo {
+                    sampler: vk::Sampler::null(),
+                    image_view: render_target_views.sdr_target().srgb_view().vk_handle(),
+                    image_layout: vk::ImageLayout::GENERAL,
+                }]),
                 vk::WriteDescriptorSet {
                     dst_binding: 3,
                     descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,

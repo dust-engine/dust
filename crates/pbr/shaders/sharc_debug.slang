@@ -31,7 +31,7 @@ void main(uint3 threadId: SV_DispatchThreadID) {
     // Empty cells / inter-cell borders come back black: leave those pixels
     // as the rendered image so only populated table cells draw on top.
     if (any(occ != float3(0.0, 0.0, 0.0))) {
-        params.gbuffer.occlusionTexture[px] = float4(occ * brightness, 1.0);
+        params.gbuffer.writeOverlay(px, occ * brightness);
     }
 }
 
@@ -65,7 +65,7 @@ void splatCandidates(uint3 threadId: SV_DispatchThreadID) {
     if (any(center >= int2(0, 0)) && any(center < int2(dims))) {
         if (params.gbuffer.occlusionTexture[uint2(center)].a != 1.0) {
             // don't paint over egui
-            params.gbuffer.occlusionTexture[uint2(center)] = float4(color, 1.0);
+            params.gbuffer.writeOverlay(uint2(center), color);
         }
     }
 }

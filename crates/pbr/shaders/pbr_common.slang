@@ -278,6 +278,7 @@ public struct PbrPipelineGbuffer {
     public RWTexture2D<float4> normalTexture;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float> depthTexture;
+    // The SDR target for Debug overlays and UI. Values are sRGB-encoded.
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float4> occlusionTexture;
     // Screen-space motion (in pixels): currentPixel - prevPixel. Consumed by
@@ -291,6 +292,15 @@ public struct PbrPipelineGbuffer {
     // normalTexture.w (DLSS reads it there — RoughnessMode::Packed).
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public RWTexture2D<float4> specularAlbedo;
+
+    // Draws an opaque pixel of linear `color` into `occlusionTexture`.
+    public void writeOverlay(uint2 pixel, float3 color) {
+        // The sRGB transfer function, since the texture is bound through its
+        // UNORM view. Saturated first, as the UNORM store would clamp anyway.
+        color = saturate(color);
+        float3 encoded = select(color <= 0.0031308, color * 12.92, 1.055 * pow(color, 1.0 / 2.4) - 0.055);
+        occlusionTexture[pixel] = float4(encoded, 1.0);
+    }
 }
 
 // ── Screen-space (HZB) gather trace ─────────────────────────────────────

@@ -14,9 +14,9 @@ PipelineLayout(
                         ty: StorageImage,
                         stages: [Compute],
                     ),
-                    Binding( // sdrInput
+                    Binding( // sdrInput, through its sRGB view
                         binding: 2,
-                        ty: StorageImage,
+                        ty: SampledImage,
                         stages: [Compute],
                     ),
                     Binding( // LPM control block (uvec4 ctl[24])

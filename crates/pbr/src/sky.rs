@@ -66,7 +66,7 @@ impl Plugin for SkyPlugin {
         // Add egui plugin
         app.add_plugins(pumicite_egui::EguiPlugin::<With<PrimaryWindow>> {
             framebuffer_format: pumicite::types::format::Format::R8G8B8A8_UNORM,
-            linear_colorspace: true,
+            linear_colorspace: false,
             ..Default::default()
         });
 

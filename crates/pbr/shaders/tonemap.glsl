@@ -1,11 +1,12 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_samplerless_texture_functions : require
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba16f) uniform readonly image2D hdrInput;
 layout(set = 0, binding = 1, rgba16f)   uniform writeonly image2D ldrOutput;
-layout(set = 0, binding = 2, rgba8)   uniform readonly image2D sdrInput;
+layout(set = 0, binding = 2) uniform texture2D sdrInput;
 // 1x1 auto-exposure scale written by autoexposure.glsl. The same value is fed
 // to the denoise/upscale engine, so the brightness it was told matches what we
 // display here.
@@ -60,7 +61,7 @@ void main() {
     ivec2 extent = imageSize(hdrInput);
     if (coord.x >= extent.x || coord.y >= extent.y) return;
 
-    vec4 outColor = imageLoad(sdrInput, coord);
+    vec4 outColor = texelFetch(sdrInput, coord, 0);
     if (outColor.a != 0.0) {
         // SDR has output
         outColor.rgb = mat3(lpm.sdr_mapping_col0, lpm.sdr_mapping_col1, lpm.sdr_mapping_col2) * outColor.rgb;
