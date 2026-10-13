@@ -999,7 +999,7 @@ source = "git+https://github.com/dust-engine/bevy.git?branch=release-0.20.0#12cf
 [[package]]
 name = "bevy_pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=a5a862c90ea110f1d80573f0c3d829adb0d0bb7f#a5a862c90ea110f1d80573f0c3d829adb0d0bb7f"
 dependencies = [
  "async-lock",
  "bevy_app",
@@ -2119,6 +2119,7 @@ name = "dust_devtools"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_pumicite",
  "clap",
  "dust_pbr",
  "dust_profiler",
@@ -4202,7 +4203,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 [[package]]
 name = "pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=a5a862c90ea110f1d80573f0c3d829adb0d0bb7f#a5a862c90ea110f1d80573f0c3d829adb0d0bb7f"
 dependencies = [
  "ash",
  "bevy_asset",
@@ -4230,7 +4231,7 @@ dependencies = [
 [[package]]
 name = "pumicite_egui"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=a5a862c90ea110f1d80573f0c3d829adb0d0bb7f#a5a862c90ea110f1d80573f0c3d829adb0d0bb7f"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -4248,7 +4249,7 @@ dependencies = [
 [[package]]
 name = "pumicite_types"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=915e81eb74404046e917c8099b1992ad2fc5e0bb#915e81eb74404046e917c8099b1992ad2fc5e0bb"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=a5a862c90ea110f1d80573f0c3d829adb0d0bb7f#a5a862c90ea110f1d80573f0c3d829adb0d0bb7f"
 dependencies = [
  "ash",
  "glam",

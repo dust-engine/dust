@@ -18,6 +18,7 @@ use bevy::window::PrimaryWindow;
 
 use bevy_pumicite::CreateDevice;
 use bevy_pumicite::prelude::*;
+use pumicite::bindless::{ImageAccessMode, ResourceHeap, WithResourceHandle};
 use pumicite::buffer::SharedRingBufferSuballocation;
 use pumicite::device::DeviceBuilder;
 use pumicite::{
@@ -56,6 +57,8 @@ impl Plugin for SkyPlugin {
                         &mut x.shader_draw_parameters
                     })
                     .unwrap();
+                // For the LUTs' resource handles.
+                device_builder.enable_bindless().unwrap();
             })
             .before(CreateDevice),
         );
@@ -255,21 +258,26 @@ struct Pipelines {
 }
 
 pub struct LutImage {
-    pub view: GPUMutex<FullImageView<Image>>,
+    pub view: GPUMutex<WithResourceHandle<FullImageView<Image>>>,
     pub state: ResourceState,
 }
 
 #[derive(Resource)]
 pub struct AtmosphereLUTs {
     pub transmittance: LutImage,
-    multi_scattering: LutImage,
+    pub multi_scattering: LutImage,
     pub sky_view: LutImage,
     pub luts_initialized: bool,
     pub sampler: Sampler,
     pub param_buffer: Option<SharedRingBufferSuballocation>,
 }
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<Allocator>) {
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    allocator: Res<Allocator>,
+    heap: Res<DescriptorHeap>,
+) {
     // Load pipelines
     commands.insert_resource(Pipelines {
         transmittance_lut: asset_server.load(
@@ -285,6 +293,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
     // Create LUT images
     let transmittance = create_lut_image(
         &allocator,
+        heap.resource_heap(),
         TRANSMITTANCE_WIDTH,
         TRANSMITTANCE_HEIGHT,
         vk::Format::R16G16B16A16_SFLOAT,
@@ -293,6 +302,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
     );
     let multi_scattering = create_lut_image(
         &allocator,
+        heap.resource_heap(),
         MULTI_SCATTERING_RES,
         MULTI_SCATTERING_RES,
         vk::Format::R16G16B16A16_SFLOAT,
@@ -301,6 +311,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
     );
     let sky_view = create_lut_image(
         &allocator,
+        heap.resource_heap(),
         SKY_VIEW_WIDTH,
         SKY_VIEW_HEIGHT,
         vk::Format::B10G11R11_UFLOAT_PACK32,
@@ -337,6 +348,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, allocator: Res<
 
 fn create_lut_image(
     allocator: &Allocator,
+    heap: &ResourceHeap,
     width: u32,
     height: u32,
     format: vk::Format,
@@ -365,7 +377,18 @@ fn create_lut_image(
     .unwrap()
     .with_name(name_image);
 
-    let view = GPUMutex::new(image.create_full_view().unwrap().with_name(name_view));
+    let view = GPUMutex::new(
+        image
+            .create_full_view()
+            .unwrap()
+            .with_name(name_view)
+            .with_resource_handle(
+                heap,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                ImageAccessMode::Sampled,
+            )
+            .unwrap(),
+    );
 
     LutImage {
         view,
@@ -466,7 +489,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: transmittance_view.full_view().vk_handle(),
+                            image_view: transmittance_view.deref_inner().full_view().vk_handle(),
                             image_layout: vk::ImageLayout::GENERAL,
                             sampler: vk::Sampler::null(),
                         },
@@ -545,7 +568,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: transmittance_view.full_view().vk_handle(),
+                            image_view: transmittance_view.deref_inner().full_view().vk_handle(),
                             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                             sampler: vk::Sampler::null(),
                         },
@@ -556,7 +579,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: multi_scattering_view.full_view().vk_handle(),
+                            image_view: multi_scattering_view.deref_inner().full_view().vk_handle(),
                             image_layout: vk::ImageLayout::GENERAL,
                             sampler: vk::Sampler::null(),
                         },
@@ -611,12 +634,12 @@ fn compute_luts(
             encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
             let multi_scattering_image_info = vk::DescriptorImageInfo {
-                image_view: multi_scattering_view.full_view().vk_handle(),
+                image_view: multi_scattering_view.deref_inner().full_view().vk_handle(),
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 sampler: vk::Sampler::null(),
             };
             let sky_view_image_info = vk::DescriptorImageInfo {
-                image_view: sky_view.full_view().vk_handle(),
+                image_view: sky_view.deref_inner().full_view().vk_handle(),
                 image_layout: vk::ImageLayout::GENERAL,
                 sampler: vk::Sampler::null(),
             };
@@ -652,7 +675,7 @@ fn compute_luts(
                         descriptor_count: 1,
                         descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
                         p_image_info: &vk::DescriptorImageInfo {
-                            image_view: transmittance_view.full_view().vk_handle(),
+                            image_view: transmittance_view.deref_inner().full_view().vk_handle(),
                             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                             sampler: vk::Sampler::null(),
                         },

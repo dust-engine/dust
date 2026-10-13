@@ -44,6 +44,7 @@ impl Plugin for GraphicsDebugPlugin {
             .position(|stage| stage.toggles.is_some())
             .unwrap_or(0);
         app.insert_resource(GraphicsDebug { stages, selected });
+        sky::build(app);
         app.add_devtools_tab("Graphics Debug", graphics_debug_ui);
     }
 }

@@ -21,9 +21,9 @@ dust_character = { path = "crates/character" }
 # The local avian branch: adds the pluggable `QueryDispatcher` resource that routes
 # `VdbShape` pairs to `dust_physics::VdbDispatcher`.
 avian3d = { git = "https://github.com/0xbeefd1ed/avian.git", branch = "main", default-features = false, features = ["3d", "parry-f32"] }
-pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
-pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "915e81eb74404046e917c8099b1992ad2fc5e0bb" }
+pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "a5a862c90ea110f1d80573f0c3d829adb0d0bb7f" }
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "a5a862c90ea110f1d80573f0c3d829adb0d0bb7f" }
+pumicite_egui = { git = "https://github.com/dust-engine/pumicite.git", rev = "a5a862c90ea110f1d80573f0c3d829adb0d0bb7f" }
 
 [dependencies]
 dust_vox.workspace = true

@@ -569,8 +569,8 @@ fn render(
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
-            .sky_transmittance_lut(transmittance_view.full_view())
-            .sky_sky_view_lut(sky_view.full_view())
+            .sky_transmittance_lut(transmittance_view.deref_inner().full_view())
+            .sky_sky_view_lut(sky_view.deref_inner().full_view())
             .sky_linear_sampler(&atmosphere_luts.sampler)
             .per_instance_data(per_instance_buf)
             .sharc_g_sharc_constants(sharc_constants_buf);
@@ -1356,8 +1356,8 @@ fn shadow_pass(
                 .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
                 .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
                 .sky_atmosphere_params(atmo_buffer)
-                .sky_transmittance_lut(transmittance_view.full_view())
-                .sky_sky_view_lut(sky_view.full_view())
+                .sky_transmittance_lut(transmittance_view.deref_inner().full_view())
+                .sky_sky_view_lut(sky_view.deref_inner().full_view())
                 .sky_linear_sampler(&atmosphere_luts.sampler)
                 .per_instance_data(per_instance_buf)
                 .as_slice(),
@@ -1734,8 +1734,8 @@ pub(crate) fn final_gather_pass(
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
-            .sky_transmittance_lut(transmittance_view.full_view())
-            .sky_sky_view_lut(sky_view.full_view())
+            .sky_transmittance_lut(transmittance_view.deref_inner().full_view())
+            .sky_sky_view_lut(sky_view.deref_inner().full_view())
             .sky_linear_sampler(&atmosphere_luts.sampler)
             .per_instance_data(per_instance_buf)
             // SHARC working storage + candidate pool via the generated helper, so

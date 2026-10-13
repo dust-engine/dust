@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bevy.workspace = true
+bevy_pumicite.workspace = true
 pumicite_egui.workspace = true
 dust_pbr.workspace = true
 dust_profiler.workspace = true
