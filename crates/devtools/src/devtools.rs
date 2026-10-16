@@ -392,7 +392,7 @@ fn paint_close(painter: &egui::Painter, c: egui::Pos2, stroke: egui::Stroke) {
     painter.line_segment([c + egui::vec2(-r, r), c + egui::vec2(r, -r)], stroke);
 }
 
-fn paint_kebab(painter: &egui::Painter, c: egui::Pos2, stroke: egui::Stroke) {
+pub(crate) fn paint_kebab(painter: &egui::Painter, c: egui::Pos2, stroke: egui::Stroke) {
     for dy in [-4.5, 0.0, 4.5] {
         painter.circle_filled(c + egui::vec2(0.0, dy), 1.5, stroke.color);
     }
