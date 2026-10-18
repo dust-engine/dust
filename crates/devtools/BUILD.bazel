@@ -18,6 +18,7 @@ rust_library(
     compile_data = ["Cargo.toml"],
     aliases = aliases(),
     deps = all_crate_deps(normal = True) + [
+        "//crates/character:dust_character",
         "//crates/pbr:dust_pbr",
         "//crates/profiler:dust_profiler",
     ],

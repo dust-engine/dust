@@ -2121,6 +2121,7 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "clap",
+ "dust_character",
  "dust_pbr",
  "dust_profiler",
  "pumicite_egui",

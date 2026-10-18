@@ -524,7 +524,7 @@
           "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "REPO_MAPPING:rules_rust+,cargo_bazel_bootstrap rules_rust++cu_nr+cargo_bazel_bootstrap",
-          "FILE:@@//Cargo.lock e9722bb66616ba13daa444c149b4d0bd6cd650009556e3ba793656628c0ee97e",
+          "FILE:@@//Cargo.lock f7a02c0db610cb49f4f6fe4dc7f85e8ca8db018da20d59db5968fb7244160b24",
           "FILE:@@//Cargo.toml c332ea0ff95c1605a55da12fb69de1d5d578b4bae71becea0146d07a488427e3"
         ],
         "generatedRepoSpecs": {

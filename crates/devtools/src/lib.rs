@@ -3,8 +3,9 @@
 //! The crate hosts [`DevTools`], a Chrome-DevTools-style dock for egui debug
 //! panels; its "Graphics Debug" tab with the renderer's debug toggles; its
 //! "Entities" tab with the world's entities and their components; its
-//! "Console" tab with the log and a command prompt; and the
-//! [`PerformancePanel`] overlay tracking frame rate and GPU timings. Other
+//! "Console" tab with the log and a command prompt; the
+//! [`PerformancePanel`] overlay tracking frame rate and GPU timings; and the
+//! [`PlayerOverlay`] showing the player's position and orientation. Other
 //! crates can add DevTools tabs with [`DevToolsAppExt::add_devtools_tab`].
 //!
 //! The panels render into the primary egui context, which is set up by the
@@ -16,20 +17,22 @@ mod devtools;
 mod entities;
 mod graphics_debug;
 mod performance;
+mod player;
 
 pub use console::{ConsolePlugin, console_layer};
 pub use devtools::{DevTools, DevToolsAppExt, DevToolsPlugin, DockSide};
 pub use entities::{EntitiesPlugin, EntityInspector};
 pub use graphics_debug::GraphicsDebugPlugin;
 pub use performance::{PerformancePanel, PerformancePanelPlugin};
+pub use player::{PlayerOverlay, PlayerOverlayPlugin};
 
 use bevy::prelude::*;
 use dust_profiler::GpuProfilerPlugin;
 
 /// Adds everything in this crate: the DevTools dock with its Graphics Debug,
-/// Entities and Console tabs, the GPU profiler and the performance overlay. It
-/// is the single entry point so callers don't have to track individual panel
-/// plugins as the crate grows.
+/// Entities and Console tabs, the GPU profiler, and the performance and player
+/// overlays. It is the single entry point so callers don't have to track
+/// individual panel plugins as the crate grows.
 #[derive(Default)]
 pub struct GfxDebugPlugin;
 
@@ -41,5 +44,6 @@ impl Plugin for GfxDebugPlugin {
         app.add_plugins(ConsolePlugin);
         app.add_plugins(GpuProfilerPlugin);
         app.add_plugins(PerformancePanelPlugin);
+        app.add_plugins(PlayerOverlayPlugin);
     }
 }

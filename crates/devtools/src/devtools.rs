@@ -23,7 +23,7 @@ use pumicite_egui::{
     EguiContext, EguiGlobalSettings, EguiPrimaryContextPass, PrimaryEguiContext, egui,
 };
 
-use crate::PerformancePanel;
+use crate::{PerformancePanel, PlayerOverlay};
 
 /// Adds the DevTools dock and its F12 / ⌘⌥I toggle.
 ///
@@ -231,6 +231,9 @@ fn devtools_contents(ui: &mut egui::Ui, world: &mut World, devtools: &mut DevToo
                 ui.separator();
                 if let Some(mut panel) = world.get_resource_mut::<PerformancePanel>() {
                     ui.checkbox(&mut panel.open, "Performance overlay");
+                }
+                if let Some(mut overlay) = world.get_resource_mut::<PlayerOverlay>() {
+                    ui.checkbox(&mut overlay.open, "Player overlay");
                 }
                 if let Some(mut profiler) = world.get_resource_mut::<GpuProfiler>() {
                     let supported = profiler.is_supported();
