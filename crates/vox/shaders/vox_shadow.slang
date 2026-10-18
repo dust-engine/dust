@@ -20,6 +20,7 @@ uint8_t encode_index(uint8_t3 position) {
 /// Simplified DDA for shadow rays. No AMD workaround needed since hit attributes
 /// are never read (closest hit shader is skipped for shadow rays).
 void shadow_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
+    dir = ddaSafeDirection(dir);
     float2 t = intersectAABB(origin, dir, float3(0.0), float3(4.0));
     if (t.x >= t.y || t.y <= 0.0)
         return;

@@ -22,6 +22,7 @@ uint8_t encode_index(uint8_t3 position) {
 // Tracks `positionDelta` so we can hand the face normal to the closest hit
 // shader for SHARC's worldNormal-keyed cache query.
 void final_gather_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
+    dir = ddaSafeDirection(dir);
     int8_t3 positionDelta;
     float2 t = intersectAABB(origin, dir, float3(0.0), float3(4.0), positionDelta);
     if (t.x >= t.y || t.y <= 0.0)

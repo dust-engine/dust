@@ -67,6 +67,14 @@ bool ReportHitWithAMDWorkaround(float tHit, uint hitKind, A attributes)
     }
 }
 
+// A ray direction with a component of exactly zero gives the DDA `t_coef = 1 / dir = inf`, so
+// `tMax = inf - inf = NaN` on that axis. Every `step()` against a NaN is 0, `position` never
+// advances, and the DDA loop never exits, hanging the GPU (seen as a TDR on AMD). Replacing exact
+// zeros with a tiny value keeps every tMax finite; the ray then never steps along that axis.
+public float3 ddaSafeDirection(float3 dir) {
+    return select(dir == 0.0, float3(1e-20), dir);
+}
+
 public struct VoxMaterial {
     // Packed bytes, low → high: type, roughness, metalness, specular.
     private uint32_t packed;

@@ -128,6 +128,7 @@ uint8_t encode_index(uint8_t3 position) {
   @param(grid):   The occupancy of the 64 voxels encoded in z-curve order.
 */
 void dda(float3 origin, float3 dir, uint64_t grid, float scale) {
+    dir = ddaSafeDirection(dir);
     // Init phase
 
     // The initialization phase begins by identifying the voxel in which the ray origin is found. If the ray

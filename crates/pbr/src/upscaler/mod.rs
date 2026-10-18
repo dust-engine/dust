@@ -154,7 +154,7 @@ pub(crate) fn ensure_upscaler_session(
     state.session = None;
     state.jitter_pattern.clear();
 
-    let session = match &*upscaler {
+    let session: Result<UpscalerSession, String> = match &*upscaler {
         #[cfg(feature = "dlss")]
         Upscaler::Dlss(ngx) => {
             let mut created = None;

@@ -98,6 +98,7 @@ uint8_t encode_index(uint8_t3 position) {
 }
 
 void dda(float3 origin, float3 dir, uint64_t grid, float scale) {
+    dir = ddaSafeDirection(dir);
     int8_t3 positionDelta;
     float2 initialIntersectionT = intersectAABB(origin, dir, float3(0.0), float3(4.0), positionDelta);
     if (initialIntersectionT.x >= initialIntersectionT.y || initialIntersectionT.y <= 0.0) return;
