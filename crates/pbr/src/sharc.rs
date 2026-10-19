@@ -40,7 +40,7 @@ use crate::{
 // ─── SHARC debug visualization ─────────────────────────────────────────────
 
 /// Which SHARC debug view to draw. When not `Off`, the SHARC debug compute pass
-/// (`sharc_debug_overlay_pass`) paints the visualization into occlusionTexture,
+/// (`sharc_debug_overlay_pass`) paints the visualization into the debug overlay,
 /// which tonemap composites over the frame, and the shadow pass is skipped (see
 /// `shadow_pass`). Encoded into `SharcShaderConstants::debugMode`.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -374,9 +374,8 @@ impl Plugin for SharcDebugPlugin {
                     .in_set(DefaultRenderSet)
                     .run_if(crate::screen_trace::hardware_gather_enabled)
                     .after(sharc_update_pass),
-                // Debug overlay writes the visualization into occlusionTexture
-                // (== sdr_target), which tonemap then composites onto the
-                // swapchain — the same path egui rides. Ordered after
+                // Debug overlay writes the visualization into debug_overlay,
+                // which tonemap then composites onto the swapchain. Ordered after
                 // final-gather and before Update so the candidate-pool splat
                 // reads this frame's final-gather write side (Update would
                 // otherwise add cascade entries and flip the ping-pong index).
@@ -866,7 +865,12 @@ fn record_sharc_rt(
             .gbuffer_albedo_srgb(render_target_views.albedo().deref_inner().srgb_view())
             .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
             .gbuffer_depth_texture(render_target_views.depth().full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
+            .gbuffer_debug_overlay_texture(
+                render_target_views
+                    .debug_overlay()
+                    .deref_inner()
+                    .full_view(),
+            )
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
@@ -1041,7 +1045,7 @@ fn sharc_resolve_pass(
 
 // ─── Debug overlay (compute) ─────────────────────────────────────────────────
 
-/// The screen-space SHARC debug views, painted into `occlusionTexture` (the
+/// The screen-space SHARC debug views, painted into `debugOverlay` (the
 /// overlay layer tonemap composites). The per-surface views (colored hash /
 /// cached radiance / hash collisions) moved to the primary closest-hit
 /// (vox_pbr.slang), where the voxel cell key is available — so this pass only
@@ -1111,8 +1115,8 @@ fn sharc_debug_overlay_pass(
             );
 
             encoder.use_image_resource(
-                render_target_views.sdr_target(),
-                &mut hdr.sdr_target_state,
+                render_target_views.debug_overlay(),
+                &mut hdr.debug_overlay_state,
                 Access {
                     stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
                     access: vk::AccessFlags2::SHADER_STORAGE_READ
@@ -1141,8 +1145,11 @@ fn sharc_debug_overlay_pass(
             let mut params = PbrPipelineParams::new();
             params
                 .uniforms(cam_buffer)
-                .gbuffer_occlusion_texture(
-                    render_target_views.sdr_target().deref_inner().full_view(),
+                .gbuffer_debug_overlay_texture(
+                    render_target_views
+                        .debug_overlay()
+                        .deref_inner()
+                        .full_view(),
                 )
                 .sharc_g_sharc_constants(constants_buffer)
                 .sharc_g_sharc_candidates_read(cand_buf)
@@ -1186,12 +1193,11 @@ fn sharc_debug_overlay_pass(
             vk::PipelineStageFlags2::COMPUTE_SHADER,
         );
 
-        // The SDR target (== occlusionTexture) already holds the tonemapped
-        // scene + egui; we overwrite only the populated-cell pixels, so it's
-        // read-modify-write storage access.
+        // The debug overlay may already hold other views; we overwrite only
+        // the populated-cell pixels, so it's read-modify-write storage access.
         encoder.use_image_resource(
-            render_target_views.sdr_target(),
-            &mut hdr.sdr_target_state,
+            render_target_views.debug_overlay(),
+            &mut hdr.debug_overlay_state,
             Access {
                 stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
                 access: vk::AccessFlags2::SHADER_STORAGE_READ
@@ -1220,7 +1226,12 @@ fn sharc_debug_overlay_pass(
         // dirty-bit tracking leaves every other slot in the layout untouched.
         let mut params = PbrPipelineParams::new();
         params
-            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
+            .gbuffer_debug_overlay_texture(
+                render_target_views
+                    .debug_overlay()
+                    .deref_inner()
+                    .full_view(),
+            )
             .sharc_g_sharc_hash_entries(hash_buf)
             .sharc_g_sharc_constants(constants_buffer);
         encoder.push_descriptor_set(

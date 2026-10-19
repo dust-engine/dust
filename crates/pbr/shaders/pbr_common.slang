@@ -278,9 +278,10 @@ public struct PbrPipelineGbuffer {
     public RWTexture2D<float4> normalTexture;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWTexture2D<float> depthTexture;
-    // The SDR target for Debug overlays and UI. Values are sRGB-encoded.
+    // Debug visualizations, composited over the tonemapped frame. Values are
+    // sRGB-encoded; alpha 1 marks painted pixels, 0 lets the frame through.
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
-    public RWTexture2D<float4> occlusionTexture;
+    public RWTexture2D<float4> debugOverlayTexture;
     // Screen-space motion (in pixels): currentPixel - prevPixel. Consumed by
     // DLSS-RR; set to (0, 0) for sky/miss pixels.
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
@@ -293,13 +294,13 @@ public struct PbrPipelineGbuffer {
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public RWTexture2D<float4> specularAlbedo;
 
-    // Draws an opaque pixel of linear `color` into `occlusionTexture`.
+    // Draws an opaque pixel of linear `color` into `debugOverlayTexture`.
     public void writeOverlay(uint2 pixel, float3 color) {
         // The sRGB transfer function, since the texture is bound through its
         // UNORM view. Saturated first, as the UNORM store would clamp anyway.
         color = saturate(color);
         float3 encoded = select(color <= 0.0031308, color * 12.92, 1.055 * pow(color, 1.0 / 2.4) - 0.055);
-        occlusionTexture[pixel] = float4(encoded, 1.0);
+        debugOverlayTexture[pixel] = float4(encoded, 1.0);
     }
 }
 

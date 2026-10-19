@@ -58,7 +58,7 @@ void closestHitShader(
     // identity, which only this primary closest-hit can compute — the
     // screen-space debug compute pass can't recover voxel identity from the
     // G-buffer, so it owns only the screen-space views (occupancy / candidate
-    // splat). We paint straight into occlusionTexture (the egui/overlay layer
+    // splat). We paint straight into debugOverlayTexture (the overlay layer
     // tonemap composites), so it survives to the final image. The write below
     // fans each render-res thread across its display-res footprint so the
     // overlay covers the whole screen under DLSS upscaling.
@@ -83,7 +83,7 @@ void closestHitShader(
         }
         float3 outColor = dbgColor * params.sharc.g_sharcConstants.debugBrightness;
 
-        // occlusionTexture is display-resolution but this pass runs at render
+        // debugOverlayTexture is display-resolution but this pass runs at render
         // resolution (DispatchRaysIndex/Dimensions), so each render-res thread
         // fills its display-space footprint instead of a single texel — without
         // this the overlay only covers the render-res region (e.g. 1/4 screen
@@ -91,7 +91,7 @@ void closestHitShader(
         // render pixels tile the display exactly, with no gaps or overlaps.
         uint2 renderDims = DispatchRaysDimensions().xy;
         uint2 dispDims;
-        params.gbuffer.occlusionTexture.GetDimensions(dispDims.x, dispDims.y);
+        params.gbuffer.debugOverlayTexture.GetDimensions(dispDims.x, dispDims.y);
         uint2 idx = DispatchRaysIndex().xy;
         uint2 lo = idx * dispDims / renderDims;
         uint2 hi = (idx + uint2(1, 1)) * dispDims / renderDims;

@@ -7,32 +7,7 @@ struct [raypayload] RayPayload {
 
 [shader("raygeneration")]
 void rayGenShader() {
-    // Check the egui overlay for occlusion. The overlay (occlusionTexture) is
-    // at display resolution, but this pass runs at render resolution, which is
-    // lower whenever DLSS upscaling is active. Map this render-res pixel onto
-    // the overlay via nearest sampling — `(pixel + 0.5) / renderExtent` UVs
-    // scaled by the overlay's own dimensions — instead of indexing it directly.
-    uint2 overlayDim;
-    params.gbuffer.occlusionTexture.GetDimensions(overlayDim.x, overlayDim.y);
-    uint2 overlayPixel = uint2(
-        (float2(DispatchRaysIndex().xy) + 0.5) * float2(overlayDim) / float2(DispatchRaysDimensions().xy));
-    float4 originalColor = params.gbuffer.occlusionTexture[overlayPixel];
-    if (originalColor.a == 1.0) {
-        // Solid UI pixel. Write transparent to HDR so tonemap skips it.
-        params.outputTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
-        params.gbuffer.albedoUint[DispatchRaysIndex().xy] = uint4(0, 0, 0, 0xFF);
-        params.gbuffer.normalTexture[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
-        params.gbuffer.specularAlbedo[DispatchRaysIndex().xy] = float4(0, 0, 0, 0);
-        // UI occludes the world: treat it as a screen-locked surface stuck to
-        // the near plane. depth = 1 in reverse-infinite-Z (closest), and MV = 0
-        // because UI is fixed in screen space — last frame the same screen
-        // pixel was the same UI element, not a rotated world direction.
-        params.gbuffer.depthTexture[DispatchRaysIndex().xy] = 1.0;
-        params.gbuffer.motionVectorTexture[DispatchRaysIndex().xy] = float2(0, 0);
-        return;
-    } else {
-        params.outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 1.0);
-    }
+    params.outputTexture[DispatchRaysIndex().xy] = float4(0.0, 0.0, 0.0, 1.0);
     RayDesc ray;
     ray.Direction = params.uniforms.primaryRayDirWorldSpace(DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
     ray.Origin = params.uniforms.cameraOrigin();

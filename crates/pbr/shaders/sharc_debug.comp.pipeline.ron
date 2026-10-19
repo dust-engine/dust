@@ -1,5 +1,5 @@
 // SHARC occupancy debug overlay compute pass. Shares the ray-tracing pipeline
-// layout (pbr.playout.bin) so it can bind occlusionTexture + the SHARC hash
+// layout (pbr.playout.bin) so it can bind debugOverlayTexture + the SHARC hash
 // buffer through the same `params` ParameterBlock the RT pipelines use.
 ComputePipeline(
     shader: (

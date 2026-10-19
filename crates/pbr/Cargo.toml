@@ -7,7 +7,6 @@ edition = "2024"
 bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
-pumicite_egui.workspace = true
 dust_app.workspace = true
 dust_profiler.workspace = true
 tracing = "0.1"

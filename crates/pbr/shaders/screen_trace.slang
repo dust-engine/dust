@@ -381,7 +381,7 @@ static const uint DEBUG_TRACE_TYPES = 1;   // Lumen's DEBUG_VISUALIZE_TRACE_TYPE
 static const uint DEBUG_HZB_MIP = 2;       // one HZB level, log-scaled
 static const uint DEBUG_PREV_COLOR = 3;    // the history color the hits sample
 
-// Dispatched at display resolution over the overlay layer (occlusionTexture,
+// Dispatched at display resolution over the overlay layer (debugOverlayTexture,
 // which tonemap composites), like the SHARC debug overlay.
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -389,12 +389,9 @@ void debugOverlay(uint3 threadId: SV_DispatchThreadID) {
     ScreenTraceConstants st = params.screenTrace;
     uint2 px = threadId.xy;
     uint2 displayDims;
-    params.gbuffer.occlusionTexture.GetDimensions(displayDims.x, displayDims.y);
+    params.gbuffer.debugOverlayTexture.GetDimensions(displayDims.x, displayDims.y);
     if (any(px >= displayDims)) {
         return;
-    }
-    if (params.gbuffer.occlusionTexture[px].a == 1.0) {
-        return; // keep egui on top
     }
     float2 uv = (float2(px) + 0.5) / float2(displayDims);
     uint2 screenSize = uint2(st.renderExtent);

@@ -51,7 +51,7 @@ impl ScreenTraceDebugMode {
     }
 }
 
-/// Tunables of the screen trace; the egui window "Screen trace" edits them.
+/// Tunables of the screen trace; the devtools "Screen trace" page edits them.
 #[derive(Resource, Clone)]
 pub struct ScreenTraceConfig {
     /// Off: every surface pixel traces a hardware ray from the surface, as
@@ -784,8 +784,8 @@ fn screen_trace_debug_pass(
         let trace_hit = encoder.lock(&res.trace_hit, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
         encoder.use_image_resource(
-            views.sdr_target(),
-            &mut hdr.sdr_target_state,
+            views.debug_overlay(),
+            &mut hdr.debug_overlay_state,
             compute_read_write(),
             vk::ImageLayout::GENERAL,
             0..1,
@@ -834,7 +834,7 @@ fn screen_trace_debug_pass(
         encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
         let mut p = PbrPipelineParams::new();
         p.gbuffer_depth_texture(views.depth().full_view())
-            .gbuffer_occlusion_texture(views.sdr_target().deref_inner().full_view())
+            .gbuffer_debug_overlay_texture(views.debug_overlay().deref_inner().full_view())
             .hzb_texture(hzb_image.deref_inner().full_view())
             .prev_scene_color(views.hdr_denoised_output().full_view())
             .sky_linear_sampler(&atmosphere_luts.sampler)

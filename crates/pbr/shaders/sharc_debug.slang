@@ -3,15 +3,11 @@ import pbr_common;
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void main(uint3 threadId: SV_DispatchThreadID) {
-    // Dispatched at display resolution: occlusionTexture == the SDR target.
+    // Dispatched at display resolution, the size of debugOverlayTexture.
     uint2 px = threadId.xy;
     uint2 dims;
-    params.gbuffer.occlusionTexture.GetDimensions(dims.x, dims.y);
+    params.gbuffer.debugOverlayTexture.GetDimensions(dims.x, dims.y);
     if (any(px >= dims)) {
-        return;
-    }
-    if (params.gbuffer.occlusionTexture[px].a == 1.0) {
-        // Skip existing GUI
         return;
     }
 
@@ -54,7 +50,7 @@ void splatCandidates(uint3 threadId: SV_DispatchThreadID) {
     Candidate c = params.sharc.candidateAt(slot);
 
     uint2 dims;
-    params.gbuffer.occlusionTexture.GetDimensions(dims.x, dims.y);
+    params.gbuffer.debugOverlayTexture.GetDimensions(dims.x, dims.y);
     float2 pixelF;
     if (!params.uniforms.projectToPixel(c.worldPos, dims, pixelF)) {
         return; // behind the camera
@@ -63,9 +59,6 @@ void splatCandidates(uint3 threadId: SV_DispatchThreadID) {
     float3 color = float3(0.1, 1.0, 0.2) * params.sharc.g_sharcConstants.debugBrightness;
 
     if (any(center >= int2(0, 0)) && any(center < int2(dims))) {
-        if (params.gbuffer.occlusionTexture[uint2(center)].a != 1.0) {
-            // don't paint over egui
-            params.gbuffer.writeOverlay(uint2(center), color);
-        }
+        params.gbuffer.writeOverlay(uint2(center), color);
     }
 }

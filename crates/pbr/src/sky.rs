@@ -8,13 +8,11 @@
 //! - Multi-scattering LUT (32x32)
 //! - Per-frame Sky View LUT (192x108)
 //! - Interactive camera and sun controls
-//! - egui parameter tweaking
 
 use std::ffi::CStr;
 
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 
 use bevy_pumicite::CreateDevice;
 use bevy_pumicite::prelude::*;
@@ -62,13 +60,6 @@ impl Plugin for SkyPlugin {
             })
             .before(CreateDevice),
         );
-
-        // Add egui plugin
-        app.add_plugins(pumicite_egui::EguiPlugin::<With<PrimaryWindow>> {
-            framebuffer_format: pumicite::types::format::Format::R8G8B8A8_UNORM,
-            linear_colorspace: false,
-            ..Default::default()
-        });
 
         // Systems
         app.add_systems(Startup, setup.after(CreateDevice));

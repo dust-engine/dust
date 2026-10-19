@@ -53,11 +53,6 @@ void main() {
         ivec2 cell = ivec2(int(i) % lattice.x, int(i) / lattice.x);
         ivec2 coord = min(cell * stride, extent - 1);
         vec4 hdr = imageLoad(hdrInput, coord);
-        // Alpha 0 marks egui-occluded pixels (no scene radiance); skip them so
-        // menus don't drag the meter toward black.
-        if (hdr.a == 0.0) {
-            continue;
-        }
         float lum = dot(max(hdr.rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
         sum += clamp(log2(max(lum, 1e-8)), ctl.min_log_luminance, ctl.max_log_luminance);
         count += 1u;

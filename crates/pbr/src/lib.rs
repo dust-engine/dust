@@ -18,7 +18,7 @@ use tonemap::{autoexposure_pass, tonemap_pass};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bevy_pumicite::{
-    CreateDevice, DefaultRenderSet, PumiciteApp, SubmissionState,
+    CreateDevice, DefaultRenderSet, SubmissionState,
     rtx::{
         RayTracingPipeline, RtxPipelineManager,
         tlas::{TLAS, TLASInstance, tlas_build_input_upload_system},
@@ -39,7 +39,6 @@ use pumicite::{
     utils::glam_to_vk_transform,
 };
 use pumicite::{device::DeviceBuilder, image::UintImageView};
-use pumicite_egui::EguiRenderSet;
 
 use dust_profiler::{GpuProfiler, GpuTimerCommands};
 
@@ -170,6 +169,9 @@ impl Plugin for PbrRenderPlugin {
             (
                 create_sbt.before(PbrRenderSet),
                 ensure_hdr_target.in_set(SwapchainSet).before(render),
+                clear_debug_overlay
+                    .in_set(DefaultRenderSet)
+                    .after(ensure_hdr_target),
                 ensure_upscaler_session
                     .in_set(DefaultRenderSet)
                     .after(ensure_hdr_target)
@@ -186,7 +188,7 @@ impl Plugin for PbrRenderPlugin {
                     .after(PbrRenderSet)
                     .after(bevy_pumicite::rtx::tlas::tlas_build_system::<PbrInstanceData>)
                     .after(bevy_pumicite::rtx::build_rtx_pipeline_system)
-                    .after(OccludingRenderPass)
+                    .after(clear_debug_overlay)
                     .after(create_sbt),
                 hzb::ensure_hzb_resources
                     .in_set(DefaultRenderSet)
@@ -228,10 +230,6 @@ impl Plugin for PbrRenderPlugin {
             ),
         );
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
-
-        app.add_render_set(OccludingRenderPass, start_occluding_render_pass);
-        app.configure_sets(PostUpdate, OccludingRenderPass.in_set(DefaultRenderSet));
-        app.configure_sets(PostUpdate, EguiRenderSet.in_set(OccludingRenderPass));
 
         // Build a TLAS over everything.
         app.add_plugins(bevy_pumicite::rtx::tlas::TLASBuilderPlugin::<PbrInstanceData>::default());
@@ -464,12 +462,11 @@ fn render(
             0..1,
             true,
         );
-        // SDR target: read for the occlusion check against egui content, and
-        // written by the primary closest-hit when a SHARC per-surface debug
-        // overlay is active (it paints the visualization into this layer).
+        // Debug overlay: written by the primary closest-hit when a SHARC
+        // per-surface debug view is active.
         encoder.use_image_resource(
-            render_target_views.sdr_target(),
-            &mut hdr.sdr_target_state,
+            render_target_views.debug_overlay(),
+            &mut hdr.debug_overlay_state,
             Access {
                 stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
                 access: vk::AccessFlags2::SHADER_STORAGE_READ
@@ -565,7 +562,12 @@ fn render(
             .gbuffer_albedo_uint(render_target_views.albedo().uint_view())
             .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
             .gbuffer_depth_texture(render_target_views.depth().full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
+            .gbuffer_debug_overlay_texture(
+                render_target_views
+                    .debug_overlay()
+                    .deref_inner()
+                    .full_view(),
+            )
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
@@ -609,8 +611,9 @@ fn render(
 pub struct HdrRenderTargetViews {
     // R16G16B16A16_SFLOAT. Stores noisy raw light.
     pub hdr_output: FullImageView<Image>,
-    // R8G8B8A8_UNORM. Stores sRGB UI elements. Full view = linear, sRGB view = decoded.
-    pub sdr_target: SrgbImageView<FullImageView<Image>>,
+    // R8G8B8A8_UNORM, display resolution. Debug visualizations, sRGB-encoded,
+    // composited over the frame by tonemap. Full view = linear, sRGB view = decoded.
+    pub debug_overlay: SrgbImageView<FullImageView<Image>>,
     /// R8G8B8A8_UNORM image with linear (full), sRGB, and UINT views of albedo.
     pub albedo: UintImageView<SrgbImageView<FullImageView<Image>>>,
     /// R16G16B16A16_SFLOAT. World-space normal in `.xyz`, roughness in `.w`. The
@@ -652,7 +655,7 @@ pumicite::project_fields! {
     /// Per-image projections of a locked [`HdrRenderTargetViews`] token.
     pub trait HdrRenderTargetViewsExt for impl[] HdrRenderTargetViews {
         hdr_output: FullImageView<Image>,
-        sdr_target: SrgbImageView<FullImageView<Image>>,
+        debug_overlay: SrgbImageView<FullImageView<Image>>,
         albedo: UintImageView<SrgbImageView<FullImageView<Image>>>,
         normal: SwizzledImageView<FullImageView<Image>>,
         depth: FullImageView<Image>,
@@ -672,7 +675,7 @@ pub struct HdrRenderTarget {
     pub normal_state: ResourceState,
     pub depth_state: ResourceState,
     pub depth_prev_state: ResourceState,
-    pub sdr_target_state: ResourceState,
+    pub debug_overlay_state: ResourceState,
     pub hdr_target_state: ResourceState,
     pub hdr_denoised_target_state: ResourceState,
     /// `depth_prev` and `hdr_denoised_output` hold last frame's images. False
@@ -693,7 +696,7 @@ pub struct HdrRenderTarget {
     /// previous value and adopts the metered target directly.
     pub exposure_initialized: bool,
     /// Display/output resolution (matches the swapchain). DLSS *output* targets
-    /// (`hdr_denoised_output`, `sdr_target`) and the tonemap pass use this.
+    /// (`hdr_denoised_output`, `debug_overlay`) and the tonemap pass use this.
     pub display_extent: UVec2,
     /// Internal render resolution (≤ `extent`), resolved from the active
     /// [`RenderQualitySettings`] via NGX optimal settings. The RT passes and the
@@ -937,7 +940,7 @@ fn ensure_hdr_target(
         initial_layout: vk::ImageLayout::UNDEFINED,
         ..Default::default()
     };
-    // Display-resolution targets: DLSS output + the egui overlay + tonemap.
+    // Display-resolution targets: DLSS output + the debug overlay + tonemap.
     let display_create_info = vk::ImageCreateInfo {
         extent: vk::Extent3D {
             width: extent.x,
@@ -985,13 +988,13 @@ fn ensure_hdr_target(
     .unwrap()
     .with_name(c"HDR Denoised Render Target View");
 
-    let sdr_target = Image::new_device(
+    let debug_overlay = Image::new_device(
         allocator.clone(),
         &vk::ImageCreateInfo {
             flags: vk::ImageCreateFlags::MUTABLE_FORMAT,
             format: vk::Format::R8G8B8A8_UNORM,
             usage: vk::ImageUsageFlags::STORAGE
-                | vk::ImageUsageFlags::COLOR_ATTACHMENT
+                | vk::ImageUsageFlags::TRANSFER_DST
                 | vk::ImageUsageFlags::SAMPLED,
             ..display_create_info
         }
@@ -1001,7 +1004,7 @@ fn ensure_hdr_target(
         ),
     )
     .unwrap()
-    .with_name(c"SDR Render Target")
+    .with_name(c"Debug Overlay")
     .create_full_view()
     .unwrap()
     .create_srgb_view(vk::ImageUsageFlags::SAMPLED)
@@ -1125,7 +1128,7 @@ fn ensure_hdr_target(
 
     let view = GPUMutex::new(HdrRenderTargetViews {
         hdr_output,
-        sdr_target,
+        debug_overlay,
         albedo,
         normal,
         depth,
@@ -1143,7 +1146,7 @@ fn ensure_hdr_target(
         normal_state: Default::default(),
         depth_state: Default::default(),
         depth_prev_state: Default::default(),
-        sdr_target_state: Default::default(),
+        debug_overlay_state: Default::default(),
         hdr_target_state: Default::default(),
         motion_vectors_state: Default::default(),
         specular_albedo_state: Default::default(),
@@ -1350,8 +1353,11 @@ fn shadow_pass(
                 .gbuffer_albedo_uint(render_target_views.albedo().uint_view())
                 .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
                 .gbuffer_depth_texture(render_target_views.depth().full_view())
-                .gbuffer_occlusion_texture(
-                    render_target_views.sdr_target().deref_inner().full_view(),
+                .gbuffer_debug_overlay_texture(
+                    render_target_views
+                        .debug_overlay()
+                        .deref_inner()
+                        .full_view(),
                 )
                 .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
                 .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
@@ -1730,7 +1736,12 @@ pub(crate) fn final_gather_pass(
             .gbuffer_albedo_uint(render_target_views.albedo().uint_view())
             .gbuffer_normal_texture(render_target_views.normal().deref_inner().full_view())
             .gbuffer_depth_texture(render_target_views.depth().full_view())
-            .gbuffer_occlusion_texture(render_target_views.sdr_target().deref_inner().full_view())
+            .gbuffer_debug_overlay_texture(
+                render_target_views
+                    .debug_overlay()
+                    .deref_inner()
+                    .full_view(),
+            )
             .gbuffer_motion_vector_texture(render_target_views.motion_vectors().full_view())
             .gbuffer_specular_albedo(render_target_views.specular_albedo().full_view())
             .sky_atmosphere_params(atmo_buffer)
@@ -1786,47 +1797,26 @@ pub(crate) fn final_gather_pass(
     });
 }
 
-#[derive(Default, SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
-pub struct OccludingRenderPass;
-
-/// For egui, you are always responsible for setting up the render pass. This
-/// is so that egui can piggy-back on an already existing render pass and doesn't
-/// have to start a new one - important for mobile performance.
-fn start_occluding_render_pass(
-    mut ctx: SubmissionState,
-    mut hdr_target: Option<ResMut<HdrRenderTarget>>,
-) {
+/// Clears the debug overlay before this frame's passes paint into it.
+fn clear_debug_overlay(mut ctx: SubmissionState, mut hdr_target: Option<ResMut<HdrRenderTarget>>) {
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
     ctx.record(|encoder| {
-        let render_target_views =
-            encoder.lock(&hdr.view, vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT);
-
+        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::CLEAR);
         encoder.use_image_resource(
-            render_target_views.sdr_target(),
-            &mut hdr.sdr_target_state,
-            Access::COLOR_ATTACHMENT_WRITE,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            render_target_views.debug_overlay(),
+            &mut hdr.debug_overlay_state,
+            Access::CLEAR,
+            vk::ImageLayout::GENERAL,
             0..1,
             0..1,
             true,
         );
         encoder.emit_barriers();
-        encoder
-            .begin_rendering()
-            .color_attachment(0, |mut builder| {
-                builder
-                    .clear(Vec4::new(0.0, 0.0, 0.0, 0.0))
-                    .image_layout(vk::ImageLayout::ATTACHMENT_OPTIMAL)
-                    .store(true)
-                    .view(render_target_views.sdr_target().deref_inner().full_view());
-                // Use linear view for egui. egui does all the interpolation in srgb space.
-            })
-            .render_area(
-                IVec2::ZERO,
-                UVec2::new(hdr.display_extent.x, hdr.display_extent.y),
-            )
-            .begin();
+        encoder.clear_color_image(
+            render_target_views.debug_overlay(),
+            &vk::ClearColorValue::default(),
+        );
     });
 }

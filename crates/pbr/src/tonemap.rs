@@ -480,10 +480,10 @@ pub(crate) fn tonemap_pass(
             0..1,
             false,
         );
-        // SDR target: read (egui / occluding content)
+        // Debug overlay: read
         encoder.use_image_resource(
-            render_target_views.sdr_target(),
-            &mut hdr.sdr_target_state,
+            render_target_views.debug_overlay(),
+            &mut hdr.debug_overlay_state,
             Access::COMPUTE_READ,
             vk::ImageLayout::GENERAL,
             0..1,
@@ -547,7 +547,7 @@ pub(crate) fn tonemap_pass(
                 }
                 .image_info(&[vk::DescriptorImageInfo {
                     sampler: vk::Sampler::null(),
-                    image_view: render_target_views.sdr_target().srgb_view().vk_handle(),
+                    image_view: render_target_views.debug_overlay().srgb_view().vk_handle(),
                     image_layout: vk::ImageLayout::GENERAL,
                 }]),
                 vk::WriteDescriptorSet {
