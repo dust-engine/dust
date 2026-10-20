@@ -5,7 +5,15 @@
 use bevy::prelude::*;
 use bevy_pumicite::pumicite::ash::vk;
 use bevy_pumicite::pumicite::physical_device::PhysicalDevice;
-use pumicite_egui::egui;
+use gpui::{
+    ClipboardItem, Context, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
+    Window, div, px,
+};
+use gpui_component::accordion::Accordion;
+use gpui_component::button::Button;
+use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+
+use crate::read;
 
 /// A titled group of label / value rows.
 pub(super) struct Section {
@@ -15,45 +23,90 @@ pub(super) struct Section {
     rows: Vec<(String, String)>,
 }
 
-pub(super) fn gpu_info_ui(
-    InMut(ui): InMut<egui::Ui>,
-    physical_device: Option<Res<PhysicalDevice>>,
-    // The properties don't change while the app runs, so they're formatted
-    // once.
-    mut sections: Local<Vec<Section>>,
-) {
-    let Some(physical_device) = physical_device else {
-        ui.weak("No Vulkan physical device.");
-        return;
-    };
-    if sections.is_empty() {
-        *sections = collect_sections(&physical_device);
-    }
+/// The sections; `None` without a physical device.
+fn gpu_info_snapshot(physical_device: Option<Res<PhysicalDevice>>) -> Option<Vec<Section>> {
+    physical_device.map(|device| collect_sections(&device))
+}
 
-    if ui
-        .button("Copy as text")
-        .on_hover_text("Copy everything below, e.g. for a bug report.")
-        .clicked()
-    {
-        ui.ctx().copy_text(sections_text(&sections));
-    }
-    ui.add_space(4.0);
+pub(super) struct GpuInfoPage {
+    sections: Vec<Section>,
+    /// Indices of the expanded sections.
+    open: Vec<usize>,
+}
 
-    for section in sections.iter() {
-        egui::CollapsingHeader::new(section.title)
-            .default_open(section.open)
-            .show(ui, |ui| {
-                egui::Grid::new(("gpu_info", section.title))
-                    .num_columns(2)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        for (label, value) in &section.rows {
-                            ui.label(label);
-                            ui.add(egui::Label::new(egui::RichText::new(value).monospace()).wrap());
-                            ui.end_row();
-                        }
-                    });
+impl GpuInfoPage {
+    pub fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        GpuInfoPage {
+            sections: Vec::new(),
+            open: Vec::new(),
+        }
+    }
+}
+
+impl Render for GpuInfoPage {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The properties don't change while the app runs: once shown, they
+        // aren't asked for again.
+        if self.sections.is_empty() {
+            read(window, cx, gpu_info_snapshot, |this, sections, _, _| {
+                if let Some(sections) = sections {
+                    this.open = (0..sections.len()).filter(|&i| sections[i].open).collect();
+                    this.sections = sections;
+                }
             });
+        }
+        let theme = cx.theme();
+        if self.sections.is_empty() {
+            return v_flex()
+                .text_color(theme.muted_foreground)
+                .child("No Vulkan physical device.");
+        }
+        let text = sections_text(&self.sections);
+        let mut accordion = Accordion::new("gpu-info").multiple(true);
+        for (i, section) in self.sections.iter().enumerate() {
+            let rows = section.rows.iter().map(|(label, value)| {
+                h_flex()
+                    .items_start()
+                    .gap_2()
+                    .child(
+                        div()
+                            .w(px(200.))
+                            .flex_shrink_0()
+                            .text_color(theme.muted_foreground)
+                            .child(SharedString::from(label.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .font_family(theme.mono_font_family.clone())
+                            .child(SharedString::from(value.clone())),
+                    )
+            });
+            let open = self.open.contains(&i);
+            let rows: Vec<_> = rows.collect();
+            accordion = accordion.item(move |item| {
+                item.title(section.title)
+                    .open(open)
+                    .child(v_flex().gap_0p5().children(rows))
+            });
+        }
+        v_flex()
+            .gap_2()
+            .child(
+                Button::new("gpu-info-copy")
+                    .label("Copy as text")
+                    .small()
+                    .tooltip("Copy everything below, e.g. for a bug report.")
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
+                    }),
+            )
+            .child(
+                accordion.on_toggle_click(cx.listener(|this, open: &[usize], _, cx| {
+                    this.open = open.to_vec();
+                    cx.notify();
+                })),
+            )
     }
 }
 

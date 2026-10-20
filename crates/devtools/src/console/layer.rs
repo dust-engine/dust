@@ -1,7 +1,6 @@
 //! The `tracing` layer that copies log messages into the console.
 
 use std::fmt::{self, Write as _};
-use std::sync::mpsc;
 
 use bevy::log::BoxedLayer;
 use bevy::log::tracing::field::{self as tracing_field, Visit};
@@ -9,12 +8,14 @@ use bevy::log::tracing::{Event, Subscriber, span};
 use bevy::log::tracing_subscriber::Layer;
 use bevy::log::tracing_subscriber::layer::Context;
 use bevy::log::tracing_subscriber::registry::LookupSpan;
-use bevy::platform::cell::SyncCell;
 use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use tracing_log::NormalizeEvent;
 
-use super::{Console, ConsoleMessage, Field, MessageKind, Source, SpanContext, ValueKind};
+use dust_ui::UiHandle;
+
+use super::ConsoleSink;
+use super::{ConsoleEvent, ConsoleMessage, Field, MessageKind, Source, SpanContext, ValueKind};
 
 /// Copies log messages into the DevTools console. Install it as
 /// `LogPlugin::custom_layer`:
@@ -29,31 +30,29 @@ use super::{Console, ConsoleMessage, Field, MessageKind, Source, SpanContext, Va
 /// The console gets what passes `LogPlugin`'s filter, the same messages it
 /// prints to stderr: `tracing` events, and `log` records, which `LogPlugin`
 /// turns into `tracing` events.
+///
+/// The messages go to the UI thread through `dust_ui`'s `UiHandle`, which
+/// `UiHostPlugin` inserts; it has to be added before `LogPlugin`. Without the
+/// handle there is no layer.
 pub fn console_layer(app: &mut App) -> Option<BoxedLayer> {
-    let (sender, receiver) = mpsc::channel();
-    app.init_resource::<Console>();
-    app.insert_resource(LogReceiver(SyncCell::new(receiver)));
-    app.add_systems(Update, receive_log_messages);
-    Some(Box::new(ConsoleLayer { sender }))
+    let ui = app.world().get_resource::<UiHandle>()?.clone();
+    app.init_resource::<LayerInstalled>();
+    let startup = Instant::now();
+    ui.update(move |cx| ConsoleSink::set_startup(startup, cx));
+    Some(Box::new(ConsoleLayer {
+        send: Box::new(move |message| {
+            ui.update(move |cx| ConsoleSink::send(ConsoleEvent::Message(message), cx))
+        }),
+    }))
 }
 
-/// The receiving end of [`ConsoleLayer`]'s channel. The layer runs on whichever
-/// thread logs, so messages go through the channel and are moved into
-/// [`Console`] once per frame.
-#[derive(Resource)]
-pub(super) struct LogReceiver(SyncCell<mpsc::Receiver<ConsoleMessage>>);
+/// Present once [`console_layer`] has installed the layer.
+#[derive(Resource, Default)]
+pub(super) struct LayerInstalled;
 
-pub(super) fn receive_log_messages(
-    mut receiver: ResMut<LogReceiver>,
-    mut console: ResMut<Console>,
-) {
-    for message in receiver.0.get().try_iter() {
-        console.push(message);
-    }
-}
-
+/// Sends each message on, from whichever thread logged it.
 pub(super) struct ConsoleLayer {
-    pub(super) sender: mpsc::Sender<ConsoleMessage>,
+    pub(super) send: Box<dyn Fn(ConsoleMessage) + Send + Sync>,
 }
 
 /// A span's fields, kept in the span's extensions for the events logged in
@@ -138,8 +137,7 @@ where
             }),
             time: Instant::now(),
         };
-        // Sending fails only once the app, and with it the receiver, is gone.
-        let _ = self.sender.send(message);
+        (self.send)(message);
     }
 }
 

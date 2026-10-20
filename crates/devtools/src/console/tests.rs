@@ -1,21 +1,25 @@
 use std::sync::mpsc;
 
-use bevy::ecs::system::RunSystemOnce;
 use bevy::log::tracing::{self, subscriber};
 use bevy::log::tracing_subscriber::filter::LevelFilter;
 use bevy::log::tracing_subscriber::layer::SubscriberExt;
 use bevy::log::tracing_subscriber::registry::Registry;
 
+use super::command::Outcome;
 use super::layer::ConsoleLayer;
 use super::*;
-use crate::{DevTools, DockSide};
+use crate::DockSide;
 
 /// Runs `f` with a subscriber of only a [`ConsoleLayer`], whose filter lets
 /// through messages up to `max_level`, and returns what the layer sent.
 fn capture_at(max_level: LevelFilter, f: impl FnOnce()) -> Vec<ConsoleMessage> {
     let (sender, receiver) = mpsc::channel();
     let subscriber = Registry::default()
-        .with(ConsoleLayer { sender })
+        .with(ConsoleLayer {
+            send: Box::new(move |message| {
+                let _ = sender.send(message);
+            }),
+        })
         .with(max_level);
     subscriber::with_default(subscriber, f);
     receiver.try_iter().collect()
@@ -204,13 +208,14 @@ fn scopes_and_filter() {
 #[test]
 fn prompt_history() {
     let mut console = Console::default();
+    let mut submitted = Vec::new();
     for line in ["echo a", "  ", "echo b", "echo b"] {
         console.prompt.line = line.to_owned();
-        console.submit();
+        submitted.extend(console.submit());
     }
     // Blank lines are dropped, and a repeated line is kept once.
     assert_eq!(console.prompt.history, ["echo a", "echo b"]);
-    assert_eq!(console.pending, ["echo a", "echo b", "echo b"]);
+    assert_eq!(submitted, ["echo a", "echo b", "echo b"]);
 
     let prompt = &mut console.prompt;
     prompt.line = "ec".to_owned();
@@ -226,28 +231,37 @@ fn prompt_history() {
     assert_eq!(browse(false), "ec");
 }
 
+/// The text a command printed.
+fn printed(result: Result<Outcome, String>) -> String {
+    match result {
+        Ok(Outcome::Output(text)) => text,
+        _ => panic!("the command printed nothing"),
+    }
+}
+
 #[test]
 fn commands() {
     let mut world = World::new();
-    world.init_resource::<Console>();
-    world.init_resource::<DevTools>();
 
-    assert_eq!(
-        command::run("echo 'a  b' c", &mut world),
-        Ok(Some("a  b c".to_owned()))
-    );
-    let help = command::run("help", &mut world).unwrap().unwrap();
+    assert_eq!(printed(command::run("echo 'a  b' c", &mut world)), "a  b c");
+    let help = printed(command::run("help", &mut world));
     assert!(help.contains("echo") && help.contains("dock"));
-    let typo = command::run("ecko hi", &mut world).unwrap_err();
+    let typo = command::run("ecko hi", &mut world).err().unwrap();
     assert!(typo.contains("a similar subcommand exists: 'echo'"));
 
-    assert_eq!(command::run("dock left", &mut world), Ok(None));
-    assert_eq!(world.resource::<DevTools>().dock, DockSide::Left);
+    assert!(matches!(
+        command::run("dock left", &mut world),
+        Ok(Outcome::Console(ConsoleEvent::Dock(DockSide::Left)))
+    ));
     assert!(command::run("dock top", &mut world).is_err());
 
-    world.resource_mut::<Console>().push(output("x"));
-    assert_eq!(command::run("clear", &mut world), Ok(None));
-    assert!(world.resource::<Console>().rows.is_empty());
+    let mut console = Console::default();
+    console.push(output("x"));
+    let Ok(Outcome::Console(event)) = command::run("clear", &mut world) else {
+        panic!("clear didn't clear the console");
+    };
+    console.apply(event);
+    assert!(console.rows.is_empty());
 }
 
 #[test]
@@ -255,11 +269,14 @@ fn log_command() {
     let _ = tracing_log::LogTracer::init();
     let mut world = World::new();
     let messages = capture(|| {
-        assert_eq!(
+        assert!(matches!(
             command::run("log -l warn hello there", &mut world),
-            Ok(None)
-        );
-        assert_eq!(command::run("log --log-crate oh no", &mut world), Ok(None));
+            Ok(Outcome::Nothing)
+        ));
+        assert!(matches!(
+            command::run("log --log-crate oh no", &mut world),
+            Ok(Outcome::Nothing)
+        ));
     });
     let logged: Vec<_> = messages
         .iter()
@@ -278,7 +295,9 @@ fn log_command() {
 
     // A level the filter drops is reported instead of vanishing.
     capture_at(LevelFilter::INFO, || {
-        let error = command::run("log -l debug hidden", &mut world).unwrap_err();
+        let error = command::run("log -l debug hidden", &mut world)
+            .err()
+            .unwrap();
         assert!(error.contains("RUST_LOG=console=debug"), "{error}");
     });
 }
@@ -286,14 +305,14 @@ fn log_command() {
 #[test]
 fn submitted_lines_run() {
     let mut world = World::new();
-    world.init_resource::<Console>();
+    let mut console = Console::default();
     for line in ["echo hi", "nope"] {
-        let mut console = world.resource_mut::<Console>();
         console.prompt.line = line.to_owned();
-        console.submit();
+        let line = console.submit().unwrap();
+        if let Some(event) = run_line(&line, &mut world) {
+            console.apply(event);
+        }
     }
-    world.run_system_once(run_commands).unwrap();
-    let console = world.resource::<Console>();
     let rows: Vec<_> = console
         .rows
         .iter()
@@ -303,15 +322,14 @@ fn submitted_lines_run() {
         rows,
         [
             (MessageKind::Command, "echo hi"),
-            (MessageKind::Command, "nope"),
             (MessageKind::Output, "hi"),
+            (MessageKind::Command, "nope"),
             (
                 MessageKind::CommandError,
                 "error: unrecognized subcommand 'nope'"
             ),
         ]
     );
-    assert!(console.pending.is_empty());
 }
 
 #[test]
@@ -321,7 +339,13 @@ fn plugin_builds_with_and_without_layer() {
     app.update();
 
     let mut app = App::new();
-    let _layer = console_layer(&mut app);
+    assert!(console_layer(&mut app).is_none());
+
+    let mut app = App::new();
+    let (to_ui, _from_bevy) = futures_channel::mpsc::unbounded();
+    app.insert_resource(dust_ui::UiHandle(to_ui));
+    let layer = console_layer(&mut app);
+    assert!(layer.is_some());
     app.add_plugins(ConsolePlugin);
     app.update();
 }

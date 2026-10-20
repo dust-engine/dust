@@ -1,349 +1,539 @@
-//! Drawing of the console tab: the toolbar, the message list and the prompt.
+//! The console tab's view: the toolbar, the message list and the prompt.
+
+use std::collections::VecDeque;
+use std::rc::Rc;
 
 use bevy::log::Level;
 use bevy::platform::time::Instant;
-use bevy::prelude::*;
-use pumicite_egui::egui;
+use gpui::{
+    AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, FollowMode,
+    HighlightStyle, Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListAlignment,
+    ListState, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, StyledText, Subscription, WeakEntity, Window, actions, div, list,
+    prelude::FluentBuilder as _, px, rgb,
+};
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::input::{Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_component::scroll::ScrollableElement as _;
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _, Theme,
+    h_flex, v_flex,
+};
 
 use super::{
-    Console, ConsoleMessage, Field, MessageKind, Row, Scope, ValueKind, filter_default_allows,
+    Console, ConsoleEvent, ConsoleMessage, Field, MessageKind, Scope, ValueKind,
+    filter_default_allows, submit_line,
 };
-use crate::devtools::icon_button;
 
-const CLEAR_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
+actions!(dust_devtools_console, [ClearConsole]);
 
 /// Width of the column of icons at the start of each row and of the prompt.
 const ICON_WIDTH: f32 = 14.0;
 
-const ROW_MARGIN: egui::Margin = egui::Margin::symmetric(6, 3);
-
-const INFO_COLOR: egui::Color32 = egui::Color32::from_rgb(0x4c, 0x9a, 0xff);
-
-pub(super) fn console_ui(
-    InMut(ui): InMut<egui::Ui>,
-    mut console: ResMut<Console>,
-    time: Res<Time<Real>>,
-) {
-    let console = &mut *console;
-    toolbar(ui, console);
-    egui::Panel::bottom("devtools_console_prompt").show(ui, |ui| prompt(ui, console));
-    message_list(ui, console, time.startup());
-}
-
-/// The filter field, the scope bar, and the button clearing the console.
-fn toolbar(ui: &mut egui::Ui, console: &mut Console) {
-    let is_mac = ui.ctx().os().is_mac();
-    ui.horizontal(|ui| {
-        // Right-to-left first, so the clear button keeps its place at the end
-        // and the scope bar wraps in the width left.
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let shortcut = CLEAR_SHORTCUT.format(&egui::ModifierNames::NAMES, is_mac);
-            let clear =
-                icon_button(ui, paint_trash).on_hover_text(format!("Clear Console ({shortcut})"));
-            if clear.clicked() || ui.input_mut(|input| input.consume_shortcut(&CLEAR_SHORTCUT)) {
-                console.rows.clear();
-            }
-            let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true);
-            ui.with_layout(layout, |ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut console.filter)
-                        .hint_text("Filter")
-                        .desired_width(120.0),
-                );
-                scope_bar(ui, &mut console.scopes, &console.received, is_mac);
-            });
-        });
-    });
-    ui.separator();
-}
-
-/// Safari's scope bar: "All", or only the picked scopes. A click picks one
-/// scope; a click with Cmd (Ctrl) held adds or removes one.
-///
-/// The scope of a level `LogPlugin`'s filter drops is disabled, with a tooltip
-/// saying how to let the level through, until a message of that level arrives
-/// anyway, from a target with a directive of its own.
-fn scope_bar(
-    ui: &mut egui::Ui,
-    picked: &mut [bool; Scope::ALL.len()],
-    received: &[bool; Scope::ALL.len()],
-    is_mac: bool,
-) {
-    let all = !picked.contains(&true);
-    if ui.add(egui::Button::selectable(all, "All")).clicked() {
-        *picked = Default::default();
-    }
-    let modifier = egui::ModifierNames::NAMES.format(&egui::Modifiers::COMMAND, is_mac);
-    for scope in Scope::ALL {
-        let index = scope as usize;
-        let filtered_out = scope
-            .level()
-            .filter(|&level| !received[index] && !filter_default_allows(level));
-        let mut response = ui
-            .add_enabled(
-                filtered_out.is_none(),
-                egui::Button::selectable(picked[index], scope.label()),
-            )
-            .on_hover_text(format!("{modifier}-click to show several"));
-        if let Some(level) = filtered_out {
-            let level = level.as_str().to_lowercase();
-            response = response.on_disabled_hover_text(format!(
-                "LogPlugin filters out {level} messages. \
-                 Restart with RUST_LOG={level} to show them."
-            ));
-        }
-        if response.clicked() {
-            if ui.input(|input| input.modifiers.command) {
-                picked[index] = !picked[index];
-            } else {
-                *picked = Default::default();
-                picked[index] = true;
-            }
-        }
-    }
-}
-
-/// The command line: Enter submits it, ↑ and ↓ recall earlier lines.
-fn prompt(ui: &mut egui::Ui, console: &mut Console) {
-    let id = egui::Id::new("devtools_console_input");
-    if ui.memory(|memory| memory.has_focus(id)) {
-        // Consumed before the `TextEdit` sees them, which would otherwise move
-        // the text cursor on ↑ and ↓.
-        let (enter, up, down) = ui.input_mut(|input| {
-            (
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
-            )
-        });
-        if enter {
-            console.submit();
-        }
-        if up || down {
-            console.prompt.browse(up);
-            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
-                let end = egui::text::CCursor::new(console.prompt.line.chars().count());
-                state
-                    .cursor
-                    .set_char_range(Some(egui::text::CCursorRange::one(end)));
-                state.store(ui.ctx(), id);
-            }
-        }
-    }
-    ui.horizontal(|ui| {
-        let line_height = ui.text_style_height(&egui::TextStyle::Monospace);
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(ICON_WIDTH, line_height), egui::Sense::hover());
-        let accent = ui.visuals().selection.stroke.color;
-        paint_chevron(ui.painter(), rect.center(), accent);
-        egui::TextEdit::singleline(&mut console.prompt.line)
-            .id(id)
-            .hint_text("help lists the commands")
-            .frame(egui::Frame::NONE)
-            .font(egui::TextStyle::Monospace)
-            .desired_width(f32::INFINITY)
-            // Enter is handled above, and must not end editing.
-            .return_key(None)
-            .show(ui);
-    });
-}
-
-/// The rows the scope bar and the filter field let through. Only the rows in
-/// view are laid out: the ones above are skipped by adding up their heights
-/// from the last time they were drawn, with a one-line estimate for rows
-/// never drawn.
-fn message_list(ui: &mut egui::Ui, console: &mut Console, startup: Instant) {
-    let filter = console.filter.trim();
-    let shown: Vec<usize> = (0..console.rows.len())
-        .filter(|&index| console.shows(&console.rows[index].message, filter))
-        .collect();
-    let estimate = ui.text_style_height(&egui::TextStyle::Body) + ROW_MARGIN.sum().y;
-    let height = |row: &Row| {
-        if row.height > 0.0 {
-            row.height
-        } else {
-            estimate
-        }
-    };
-    let total: f32 = shown
-        .iter()
-        .map(|&index| height(&console.rows[index]))
-        .sum();
-
-    let mut scroll_area = egui::ScrollArea::vertical()
-        .auto_shrink(false)
-        .stick_to_bottom(true);
-    if std::mem::take(&mut console.scroll_to_bottom) {
-        // Clamped to the end of the list.
-        scroll_area = scroll_area.vertical_scroll_offset(total);
-    }
-    scroll_area.show_viewport(ui, |ui, viewport| {
-        ui.set_height(total);
-        // The viewport can lie past the end when the list just got shorter.
-        let top = viewport.min.y.min(total - viewport.height()).max(0.0);
-        let bottom = top + viewport.height();
-
-        let mut y = 0.0;
-        let mut first = shown.len();
-        for (i, &index) in shown.iter().enumerate() {
-            let row_height = height(&console.rows[index]);
-            if y + row_height > top {
-                first = i;
-                break;
-            }
-            y += row_height;
-        }
-
-        let content = ui.max_rect();
-        let rect = egui::Rect::from_x_y_ranges(
-            content.x_range(),
-            content.top() + y..=content.bottom().max(content.top() + y),
-        );
-        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-            let spacing = ui.spacing().item_spacing;
-            // The rows touch; lines separate them.
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for &index in &shown[first..] {
-                if y >= bottom {
-                    break;
-                }
-                let row = &mut console.rows[index];
-                let rect = ui
-                    .push_id(row.serial, |ui| message_row(ui, row, spacing, startup))
-                    .inner
-                    .rect;
-                row.height = rect.height();
-                y += rect.height();
-            }
-        });
-    });
-}
-
-/// A row as in Safari: an icon for the kind of message, the repeat count, a
-/// triangle expanding the details, the message with its fields, and the
-/// target it was logged to on the right.
-fn message_row(
-    ui: &mut egui::Ui,
-    row: &mut Row,
-    spacing: egui::Vec2,
+/// Where console events go on the UI thread, a global of the GPUI app: the
+/// console view once it exists, a backlog before. Events come from the Bevy
+/// thread, and from whichever thread logs.
+pub(crate) struct ConsoleSink {
+    window: AnyWindowHandle,
+    /// When logging started; set by [`super::console_layer`].
     startup: Instant,
-) -> egui::Response {
-    let message = &row.message;
-    let visuals = ui.visuals();
-    let fill = match message.kind {
-        MessageKind::Log(Level::ERROR) | MessageKind::CommandError => {
-            visuals.error_fg_color.gamma_multiply(0.15)
+    sink: Sink,
+}
+
+impl gpui::Global for ConsoleSink {}
+
+enum Sink {
+    Backlog(VecDeque<ConsoleEvent>),
+    View(Rc<dyn Fn(ConsoleEvent, &mut Window, &mut App)>),
+}
+
+/// The most console events kept before the console view exists.
+const MAX_BACKLOG: usize = 10_000;
+
+impl ConsoleSink {
+    pub fn new(window: AnyWindowHandle) -> Self {
+        ConsoleSink {
+            window,
+            startup: Instant::now(),
+            sink: Sink::Backlog(VecDeque::new()),
         }
-        MessageKind::Log(Level::WARN) => visuals.warn_fg_color.gamma_multiply(0.15),
-        _ => egui::Color32::TRANSPARENT,
-    };
-    // Commands and their output in monospace, so tables like clap's help line
-    // up.
-    let font = match message.source {
-        Some(_) => egui::TextStyle::Body,
-        None => egui::TextStyle::Monospace,
-    };
-    let line_height = ui.text_style_height(&font);
-    let response = egui::Frame::new()
-        .fill(fill)
-        .inner_margin(ROW_MARGIN)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = spacing;
-            ui.set_width(ui.available_width());
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let (icon, _) = ui
-                    .allocate_exact_size(egui::vec2(ICON_WIDTH, line_height), egui::Sense::hover());
-                paint_icon(ui.painter(), icon.center(), message.kind, ui.visuals());
-                if row.count > 1 {
-                    count_badge(ui, row.count, message.kind, line_height);
+    }
+
+    /// Passes `event` to the console view, or keeps it until the view exists.
+    pub fn send(event: ConsoleEvent, cx: &mut App) {
+        let console = cx.global_mut::<ConsoleSink>();
+        let sink = match &mut console.sink {
+            Sink::Backlog(backlog) => {
+                if backlog.len() == MAX_BACKLOG {
+                    backlog.pop_front();
                 }
-                if message.source.is_some() {
-                    disclosure_triangle(ui, &mut row.expanded, line_height);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    if let Some(source) = &message.source {
-                        ui.weak(&source.target);
+                backlog.push_back(event);
+                return;
+            }
+            Sink::View(sink) => sink.clone(),
+        };
+        let window = console.window;
+        window
+            .update(cx, |_, window, cx| sink(event, window, cx))
+            .ok();
+    }
+
+    /// Passes the console events to `sink` from now on, after those that
+    /// arrived before.
+    pub fn attach(sink: impl Fn(ConsoleEvent, &mut Window, &mut App) + 'static, cx: &mut App) {
+        let sink: Rc<dyn Fn(ConsoleEvent, &mut Window, &mut App)> = Rc::new(sink);
+        let console = cx.global_mut::<ConsoleSink>();
+        let window = console.window;
+        let previous = std::mem::replace(&mut console.sink, Sink::View(sink.clone()));
+        if let Sink::Backlog(backlog) = previous {
+            window
+                .update(cx, |_, window, cx| {
+                    for event in backlog {
+                        sink(event, window, cx);
                     }
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        let summary = summary(ui, message, &font.resolve(ui.style()));
-                        ui.add(egui::Label::new(summary).wrap());
-                        if row.expanded {
-                            details(ui, message, startup);
+                })
+                .ok();
+        }
+    }
+
+    pub fn set_startup(startup: Instant, cx: &mut App) {
+        cx.global_mut::<ConsoleSink>().startup = startup;
+    }
+
+    pub fn startup(cx: &App) -> Instant {
+        cx.global::<ConsoleSink>().startup
+    }
+}
+
+pub(crate) struct ConsoleView {
+    console: Console,
+    filter: Entity<InputState>,
+    prompt: Entity<InputState>,
+    list: ListState,
+    /// The `serial`s of the rows the list shows, in order.
+    shown: Vec<u64>,
+    /// The count of the last shown row when the list was last updated.
+    last_count: u32,
+    /// The rows changed since the list was last updated.
+    dirty: bool,
+    startup: Instant,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl ConsoleView {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.bind_keys([KeyBinding::new("cmd-k", ClearConsole, Some("Console"))]);
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
+        let prompt =
+            cx.new(|cx| InputState::new(window, cx).placeholder("help lists the commands"));
+        let subscriptions = vec![
+            cx.subscribe(&filter, |this, filter, event: &InputEvent, cx| {
+                if let InputEvent::Change = event {
+                    this.console.filter = filter.read(cx).value().to_string();
+                    this.dirty = true;
+                    cx.notify();
+                }
+            }),
+            cx.subscribe_in(
+                &prompt,
+                window,
+                |this, prompt, event: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter { .. } = event {
+                        this.console.prompt.line = prompt.read(cx).value().to_string();
+                        if let Some(line) = this.console.submit() {
+                            submit_line(cx, line);
                         }
-                    });
-                });
-            });
+                        prompt.update(cx, |prompt, cx| prompt.set_value("", window, cx));
+                        this.list.scroll_to_end();
+                        this.dirty = true;
+                        cx.notify();
+                    }
+                },
+            ),
+        ];
+
+        // Attached once this view exists, as the backlog is delivered at once.
+        let view = cx.weak_entity();
+        cx.defer(move |cx| {
+            ConsoleSink::attach(
+                move |event, _, cx| {
+                    if let ConsoleEvent::Dock(side) = event {
+                        crate::devtools::set_dock(side, cx);
+                        return;
+                    }
+                    view.update(cx, |view, cx| {
+                        view.console.apply(event);
+                        view.dirty = true;
+                        cx.notify();
+                    })
+                    .ok();
+                },
+                cx,
+            );
+        });
+
+        let list = ListState::new(0, ListAlignment::Top, px(200.));
+        list.set_follow_mode(FollowMode::Tail);
+        ConsoleView {
+            console: Console::default(),
+            filter,
+            prompt,
+            list,
+            shown: Vec::new(),
+            last_count: 0,
+            dirty: false,
+            startup: ConsoleSink::startup(cx),
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// Brings the list up to date with the rows the scope bar and the filter
+    /// field let through. Rows only come and go at the ends while nothing else
+    /// changes, which keeps the measured heights of the others.
+    fn update_list(&mut self) {
+        if !std::mem::take(&mut self.dirty) {
+            return;
+        }
+        let filter = self.console.filter.trim();
+        let shown: Vec<u64> = self
+            .console
+            .rows
+            .iter()
+            .filter(|row| self.console.shows(&row.message, filter))
+            .map(|row| row.serial)
+            .collect();
+        let dropped = match shown.first() {
+            Some(&first) => self
+                .shown
+                .iter()
+                .take_while(|&&serial| serial < first)
+                .count(),
+            None => self.shown.len(),
+        };
+        let kept = &self.shown[dropped..];
+        if shown.starts_with(kept) {
+            self.list.splice(0..dropped, 0);
+            self.list
+                .splice(kept.len()..kept.len(), shown.len() - kept.len());
+            // A repeat only increments the last row's count.
+            let last_count = self.console.rows.back().map_or(0, |row| row.count);
+            if !kept.is_empty() && last_count != self.last_count {
+                self.list.remeasure_items(kept.len() - 1..kept.len());
+            }
+        } else {
+            self.list.reset(shown.len());
+        }
+        self.last_count = self.console.rows.back().map_or(0, |row| row.count);
+        self.shown = shown;
+        if std::mem::take(&mut self.console.scroll_to_bottom) {
+            self.list.scroll_to_end();
+        }
+    }
+
+    fn toggle_expanded(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let serial = self.shown[ix];
+        if let Some(row) = self
+            .console
+            .rows
+            .iter_mut()
+            .find(|row| row.serial == serial)
+        {
+            row.expanded = !row.expanded;
+            self.list.remeasure_items(ix..ix + 1);
+            cx.notify();
+        }
+    }
+
+    /// The filter field, the scope bar, and the button clearing the console.
+    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme();
+        h_flex()
+            .gap_1()
+            .p_1()
+            .flex_wrap()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .w(px(140.))
+                    .child(Input::new(&self.filter).xsmall().cleanable(true)),
+            )
+            .child(self.scope_bar(cx))
+            .child(div().flex_1())
+            .child(
+                Button::new("console-clear")
+                    .icon(IconName::Delete)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Clear Console (⌘K)")
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.clear(&ClearConsole, window, cx)),
+                    ),
+            )
+    }
+
+    fn clear(&mut self, _: &ClearConsole, _: &mut Window, cx: &mut Context<Self>) {
+        self.console.rows.clear();
+        self.dirty = true;
+        cx.notify();
+    }
+
+    /// Safari's scope bar: "All", or only the picked scopes. A click picks one
+    /// scope; a click with Cmd held adds or removes one.
+    ///
+    /// The scope of a level `LogPlugin`'s filter drops is disabled, with a
+    /// tooltip saying how to let the level through, until a message of that
+    /// level arrives anyway, from a target with a directive of its own.
+    fn scope_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let picked = self.console.scopes;
+        let all = !picked.contains(&true);
+        let mut bar = h_flex().gap_0p5().child(
+            Button::new("console-scope-all")
+                .label("All")
+                .ghost()
+                .xsmall()
+                .selected(all)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.console.scopes = Default::default();
+                    this.dirty = true;
+                    cx.notify();
+                })),
+        );
+        for scope in Scope::ALL {
+            let index = scope as usize;
+            let filtered_out = scope
+                .level()
+                .filter(|&level| !self.console.received[index] && !filter_default_allows(level));
+            let tooltip = match filtered_out {
+                Some(level) => {
+                    let level = level.as_str().to_lowercase();
+                    format!(
+                        "LogPlugin filters out {level} messages. \
+                         Restart with RUST_LOG={level} to show them."
+                    )
+                }
+                None => "⌘-click to show several".to_owned(),
+            };
+            bar = bar.child(
+                Button::new(("console-scope", index))
+                    .label(scope.label())
+                    .ghost()
+                    .xsmall()
+                    .selected(picked[index])
+                    .disabled(filtered_out.is_some())
+                    .tooltip(tooltip)
+                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                        let scopes = &mut this.console.scopes;
+                        if event.modifiers().platform {
+                            scopes[index] = !scopes[index];
+                        } else {
+                            *scopes = Default::default();
+                            scopes[index] = true;
+                        }
+                        this.dirty = true;
+                        cx.notify();
+                    })),
+            );
+        }
+        bar
+    }
+
+    /// The command line: Enter submits it, ↑ and ↓ recall earlier lines.
+    fn prompt(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme();
+        h_flex()
+            .gap_1()
+            .px_1()
+            .border_t_1()
+            .border_color(theme.border)
+            // A single-line input leaves ↑ and ↓ to its ancestors.
+            .on_action(cx.listener(|this, _: &MoveUp, window, cx| this.browse(true, window, cx)))
+            .on_action(cx.listener(|this, _: &MoveDown, window, cx| this.browse(false, window, cx)))
+            .child(
+                Icon::new(IconName::ChevronRight)
+                    .xsmall()
+                    .text_color(theme.primary),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .font_family(theme.mono_font_family.clone())
+                    .child(Input::new(&self.prompt).appearance(false).small()),
+            )
+    }
+
+    fn browse(&mut self, older: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let prompt = &mut self.console.prompt;
+        prompt.line = self.prompt.read(cx).value().to_string();
+        prompt.browse(older);
+        let line = prompt.line.clone();
+        self.prompt
+            .update(cx, |prompt, cx| prompt.set_value(line, window, cx));
+    }
+
+    /// A row as in Safari: an icon for the kind of message, the repeat count,
+    /// a triangle expanding the details, the message with its fields, and the
+    /// target it was logged to on the right.
+    fn row(&self, ix: usize, view: WeakEntity<Self>, cx: &App) -> AnyElement {
+        let Some(row) = self
+            .shown
+            .get(ix)
+            .and_then(|&serial| self.console.rows.iter().find(|row| row.serial == serial))
+        else {
+            return div().into_any_element();
+        };
+        let theme = cx.theme();
+        let message = &row.message;
+        let fill = match message.kind {
+            MessageKind::Log(Level::ERROR) | MessageKind::CommandError => {
+                theme.danger.opacity(0.15)
+            }
+            MessageKind::Log(Level::WARN) => theme.warning.opacity(0.15),
+            _ => gpui::transparent_black(),
+        };
+        let expandable = message.source.is_some();
+        let mut summary = v_flex().flex_1().min_w_0().child(summary(message, theme));
+        if row.expanded {
+            summary = summary.children(details(message, self.startup, theme));
+        }
+        h_flex()
+            .id(("console-row", row.serial as usize))
+            .items_start()
+            .gap_1()
+            .px_1p5()
+            .py_0p5()
+            .bg(fill)
+            .border_b_1()
+            .border_color(theme.border)
+            .text_sm()
+            // Commands and their output in monospace, so tables like clap's
+            // help line up.
+            .when(!expandable, |row| {
+                row.font_family(theme.mono_font_family.clone())
+            })
+            .child(
+                div()
+                    .w(px(ICON_WIDTH))
+                    .flex_shrink_0()
+                    .child(icon(message.kind, theme)),
+            )
+            .when(row.count > 1, |this| {
+                this.child(count_badge(row.count, message.kind, theme))
+            })
+            .when(expandable, |this| {
+                this.child(
+                    div()
+                        .id(("console-disclosure", row.serial as usize))
+                        .flex_shrink_0()
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            view.update(cx, |view, cx| view.toggle_expanded(ix, cx))
+                                .ok();
+                        })
+                        .child(
+                            Icon::new(if row.expanded {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .xsmall()
+                            .text_color(theme.muted_foreground),
+                        ),
+                )
+            })
+            .child(summary)
+            .children(message.source.as_ref().map(|source| {
+                div()
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(SharedString::from(source.target.clone()))
+            }))
+            .into_any_element()
+    }
+}
+
+impl Render for ConsoleView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.update_list();
+        let view = cx.weak_entity();
+        let rows = list(self.list.clone(), move |ix, _, cx| {
+            let Some(entity) = view.upgrade() else {
+                return div().into_any_element();
+            };
+            entity.read(cx).row(ix, view.clone(), cx)
         })
-        .response;
-    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-    ui.painter()
-        .hline(response.rect.x_range(), response.rect.bottom(), stroke);
-    response
+        .size_full();
+        v_flex()
+            .key_context("Console")
+            .on_action(cx.listener(Self::clear))
+            .size_full()
+            .child(self.toolbar(cx))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(rows)
+                    .vertical_scrollbar(&self.list),
+            )
+            .child(self.prompt(cx))
+    }
 }
 
 /// The message followed by its fields as `name=value`, like the log lines on
 /// stderr.
-fn summary(ui: &egui::Ui, message: &ConsoleMessage, font: &egui::FontId) -> egui::text::LayoutJob {
-    let visuals = ui.visuals();
+fn summary(message: &ConsoleMessage, theme: &Theme) -> StyledText {
     let color = match message.kind {
-        MessageKind::Log(Level::ERROR) | MessageKind::CommandError => visuals.error_fg_color,
-        MessageKind::Log(Level::WARN) => visuals.warn_fg_color,
-        MessageKind::Log(Level::TRACE) => visuals.weak_text_color(),
-        MessageKind::Command => visuals.strong_text_color(),
-        _ => visuals.text_color(),
+        MessageKind::Log(Level::ERROR) | MessageKind::CommandError => theme.danger,
+        MessageKind::Log(Level::WARN) => theme.warning,
+        MessageKind::Log(Level::TRACE) => theme.muted_foreground,
+        _ => theme.foreground,
     };
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &message.text,
-        0.0,
-        egui::TextFormat::simple(font.clone(), color),
-    );
+    let mut text = Highlighted::default();
+    text.push(&message.text, color);
     for field in &message.fields {
-        let space = if job.text.is_empty() { 0.0 } else { 8.0 };
-        job.append(
-            &format!("{}=", field.name),
-            space,
-            egui::TextFormat::simple(font.clone(), visuals.weak_text_color()),
-        );
-        append_value(&mut job, field, font, visuals);
+        if !text.text.is_empty() {
+            text.push("  ", color);
+        }
+        text.push(&format!("{}=", field.name), theme.muted_foreground);
+        push_value(&mut text, field, theme);
     }
-    job
+    text.build()
 }
 
 /// The fields one per line, the spans the message was logged in, where it
 /// was logged, and when.
-fn details(ui: &mut egui::Ui, message: &ConsoleMessage, startup: Instant) {
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let visuals = ui.visuals();
-    let weak = egui::TextFormat::simple(font.clone(), visuals.weak_text_color());
-    let normal = egui::TextFormat::simple(font.clone(), visuals.text_color());
+fn details(message: &ConsoleMessage, startup: Instant, theme: &Theme) -> Vec<StyledText> {
+    let weak = theme.muted_foreground;
+    let normal = theme.foreground;
     let line = |name: &str| {
-        let mut job = egui::text::LayoutJob::default();
-        job.append(&format!("{name}: "), 0.0, weak.clone());
-        job
+        let mut text = Highlighted::default();
+        text.push(&format!("{name}: "), weak);
+        text
     };
 
     let mut lines = Vec::new();
     for field in &message.fields {
-        let mut job = line(field.name);
-        append_value(&mut job, field, &font, visuals);
-        lines.push(job);
+        let mut text = line(field.name);
+        push_value(&mut text, field, theme);
+        lines.push(text);
     }
     for span in &message.spans {
-        let mut job = line("span");
-        job.append(span.name, 0.0, normal.clone());
+        let mut text = line("span");
+        text.push(span.name, normal);
         if !span.fields.is_empty() {
-            job.append("{", 0.0, weak.clone());
+            text.push("{", weak);
             for (i, field) in span.fields.iter().enumerate() {
-                let space = if i == 0 { 0.0 } else { 6.0 };
-                job.append(&format!("{}=", field.name), space, weak.clone());
-                append_value(&mut job, field, &font, visuals);
+                if i > 0 {
+                    text.push(" ", weak);
+                }
+                text.push(&format!("{}=", field.name), weak);
+                push_value(&mut text, field, theme);
             }
-            job.append("}", 0.0, weak.clone());
+            text.push("}", weak);
         }
-        lines.push(job);
+        lines.push(text);
     }
     let mut plain = Vec::new();
     if let Some(source) = &message.source {
@@ -370,184 +560,97 @@ fn details(ui: &mut egui::Ui, message: &ConsoleMessage, startup: Instant) {
         .as_secs_f64();
     plain.push(("time", format!("{seconds:.3} s after startup")));
     for (name, value) in plain {
-        let mut job = line(name);
-        job.append(&value, 0.0, normal.clone());
-        lines.push(job);
+        let mut text = line(name);
+        text.push(&value, normal);
+        lines.push(text);
     }
-
-    for job in lines {
-        ui.add(egui::Label::new(job).wrap());
-    }
+    lines.into_iter().map(Highlighted::build).collect()
 }
 
 /// Appends a field's value, colored by type as in Xcode: strings red and
-/// quoted, numbers yellow (blue in light mode), booleans pink, errors in the
-/// error color.
-fn append_value(
-    job: &mut egui::text::LayoutJob,
-    field: &Field,
-    font: &egui::FontId,
-    visuals: &egui::Visuals,
-) {
-    let dark = visuals.dark_mode;
-    let rgb = |dark_rgb: [u8; 3], light_rgb: [u8; 3]| {
-        let [r, g, b] = if dark { dark_rgb } else { light_rgb };
-        egui::Color32::from_rgb(r, g, b)
-    };
-    let (text, color) = match field.kind {
-        ValueKind::Str => (
-            format!("{:?}", field.value),
-            rgb([0xfc, 0x6a, 0x5d], [0xc4, 0x1a, 0x16]),
-        ),
-        ValueKind::Number => (
-            field.value.clone(),
-            rgb([0xd0, 0xbf, 0x69], [0x1c, 0x00, 0xcf]),
-        ),
-        ValueKind::Bool => (
-            field.value.clone(),
-            rgb([0xfc, 0x5f, 0xa3], [0x9b, 0x23, 0x93]),
-        ),
-        ValueKind::Error => (field.value.clone(), visuals.error_fg_color),
-        ValueKind::Debug => (field.value.clone(), visuals.text_color()),
-    };
-    job.append(&text, 0.0, egui::TextFormat::simple(font.clone(), color));
+/// quoted, numbers yellow, booleans pink, errors in the error color.
+fn push_value(text: &mut Highlighted, field: &Field, theme: &Theme) {
+    match field.kind {
+        ValueKind::Str => text.push(&format!("{:?}", field.value), rgb(0xfc6a5d).into()),
+        ValueKind::Number => text.push(&field.value, rgb(0xd0bf69).into()),
+        ValueKind::Bool => text.push(&field.value, rgb(0xfc5fa3).into()),
+        ValueKind::Error => text.push(&field.value, theme.danger),
+        ValueKind::Debug => text.push(&field.value, theme.foreground),
+    }
+}
+
+/// Text built from colored pieces.
+#[derive(Default)]
+struct Highlighted {
+    text: String,
+    highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
+}
+
+impl Highlighted {
+    fn push(&mut self, piece: &str, color: Hsla) {
+        let start = self.text.len();
+        self.text.push_str(piece);
+        self.highlights.push((
+            start..self.text.len(),
+            HighlightStyle {
+                color: Some(color),
+                ..Default::default()
+            },
+        ));
+    }
+
+    fn build(self) -> StyledText {
+        StyledText::new(self.text).with_highlights(self.highlights)
+    }
 }
 
 /// Safari's repeat count: a pill with the number of times the message
 /// arrived in a row.
-fn count_badge(ui: &mut egui::Ui, count: u32, kind: MessageKind, line_height: f32) {
-    let visuals = ui.visuals();
-    let (fill, text_color) = match kind {
-        MessageKind::Log(Level::ERROR) | MessageKind::CommandError => {
-            (visuals.error_fg_color, egui::Color32::WHITE)
-        }
-        MessageKind::Log(Level::WARN) => (visuals.warn_fg_color, egui::Color32::BLACK),
-        _ => (INFO_COLOR, egui::Color32::WHITE),
+fn count_badge(count: u32, kind: MessageKind, theme: &Theme) -> impl IntoElement {
+    let (fill, text_color): (Hsla, Hsla) = match kind {
+        MessageKind::Log(Level::ERROR) | MessageKind::CommandError => (theme.danger, gpui::white()),
+        MessageKind::Log(Level::WARN) => (theme.warning, gpui::black()),
+        _ => (theme.info, gpui::white()),
     };
-    let galley = ui.painter().layout_no_wrap(
-        count.to_string(),
-        egui::FontId::proportional(10.0),
-        text_color,
-    );
-    let pill_height = 14.0;
-    let size = egui::vec2((galley.size().x + 8.0).max(pill_height), line_height);
-    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    let pill = egui::Rect::from_center_size(rect.center(), egui::vec2(size.x, pill_height));
-    ui.painter()
-        .rect_filled(pill, egui::CornerRadius::same(7), fill);
-    ui.painter()
-        .galley(pill.center() - galley.size() / 2.0, galley, text_color);
+    div()
+        .flex_shrink_0()
+        .px_1()
+        .min_w(px(14.))
+        .rounded_full()
+        .bg(fill)
+        .text_color(text_color)
+        .text_xs()
+        .text_center()
+        .child(count.to_string())
 }
 
-/// ▶ when collapsed, ▼ when expanded; a click toggles `expanded`.
-fn disclosure_triangle(ui: &mut egui::Ui, expanded: &mut bool, line_height: f32) {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(10.0, line_height), egui::Sense::click());
-    if response.clicked() {
-        *expanded = !*expanded;
-    }
-    let color = if response.hovered() {
-        ui.visuals().strong_text_color()
-    } else {
-        ui.visuals().weak_text_color()
+/// The icons follow Safari's: errors, warnings and infos by their usual
+/// symbols, ">" for a submitted line and "<" for what it printed.
+fn icon(kind: MessageKind, theme: &Theme) -> AnyElement {
+    let icon = |name: IconName, color: Hsla| {
+        Icon::new(name)
+            .xsmall()
+            .text_color(color)
+            .into_any_element()
     };
-    let c = rect.center();
-    let points = if *expanded {
-        vec![
-            c + egui::vec2(-4.0, -2.0),
-            c + egui::vec2(4.0, -2.0),
-            c + egui::vec2(0.0, 3.0),
-        ]
-    } else {
-        vec![
-            c + egui::vec2(-2.0, -4.0),
-            c + egui::vec2(3.0, 0.0),
-            c + egui::vec2(-2.0, 4.0),
-        ]
-    };
-    ui.painter().add(egui::Shape::convex_polygon(
-        points,
-        color,
-        egui::Stroke::NONE,
-    ));
-}
-
-/// The icons follow Safari's: a red circle with "!" for errors, a yellow
-/// triangle with "!" for warnings, a blue circle with "i" for infos, ">" for
-/// a submitted line and "<·" for what it printed.
-fn paint_icon(painter: &egui::Painter, c: egui::Pos2, kind: MessageKind, visuals: &egui::Visuals) {
-    let v = egui::vec2;
     match kind {
         MessageKind::Log(Level::ERROR) | MessageKind::CommandError => {
-            painter.circle_filled(c, 6.0, visuals.error_fg_color);
-            paint_exclamation_mark(painter, c, egui::Color32::WHITE);
+            icon(IconName::CircleX, theme.danger)
         }
-        MessageKind::Log(Level::WARN) => {
-            let points = vec![c + v(0.0, -6.5), c + v(6.5, 5.0), c + v(-6.5, 5.0)];
-            painter.add(egui::Shape::convex_polygon(
-                points,
-                visuals.warn_fg_color,
-                egui::Stroke::NONE,
-            ));
-            paint_exclamation_mark(painter, c + v(0.0, 0.5), egui::Color32::BLACK);
-        }
-        MessageKind::Log(Level::INFO) => {
-            painter.circle_filled(c, 6.0, INFO_COLOR);
-            painter.circle_filled(c + v(0.0, -3.0), 1.0, egui::Color32::WHITE);
-            painter.line_segment(
-                [c + v(0.0, -1.0), c + v(0.0, 3.5)],
-                egui::Stroke::new(1.5, egui::Color32::WHITE),
-            );
-        }
-        MessageKind::Log(Level::DEBUG) => {
-            // Safari's icon for `console.log`: lines of text.
-            let stroke = egui::Stroke::new(1.0, visuals.text_color());
-            for dy in [-3.5, 0.0, 3.5] {
-                painter.line_segment([c + v(-4.0, dy), c + v(4.0, dy)], stroke);
-            }
-        }
-        MessageKind::Log(_) => {
-            painter.circle_filled(c, 1.5, visuals.weak_text_color());
-        }
-        MessageKind::Command => paint_chevron(painter, c, visuals.selection.stroke.color),
-        MessageKind::Output => {
-            let stroke = egui::Stroke::new(1.5, visuals.weak_text_color());
-            let tip = c + v(-4.0, 0.0);
-            painter.line_segment([tip, tip + v(4.0, -4.0)], stroke);
-            painter.line_segment([tip, tip + v(4.0, 4.0)], stroke);
-            painter.circle_filled(c + v(3.5, 0.0), 1.2, visuals.weak_text_color());
-        }
+        MessageKind::Log(Level::WARN) => icon(IconName::TriangleAlert, theme.warning),
+        MessageKind::Log(Level::INFO) => icon(IconName::Info, theme.info),
+        MessageKind::Log(Level::DEBUG) => icon(IconName::Ellipsis, theme.foreground),
+        MessageKind::Log(_) => div()
+            .mt(px(6.))
+            .ml(px(4.))
+            .size(px(3.))
+            .rounded_full()
+            .bg(theme.muted_foreground)
+            .into_any_element(),
+        MessageKind::Command => icon(IconName::ChevronRight, theme.primary),
+        MessageKind::Output => div()
+            .text_color(theme.muted_foreground)
+            .child("‹")
+            .into_any_element(),
     }
-}
-
-fn paint_exclamation_mark(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
-    painter.line_segment(
-        [c + egui::vec2(0.0, -3.5), c + egui::vec2(0.0, 1.0)],
-        egui::Stroke::new(1.5, color),
-    );
-    painter.circle_filled(c + egui::vec2(0.0, 3.2), 0.9, color);
-}
-
-/// ">", the prompt.
-fn paint_chevron(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.5, color);
-    let tip = c + egui::vec2(2.5, 0.0);
-    painter.line_segment([tip + egui::vec2(-4.0, -4.0), tip], stroke);
-    painter.line_segment([tip + egui::vec2(-4.0, 4.0), tip], stroke);
-}
-
-/// A trash can: lid, handle, and a body narrowing toward the bottom.
-fn paint_trash(painter: &egui::Painter, c: egui::Pos2, stroke: egui::Stroke) {
-    let v = egui::vec2;
-    painter.line_segment([c + v(-5.0, -3.5), c + v(5.0, -3.5)], stroke);
-    painter.line_segment([c + v(-1.5, -5.5), c + v(1.5, -5.5)], stroke);
-    painter.add(egui::Shape::line(
-        vec![
-            c + v(-3.5, -3.5),
-            c + v(-2.8, 5.0),
-            c + v(2.8, 5.0),
-            c + v(3.5, -3.5),
-        ],
-        stroke,
-    ));
 }

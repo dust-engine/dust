@@ -37,6 +37,12 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 
 - **`crates/vox/`** (`dust_vox`) — Voxel geometry, materials, and MagicaVoxel `.vox` file loading. Defines the voxel tree hierarchy as `hierarchy!(3, 3, 2, VoxLeafNode)`. Provides hit group shaders for voxel ray intersection and shadow rays.
 
+- **`crates/ui/`** (`dust_ui`) — The window and the thread split. GPUI (`gpui-pre`) owns the main thread, opens the window and draws the UI into its own `CAMetalLayer`; the Bevy app runs on a spawned thread and presents through Vulkan into a second `CAMetalLayer`, in a view under GPUI's. Each thread runs code on the other by queueing closures: `UiHandle` (a Bevy resource) runs them with GPUI's `App`, `BevyHandle` (a GPUI global) with Bevy's `World`; `BevyHandle::run_every_frame` runs a system every frame until its handle is dropped (see `bridge.rs`). macOS only.
+
+- **`crates/input/`** (`dust_input`) — The game's keyboard and mouse, read on the Bevy thread from the platform (GameController on macOS) and written as `bevy_input` messages. The UI decides which input is the game's by setting `InputGate`.
+
+- **`crates/devtools/`** (`dust_devtools`) — DevTools dock and overlays as GPUI views. A view shows the world with `watch` (a system run every Bevy frame while the view is drawn) or `read` (once, when it is shown), and edits it through `dust_ui`'s `BevyHandle` (see `devtools.rs`).
+
 - **`src/main.rs`** — Application entry point.
 
 ### Rendering Pipeline
@@ -44,7 +50,7 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 1. PBR ray-tracing pass → HDR output + G-buffers (albedo, normal, depth)
 2. Shadow pass → visibility
 3. Tone-mapping compute pass → HDR to LDR
-4. egui overlay
+4. GPUI overlay, drawn and presented separately in its own layer
 
 ### Shader Compilation
 

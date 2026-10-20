@@ -6,10 +6,15 @@ edition = "2024"
 [dependencies]
 bevy.workspace = true
 bevy_pumicite.workspace = true
-pumicite_egui.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+dust_ui.workspace = true
 dust_pbr.workspace = true
 dust_profiler.workspace = true
 dust_character.workspace = true
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 shlex = "2"
 tracing-log = "0.2"
+
+[dev-dependencies]
+futures-channel = "0.3"

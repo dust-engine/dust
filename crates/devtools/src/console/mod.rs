@@ -2,8 +2,13 @@
 //! `tracing` and `log`, a scope bar filtering them by severity, and a prompt
 //! that runs commands.
 //!
-//! Log messages reach the console through [`console_layer`], which has to be
-//! installed as `LogPlugin::custom_layer`. The commands live in [`command`].
+//! The console's rows live with its view on the UI thread. Log messages reach
+//! them through [`console_layer`], which has to be installed as
+//! `LogPlugin::custom_layer`; it sends each message to the UI thread through
+//! `dust_ui`'s `UiHandle`.
+//! A line submitted at the prompt runs on the Bevy thread, with the world, and
+//! what it does to the console comes back the same way. The commands live in
+//! [`command`].
 
 mod command;
 mod layer;
@@ -17,11 +22,14 @@ use bevy::log::{Level, tracing};
 use bevy::platform::time::Instant;
 use bevy::prelude::*;
 
-use crate::devtools::DevToolsAppExt;
-use layer::LogReceiver;
+use crate::DevToolsAppExt;
+use crate::DockSide;
+use dust_ui::{BevyHandle, UiHandle};
+use layer::LayerInstalled;
 pub use layer::console_layer;
+pub(crate) use ui::{ConsoleSink, ConsoleView};
 
-/// Adds the "Console" DevTools tab and runs the commands submitted in it.
+/// Adds the "Console" DevTools tab.
 ///
 /// Without [`console_layer`] installed, the tab only shows commands and their
 /// output.
@@ -30,21 +38,23 @@ pub struct ConsolePlugin;
 
 impl Plugin for ConsolePlugin {
     fn build(&self, app: &mut App) {
-        if !app.world().contains_resource::<LogReceiver>() {
+        if !app.world().contains_resource::<LayerInstalled>() {
             warn!(
                 "The DevTools console won't show log messages: \
                  set `LogPlugin::custom_layer` to `dust_devtools::console_layer`."
             );
         }
-        app.init_resource::<Console>();
-        app.add_systems(
-            Update,
-            run_commands
-                .run_if(|console: Res<Console>| !console.pending.is_empty())
-                .before(layer::receive_log_messages),
-        );
-        app.add_devtools_tab("Console", ui::console_ui);
+        app.add_devtools_tab("Console", ConsoleView::new);
     }
+}
+
+/// A change to the console, sent from the Bevy thread to its view.
+pub(crate) enum ConsoleEvent {
+    Message(ConsoleMessage),
+    /// Removes all rows.
+    Clear,
+    /// Moves DevTools.
+    Dock(DockSide),
 }
 
 /// The most rows the console keeps; the oldest are dropped first.
@@ -62,7 +72,7 @@ enum MessageKind {
     CommandError,
 }
 
-struct ConsoleMessage {
+pub(crate) struct ConsoleMessage {
     kind: MessageKind,
     /// The formatted message, the submitted line, or the command's output.
     text: String,
@@ -219,7 +229,7 @@ impl Scope {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Default)]
 struct Console {
     rows: VecDeque<Row>,
     /// The `serial` of the next row.
@@ -230,8 +240,6 @@ struct Console {
     /// Only rows containing this text show.
     filter: String,
     prompt: Prompt,
-    /// Lines submitted at the prompt that [`run_commands`] hasn't run yet.
-    pending: Vec<String>,
     /// Makes the list jump to its end; set when a line is submitted.
     scroll_to_bottom: bool,
     /// The scopes a message has arrived in, indexed like `scopes`; kept when
@@ -243,14 +251,11 @@ struct Row {
     message: ConsoleMessage,
     /// How many times in a row the message arrived.
     count: u32,
-    /// Unique among rows, so a row's widgets keep their egui ids while the
-    /// list scrolls.
+    /// Unique among rows: the view tracks the rows its list shows by it, and
+    /// keys their elements with it.
     serial: u64,
     /// Whether the row shows the message's fields, spans and source.
     expanded: bool,
-    /// The row's height when it was last drawn, or 0. The list skips the rows
-    /// out of view by adding up these heights.
-    height: f32,
 }
 
 impl Console {
@@ -270,7 +275,6 @@ impl Console {
             count: 1,
             serial: self.next_serial,
             expanded: false,
-            height: 0.0,
         });
         self.next_serial += 1;
     }
@@ -282,12 +286,12 @@ impl Console {
         picked && (filter.is_empty() || message.contains(filter))
     }
 
-    /// Takes the prompt's line to be run by [`run_commands`].
-    fn submit(&mut self) {
+    /// Takes the prompt's line, to be run by [`run_line`].
+    fn submit(&mut self) -> Option<String> {
         let line = std::mem::take(&mut self.prompt.line);
         self.prompt.browsing = None;
         if line.trim().is_empty() {
-            return;
+            return None;
         }
         if self.prompt.history.last() != Some(&line) {
             self.prompt.history.push(line.clone());
@@ -296,8 +300,16 @@ impl Console {
             MessageKind::Command,
             line.clone(),
         ));
-        self.pending.push(line);
         self.scroll_to_bottom = true;
+        Some(line)
+    }
+
+    fn apply(&mut self, event: ConsoleEvent) {
+        match event {
+            ConsoleEvent::Message(message) => self.push(message),
+            ConsoleEvent::Clear => self.rows.clear(),
+            ConsoleEvent::Dock(_) => {}
+        }
     }
 }
 
@@ -359,21 +371,30 @@ fn filter_default_allows(level: Level) -> bool {
     }
 }
 
-/// Runs the lines submitted at the prompt, each in a `command` span, and
-/// prints their output.
-fn run_commands(world: &mut World) {
-    let lines = std::mem::take(&mut world.resource_mut::<Console>().pending);
-    for line in lines {
-        let result = info_span!(target: "console", "command", line = line.as_str())
-            .in_scope(|| command::run(&line, world));
-        let (kind, text) = match result {
-            Ok(None) => continue,
-            Ok(Some(output)) => (MessageKind::Output, output),
-            Err(error) => (MessageKind::CommandError, error),
-        };
-        let text = text.trim_end().to_owned();
-        world
-            .resource_mut::<Console>()
-            .push(ConsoleMessage::evaluation(kind, text));
-    }
+/// Runs a line submitted at the prompt in a `command` span, and returns what
+/// it did to the console.
+fn run_line(line: &str, world: &mut World) -> Option<ConsoleEvent> {
+    let result = info_span!(target: "console", "command", line = line)
+        .in_scope(|| command::run(line, world));
+    let (kind, text) = match result {
+        Ok(command::Outcome::Nothing) => return None,
+        Ok(command::Outcome::Console(event)) => return Some(event),
+        Ok(command::Outcome::Output(output)) => (MessageKind::Output, output),
+        Err(error) => (MessageKind::CommandError, error),
+    };
+    let text = text.trim_end().to_owned();
+    Some(ConsoleEvent::Message(ConsoleMessage::evaluation(
+        kind, text,
+    )))
+}
+
+/// Runs `line` on the Bevy thread, sending what it did back to the console.
+fn submit_line(cx: &gpui::App, line: String) {
+    cx.global::<BevyHandle>().update(move |world| {
+        if let Some(event) = run_line(&line, world)
+            && let Some(ui) = world.get_resource::<UiHandle>()
+        {
+            ui.update(move |cx| ConsoleSink::send(event, cx));
+        }
+    });
 }

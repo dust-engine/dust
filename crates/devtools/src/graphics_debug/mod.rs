@@ -9,11 +9,16 @@ mod screen_trace;
 mod sharc;
 mod sky;
 
-use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
-use pumicite_egui::egui;
+use gpui::{
+    AnyView, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
+    px,
+};
+use gpui_component::scroll::ScrollableElement as _;
+use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 
-use crate::devtools::DevToolsAppExt;
+use crate::DevToolsAppExt;
 
 /// Adds the "Graphics Debug" DevTools tab.
 #[derive(Default)]
@@ -21,102 +26,113 @@ pub struct GraphicsDebugPlugin;
 
 impl Plugin for GraphicsDebugPlugin {
     fn build(&self, app: &mut App) {
-        let world = app.world_mut();
-        let info = vec![("GPU Info", Some(world.register_system(gpu::gpu_info_ui)))];
-        let render_pipeline = vec![
-            // Drawn first: primary rays skip the pixels opaque UI covers.
-            ("egui overlay", None),
-            ("Sky atmosphere", Some(world.register_system(sky::egui_ui))),
-            ("Primary rays", None),
-            ("HZB build", None),
-            ("Shadow rays", None),
-            (
-                "Screen trace",
-                Some(world.register_system(screen_trace::screen_trace_ui)),
-            ),
-            ("Final gather", None),
-            ("SHARC", Some(world.register_system(sharc::sharc_debug_ui))),
-            ("Auto-exposure", None),
-            ("Super-resolution", None),
-            ("Tonemap", None),
-        ];
-        let sections: Vec<Vec<Page>> = [info, render_pipeline]
-            .into_iter()
-            .map(|section| {
-                section
-                    .into_iter()
-                    .map(|(name, contents)| Page { name, contents })
-                    .collect()
-            })
-            .collect();
-        app.insert_resource(GraphicsDebug {
-            sections,
-            // "GPU Info".
-            selected: (0, 0),
-        });
-        sky::build(app);
-        app.add_devtools_tab("Graphics Debug", graphics_debug_ui);
+        app.add_devtools_tab("Graphics Debug", GraphicsDebugView::new);
     }
 }
 
 struct Page {
     name: &'static str,
-    /// Draws the page into the `Ui` it is given; `None` for a render stage
-    /// without debug toggles.
-    contents: Option<SystemId<InMut<'static, egui::Ui>>>,
+    /// The page's view; `None` for a render stage without debug toggles.
+    contents: Option<AnyView>,
 }
 
-#[derive(Resource)]
-struct GraphicsDebug {
+pub(crate) struct GraphicsDebugView {
     /// The sidebar's sections, top to bottom.
     sections: Vec<Vec<Page>>,
     /// Section and page index of the shown page.
     selected: (usize, usize),
 }
 
-fn graphics_debug_ui(InMut(ui): InMut<egui::Ui>, world: &mut World) {
-    world.resource_scope(|world, mut debug: Mut<GraphicsDebug>| {
-        let debug = &mut *debug;
-        egui::Panel::left("graphics_debug_pages")
-            .resizable(true)
-            .default_size(160.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
-                        for (s, pages) in debug.sections.iter().enumerate() {
-                            if s > 0 {
-                                ui.separator();
-                            }
-                            for (p, page) in pages.iter().enumerate() {
-                                let mut name = egui::RichText::new(page.name);
-                                if page.contents.is_none() {
-                                    name = name.weak();
-                                }
-                                ui.selectable_value(&mut debug.selected, (s, p), name);
-                            }
-                        }
-                    });
-                });
-            });
-        let (s, p) = debug.selected;
-        let contents = debug
-            .sections
-            .get(s)
-            .and_then(|pages| pages.get(p))
-            .and_then(|page| page.contents);
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| match contents {
-                    Some(system) => {
-                        if let Err(err) = world.run_system_with(system, ui) {
-                            ui.colored_label(ui.visuals().error_fg_color, err.to_string());
-                        }
-                    }
-                    None => {
-                        ui.weak("No debug toggles for this stage.");
-                    }
-                });
-        });
-    });
+impl GraphicsDebugView {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let page = |name, contents: Option<AnyView>| Page { name, contents };
+        let info = vec![page(
+            "GPU Info",
+            Some(cx.new(|cx| gpu::GpuInfoPage::new(window, cx)).into()),
+        )];
+        let render_pipeline = vec![
+            page(
+                "Sky atmosphere",
+                Some(cx.new(|cx| sky::SkyPage::new(window, cx)).into()),
+            ),
+            page("Primary rays", None),
+            page("HZB build", None),
+            page("Shadow rays", None),
+            page(
+                "Screen trace",
+                Some(
+                    cx.new(|cx| screen_trace::ScreenTracePage::new(window, cx))
+                        .into(),
+                ),
+            ),
+            page("Final gather", None),
+            page(
+                "SHARC",
+                Some(cx.new(|cx| sharc::SharcPage::new(window, cx)).into()),
+            ),
+            page("Auto-exposure", None),
+            page("Super-resolution", None),
+            page("Tonemap", None),
+        ];
+        GraphicsDebugView {
+            sections: vec![info, render_pipeline],
+            // "GPU Info".
+            selected: (0, 0),
+        }
+    }
+}
+
+impl Render for GraphicsDebugView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let mut sidebar = v_flex()
+            .id("graphics-debug-pages")
+            .w(px(160.))
+            .flex_shrink_0()
+            .h_full()
+            .p_1()
+            .border_r_1()
+            .border_color(theme.border)
+            .overflow_y_scroll();
+        for (s, pages) in self.sections.iter().enumerate() {
+            if s > 0 {
+                sidebar = sidebar.child(div().my_1().h(px(1.)).bg(theme.border));
+            }
+            for (p, page) in pages.iter().enumerate() {
+                let selected = self.selected == (s, p);
+                sidebar = sidebar.child(
+                    div()
+                        .id(("graphics-debug-page", s * 100 + p))
+                        .px_2()
+                        .py_0p5()
+                        .rounded_sm()
+                        .when(page.contents.is_none(), |item| {
+                            item.text_color(theme.muted_foreground)
+                        })
+                        .when(selected, |item| item.bg(theme.list_active))
+                        .hover(|item| item.bg(theme.list_hover))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = (s, p);
+                            cx.notify();
+                        }))
+                        .child(page.name),
+                );
+            }
+        }
+        let (s, p) = self.selected;
+        let contents = match self.sections[s][p].contents.clone() {
+            Some(view) => div().child(view),
+            None => div()
+                .text_color(theme.muted_foreground)
+                .child("No debug toggles for this stage."),
+        };
+        h_flex().size_full().items_start().child(sidebar).child(
+            div()
+                .flex_1()
+                .h_full()
+                .p_2()
+                .overflow_y_scrollbar()
+                .child(contents),
+        )
+    }
 }

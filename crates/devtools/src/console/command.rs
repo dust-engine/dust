@@ -7,8 +7,8 @@ use clap::error::ErrorKind;
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing_log::log;
 
-use super::Console;
-use crate::{DevTools, DockSide};
+use super::ConsoleEvent;
+use crate::DockSide;
 
 /// A line typed at the prompt. As in a shell, its first word names the
 /// command: `multicall` has clap match it against the subcommands instead of
@@ -65,46 +65,46 @@ enum Side {
     Undock,
 }
 
-/// Runs `line`, returning what it printed, if anything, or why it failed.
-pub(super) fn run(line: &str, world: &mut World) -> Result<Option<String>, String> {
+/// What a command did, when it didn't fail.
+pub(super) enum Outcome {
+    Nothing,
+    /// What it printed.
+    Output(String),
+    /// A change to the console or DevTools, which live on the UI thread.
+    Console(ConsoleEvent),
+}
+
+/// Runs `line`, returning what it did, or why it failed.
+pub(super) fn run(line: &str, _world: &mut World) -> Result<Outcome, String> {
     let words = shlex::split(line).ok_or("error: unterminated quote")?;
     let command = match CommandLine::try_parse_from(words) {
         Ok(command_line) => command_line.command,
         // `help` and `--help` come back as errors too.
         Err(error) if error.kind() == ErrorKind::DisplayHelp => {
-            return Ok(Some(error.render().to_string()));
+            return Ok(Outcome::Output(error.render().to_string()));
         }
         Err(error) => return Err(error.render().to_string()),
     };
     match command {
-        Command::Echo { words } => Ok(Some(words.join(" "))),
+        Command::Echo { words } => Ok(Outcome::Output(words.join(" "))),
         Command::Log {
             level,
             log_crate,
             message,
-        } => log_message(level, log_crate, &message.join(" ")),
-        Command::Clear => {
-            world.resource_mut::<Console>().rows.clear();
-            Ok(None)
-        }
-        Command::Dock { side } => {
-            let mut devtools = world
-                .get_resource_mut::<DevTools>()
-                .ok_or("error: DevTools isn't set up")?;
-            devtools.dock = match side {
-                Side::Left => DockSide::Left,
-                Side::Bottom => DockSide::Bottom,
-                Side::Right => DockSide::Right,
-                Side::Undock => DockSide::Floating,
-            };
-            Ok(None)
-        }
+        } => log_message(level, log_crate, &message.join(" ")).map(|()| Outcome::Nothing),
+        Command::Clear => Ok(Outcome::Console(ConsoleEvent::Clear)),
+        Command::Dock { side } => Ok(Outcome::Console(ConsoleEvent::Dock(match side {
+            Side::Left => DockSide::Left,
+            Side::Bottom => DockSide::Bottom,
+            Side::Right => DockSide::Right,
+            Side::Undock => DockSide::Floating,
+        }))),
     }
 }
 
 /// Logs `message` with the target "console". A message `LogPlugin`'s filter
 /// drops would never show, so for one the command fails, saying so.
-fn log_message(level: LogLevel, log_crate: bool, message: &str) -> Result<Option<String>, String> {
+fn log_message(level: LogLevel, log_crate: bool, message: &str) -> Result<(), String> {
     // The `tracing` macros need the level as a constant.
     macro_rules! log_at {
         ($tracing_level:expr, $log_level:expr) => {{
@@ -130,5 +130,5 @@ fn log_message(level: LogLevel, log_crate: bool, message: &str) -> Result<Option
         LogLevel::Debug => log_at!(Level::DEBUG, log::Level::Debug),
         LogLevel::Trace => log_at!(Level::TRACE, log::Level::Trace),
     }
-    Ok(None)
+    Ok(())
 }

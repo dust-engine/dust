@@ -1,0 +1,14 @@
+[package]
+name = "dust_input"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSNotification", "NSOperation", "NSString"] }
+objc2-game-controller = "0.3"

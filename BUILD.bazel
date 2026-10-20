@@ -51,6 +51,8 @@ rust_library(
         "//crates/devtools:dust_devtools",
         "//crates/physics:dust_physics",
         "//crates/character:dust_character",
+        "//crates/ui:dust_ui",
+        "//crates/input:dust_input",
     ] + select({
         # macOS has no system Vulkan loader; link the SDK's so ash's runtime
         # dlopen("libvulkan.dylib") resolves to the bundled, rpath-staged loader.

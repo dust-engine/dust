@@ -21,6 +21,7 @@ rust_library(
         "//crates/character:dust_character",
         "//crates/pbr:dust_pbr",
         "//crates/profiler:dust_profiler",
+        "//crates/ui:dust_ui",
     ],
     rustc_env_files = [":cargo_toml_env_vars"],
 )

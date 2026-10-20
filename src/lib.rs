@@ -53,9 +53,19 @@ struct RainbowDemo {
     timer: Timer,
 }
 
+/// Runs the game: the Bevy app on a thread of its own, and the window with the
+/// DevTools overlay on this one, the main thread.
 pub fn run() {
+    dust_ui::run(build_app, dust_devtools::overlay);
+}
+
+fn build_app(ui_host: dust_ui::UiHostPlugin) -> bevy::app::App {
     let mut app = bevy::app::App::new();
 
+    // Before `LogPlugin`: its `console_layer` sends log messages through the
+    // `UiHandle` this inserts.
+    app.add_plugins(ui_host);
+    app.add_plugins(dust_input::InputPlugin);
     app.add_plugins(dust_app::DustApp)
         .add_plugins(bevy::DefaultPlugins.set(bevy::log::LogPlugin {
             custom_layer: dust_devtools::console_layer,
@@ -106,7 +116,7 @@ pub fn run() {
     )
     .add_systems(Update, (animate_teapot_system, update_rainbow_demo_system));
 
-    app.run();
+    app
 }
 
 /// Marks the character's visible placeholder body, present only in third person.
