@@ -31,9 +31,9 @@ use super::{ConsoleEvent, ConsoleMessage, Field, MessageKind, Source, SpanContex
 /// prints to stderr: `tracing` events, and `log` records, which `LogPlugin`
 /// turns into `tracing` events.
 ///
-/// The messages go to the UI thread through `dust_ui`'s `UiHandle`, which
-/// `UiHostPlugin` inserts; it has to be added before `LogPlugin`. Without the
-/// handle there is no layer.
+/// The messages go to the UI thread through `dust_ui`'s `UiHandle`, which an
+/// app run by a `BevyView` has from the start. Without the handle there is no
+/// layer.
 pub fn console_layer(app: &mut App) -> Option<BoxedLayer> {
     let ui = app.world().get_resource::<UiHandle>()?.clone();
     app.init_resource::<LayerInstalled>();

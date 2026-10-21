@@ -9,9 +9,8 @@
 //!   thread. A GPUI task runs them with `&mut gpui::App`, in the order they were
 //!   queued, between UI frames.
 //! - [`BevyHandle`], a global of the GPUI app, queues closures for the Bevy
-//!   thread. [`UiHostPlugin`](crate::UiHostPlugin) runs them with
-//!   `&mut World`, in the order they were queued, at the start of the next
-//!   frame, in [`UiSet`](crate::UiSet).
+//!   thread. The app's runner runs them with `&mut World`, in the order they
+//!   were queued, before the next frame.
 //!
 //! Neither side ever waits for the other: a result goes back as another call.
 //!
@@ -80,11 +79,11 @@ impl BevyHandle {
 
 /// Marks a system registered by [`BevyHandle::run_every_frame`].
 #[derive(Component)]
-pub(crate) struct EveryFrame;
+pub(super) struct EveryFrame;
 
 /// Runs the systems marked [`EveryFrame`]. Added to `Last`, after Bevy
 /// despawns the systems whose handles were dropped.
-pub(crate) fn run_every_frame(
+pub(super) fn run_every_frame(
     world: &mut World,
     systems: &mut QueryState<Entity, With<EveryFrame>>,
 ) {

@@ -61,10 +61,8 @@ pub enum DockSide {
     Floating,
 }
 
-/// Builds the overlay [`dust_ui::run`] draws over the game: the DevTools dock
-/// and the performance and player overlays.
-///
-/// [`dust_ui::run`]: https://docs.rs/dust_ui
+/// Builds the overlay drawn over the game's `BevyView`: the DevTools dock and the
+/// performance and player overlays.
 pub fn overlay(window: &mut Window, cx: &mut App) -> AnyView {
     Theme::change(ThemeMode::Dark, Some(window), cx);
     cx.set_global(ConsoleSink::new(window.window_handle()));

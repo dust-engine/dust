@@ -4,9 +4,9 @@
 //! GameController calls our handlers on a dispatch queue of our own, so input
 //! reaches the Bevy thread without waiting on the UI thread, which may be busy
 //! drawing. The handlers only push [`GcEvent`]s into a channel, which
-//! [`GameControllerPlugin`] drains once per frame into [`GatedInput`].
+//! [`GameControllerPlugin`] drains once per frame into [`InputWriter`].
 
-use std::ptr::NonNull;
+use std::ptr::{self, NonNull};
 use std::sync::mpsc::{Receiver, Sender};
 
 use bevy::input::keyboard::NativeKeyCode;
@@ -23,23 +23,30 @@ use objc2_game_controller::{
     GCMouseInput,
 };
 
-use crate::{GatedInput, InputSet, release_inactive};
+use crate::{CursorMode, InputSet, InputWriter};
 
 /// Reads GameController's keyboards and mice.
 pub struct GameControllerPlugin;
 
 impl Plugin for GameControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            PreUpdate,
-            read_events.in_set(InputSet).after(release_inactive),
-        );
+        app.add_systems(PreUpdate, read_events.in_set(InputSet));
     }
 }
 
-/// `watch` starts reporting when the system is initialized.
-fn read_events(watch: Local<InputSubscription>, mut input: GatedInput) {
-    for event in watch.events.try_iter() {
+/// Subscribes to the keyboards and mice while the cursor is attached, and
+/// unsubscribes, dropping the events not yet read, when it is detached.
+fn read_events(
+    mut subscription: Local<Option<InputSubscription>>,
+    cursor_mode: Res<State<CursorMode>>,
+    mut input: InputWriter,
+) {
+    if *cursor_mode.get() == CursorMode::Detached {
+        *subscription = None;
+        return;
+    }
+    let subscription = subscription.get_or_insert_with(InputSubscription::new);
+    for event in subscription.events.try_iter() {
         match event {
             GcEvent::Key { usage, pressed } => {
                 input.key(key_code(usage), pressed);
@@ -82,9 +89,9 @@ struct InputSubscription {
 // `NSNotificationCenter` may be called from any thread.
 unsafe impl Send for InputSubscription {}
 
-impl Default for InputSubscription {
+impl InputSubscription {
     /// Starts reporting from the keyboards and mice connected now and later.
-    fn default() -> Self {
+    fn new() -> Self {
         let (send, events) = std::sync::mpsc::channel();
         let queue = DispatchQueue::new("dust.game-input", DispatchQueueAttr::SERIAL);
 
@@ -141,11 +148,30 @@ impl Default for InputSubscription {
 }
 
 impl Drop for InputSubscription {
+    /// Stops reporting: removes the handlers from the devices connected now. A
+    /// device set up while this runs may keep its handlers, but they send into
+    /// the dropped channel, which ignores them.
     fn drop(&mut self) {
         let center = NSNotificationCenter::defaultCenter();
         unsafe {
             center.removeObserver(self.keyboard_observer.as_ref());
             center.removeObserver(self.mouse_observer.as_ref());
+        }
+        let keyboard = unsafe { GCKeyboard::coalescedKeyboard() };
+        if let Some(input) = keyboard.and_then(|keyboard| unsafe { keyboard.keyboardInput() }) {
+            unsafe { input.setKeyChangedHandler(ptr::null_mut()) };
+        }
+        for mouse in unsafe { GCMouse::mice() }.iter() {
+            let Some(input) = (unsafe { mouse.mouseInput() }) else {
+                continue;
+            };
+            unsafe {
+                input.setMouseMovedHandler(ptr::null_mut());
+                input.scroll().setValueChangedHandler(ptr::null_mut());
+            }
+            for (button, _) in mouse_buttons(&input) {
+                unsafe { button.setPressedChangedHandler(ptr::null_mut()) };
+            }
         }
     }
 }
@@ -204,6 +230,23 @@ fn watch_mouse(mouse: &GCMouse, queue: &DispatchRetained<DispatchQueue>, send: S
             .setValueChangedHandler(RcBlock::as_ptr(&scrolled))
     };
 
+    for (input, button) in mouse_buttons(&input) {
+        let send = send.clone();
+        let handler = RcBlock::new(
+            move |_: NonNull<GCControllerButtonInput>, _: f32, pressed: Bool| {
+                send.send(GcEvent::Button {
+                    button,
+                    pressed: pressed.as_bool(),
+                })
+                .ok();
+            },
+        );
+        unsafe { input.setPressedChangedHandler(RcBlock::as_ptr(&handler)) };
+    }
+}
+
+/// The mouse's buttons, each with the [`MouseButton`] it reports as.
+fn mouse_buttons(input: &GCMouseInput) -> Vec<(Retained<GCControllerButtonInput>, MouseButton)> {
     let mut buttons = vec![(unsafe { input.leftButton() }, MouseButton::Left)];
     buttons.extend(unsafe { input.rightButton() }.map(|b| (b, MouseButton::Right)));
     buttons.extend(unsafe { input.middleButton() }.map(|b| (b, MouseButton::Middle)));
@@ -218,19 +261,7 @@ fn watch_mouse(mouse: &GCMouse, queue: &DispatchRetained<DispatchQueue>, send: S
             buttons.push((b, button));
         }
     }
-    for (input, button) in buttons {
-        let send = send.clone();
-        let handler = RcBlock::new(
-            move |_: NonNull<GCControllerButtonInput>, _: f32, pressed: Bool| {
-                send.send(GcEvent::Button {
-                    button,
-                    pressed: pressed.as_bool(),
-                })
-                .ok();
-            },
-        );
-        unsafe { input.setPressedChangedHandler(RcBlock::as_ptr(&handler)) };
-    }
+    buttons
 }
 
 fn key_code(usage: isize) -> KeyCode {

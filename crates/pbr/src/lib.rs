@@ -25,9 +25,9 @@ use bevy_pumicite::{
     },
     shader::RayTracingPipelineLibrary,
     staging::{BufferInitializer, UniformRingBuffer},
-    swapchain::{SwapchainImage, SwapchainSet},
 };
 use bytemuck::{Pod, Zeroable};
+use dust_ui::{Swapchain, SwapchainSet};
 use pumicite::{
     Allocator,
     ash::vk::{self, TaggedStructure},
@@ -317,7 +317,7 @@ fn render(
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    mut swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    mut swapchain_images: Query<(&Camera, &GlobalTransform)>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut prev_camera: Local<PreviousCameraState>,
@@ -876,14 +876,12 @@ fn ensure_hdr_target(
     mut commands: Commands,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
     allocator: Res<Allocator>,
-    swapchain_images: Query<&SwapchainImage, With<bevy::window::PrimaryWindow>>,
+    swapchain: If<Res<Swapchain>>,
     quality_settings: Res<RenderQualitySettings>,
     upscaler: Option<Res<Upscaler>>,
 ) {
-    let Ok(swapchain_image) = swapchain_images.single() else {
-        return;
-    };
-    let Some(current) = swapchain_image.current_image() else {
+    let swapchain = swapchain.into_inner();
+    let Some(current) = swapchain.current_image() else {
         return;
     };
     let extent = UVec2::new(current.extent().x, current.extent().y);
@@ -1168,7 +1166,7 @@ fn shadow_pass(
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    swapchain_images: Query<(&Camera, &GlobalTransform)>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<JitterState>,
@@ -1396,7 +1394,7 @@ pub(crate) fn final_gather_pass(
     pipelines: Res<Assets<RayTracingPipeline>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    swapchain_images: Query<(&Camera, &GlobalTransform)>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<JitterState>,

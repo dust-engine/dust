@@ -2,11 +2,9 @@
 //! messages `bevy_input` reads (`KeyboardInput`, `MouseButtonInput`,
 //! `MouseMotion`, `MouseWheel`).
 //!
-//! The platform reports every key and click while the app is active, including
-//! typing into a UI text field and clicks on a UI panel. Which of them are the
-//! game's is up to the UI, which sets [`InputGate`]. A backend plugin reads one
-//! platform's devices and hands each event to [`GatedInput`], which keeps what
-//! the gate lets through:
+//! The game gets them only while the cursor is attached ([`CursorMode`]). A
+//! backend plugin reads one platform's devices while it is attached and hands
+//! each event to [`InputWriter`]:
 //! - macOS: [`GameControllerPlugin`](game_controller::GameControllerPlugin).
 
 #[cfg(target_os = "macos")]
@@ -14,20 +12,20 @@ pub mod game_controller;
 
 use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
-use bevy::input::keyboard::{Key, KeyCode, KeyboardFocusLost, KeyboardInput, NativeKey};
+use bevy::input::keyboard::{Key, KeyCode, KeyboardInput, NativeKey};
 use bevy::input::mouse::{MouseButtonInput, MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::input::touch::TouchPhase;
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
-/// The gate, and the backend for this platform.
+/// The [`CursorMode`] state, and the backend for this platform. Add it after
+/// `StatesPlugin`.
 pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<InputGate>()
+        app.init_state::<CursorMode>()
             .configure_sets(PreUpdate, InputSet.before(bevy::input::InputSystems))
-            .add_systems(PreUpdate, release_inactive.in_set(InputSet));
+            .add_systems(OnExit(CursorMode::Attached), release_held);
         #[cfg(target_os = "macos")]
         app.add_plugins(game_controller::GameControllerPlugin);
     }
@@ -35,122 +33,69 @@ impl Plugin for InputPlugin {
 
 /// Where input is read: in [`PreUpdate`], before `bevy_input` turns the
 /// messages into `ButtonInput` and the accumulators in [`InputSystems`].
-/// Backends run in it, after [`release_inactive`].
+/// Backends run in it.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InputSet;
 
-/// Which presses and scrolls are the game's. While the primary window's cursor
-/// is locked, all of them are, as long as the window is active.
-///
-/// Releases always reach the game: `ButtonInput` ignores one with no press.
-/// Mouse motion always does too: `MouseMotion` is the device's raw motion,
-/// whatever the pointer is over.
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct InputGate {
-    /// The window is the active one. When it stops being, every held key and
-    /// button is released: the platform reports nothing while it is inactive,
-    /// so their releases would never come.
-    pub active: bool,
-    /// Keys are the game's.
-    pub keys: bool,
-    /// The pointer is over the game, so clicks and scrolling are the game's.
-    pub pointer: bool,
+/// Whether the cursor is the game's. While it is attached, the game gets the
+/// keyboard and mouse; while it is detached, they are the UI's, and the game
+/// gets none of them. The UI sets it (`dust_ui`'s `BevyView`), and locks and
+/// hides the cursor while it is attached: it attaches the cursor when the game
+/// is clicked, and detaches it on Escape and when the window stops being the
+/// active one.
+#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CursorMode {
+    Attached,
+    #[default]
+    Detached,
 }
 
-/// Releases every held key and button while the window is inactive. Backends
-/// run after it.
-pub(crate) fn release_inactive(
-    gate: Res<InputGate>,
+/// Releases the keys and buttons held when the cursor is detached. The backend
+/// stops reading then, so their releases would never come, and they would stay
+/// held until pressed again.
+fn release_held(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
-    primary_window: Query<Entity, With<PrimaryWindow>>,
-    mut focus_lost: MessageWriter<KeyboardFocusLost>,
-    mut mouse_buttons: MessageWriter<MouseButtonInput>,
+    mut input: InputWriter,
 ) {
-    if gate.active {
-        return;
+    for &key in keys.get_pressed() {
+        input.key(key, false);
     }
-    let Ok(window) = primary_window.single() else {
-        return;
-    };
-    if keys.get_pressed().next().is_some() {
-        focus_lost.write(KeyboardFocusLost);
-    }
-    // `bevy_input` has no `KeyboardFocusLost` for the mouse.
     for &button in buttons.get_pressed() {
-        mouse_buttons.write(MouseButtonInput {
-            button,
-            state: ButtonState::Released,
-            window,
-        });
+        input.button(button, false);
     }
 }
 
-impl InputGate {
-    fn keys_to_game(&self, cursor: &CursorOptions) -> bool {
-        self.active && (locked(cursor) || self.keys)
-    }
-
-    fn pointer_to_game(&self, cursor: &CursorOptions) -> bool {
-        self.active && (locked(cursor) || self.pointer)
-    }
-}
-
-fn locked(cursor: &CursorOptions) -> bool {
-    cursor.grab_mode != CursorGrabMode::None
-}
-
-/// Writes a backend's events as `bevy_input` messages, keeping what the
-/// [`InputGate`] lets through. Events other than motion are dropped while there
-/// is no primary window.
+/// Writes a backend's events as `bevy_input` messages. There are no Bevy
+/// windows, so the messages name [`Entity::PLACEHOLDER`] as theirs.
 #[derive(SystemParam)]
-pub struct GatedInput<'w, 's> {
-    gate: Res<'w, InputGate>,
-    primary_window: Query<'w, 's, (Entity, &'static CursorOptions), With<PrimaryWindow>>,
+pub struct InputWriter<'w> {
     keyboard: MessageWriter<'w, KeyboardInput>,
     mouse_buttons: MessageWriter<'w, MouseButtonInput>,
     mouse_motion: MessageWriter<'w, MouseMotion>,
     mouse_wheel: MessageWriter<'w, MouseWheel>,
 }
 
-impl GatedInput<'_, '_> {
+impl InputWriter<'_> {
     /// A physical key. The platform reports no layout, so the logical key is
     /// `Unidentified`.
     pub fn key(&mut self, key_code: KeyCode, pressed: bool) {
-        let Ok((window, cursor)) = self.primary_window.single() else {
-            return;
-        };
-        if !pressed || self.gate.keys_to_game(cursor) {
-            self.keyboard.write(KeyboardInput {
-                key_code,
-                logical_key: Key::Unidentified(NativeKey::Unidentified),
-                state: if pressed {
-                    ButtonState::Pressed
-                } else {
-                    ButtonState::Released
-                },
-                text: None,
-                repeat: false,
-                window,
-            });
-        }
+        self.keyboard.write(KeyboardInput {
+            key_code,
+            logical_key: Key::Unidentified(NativeKey::Unidentified),
+            state: button_state(pressed),
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
     }
 
     pub fn button(&mut self, button: MouseButton, pressed: bool) {
-        let Ok((window, cursor)) = self.primary_window.single() else {
-            return;
-        };
-        if !pressed || self.gate.pointer_to_game(cursor) {
-            self.mouse_buttons.write(MouseButtonInput {
-                button,
-                state: if pressed {
-                    ButtonState::Pressed
-                } else {
-                    ButtonState::Released
-                },
-                window,
-            });
-        }
+        self.mouse_buttons.write(MouseButtonInput {
+            button,
+            state: button_state(pressed),
+            window: Entity::PLACEHOLDER,
+        });
     }
 
     /// Raw mouse motion, y down.
@@ -160,17 +105,20 @@ impl GatedInput<'_, '_> {
 
     /// Scrolling, y up.
     pub fn scroll(&mut self, delta: Vec2, unit: MouseScrollUnit) {
-        let Ok((window, cursor)) = self.primary_window.single() else {
-            return;
-        };
-        if self.gate.pointer_to_game(cursor) {
-            self.mouse_wheel.write(MouseWheel {
-                unit,
-                x: delta.x,
-                y: delta.y,
-                window,
-                phase: TouchPhase::Moved,
-            });
-        }
+        self.mouse_wheel.write(MouseWheel {
+            unit,
+            x: delta.x,
+            y: delta.y,
+            window: Entity::PLACEHOLDER,
+            phase: TouchPhase::Moved,
+        });
+    }
+}
+
+fn button_state(pressed: bool) -> ButtonState {
+    if pressed {
+        ButtonState::Pressed
+    } else {
+        ButtonState::Released
     }
 }

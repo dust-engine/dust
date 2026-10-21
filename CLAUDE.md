@@ -15,7 +15,7 @@ Hybrid Bazel + Cargo build. Bazel is the primary build system.
 
 ### pumicite
 
-We own pumicite (`dust-engine/pumicite`, local checkout at `../pumicite`), so fix bugs there rather than working around them in dust. Committed `Cargo.toml` must pin `pumicite` to a pushed commit hash (`rev`). To develop against local pumicite changes, add a `[patch]` section and build with cargo:
+We own pumicite (`dust-engine/pumicite`, local checkout at `../pumicite`), so fix bugs there rather than working around them in dust. Committed `Cargo.toml` must pin `pumicite` to a pushed commit hash (`rev`). To develop against local pumicite changes, add a `[patch]` section:
 
 ```toml
 [patch."https://github.com/dust-engine/pumicite.git"]
@@ -25,7 +25,7 @@ pumicite_egui = { path = "../pumicite/crates/egui" }
 pumicite_types = { path = "../pumicite/crates/types" }
 ```
 
-Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without it. Before committing dust, push the pumicite commit, bump the three `rev`s, and remove the `[patch]`.
+Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without it. While the `[patch]` is in, build and test with cargo only, not Bazel: a Bazel repin against the local path rewrites `MODULE.bazel.lock` and writes generated `BUILD.bazel` files into `../pumicite`. Before committing dust, push the pumicite commit, bump the three `rev`s, and remove the `[patch]`.
 
 ## Architecture
 
@@ -37,9 +37,9 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 
 - **`crates/vox/`** (`dust_vox`) — Voxel geometry, materials, and MagicaVoxel `.vox` file loading. Defines the voxel tree hierarchy as `hierarchy!(3, 3, 2, VoxLeafNode)`. Provides hit group shaders for voxel ray intersection and shadow rays.
 
-- **`crates/ui/`** (`dust_ui`) — The window and the thread split. GPUI (`gpui-pre`) owns the main thread, opens the window and draws the UI into its own `CAMetalLayer`; the Bevy app runs on a spawned thread and presents through Vulkan into a second `CAMetalLayer`, in a view under GPUI's. Each thread runs code on the other by queueing closures: `UiHandle` (a Bevy resource) runs them with GPUI's `App`, `BevyHandle` (a GPUI global) with Bevy's `World`; `BevyHandle::run_every_frame` runs a system every frame until its handle is dropped (see `bridge.rs`). macOS only.
+- **`crates/ui/`** (`dust_ui`) — `BevyView`, the GPUI view the game runs in, and the thread split. GPUI (`gpui-pre`) owns the main thread and draws the UI into its own `CAMetalLayer`; `BevyView` creates the Bevy app on a spawned thread, with the `Swapchain` resource, and has a closure build the rest. The app draws into a second `CAMetalLayer`, in a view under GPUI's. A `CAMetalDisplayLink` on that layer updates the Bevy app once per display frame, and the game renders straight into the link's drawables, imported into Vulkan (`VK_EXT_metal_objects`) as the frame's `SwapchainImage`; there is no Vulkan surface or swapchain. All macOS code is in `src/apple/`. Each thread runs code on the other by queueing closures: `UiHandle` (a Bevy resource) runs them with GPUI's `App`, `BevyHandle` (a GPUI global) with Bevy's `World`; `BevyHandle::run_every_frame` runs a system every frame until its handle is dropped (see `bridge.rs`). macOS only.
 
-- **`crates/input/`** (`dust_input`) — The game's keyboard and mouse, read on the Bevy thread from the platform (GameController on macOS) and written as `bevy_input` messages. The UI decides which input is the game's by setting `InputGate`.
+- **`crates/input/`** (`dust_input`) — The game's keyboard and mouse, read on the Bevy thread from the platform (GameController on macOS) and written as `bevy_input` messages, only while the `CursorMode` state is attached (for gameplay); while it is detached (for the UI) the backend doesn't read, and keys held at detach are released. `BevyView` sets it: a click on the game attaches the cursor, Escape and window deactivation detach it.
 
 - **`crates/devtools/`** (`dust_devtools`) — DevTools dock and overlays as GPUI views. A view shows the world with `watch` (a system run every Bevy frame while the view is drawn) or `read` (once, when it is shown), and edits it through `dust_ui`'s `BevyHandle` (see `devtools.rs`).
 

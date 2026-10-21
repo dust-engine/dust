@@ -7,8 +7,8 @@
 //! player's position and orientation. Other crates can add DevTools tabs with
 //! [`DevToolsAppExt::add_devtools_tab`].
 //!
-//! The panels are GPUI views on the UI thread, drawn over the game by the
-//! [`overlay`] given to `dust_ui::run`. They show the Bevy world with [`watch`]
+//! The panels are GPUI views on the UI thread, drawn over the game's
+//! `BevyView` by [`overlay`]. They show the Bevy world with [`watch`]
 //! and [`read`], and edit it through `dust_ui`'s `BevyHandle`.
 
 mod console;
@@ -34,8 +34,7 @@ use dust_profiler::GpuProfilerPlugin;
 /// performance overlay shows. It is the single entry point so callers don't
 /// have to track individual plugins as the crate grows.
 ///
-/// The app also needs `dust_ui`'s `UiHostPlugin`, added before `LogPlugin` so
-/// that [`console_layer`] finds the `UiHandle` it inserts.
+/// The app has to be run by a `dust_ui::BevyView`.
 #[derive(Default)]
 pub struct GfxDebugPlugin;
 

@@ -8,18 +8,16 @@
 //!
 //! [`CharacterCamera`] marks the entity whose [`Transform`] is written every
 //! frame from the character's eye position and look angles. In dust that is the
-//! primary window entity, which carries the render camera.
+//! entity carrying the render camera.
 //!
 //! Controls: WASD to move, Space to jump (or fly up), Left Control to fly down,
-//! Left Shift to sprint, F to toggle flying, V to toggle first/third person,
-//! Left Click to grab the cursor, Escape to release it. Mouse look only runs
-//! while the cursor is grabbed.
+//! Left Shift to sprint, F to toggle flying, V to toggle first/third person, and
+//! the mouse to look.
 
 use avian3d::character_controller::prelude::*;
 use avian3d::prelude::*;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 pub struct CharacterPlugin;
 
@@ -429,36 +427,22 @@ fn step_up(
 fn look_and_camera(
     mut characters: Query<(&mut Character, &Transform)>,
     mut cameras: Query<(&CharacterCamera, &mut Transform), Without<Character>>,
-    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     mouse_motion: Res<AccumulatedMouseMotion>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     children: Query<&Children>,
     spatial_query: SpatialQuery,
     mut commands: Commands,
 ) {
-    if keys.just_pressed(KeyCode::Escape) {
-        cursor.grab_mode = CursorGrabMode::None;
-        cursor.visible = true;
-    } else if mouse_buttons.just_pressed(MouseButton::Left) {
-        cursor.grab_mode = CursorGrabMode::Locked;
-        cursor.visible = false;
-    }
-    let grabbed = cursor.grab_mode != CursorGrabMode::None;
-
     for (camera, mut camera_transform) in &mut cameras {
         let Ok((mut character, transform)) = characters.get_mut(camera.0) else {
             continue;
         };
         let character = &mut *character;
 
-        if grabbed {
-            const PITCH_LIMIT: f32 = core::f32::consts::FRAC_PI_2 - 0.01;
-            character.yaw -= mouse_motion.delta.x * character.mouse_sensitivity;
-            character.pitch = (character.pitch
-                - mouse_motion.delta.y * character.mouse_sensitivity)
-                .clamp(-PITCH_LIMIT, PITCH_LIMIT);
-        }
+        const PITCH_LIMIT: f32 = core::f32::consts::FRAC_PI_2 - 0.01;
+        character.yaw -= mouse_motion.delta.x * character.mouse_sensitivity;
+        character.pitch = (character.pitch - mouse_motion.delta.y * character.mouse_sensitivity)
+            .clamp(-PITCH_LIMIT, PITCH_LIMIT);
         if keys.just_pressed(KeyCode::Space) {
             character.jump_requested = true;
         }

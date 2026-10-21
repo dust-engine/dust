@@ -418,7 +418,7 @@ fn screen_trace_pass(
     compute_pipelines: Res<Assets<ComputePipeline>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    swapchain_images: Query<(&Camera, &GlobalTransform)>,
     jitter: Res<crate::JitterState>,
     mut profiler: Option<ResMut<GpuProfiler>>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,

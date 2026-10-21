@@ -1,9 +1,7 @@
 use bevy::prelude::*;
-use bevy_pumicite::{
-    SubmissionState, prelude::ComputePipeline, staging::UniformRingBuffer,
-    swapchain::SwapchainImage,
-};
+use bevy_pumicite::{SubmissionState, prelude::ComputePipeline, staging::UniformRingBuffer};
 use bytemuck::NoUninit;
+use dust_ui::{Swapchain, SwapchainImageMetadata as _};
 use pumicite::{
     ash::vk,
     tracking::Access,
@@ -305,7 +303,7 @@ pub(crate) fn autoexposure_pass(
     state: Res<PbrRenderState>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    cameras: Query<&Camera, With<bevy::window::PrimaryWindow>>,
+    cameras: Query<&Camera>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
     time: Res<Time>,
     mut profiler: Option<ResMut<GpuProfiler>>,
@@ -416,20 +414,17 @@ pub(crate) fn tonemap_pass(
     state: Res<PbrRenderState>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    mut swapchain_images: Query<&mut SwapchainImage, With<bevy::window::PrimaryWindow>>,
+    mut swapchain: If<ResMut<Swapchain>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
-    let Ok(mut swapchain_image) = swapchain_images.single_mut() else {
-        return;
-    };
     let Some(pipeline) = compute_pipelines.get(&state.tonemap_pipeline) else {
         return;
     };
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
-    let swapchain_current_image = swapchain_image.current_image().unwrap();
+    let swapchain_current_image = swapchain.current_image().unwrap();
     // The shader pre-multiplies the HDR input by the auto-exposure scale (see
     // `autoexposure_pass`), so its mid-gray already sits at 0.18. Run LPM at
     // its neutral exposure — `midIn = hdrMax · 0.18 · 2^-exposure = 0.18` ⇔
@@ -466,7 +461,7 @@ pub(crate) fn tonemap_pass(
         );
         let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
         let swapchain_target = encoder.lock(
-            swapchain_image.current_image().as_ref().unwrap(),
+            swapchain.current_image().as_ref().unwrap(),
             vk::PipelineStageFlags2::COMPUTE_SHADER,
         );
 
@@ -503,7 +498,7 @@ pub(crate) fn tonemap_pass(
         // Swapchain: write (final composited output)
         encoder.use_image_resource(
             swapchain_target,
-            &mut swapchain_image.state,
+            swapchain.state_mut(),
             Access::COMPUTE_WRITE,
             vk::ImageLayout::GENERAL,
             0..1,

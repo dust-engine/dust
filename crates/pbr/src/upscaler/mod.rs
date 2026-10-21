@@ -287,7 +287,7 @@ pub(crate) fn upscaler_evaluate(
     mut ctx: SubmissionState,
     state: Res<UpscalerSessionState>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform)>,
     jitter: Res<crate::JitterState>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {

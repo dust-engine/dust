@@ -24,7 +24,8 @@ dust_input = { path = "crates/input" }
 # `VdbShape` pairs to `dust_physics::VdbDispatcher`.
 avian3d = { git = "https://github.com/0xbeefd1ed/avian.git", branch = "main", default-features = false, features = ["3d", "parry-f32"] }
 pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "68f665ca5c07cf6071285e81800a0b1dcadc91ee" }
-bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "68f665ca5c07cf6071285e81800a0b1dcadc91ee" }
+# Without `bevy_window`: on macOS `dust_ui` presents the frames itself, from a CAMetalDisplayLink.
+bevy_pumicite = { git = "https://github.com/dust-engine/pumicite.git", rev = "68f665ca5c07cf6071285e81800a0b1dcadc91ee", default-features = false, features = ["ktx2", "dds", "png", "jpeg", "tiff", "ron", "postcard"] }
 # Zed's GPUI (the gpui-pre snapshot) draws the UI on the main thread; see `dust_ui`.
 gpui = { package = "gpui-pre", version = "=0.3.9" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit"] }
@@ -41,6 +42,10 @@ dust_character.workspace = true
 dust_ui.workspace = true
 dust_input.workspace = true
 avian3d.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui-component.workspace = true
+gpui-kit-assets.workspace = true
 bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
@@ -52,9 +57,12 @@ features = [
     "std",
     "async_executor",
     "bevy_log",
-    "bevy_window",
     "bevy_asset",
+    "bevy_color",
     "bevy_scene",
+    "bevy_state",
+    "mouse",
+    "keyboard",
     "debug",
     "reflect_auto_register",
     "multi_threaded",
@@ -67,7 +75,6 @@ ash = { git = "https://github.com/0xbeefd1ed/ash.git", branch = "meta" }
 parry3d = { git = "https://github.com/0xbeefd1ed/parry.git", branch = "generic-voxels" }
 bevy_ecs = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_app = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
-bevy_window = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_platform = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_utils = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_transform = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
@@ -85,6 +92,12 @@ bevy_asset = { git = "https://github.com/dust-engine/bevy.git", branch = "releas
 bevy_camera = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_scene = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
+
+[patch."https://github.com/dust-engine/pumicite.git"]
+pumicite = { path = "../pumicite" }
+bevy_pumicite = { path = "../pumicite/crates/bevy" }
+pumicite_egui = { path = "../pumicite/crates/egui" }
+pumicite_types = { path = "../pumicite/crates/types" }
 
 [patch."https://github.com/ash-rs/ash.git"]
 ash = { git = "https://github.com/0xbeefd1ed/ash", branch = "meta" }

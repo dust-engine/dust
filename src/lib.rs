@@ -13,10 +13,10 @@ use dust_vox::{
     VoxGeometry, VoxInstance, VoxMaterial, VoxModel, VoxModelBLASRebuild, VoxModelCollider,
     VoxPalette,
 };
-use pumicite::{Allocator, ash::vk, swapchain::SwapchainColorMode};
+use pumicite::Allocator;
 
-use bevy::window::PrimaryWindow;
 use dust_character::{Character, CharacterCamera, CharacterPlugin, View, ViewChanged};
+use gpui::{AppContext as _, Focusable as _, ParentElement as _, Styled as _};
 
 #[derive(Component)]
 struct MovingTeapot {
@@ -53,30 +53,83 @@ struct RainbowDemo {
     timer: Timer,
 }
 
-/// Runs the game: the Bevy app on a thread of its own, and the window with the
-/// DevTools overlay on this one, the main thread.
+/// Runs the game: the window, with the game's `BevyView` and the DevTools
+/// overlay over it. The Bevy app runs on a thread of its own, and the UI on this
+/// one, the main thread.
 pub fn run() {
-    dust_ui::run(build_app, dust_devtools::overlay);
+    gpui_platform::application()
+        .with_assets(gpui_kit_assets::Assets)
+        .run(|cx: &mut gpui::App| {
+            gpui_component::init(cx);
+            let window_options = gpui::WindowOptions {
+                window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
+                    None,
+                    gpui::size(gpui::px(1280.), gpui::px(720.)),
+                    cx,
+                ))),
+                titlebar: Some(gpui::TitlebarOptions {
+                    title: Some("Dust".into()),
+                    ..default()
+                }),
+                ..default()
+            };
+            cx.open_window(window_options, |window, cx| {
+                let game = cx.new(|cx| dust_ui::BevyView::new(build_app, window, cx));
+                // The app quits once the game has exited. Closing the window asks
+                // it to, and leaves the window open until then.
+                cx.subscribe(&game, |_, _: &dust_ui::BevyExited, cx| cx.quit())
+                    .detach();
+                window.on_window_should_close(cx, {
+                    let game = game.downgrade();
+                    move |_, cx| {
+                        game.read_with(cx, |game, _| game.exit()).ok();
+                        false
+                    }
+                });
+                let overlay = dust_devtools::overlay(window, cx);
+                window.focus(&game.focus_handle(cx), cx);
+                // Transparent, so the game shows through.
+                cx.new(|cx| {
+                    gpui_component::Root::new(cx.new(|_| MainView { game, overlay }), window, cx)
+                        .bg(gpui::transparent_black())
+                })
+            })
+            .expect("failed to open the window");
+            cx.activate(true);
+        });
 }
 
-fn build_app(ui_host: dust_ui::UiHostPlugin) -> bevy::app::App {
-    let mut app = bevy::app::App::new();
+/// The window's root view: the game, with the DevTools overlay over it.
+struct MainView {
+    game: gpui::Entity<dust_ui::BevyView>,
+    overlay: gpui::AnyView,
+}
 
-    // Before `LogPlugin`: its `console_layer` sends log messages through the
-    // `UiHandle` this inserts.
-    app.add_plugins(ui_host);
-    app.add_plugins(dust_input::InputPlugin);
+impl gpui::Render for MainView {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        gpui::div()
+            .size_full()
+            .child(self.game.clone())
+            .child(gpui::div().absolute().inset_0().child(self.overlay.clone()))
+    }
+}
+
+fn build_app(app: &mut bevy::app::App) {
     app.add_plugins(dust_app::DustApp)
         .add_plugins(bevy::DefaultPlugins.set(bevy::log::LogPlugin {
             custom_layer: dust_devtools::console_layer,
             ..default()
         }))
-        .add_plugins(bevy_pumicite::SurfacePlugin::default())
+        // After `DefaultPlugins`' `StatesPlugin`.
+        .add_plugins(dust_input::InputPlugin)
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())
         .add_plugins(bevy_pumicite::DeviceFaultPlugin)
         .add_plugins(dust_pbr::upscaler::UpscalerSetupPlugin)
-        .add_plugins(bevy_pumicite::PumicitePlugin::default())
-        .add_plugins(bevy_pumicite::swapchain::SwapchainPlugin);
+        .add_plugins(bevy_pumicite::PumicitePlugin::default());
 
     // Dust plugins
     app.add_plugins(dust_pbr::PbrRenderPlugin)
@@ -91,32 +144,17 @@ fn build_app(ui_host: dust_ui::UiHostPlugin) -> bevy::app::App {
         )))
         .add_plugins(CharacterPlugin);
 
-    let primary_window = app
-        .world_mut()
-        .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
-        .iter(app.world())
-        .next()
-        .unwrap();
-    app.world_mut()
-        .entity_mut(primary_window)
-        .insert((
-            dust_pbr::camera::Camera::default(),
-            GlobalTransform::default(),
-            Transform::default(),
-        ))
-        .insert(bevy_pumicite::swapchain::SwapchainConfig {
-            image_usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            color_mode: SwapchainColorMode::HDR,
-            ..Default::default()
-        });
+    app.world_mut().spawn((
+        dust_pbr::camera::Camera::default(),
+        GlobalTransform::default(),
+        Transform::default(),
+    ));
 
     app.add_systems(
         Startup,
         (startup_system, setup_rainbow_demo).after(CreateDevice),
     )
     .add_systems(Update, (animate_teapot_system, update_rainbow_demo_system));
-
-    app
 }
 
 /// Marks the character's visible placeholder body, present only in third person.
@@ -127,7 +165,7 @@ struct CharacterBody;
 /// it down to the capsule's 1.8.
 const CHARACTER_BODY_SCALE: f32 = 0.47;
 
-fn startup_system(mut commands: Commands, primary_window: Single<Entity, With<PrimaryWindow>>) {
+fn startup_system(mut commands: Commands, camera: Single<Entity, With<dust_pbr::camera::Camera>>) {
     // `queue_spawn_scene` rather than `spawn_scene`: the `.vox` files are scene
     // dependencies that have not loaded yet, and queueing waits for them.
     commands
@@ -185,9 +223,7 @@ fn startup_system(mut commands: Commands, primary_window: Single<Entity, With<Pr
         ))
         .observe(on_view_changed)
         .id();
-    commands
-        .entity(*primary_window)
-        .insert(CharacterCamera(character));
+    commands.entity(*camera).insert(CharacterCamera(character));
 }
 
 fn on_view_changed(

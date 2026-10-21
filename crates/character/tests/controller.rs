@@ -7,7 +7,6 @@ use avian3d::prelude::*;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use bevy::window::{CursorOptions, PrimaryWindow};
 use dust_character::{Character, CharacterCamera, CharacterPlugin, Mode};
 
 const TICK: f64 = 1.0 / 64.0;
@@ -28,8 +27,6 @@ fn app() -> App {
     app.init_resource::<ButtonInput<KeyCode>>();
     app.init_resource::<ButtonInput<MouseButton>>();
     app.init_resource::<AccumulatedMouseMotion>();
-    app.world_mut()
-        .spawn((PrimaryWindow, Window::default(), CursorOptions::default()));
     app.world_mut().spawn((
         RigidBody::Static,
         Collider::cuboid(40.0, 1.0, 40.0),

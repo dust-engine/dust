@@ -1007,7 +1007,6 @@ dependencies = [
  "bevy_derive",
  "bevy_diagnostic",
  "bevy_ecs",
- "bevy_image",
  "bevy_input",
  "bevy_input_focus",
  "bevy_log",
@@ -1158,7 +1157,6 @@ source = "git+https://github.com/dust-engine/bevy.git?branch=release-0.20.0#12cf
 [[package]]
 name = "bevy_pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=68f665ca5c07cf6071285e81800a0b1dcadc91ee#68f665ca5c07cf6071285e81800a0b1dcadc91ee"
 dependencies = [
  "async-lock",
  "bevy_app",
@@ -1170,7 +1168,6 @@ dependencies = [
  "bevy_reflect",
  "bevy_tasks",
  "bevy_transform",
- "bevy_window",
  "bytemuck",
  "byteorder",
  "ddsfile",
@@ -1178,13 +1175,10 @@ dependencies = [
  "image",
  "indexmap",
  "ktx2",
- "objc2 0.6.5",
- "objc2-quartz-core 0.3.2",
  "png 0.18.1",
  "postcard",
  "pumicite",
  "pumicite_types",
- "raw-window-handle",
  "ron",
  "serde",
  "smallvec",
@@ -2577,6 +2571,10 @@ dependencies = [
  "dust_physics",
  "dust_ui",
  "dust_vox",
+ "gpui-component",
+ "gpui-kit-assets",
+ "gpui-pre",
+ "gpui-pre-platform",
  "pumicite",
 ]
 
@@ -2641,6 +2639,7 @@ dependencies = [
  "bytemuck",
  "dust_app",
  "dust_profiler",
+ "dust_ui",
  "glam",
  "objc2 0.6.5",
  "objc2-metal 0.3.2",
@@ -2678,15 +2677,15 @@ dependencies = [
  "dust_input",
  "futures-channel",
  "futures-util",
- "gpui-component",
- "gpui-kit-assets",
  "gpui-pre",
- "gpui-pre-platform",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "pumicite",
  "raw-window-handle",
 ]
 
@@ -6681,7 +6680,6 @@ checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
 [[package]]
 name = "pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=68f665ca5c07cf6071285e81800a0b1dcadc91ee#68f665ca5c07cf6071285e81800a0b1dcadc91ee"
 dependencies = [
  "ash",
  "bevy_asset",
@@ -6695,7 +6693,6 @@ dependencies = [
  "log",
  "objc2 0.6.5",
  "objc2-metal 0.3.2",
- "objc2-quartz-core 0.3.2",
  "pin-project-lite",
  "portable-atomic",
  "pumicite_types",
@@ -6710,7 +6707,6 @@ dependencies = [
 [[package]]
 name = "pumicite_types"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=68f665ca5c07cf6071285e81800a0b1dcadc91ee#68f665ca5c07cf6071285e81800a0b1dcadc91ee"
 dependencies = [
  "ash",
  "glam",
@@ -10720,3 +10716,7 @@ dependencies = [
  "syn 3.0.8",
  "winnow 1.0.4",
 ]
+
+[[patch.unused]]
+name = "pumicite_egui"
+version = "0.1.0"

@@ -40,6 +40,7 @@ rust_library(
     deps = all_crate_deps(normal = True) + [
         "//crates/app:dust_app",
         "//crates/profiler:dust_profiler",
+        "//crates/ui:dust_ui",
     ],
     link_deps = ["//third_party/ffx:ffx_lpm_cpu"] + select({
         "@platforms//os:macos": [],

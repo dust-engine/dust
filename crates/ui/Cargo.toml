@@ -6,18 +6,18 @@ edition = "2024"
 [dependencies]
 bevy.workspace = true
 bevy_pumicite.workspace = true
+pumicite.workspace = true
 dust_input.workspace = true
 gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component.workspace = true
-gpui-kit-assets.workspace = true
 futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false }
 raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSCursor", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
-objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFRunLoop"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSObject", "NSRunLoop", "NSString"] }
+objc2-metal = "0.3.2"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-quartz-core", "NSCursor", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "CALayer", "CAMetalDisplayLink", "CAMetalLayer"] }

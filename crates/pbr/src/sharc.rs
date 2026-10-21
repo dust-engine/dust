@@ -573,7 +573,7 @@ fn sharc_update_pass(
     tlas: Res<TLAS<PbrInstanceData>>,
     mut uploader: BufferInitializer,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    swapchain_images: Query<(&Camera, &GlobalTransform)>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<crate::JitterState>,
@@ -919,7 +919,7 @@ fn sharc_resolve_pass(
     frame_state: Res<SharcFrameState>,
     mut sharc_resources: Option<ResMut<SharcResources>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    swapchain_images: Query<&GlobalTransform, With<bevy::window::PrimaryWindow>>,
+    swapchain_images: Query<&GlobalTransform, With<Camera>>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     if !config.enabled {
@@ -1063,7 +1063,7 @@ fn sharc_debug_overlay_pass(
     mut sharc_resources: Option<ResMut<SharcResources>>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
-    swapchain_images: Query<(&Camera, &GlobalTransform), With<bevy::window::PrimaryWindow>>,
+    swapchain_images: Query<(&Camera, &GlobalTransform)>,
     jitter: Res<crate::JitterState>,
 ) {
     if !debug.is_active() {
