@@ -4,7 +4,7 @@
 //! [`overlay`]. A Bevy plugin adds a tab with
 //! [`DevToolsAppExt::add_devtools_tab`], passing the constructor of the tab's
 //! view. A view shows the world with [`watch`] or [`read`], called from its
-//! `render`, and edits it through `dust_ui`'s `BevyHandle`:
+//! `render`, and edits it through `dust_ui`'s `BevyChannel`:
 //!
 //! ```ignore
 //! app.add_devtools_tab("Physics", PhysicsTab::new);
@@ -18,7 +18,7 @@
 //!     }
 //! }
 //! // and in a control's handler:
-//! cx.global::<BevyHandle>().update(move |world| world.resource_mut::<Gravity>().0.y = y);
+//! cx.global::<BevyChannel>().update(move |world| world.resource_mut::<Gravity>().0.y = y);
 //! ```
 //!
 //! F12, or ⌘⌥I as in Chrome on macOS, toggles DevTools.
@@ -30,7 +30,7 @@ use bevy::prelude::{
     DetectChanges as _, In, IntoSystem, Res, ResMut, Resource, Startup, World, warn_once,
 };
 use dust_profiler::GpuProfiler;
-use dust_ui::{BevyHandle, UiHandle};
+use dust_ui::{BevyChannel, GPUIChannel};
 use gpui::{
     AnyView, AnyWindowHandle, App, AppContext as _, Context, ElementId, Entity,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
@@ -330,7 +330,7 @@ impl DevTools {
                                     cx.notify();
                                 })
                                 .ok();
-                            cx.global::<BevyHandle>().update(move |world: &mut World| {
+                            cx.global::<BevyChannel>().update(move |world: &mut World| {
                                 if let Some(mut profiler) = world.get_resource_mut::<GpuProfiler>()
                                 {
                                     profiler.enabled = !enabled;
@@ -428,13 +428,13 @@ pub fn watch<V: 'static, T: Send + 'static, M>(
     let handle = window.window_handle();
     let key = ElementId::CodeLocation(*Location::caller());
     window.use_keyed_state(key, cx, move |_, cx| {
-        let send = move |In(value): In<Option<T>>, ui: Res<UiHandle>| {
+        let send = move |In(value): In<Option<T>>, ui: Res<GPUIChannel>| {
             if let Some(value) = value {
                 send_to_view(&ui, view.clone(), handle, apply, value);
             }
         };
         let slot = cx.weak_entity();
-        cx.global::<BevyHandle>()
+        cx.global::<BevyChannel>()
             .run_every_frame(system.pipe(send), move |system, cx| {
                 // Once the view stops being drawn the slot is gone, and
                 // `system` is dropped here instead.
@@ -459,9 +459,11 @@ pub fn read<V: 'static, T: Send + 'static, M>(
     let handle = window.window_handle();
     let key = ElementId::CodeLocation(*Location::caller());
     window.use_keyed_state(key, cx, move |_, cx| {
-        cx.global::<BevyHandle>()
+        cx.global::<BevyChannel>()
             .update(move |world| match world.run_system_once(system) {
-                Ok(value) => send_to_view(world.resource::<UiHandle>(), view, handle, apply, value),
+                Ok(value) => {
+                    send_to_view(world.resource::<GPUIChannel>(), view, handle, apply, value)
+                }
                 Err(error) => warn_once!("DevTools read failed: {error}"),
             });
     });
@@ -469,7 +471,7 @@ pub fn read<V: 'static, T: Send + 'static, M>(
 
 /// Has the UI thread pass `value` to `apply` on `view`, then redraw the view.
 fn send_to_view<V: 'static, T: Send + 'static>(
-    ui: &UiHandle,
+    ui: &GPUIChannel,
     view: WeakEntity<V>,
     window: AnyWindowHandle,
     apply: Apply<V, T>,
@@ -535,7 +537,7 @@ impl bevy::app::Plugin for TabsPlugin {
     }
 }
 
-fn send_tabs(mut tabs: ResMut<Tabs>, ui: Option<Res<UiHandle>>) {
+fn send_tabs(mut tabs: ResMut<Tabs>, ui: Option<Res<GPUIChannel>>) {
     let tabs = std::mem::take(&mut tabs.0);
     let Some(ui) = ui else {
         return;

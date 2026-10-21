@@ -343,7 +343,7 @@ fn plugin_builds_with_and_without_layer() {
 
     let mut app = App::new();
     let (to_ui, _from_bevy) = futures_channel::mpsc::unbounded();
-    app.insert_resource(dust_ui::UiHandle(to_ui));
+    app.insert_resource(dust_ui::GPUIChannel(to_ui));
     let layer = console_layer(&mut app);
     assert!(layer.is_some());
     app.add_plugins(ConsolePlugin);

@@ -5,7 +5,7 @@
 //! The console's rows live with its view on the UI thread. Log messages reach
 //! them through [`console_layer`], which has to be installed as
 //! `LogPlugin::custom_layer`; it sends each message to the UI thread through
-//! `dust_ui`'s `UiHandle`.
+//! `dust_ui`'s `GPUIChannel`.
 //! A line submitted at the prompt runs on the Bevy thread, with the world, and
 //! what it does to the console comes back the same way. The commands live in
 //! [`command`].
@@ -24,7 +24,7 @@ use bevy::prelude::*;
 
 use crate::DevToolsAppExt;
 use crate::DockSide;
-use dust_ui::{BevyHandle, UiHandle};
+use dust_ui::{BevyChannel, GPUIChannel};
 use layer::LayerInstalled;
 pub use layer::console_layer;
 pub(crate) use ui::{ConsoleSink, ConsoleView};
@@ -390,9 +390,9 @@ fn run_line(line: &str, world: &mut World) -> Option<ConsoleEvent> {
 
 /// Runs `line` on the Bevy thread, sending what it did back to the console.
 fn submit_line(cx: &gpui::App, line: String) {
-    cx.global::<BevyHandle>().update(move |world| {
+    cx.global::<BevyChannel>().update(move |world| {
         if let Some(event) = run_line(&line, world)
-            && let Some(ui) = world.get_resource::<UiHandle>()
+            && let Some(ui) = world.get_resource::<GPUIChannel>()
         {
             ui.update(move |cx| ConsoleSink::send(event, cx));
         }

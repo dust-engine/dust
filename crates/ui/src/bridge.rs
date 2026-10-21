@@ -5,16 +5,16 @@
 //! system is running. So each side queues closures for the other to run with
 //! its own state:
 //!
-//! - [`UiHandle`], a resource of the Bevy app, queues closures for the UI
+//! - [`GPUIChannel`], a resource of the Bevy app, queues closures for the UI
 //!   thread. A GPUI task runs them with `&mut gpui::App`, in the order they were
 //!   queued, between UI frames.
-//! - [`BevyHandle`], a global of the GPUI app, queues closures for the Bevy
+//! - [`BevyChannel`], a global of the GPUI app, queues closures for the Bevy
 //!   thread. The app's runner runs them with `&mut World`, in the order they
 //!   were queued, before the next frame.
 //!
 //! Neither side ever waits for the other: a result goes back as another call.
 //!
-//! [`BevyHandle::run_every_frame`] runs a system on the Bevy thread every
+//! [`BevyChannel::run_every_frame`] runs a system on the Bevy thread every
 //! frame, for as long as the UI thread keeps its `SystemHandle`.
 
 use std::sync::mpsc::Sender;
@@ -32,9 +32,9 @@ pub type BevyCall = Box<dyn FnOnce(&mut World) + Send>;
 /// Runs closures on the UI thread; a resource of the Bevy app. Clones queue to
 /// the same thread, from any thread.
 #[derive(Resource, Clone)]
-pub struct UiHandle(pub UnboundedSender<UiCall>);
+pub struct GPUIChannel(pub UnboundedSender<UiCall>);
 
-impl UiHandle {
+impl GPUIChannel {
     /// Runs `call` with the GPUI app, after the calls queued before it.
     pub fn update(&self, call: impl FnOnce(&mut gpui::App) + Send + 'static) {
         // Fails only once the UI has quit.
@@ -44,11 +44,11 @@ impl UiHandle {
 
 /// Runs closures on the Bevy thread; a global of the GPUI app.
 #[derive(Clone)]
-pub struct BevyHandle(pub Sender<BevyCall>);
+pub struct BevyChannel(pub Sender<BevyCall>);
 
-impl gpui::Global for BevyHandle {}
+impl gpui::Global for BevyChannel {}
 
-impl BevyHandle {
+impl BevyChannel {
     /// Runs `call` with the Bevy world, after the calls queued before it.
     pub fn update(&self, call: impl FnOnce(&mut World) + Send + 'static) {
         // Fails only once the Bevy app has exited.
@@ -71,13 +71,13 @@ impl BevyHandle {
             let handle = world.register_tracked_system(system);
             world.entity_mut(handle.entity()).insert(EveryFrame);
             world
-                .resource::<UiHandle>()
+                .resource::<GPUIChannel>()
                 .update(move |cx| then(handle, cx));
         });
     }
 }
 
-/// Marks a system registered by [`BevyHandle::run_every_frame`].
+/// Marks a system registered by [`BevyChannel::run_every_frame`].
 #[derive(Component)]
 pub(super) struct EveryFrame;
 

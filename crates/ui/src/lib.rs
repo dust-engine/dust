@@ -9,10 +9,10 @@
 //! link's drawables (see the `apple` module).
 //!
 //! The two threads reach each other by queueing closures, through
-//! [`UiHandle`] (a resource of the Bevy app) and [`BevyHandle`] (a global of
+//! [`GPUIChannel`] (a resource of the Bevy app) and [`BevyChannel`] (a global of
 //! the GPUI app); see the [`bridge`] module. This crate uses them to set
 //! `dust_input`'s `CursorMode` and for the app's exit. UI built on top, such as
-//! the devtools, uses the same handles.
+//! the devtools, uses the same channels.
 //!
 //! The keyboard and mouse don't pass through the UI thread; `dust_input` reads
 //! them on the Bevy thread.
@@ -24,21 +24,25 @@ compile_error!(
 
 pub mod bridge;
 
-mod plugin;
 mod view;
 
 #[cfg(target_os = "macos")]
 mod apple;
 
-use bevy::prelude::{Res, SystemSet};
+use bevy::{
+    app::{Last, Plugin, PostUpdate},
+    ecs::schedule::IntoScheduleConfigs,
+    prelude::{Res, SystemSet},
+};
 
-pub use bridge::{BevyHandle, UiHandle};
+use bevy_pumicite::DefaultRenderSet;
+pub use bridge::{BevyChannel, GPUIChannel};
 pub use view::{BevyExited, BevyView};
 
 #[cfg(target_os = "macos")]
 pub use apple::drawable::{
     DrawableImage as SwapchainImage, DrawableImageMetadata as SwapchainImageMetadata,
-    MetalLayer as Swapchain,
+    MetalDrawable as Swapchain,
 };
 
 /// Where systems using the [`Swapchain`]'s current image run: after the image is
@@ -50,4 +54,27 @@ pub struct SwapchainSet;
 /// The run condition for [`SwapchainSet`]
 fn swapchain_image_acquired(swapchain: Option<Res<Swapchain>>) -> bool {
     swapchain.is_some_and(|swapchain| swapchain.current_image().is_some())
+}
+
+/// Connects the Bevy app to the UI thread, and inserts the [`GPUIChannel`]
+/// resource. [`BevyView`](crate::BevyView) adds it before the rest of the app.
+pub(crate) struct GPUIPlugin {
+    pub(crate) ui: GPUIChannel,
+}
+
+impl Plugin for GPUIPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        app.insert_resource(self.ui.clone())
+            .add_systems(
+                Last,
+                bridge::run_every_frame.after(bevy::ecs::system::despawn_unused_registered_systems),
+            )
+            .configure_sets(
+                PostUpdate,
+                (
+                    DefaultRenderSet.in_set(SwapchainSet),
+                    SwapchainSet.run_if(swapchain_image_acquired),
+                ),
+            );
+    }
 }

@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use dust_pbr::sharc::{SharcConfig, SharcDebugMode, SharcDebugState};
-use dust_ui::BevyHandle;
+use dust_ui::BevyChannel;
 use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window};
 use gpui_component::accordion::Accordion;
 use gpui_component::button::Button;
@@ -53,7 +53,7 @@ fn config(
         edit(config);
         cx.notify();
     }
-    cx.global::<BevyHandle>()
+    cx.global::<BevyChannel>()
         .update(move |world| edit(&mut world.resource_mut::<SharcConfig>()));
 }
 
@@ -67,7 +67,7 @@ fn edit_debug_state(
         edit(debug_state);
         cx.notify();
     }
-    cx.global::<BevyHandle>()
+    cx.global::<BevyChannel>()
         .update(move |world| edit(&mut world.resource_mut::<SharcDebugState>()));
 }
 

@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use dust_pbr::sky::AtmosphereState;
-use dust_ui::BevyHandle;
+use dust_ui::BevyChannel;
 use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window};
 use gpui_component::button::Button;
 use gpui_component::{Sizable as _, v_flex};
@@ -30,7 +30,7 @@ pub(super) struct SkyPage {
 /// Sends an edit of the [`AtmosphereState`], marking it changed only if the
 /// edit changed it.
 fn atmosphere(cx: &mut gpui::App, edit: impl FnOnce(&mut AtmosphereState) + Send + 'static) {
-    cx.global::<BevyHandle>().update(move |world| {
+    cx.global::<BevyChannel>().update(move |world| {
         let mut atmosphere = world.resource_mut::<AtmosphereState>();
         let mut next = atmosphere.clone();
         edit(&mut next);

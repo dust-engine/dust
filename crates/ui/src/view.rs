@@ -5,23 +5,21 @@ use bevy::prelude::NextState;
 use futures_util::StreamExt;
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeyBinding, MouseButton, MouseDownEvent, Render, Styled, Task, Window, actions, div,
+    KeyDownEvent, MouseButton, MouseDownEvent, Render, Styled, Task, Window, div,
 };
 
 use dust_input::CursorMode;
 
-use crate::apple::{self, GameLayer};
-use crate::bridge::{BevyHandle, UiHandle};
-use crate::plugin::UiHostPlugin;
-
-actions!(dust_ui, [DetachCursor]);
+use crate::GPUIPlugin;
+use crate::apple::NSViewWithMetalLayer;
+use crate::bridge::{BevyChannel, GPUIChannel};
 
 /// Shows a Bevy app, which runs on a thread of its own and draws into a layer
 /// under GPUI's (see the crate docs).
 ///
-/// [`BevyView::new`] sets the [`BevyHandle`] global, so a GPUI app has one
-/// `BevyView`. The calls the Bevy app queues through the [`UiHandle`] run in a
-/// GPUI task, so not before the code that created the view returns: views
+/// [`BevyView::new`] sets the [`BevyChannel`] global, so a GPUI app has one
+/// `BevyView`. The calls the Bevy app queues through the [`GPUIChannel`] run in
+/// a GPUI task, so not before the code that created the view returns: views
 /// created next to it, such as an overlay, exist by then.
 ///
 /// The game shows only where nothing is drawn over it, so the views the
@@ -35,8 +33,8 @@ actions!(dust_ui, [DetachCursor]);
 /// active one.
 pub struct BevyView {
     focus: FocusHandle,
-    bevy: BevyHandle,
-    game_layer: GameLayer,
+    bevy: BevyChannel,
+    game_layer: NSViewWithMetalLayer,
     size: WindowSize,
     /// Runs the calls the Bevy app queues for the UI thread.
     _ui_calls: Task<()>,
@@ -51,9 +49,9 @@ impl BevyView {
     /// Starts a Bevy app on a thread of its own, drawing into this view.
     ///
     /// The app is created on that thread, with `dust_ui`'s plugin, which inserts
-    /// the [`UiHandle`] and the [`Swapchain`](crate::Swapchain). `build` then adds
-    /// the rest of the app, without running it: the view sets the app's runner
-    /// and runs it.
+    /// the [`GPUIChannel`]. `build` then adds the rest of the app, without running
+    /// it: the view sets the app's runner, which adds the
+    /// [`Swapchain`](crate::Swapchain), and runs it.
     pub fn new(
         build: impl FnOnce(&mut bevy::app::App) + Send + 'static,
         window: &mut Window,
@@ -61,35 +59,30 @@ impl BevyView {
     ) -> Self {
         let (to_bevy, from_ui) = std::sync::mpsc::channel();
         let (to_ui, mut from_bevy) = futures_channel::mpsc::unbounded();
-        let ui = UiHandle(to_ui);
-        let bevy = BevyHandle(to_bevy);
+        let ui = GPUIChannel(to_ui);
+        let bevy = BevyChannel(to_bevy);
         cx.set_global(bevy.clone());
 
-        cx.bind_keys([KeyBinding::new("escape", DetachCursor, Some("BevyView"))]);
-        cx.observe_window_activation(window, |this, window, cx| {
+        cx.observe_window_activation(window, |this, window, _| {
             if !window.is_window_active() {
-                this.set_cursor_mode(CursorMode::Detached, cx);
+                this.set_cursor_mode(CursorMode::Detached);
             }
         })
         .detach();
 
-        let game_layer = GameLayer::new(window);
+        let mut game_layer = NSViewWithMetalLayer::new(window);
+        let runner = game_layer.create_bevy_runner(from_ui);
         let size = window_size(window);
         game_layer.set_size(size);
 
-        // The Bevy app starts once the game's layer exists, and draws into it
-        // from its first frame.
-        let layer = game_layer.layer();
         let view = cx.weak_entity();
         std::thread::Builder::new()
             .name("bevy".into())
             .spawn(move || {
                 let mut app = bevy::app::App::new();
-                app.add_plugins(UiHostPlugin { ui: ui.clone() });
+                app.add_plugins(GPUIPlugin { ui: ui.clone() });
                 build(&mut app);
-                app.set_runner(move |app| apple::displaylink_runner(app, from_ui, layer));
-                // `run` moves the app into the runner, which drops it (and with
-                // it its images of the layer's drawables) before returning.
+                app.set_runner(runner);
                 let exit = app.run();
                 ui.update(move |cx| {
                     view.update(cx, |_, cx| cx.emit(BevyExited(exit))).ok();
@@ -121,8 +114,9 @@ impl BevyView {
 
     /// Locks and hides the cursor for the game, or frees it for the UI, and sets
     /// the game's [`CursorMode`] to match.
-    fn set_cursor_mode(&self, mode: CursorMode, cx: &mut App) {
-        apple::set_cursor(mode == CursorMode::Attached, cx);
+    pub fn set_cursor_mode(&mut self, mode: CursorMode) {
+        self.game_layer
+            .set_cursor_locked(mode == CursorMode::Attached);
         self.bevy.update(move |world| {
             world
                 .resource_mut::<NextState<CursorMode>>()
@@ -133,9 +127,11 @@ impl BevyView {
     /// Resizes the layer when the window's drawable area changes.
     fn sync_size(&mut self, window: &Window) {
         let size = window_size(window);
-        if std::mem::replace(&mut self.size, size) != size {
-            self.game_layer.set_size(size);
+        if self.size == size {
+            return;
         }
+        self.size = size;
+        self.game_layer.set_size(size);
     }
 }
 
@@ -149,18 +145,21 @@ impl Render for BevyView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_size(window);
         div()
-            .key_context("BevyView")
             .size_full()
             .track_focus(&self.focus)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus, cx);
-                    this.set_cursor_mode(CursorMode::Attached, cx);
+                    this.set_cursor_mode(CursorMode::Attached);
                 }),
             )
-            .on_action(cx.listener(|this, _: &DetachCursor, _, cx| {
-                this.set_cursor_mode(CursorMode::Detached, cx);
+            // A listener rather than a key binding: GPUI hides the cursor until
+            // the mouse moves after a key binding's action runs.
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, _| {
+                if event.keystroke.key == "escape" {
+                    this.set_cursor_mode(CursorMode::Detached);
+                }
             }))
     }
 }

@@ -9,7 +9,7 @@
 //!
 //! The panels are GPUI views on the UI thread, drawn over the game's
 //! `BevyView` by [`overlay`]. They show the Bevy world with [`watch`]
-//! and [`read`], and edit it through `dust_ui`'s `BevyHandle`.
+//! and [`read`], and edit it through `dust_ui`'s `BevyChannel`.
 
 mod console;
 mod devtools;

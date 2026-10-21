@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use dust_pbr::HdrRenderTarget;
 use dust_pbr::screen_trace::{ScreenTraceConfig, ScreenTraceDebugMode, ScreenTraceState};
-use dust_ui::BevyHandle;
+use dust_ui::BevyChannel;
 use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window};
 use gpui_component::accordion::Accordion;
 use gpui_component::checkbox::Checkbox;
@@ -66,7 +66,7 @@ fn config(
         edit(config);
         cx.notify();
     }
-    cx.global::<BevyHandle>()
+    cx.global::<BevyChannel>()
         .update(move |world| edit(&mut world.resource_mut::<ScreenTraceConfig>()));
 }
 

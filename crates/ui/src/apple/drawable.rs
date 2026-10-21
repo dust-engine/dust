@@ -12,54 +12,34 @@
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy_pumicite::{
-    CreateDevice, queue::{Queue, RenderQueue},
+    CreateDevice,
     pumicite::{
+        Device,
         ash::{ext, vk, vk::TaggedStructure as _},
-        device::DeviceBuilder, image::ImageLike,
-        sync::GPUMutex, tracking::ResourceState, utils::AsVkHandle, utils::metal::{AsMTLCommandQueue, AsMTLDevice},
-        Device, project_host_metadata
-    }
+        device::DeviceBuilder,
+        image::ImageLike,
+        project_host_metadata,
+        sync::GPUMutex,
+        tracking::ResourceState,
+        utils::AsVkHandle,
+        utils::metal::{AsMTLCommandQueue, AsMTLDevice},
+    },
+    queue::{Queue, RenderQueue},
 };
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2_core_graphics::{CGColorSpace, kCGColorSpaceITUR_2100_PQ};
-use objc2_metal::{
-    MTL4CommandQueue, MTLCreateSystemDefaultDevice, MTLDrawable, MTLPixelFormat, MTLResource,
-    MTLTexture,
-};
-use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use objc2_metal::{MTL4CommandQueue, MTLDrawable, MTLResource, MTLTexture};
+use objc2_quartz_core::CAMetalDrawable;
 
 use crate::SwapchainSet;
 
-/// The drawables' pixel format: HDR10's 10-bit PQ. [`configure_layer`] sets it on
-/// the layer, and the imported images take the matching Vulkan format and color
-/// space.
-const PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::RGB10A2Unorm;
-const FORMAT: vk::Format = vk::Format::A2B10G10R10_UNORM_PACK32;
-const COLOR_SPACE: vk::ColorSpaceKHR = vk::ColorSpaceKHR::HDR10_ST2084_EXT;
-
-/// Sets up the game's layer to vend the drawables the swapchain renders into.
-/// Runs on the UI thread, which makes the layer.
-pub(super) fn configure_layer(layer: &CAMetalLayer) {
-    // The drawables are imported into Vulkan, so they come from the GPU kosmickrisp
-    // runs on: on a Mac, the system default device.
-    layer.setDevice(MTLCreateSystemDefaultDevice().as_deref());
-    // The tonemap pass writes them as storage images.
-    layer.setFramebufferOnly(false);
-    layer.setPixelFormat(PIXEL_FORMAT);
-    // SAFETY: a constant CoreGraphics defines.
-    let color_space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceITUR_2100_PQ }));
-    layer.setColorspace(color_space.as_deref());
-    layer.setWantsExtendedDynamicRangeContent(true);
-}
-
-/// Inserts the [`MetalLayer`], and acquires and presents its images around
+/// Inserts the [`MetalDrawable`], and acquires and presents its images around
 /// [`SwapchainSet`].
 pub(super) struct CAMetalDrawablePlugin;
 
 impl Plugin for CAMetalDrawablePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MetalLayer {
+        app.insert_resource(MetalDrawable {
             drawable: None,
             image: None,
             state: ResourceState::default(),
@@ -83,9 +63,9 @@ impl Plugin for CAMetalDrawablePlugin {
 /// The swapchain's state on macOS: the frame's drawable, and its texture imported
 /// into Vulkan.
 #[derive(Resource)]
-pub struct MetalLayer {
-    /// The drawable of the frame being updated, from [`set_drawable`] until
-    /// [`present`].
+pub struct MetalDrawable {
+    /// The drawable of the frame being updated, from
+    /// `BevyDisplayLinkDelegate::update` until [`present`].
     pub(crate) drawable: Option<Retained<ProtocolObject<dyn CAMetalDrawable>>>,
     /// The drawable's texture imported as a Vulkan image, from [`acquire`] until
     /// [`present`]. Metal makes no promise to hand out the same textures again, so
@@ -96,13 +76,13 @@ pub struct MetalLayer {
     state: ResourceState,
 }
 
-// SAFETY: only `set_drawable`, `acquire` and `present` touch `drawable`, all on the
-// Bevy thread (`acquire` and `present` take `NonSendMarker`). The rest is `Send` and
-// `Sync`.
-unsafe impl Send for MetalLayer {}
-unsafe impl Sync for MetalLayer {}
+// SAFETY: only `BevyDisplayLinkDelegate::update`, `acquire` and `present` touch
+// `drawable`, all on the Bevy thread (`acquire` and `present` take
+// `NonSendMarker`). The rest is `Send` and `Sync`.
+unsafe impl Send for MetalDrawable {}
+unsafe impl Sync for MetalDrawable {}
 
-impl MetalLayer {
+impl MetalDrawable {
     /// The image the current frame renders into, from its acquisition until it's
     /// presented: in [`SwapchainSet`].
     pub fn current_image(&self) -> Option<&GPUMutex<DrawableImage>> {
@@ -121,18 +101,18 @@ fn acquire(
     _bevy_thread: NonSendMarker,
     device: Res<Device>,
     queue: Queue<RenderQueue>,
-    metal_layer: ResMut<MetalLayer>,
+    metal_drawable: ResMut<MetalDrawable>,
 ) {
-    let metal_layer = metal_layer.into_inner();
-    let Some(drawable) = &metal_layer.drawable else {
+    let metal_drawable = metal_drawable.into_inner();
+    let Some(drawable) = &metal_drawable.drawable else {
         return;
     };
-    metal_layer.image = Some(GPUMutex::new(DrawableImage::new(
+    metal_drawable.image = Some(GPUMutex::new(DrawableImage::new(
         device.clone(),
         &drawable.texture(),
     )));
-    metal_layer.state = ResourceState::default();
-    metal_layer.state.write.stage = vk::PipelineStageFlags2::ALL_COMMANDS;
+    metal_drawable.state = ResourceState::default();
+    metal_drawable.state.write.stage = vk::PipelineStageFlags2::ALL_COMMANDS;
     // Work committed from here on, the frame's included, waits for the drawable.
     queue
         .mtl_command_queue()
@@ -144,10 +124,10 @@ fn acquire(
 fn present(
     _bevy_thread: NonSendMarker,
     queue: Queue<RenderQueue>,
-    mut swapchain: ResMut<MetalLayer>,
+    mut metal_drawable: ResMut<MetalDrawable>,
 ) {
-    swapchain.image = None;
-    let Some(drawable) = swapchain.drawable.take() else {
+    metal_drawable.image = None;
+    let Some(drawable) = metal_drawable.drawable.take() else {
         return;
     };
     queue
@@ -177,7 +157,7 @@ impl DrawableImage {
             .mtl_texture(std::ptr::from_ref(texture).cast_mut().cast());
         let info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
-            .format(FORMAT)
+            .format(vk::Format::A2B10G10R10_UNORM_PACK32)
             .extent(vk::Extent3D {
                 width: extent.x,
                 height: extent.y,
@@ -198,7 +178,7 @@ impl DrawableImage {
                 &vk::ImageViewCreateInfo::default()
                     .image(image)
                     .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(FORMAT)
+                    .format(vk::Format::A2B10G10R10_UNORM_PACK32)
                     .subresource_range(vk::ImageSubresourceRange {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
                         base_mip_level: 0,
@@ -225,7 +205,7 @@ impl DrawableImage {
 
     /// The color space the layer shows the image in.
     pub fn color_space(&self) -> vk::ColorSpaceKHR {
-        COLOR_SPACE
+        vk::ColorSpaceKHR::HDR10_ST2084_EXT
     }
 }
 
@@ -268,7 +248,7 @@ unsafe impl ImageLike for DrawableImage {
     }
 
     fn format(&self) -> vk::Format {
-        FORMAT
+        vk::Format::A2B10G10R10_UNORM_PACK32
     }
 
     fn ty(&self) -> vk::ImageType {
