@@ -3,11 +3,11 @@
 
 use std::sync::mpsc::Receiver;
 
-use gpui::{Window, WindowBackgroundAppearance};
+use gpui::{Bounds, Pixels, Window, WindowBackgroundAppearance};
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSAutoresizingMaskOptions, NSCursor, NSView, NSWindowOrderingMode};
-use objc2_core_foundation::CGSize;
+use objc2_app_kit::{NSCursor, NSView, NSWindowOrderingMode};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_quartz_core::CAMetalLayer;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::{Cell, RefCell};
@@ -21,16 +21,16 @@ use objc2_foundation::{NSDefaultRunLoopMode, NSObject, NSObjectProtocol, NSRunLo
 use objc2_quartz_core::{CAMetalDisplayLink, CAMetalDisplayLinkDelegate, CAMetalDisplayLinkUpdate};
 
 use super::drawable;
-use crate::view::WindowSize;
 
 unsafe extern "C" {
     // CoreGraphics. Detaches the cursor from the mouse, so it stays put while the
     // mouse still reports motion.
     fn CGAssociateMouseAndMouseCursorPosition(connected: u32) -> i32;
 }
-/// The game's view and layer, under GPUI's view in the window's content view.
+/// The game's view and layer, under GPUI's view in the window's content view,
+/// where the `BevyView` is laid out.
 pub(crate) struct NSViewWithMetalLayer {
-    _view: Retained<NSView>,
+    view: Retained<NSView>,
     layer: Retained<CAMetalLayer>,
     cursor_locked: bool,
 }
@@ -50,8 +50,9 @@ impl NSViewWithMetalLayer {
         }
     }
     /// Adds a layer-hosting view for the game under GPUI's view, filling the
-    /// window's content view, and makes the window transparent so the game
-    /// shows wherever the UI draws nothing.
+    /// window's content view until [`Self::set_bounds`] fits it to the
+    /// `BevyView`, and makes the window transparent so the game shows wherever
+    /// the UI draws nothing.
     pub(crate) fn new(window: &Window) -> Self {
         let mtm = MainThreadMarker::new().expect("the UI runs on the main thread");
         let RawWindowHandle::AppKit(handle) =
@@ -81,10 +82,6 @@ impl NSViewWithMetalLayer {
         // layer is the view's, and AppKit leaves its contents alone.
         view.setLayer(Some(&layer));
         view.setWantsLayer(true);
-        view.setAutoresizingMask(
-            NSAutoresizingMaskOptions::ViewWidthSizable
-                | NSAutoresizingMaskOptions::ViewHeightSizable,
-        );
         content_view.addSubview_positioned_relativeTo(
             &view,
             NSWindowOrderingMode::Below,
@@ -92,19 +89,43 @@ impl NSViewWithMetalLayer {
         );
         window.set_background_appearance(WindowBackgroundAppearance::Transparent);
         NSViewWithMetalLayer {
-            _view: view,
+            view,
             layer,
             cursor_locked: false,
         }
     }
 
-    /// Sizes the layer's drawables to the window's drawable area.
-    pub(crate) fn set_size(&mut self, size: WindowSize) {
-        self.layer.setContentsScale(size.scale_factor as f64);
-        self.layer.setDrawableSize(CGSize::new(
-            size.physical_width as f64,
-            size.physical_height as f64,
-        ));
+    /// Fits the view to `bounds`, the `BevyView`'s, and sizes the layer's
+    /// drawables to them, unless they already are. GPUI's coordinates start at
+    /// the top left of its view, which fills the content view; the content
+    /// view's start at the bottom left.
+    pub(crate) fn set_bounds(&self, bounds: Bounds<Pixels>, scale_factor: f32) {
+        let content_view =
+            unsafe { self.view.superview() }.expect("the game's view is in the content view");
+        let content_height = content_view.bounds().size.height;
+        let frame = CGRect::new(
+            CGPoint::new(
+                bounds.origin.x.as_f32() as f64,
+                content_height - bounds.bottom().as_f32() as f64,
+            ),
+            CGSize::new(
+                bounds.size.width.as_f32() as f64,
+                bounds.size.height.as_f32() as f64,
+            ),
+        );
+        let scale = scale_factor as f64;
+        let drawable_size = bounds.size.to_device_pixels(scale_factor);
+        let drawable_size =
+            CGSize::new(drawable_size.width.0 as f64, drawable_size.height.0 as f64);
+        if self.view.frame() == frame
+            && self.layer.contentsScale() == scale
+            && self.layer.drawableSize() == drawable_size
+        {
+            return;
+        }
+        self.view.setFrame(frame);
+        self.layer.setContentsScale(scale);
+        self.layer.setDrawableSize(drawable_size);
     }
 
     pub fn create_bevy_runner(
@@ -115,8 +136,10 @@ impl NSViewWithMetalLayer {
         unsafe impl Send for LayerWrapper {}
         let layer = LayerWrapper(self.layer.clone());
         move |mut app: bevy::app::App| {
-            app.add_plugins(drawable::CAMetalDrawablePlugin);
             let layer_moved = layer;
+            app.add_plugins(drawable::CAMetalLayerPlugin {
+                layer: layer_moved.0.clone(),
+            });
             displaylink_runner(app, from_ui, &layer_moved.0)
         }
     }

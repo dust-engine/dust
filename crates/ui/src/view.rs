@@ -5,7 +5,8 @@ use bevy::prelude::NextState;
 use futures_util::StreamExt;
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, Render, Styled, Task, Window, div,
+    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled, Task, Window, canvas,
+    div,
 };
 
 use dust_input::CursorMode;
@@ -35,7 +36,6 @@ pub struct BevyView {
     focus: FocusHandle,
     bevy: BevyChannel,
     game_layer: NSViewWithMetalLayer,
-    size: WindowSize,
     /// Runs the calls the Bevy app queues for the UI thread.
     _ui_calls: Task<()>,
 }
@@ -72,8 +72,6 @@ impl BevyView {
 
         let mut game_layer = NSViewWithMetalLayer::new(window);
         let runner = game_layer.create_bevy_runner(from_ui);
-        let size = window_size(window);
-        game_layer.set_size(size);
 
         let view = cx.weak_entity();
         std::thread::Builder::new()
@@ -100,7 +98,6 @@ impl BevyView {
             focus: cx.focus_handle(),
             bevy,
             game_layer,
-            size,
             _ui_calls: ui_calls,
         }
     }
@@ -123,16 +120,6 @@ impl BevyView {
                 .set_if_different(mode);
         });
     }
-
-    /// Resizes the layer when the window's drawable area changes.
-    fn sync_size(&mut self, window: &Window) {
-        let size = window_size(window);
-        if self.size == size {
-            return;
-        }
-        self.size = size;
-        self.game_layer.set_size(size);
-    }
 }
 
 impl Focusable for BevyView {
@@ -142,10 +129,24 @@ impl Focusable for BevyView {
 }
 
 impl Render for BevyView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.sync_size(window);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.entity();
         div()
             .size_full()
+            // Fits the game's layer to the view's bounds, known once it is laid
+            // out, at prepaint.
+            .child(
+                canvas(
+                    move |bounds, window, cx| {
+                        this.read(cx)
+                            .game_layer
+                            .set_bounds(bounds, window.scale_factor());
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
             .track_focus(&self.focus)
             .on_mouse_down(
                 MouseButton::Left,
@@ -161,24 +162,5 @@ impl Render for BevyView {
                     this.set_cursor_mode(CursorMode::Detached);
                 }
             }))
-    }
-}
-
-/// The drawable area of the window.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct WindowSize {
-    pub physical_width: u32,
-    pub physical_height: u32,
-    pub scale_factor: f32,
-}
-
-/// The window's drawable area.
-fn window_size(window: &Window) -> WindowSize {
-    let scale_factor = window.scale_factor();
-    let viewport = window.viewport_size();
-    WindowSize {
-        physical_width: (viewport.width.as_f32() * scale_factor).round() as u32,
-        physical_height: (viewport.height.as_f32() * scale_factor).round() as u32,
-        scale_factor,
     }
 }

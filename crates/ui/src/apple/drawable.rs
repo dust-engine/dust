@@ -29,17 +29,24 @@ use bevy_pumicite::{
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTL4CommandQueue, MTLDrawable, MTLResource, MTLTexture};
-use objc2_quartz_core::CAMetalDrawable;
+use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::SwapchainSet;
 
 /// Inserts the [`MetalDrawable`], and acquires and presents its images around
 /// [`SwapchainSet`].
-pub(super) struct CAMetalDrawablePlugin;
+pub(super) struct CAMetalLayerPlugin {
+    pub(super) layer: Retained<CAMetalLayer>,
+}
+// SAFETY: the runner makes it on the Bevy thread and adds it to the app there,
+// which builds it and, when dropped, drops it there too.
+unsafe impl Send for CAMetalLayerPlugin {}
+unsafe impl Sync for CAMetalLayerPlugin {}
 
-impl Plugin for CAMetalDrawablePlugin {
+impl Plugin for CAMetalLayerPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MetalDrawable {
+            layer: self.layer.clone(),
             drawable: None,
             image: None,
             state: ResourceState::default(),
@@ -53,6 +60,7 @@ impl Plugin for CAMetalDrawablePlugin {
             })
             .before(CreateDevice),
         )
+        .add_systems(Startup, add_layer_to_residency_set.after(CreateDevice))
         .add_systems(
             PostUpdate,
             (acquire.before(SwapchainSet), present.after(SwapchainSet)),
@@ -64,6 +72,7 @@ impl Plugin for CAMetalDrawablePlugin {
 /// into Vulkan.
 #[derive(Resource)]
 pub struct MetalDrawable {
+    layer: Retained<CAMetalLayer>,
     /// The drawable of the frame being updated, from
     /// `BevyDisplayLinkDelegate::update` until [`present`].
     pub(crate) drawable: Option<Retained<ProtocolObject<dyn CAMetalDrawable>>>,
@@ -77,8 +86,9 @@ pub struct MetalDrawable {
 }
 
 // SAFETY: only `BevyDisplayLinkDelegate::update`, `acquire` and `present` touch
-// `drawable`, all on the Bevy thread (`acquire` and `present` take
-// `NonSendMarker`). The rest is `Send` and `Sync`.
+// `drawable`, and only `add_layer_to_residency_set` touches `layer`, all on the
+// Bevy thread (the systems take `NonSendMarker`). The app is dropped there too,
+// and with it both. The rest is `Send` and `Sync`.
 unsafe impl Send for MetalDrawable {}
 unsafe impl Sync for MetalDrawable {}
 
@@ -93,6 +103,16 @@ impl MetalDrawable {
     pub fn state_mut(&mut self) -> &mut ResourceState {
         &mut self.state
     }
+}
+
+fn add_layer_to_residency_set(
+    _bevy_thread: NonSendMarker,
+    metal_drawable: Res<MetalDrawable>,
+    queue: Queue<RenderQueue>,
+) {
+    queue
+        .mtl_command_queue()
+        .addResidencySet(&metal_drawable.layer.residencySet());
 }
 
 /// Imports the drawable's texture as the swapchain's current image, and has the
