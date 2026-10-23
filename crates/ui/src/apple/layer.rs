@@ -1,8 +1,6 @@
 //! The game's layer, under GPUI's, the cursor lock, and the runner that updates
 //! the Bevy app from a `CAMetalDisplayLink` on the layer.
 
-use std::sync::mpsc::Receiver;
-
 use gpui::{Bounds, Pixels, Window, WindowBackgroundAppearance};
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
@@ -11,7 +9,6 @@ use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_quartz_core::CAMetalLayer;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::{Cell, RefCell};
-use std::sync::mpsc::TryRecvError;
 
 use bevy::app::{AppExit, PluginsState};
 use objc2::runtime::ProtocolObject;
@@ -130,7 +127,6 @@ impl NSViewWithMetalLayer {
 
     pub fn create_bevy_runner(
         &mut self,
-        from_ui: Receiver<crate::bridge::BevyCall>,
     ) -> impl FnOnce(bevy::app::App) -> bevy::app::AppExit + Send + 'static {
         struct LayerWrapper(Retained<CAMetalLayer>);
         unsafe impl Send for LayerWrapper {}
@@ -140,19 +136,13 @@ impl NSViewWithMetalLayer {
             app.add_plugins(drawable::CAMetalLayerPlugin {
                 layer: layer_moved.0.clone(),
             });
-            displaylink_runner(app, from_ui, &layer_moved.0)
+            displaylink_runner(app, &layer_moved.0)
         }
     }
 }
 
-use crate::bridge::BevyCall;
-
 /// Runs `app` until it exits or the UI quits, one update per display frame of `layer`.
-pub(crate) fn displaylink_runner(
-    mut app: bevy::app::App,
-    from_ui: Receiver<BevyCall>,
-    layer: &CAMetalLayer,
-) -> AppExit {
+pub(crate) fn displaylink_runner(mut app: bevy::app::App, layer: &CAMetalLayer) -> AppExit {
     if app.plugins_state() != PluginsState::Cleaned {
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
@@ -161,7 +151,7 @@ pub(crate) fn displaylink_runner(
         app.cleanup();
     }
 
-    let delegate = BevyDisplayLinkDelegate::new(app, from_ui);
+    let delegate = BevyDisplayLinkDelegate::new(app);
     let link = CAMetalDisplayLink::initWithMetalLayer(CAMetalDisplayLink::alloc(), layer);
     link.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     // SAFETY: the link stays on this thread's run loop until
@@ -177,7 +167,6 @@ pub(crate) fn displaylink_runner(
 
 struct BevyDisplayLinkDelegateIvars {
     app: RefCell<bevy::app::App>,
-    from_ui: Receiver<BevyCall>,
     /// Set when the app exits or the UI quits.
     exit: Cell<Option<AppExit>>,
 }
@@ -205,29 +194,20 @@ define_class!(
 );
 
 impl BevyDisplayLinkDelegate {
-    fn new(app: bevy::app::App, from_ui: Receiver<BevyCall>) -> Retained<Self> {
+    fn new(app: bevy::app::App) -> Retained<Self> {
         let this = Self::alloc().set_ivars(BevyDisplayLinkDelegateIvars {
             app: RefCell::new(app),
-            from_ui,
             exit: Cell::new(None),
         });
         // SAFETY: `NSObject`'s `init` is its designated initializer.
         unsafe { msg_send![super(this), init] }
     }
 
-    /// One frame: the calls from the UI thread, in the order they were queued, then
-    /// `app.update()`, drawing into the update's drawable.
+    /// One frame: `app.update()`, drawing into the update's drawable. The calls
+    /// from the UI thread run at the end of it, in `Last` (see `bridge`).
     fn update(&self, link: &CAMetalDisplayLink, update: &CAMetalDisplayLinkUpdate) {
         let ivars = self.ivars();
         let mut app = ivars.app.borrow_mut();
-        loop {
-            match ivars.from_ui.try_recv() {
-                Ok(call) => call(app.world_mut()),
-                Err(TryRecvError::Empty) => break,
-                // The UI has quit.
-                Err(TryRecvError::Disconnected) => return self.stop(link, AppExit::Success),
-            }
-        }
 
         app.world_mut()
             .resource_mut::<super::drawable::MetalDrawable>()

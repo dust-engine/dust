@@ -11,9 +11,9 @@ use gpui::{
 
 use dust_input::CursorMode;
 
-use crate::GPUIPlugin;
 use crate::apple::NSViewWithMetalLayer;
 use crate::bridge::{BevyChannel, GPUIChannel};
+use crate::build_gpui_app;
 
 /// Shows a Bevy app, which runs on a thread of its own and draws into a layer
 /// under GPUI's (see the crate docs).
@@ -71,14 +71,14 @@ impl BevyView {
         .detach();
 
         let mut game_layer = NSViewWithMetalLayer::new(window);
-        let runner = game_layer.create_bevy_runner(from_ui);
+        let runner = game_layer.create_bevy_runner();
 
         let view = cx.weak_entity();
         std::thread::Builder::new()
             .name("bevy".into())
             .spawn(move || {
                 let mut app = bevy::app::App::new();
-                app.add_plugins(GPUIPlugin { ui: ui.clone() });
+                build_gpui_app(&mut app, ui.clone(), from_ui);
                 build(&mut app);
                 app.set_runner(runner);
                 let exit = app.run();

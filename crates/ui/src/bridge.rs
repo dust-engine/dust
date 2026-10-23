@@ -9,17 +9,18 @@
 //!   thread. A GPUI task runs them with `&mut gpui::App`, in the order they were
 //!   queued, between UI frames.
 //! - [`BevyChannel`], a global of the GPUI app, queues closures for the Bevy
-//!   thread. The app's runner runs them with `&mut World`, in the order they
-//!   were queued, before the next frame.
+//!   thread. A system in `Last` runs them with `&mut World`, in the order they
+//!   were queued, at the end of each frame.
 //!
 //! Neither side ever waits for the other: a result goes back as another call.
 //!
 //! [`BevyChannel::run_every_frame`] runs a system on the Bevy thread every
 //! frame, for as long as the UI thread keeps its `SystemHandle`.
 
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 
-use bevy::ecs::system::{SystemHandle, SystemId};
+use bevy::app::AppExit;
+use bevy::ecs::system::{Local, SystemHandle, SystemId};
 use bevy::prelude::{Component, Entity, IntoSystem, QueryState, Resource, With, World, warn_once};
 use futures_channel::mpsc::UnboundedSender;
 
@@ -81,12 +82,30 @@ impl BevyChannel {
 #[derive(Component)]
 pub(super) struct EveryFrame;
 
-/// Runs the systems marked [`EveryFrame`]. Added to `Last`, after Bevy
-/// despawns the systems whose handles were dropped.
+/// Runs the calls queued through [`BevyChannel`], then the systems marked
+/// [`EveryFrame`]. Added to `Last`, after Bevy despawns the systems whose
+/// handles were dropped; `calls` is the receiving end of the `BevyChannel`,
+/// given to the system with a `LocalBuilder`.
 pub(super) fn run_every_frame(
     world: &mut World,
     systems: &mut QueryState<Entity, With<EveryFrame>>,
+    mut calls: Local<Option<Receiver<BevyCall>>>,
 ) {
+    let calls = calls
+        .as_mut()
+        .expect("built with the BevyChannel's receiver");
+    loop {
+        match calls.try_recv() {
+            Ok(call) => call(world),
+            Err(TryRecvError::Empty) => break,
+            // The UI has quit.
+            Err(TryRecvError::Disconnected) => {
+                world.write_message(AppExit::Success);
+                break;
+            }
+        }
+    }
+
     let systems: Vec<Entity> = systems.iter(world).collect();
     for system in systems {
         if let Err(error) = world.run_system(SystemId::<(), ()>::from_entity(system)) {

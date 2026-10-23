@@ -29,9 +29,14 @@ mod view;
 #[cfg(target_os = "macos")]
 mod apple;
 
+use std::sync::mpsc::Receiver;
+
 use bevy::{
-    app::{Last, Plugin, PostUpdate},
-    ecs::schedule::IntoScheduleConfigs,
+    app::{App, Last, PostUpdate},
+    ecs::{
+        schedule::IntoScheduleConfigs,
+        system::{LocalBuilder, ParamBuilder, SystemParamBuilder},
+    },
     prelude::{Res, SystemSet},
 };
 
@@ -56,25 +61,24 @@ fn swapchain_image_acquired(swapchain: Option<Res<Swapchain>>) -> bool {
     swapchain.is_some_and(|swapchain| swapchain.current_image().is_some())
 }
 
-/// Connects the Bevy app to the UI thread, and inserts the [`GPUIChannel`]
-/// resource. [`BevyView`](crate::BevyView) adds it before the rest of the app.
-pub(crate) struct GPUIPlugin {
-    pub(crate) ui: GPUIChannel,
-}
-
-impl Plugin for GPUIPlugin {
-    fn build(&self, app: &mut bevy::app::App) {
-        app.insert_resource(self.ui.clone())
-            .add_systems(
-                Last,
-                bridge::run_every_frame.after(bevy::ecs::system::despawn_unused_registered_systems),
-            )
-            .configure_sets(
-                PostUpdate,
-                (
-                    DefaultRenderSet.in_set(SwapchainSet),
-                    SwapchainSet.run_if(swapchain_image_acquired),
-                ),
-            );
-    }
+/// Adds the Bevy side of the bridge to `app`: the [`GPUIChannel`] resource, and
+/// the system that runs the calls received from the UI thread through `bevy`.
+fn build_gpui_app(app: &mut App, ui: GPUIChannel, bevy: Receiver<bridge::BevyCall>) {
+    // Built eagerly: the receiver isn't `Sync`, so a lazy `build_system` builder
+    // can't be a system, but the `Local` it ends up in can.
+    let run_every_frame = (ParamBuilder, ParamBuilder, LocalBuilder(Some(bevy)))
+        .build_state(app.world_mut())
+        .build_system(bridge::run_every_frame);
+    app.insert_resource(ui)
+        .add_systems(
+            Last,
+            run_every_frame.after(bevy::ecs::system::despawn_unused_registered_systems),
+        )
+        .configure_sets(
+            PostUpdate,
+            (
+                DefaultRenderSet.in_set(SwapchainSet),
+                SwapchainSet.run_if(swapchain_image_acquired),
+            ),
+        );
 }
