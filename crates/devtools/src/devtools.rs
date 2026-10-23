@@ -184,42 +184,42 @@ impl DevTools {
     fn panel(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let menu = self.menu(cx);
         let theme = cx.theme();
-        let tab_bar = TabBar::new("devtools-tabs")
+        // The tab bar draws the border under the header, so the frame rate and
+        // the buttons go in its suffix, above the same border.
+        let header = TabBar::new("devtools-tabs")
             .underline()
             .small()
-            .flex_1()
+            .px_2()
             .children(self.tabs.iter().map(|(title, _)| title.clone()))
             .selected_index(self.selected)
             .on_click(cx.listener(|this, index: &usize, _, cx| {
                 this.selected = *index;
                 cx.notify();
-            }));
-        let header = h_flex()
-            .gap_1()
-            .pr_1()
-            .border_b_1()
-            .border_color(theme.border)
-            .child(tab_bar)
-            // Frame rate stays in view whichever tab is selected, where Chrome
-            // keeps its error count.
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .font_family(theme.mono_font_family.clone())
-                    .child(format!("{:.0} FPS", self.average_fps)),
-            )
-            .child(menu)
-            .child(
-                Button::new("devtools-close")
-                    .icon(IconName::Close)
-                    .ghost()
-                    .xsmall()
-                    .tooltip("Close DevTools (F12)")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.open = false;
-                        cx.notify();
-                    })),
+            }))
+            .suffix(
+                h_flex()
+                    .gap_1()
+                    // Frame rate stays in view whichever tab is selected, where
+                    // Chrome keeps its error count.
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .font_family(theme.mono_font_family.clone())
+                            .child(format!("{:.0} FPS", self.average_fps)),
+                    )
+                    .child(menu)
+                    .child(
+                        Button::new("devtools-close")
+                            .icon(IconName::Close)
+                            .ghost()
+                            .xsmall()
+                            .tooltip("Close DevTools (F12)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open = false;
+                                cx.notify();
+                            })),
+                    ),
             );
         let contents = match self.tabs.get(self.selected) {
             Some((_, view)) => div().flex_1().min_h_0().child(view.clone()),
@@ -232,6 +232,9 @@ impl DevTools {
             .id("devtools-panel")
             .size_full()
             .occlude()
+            // The size gpui-component's controls draw their text at, so the
+            // panels' own text matches them.
+            .text_sm()
             .bg(theme.background)
             .border_color(theme.border)
             .map(|panel| match self.dock {

@@ -7,7 +7,7 @@ use bevy_pumicite::pumicite::ash::vk;
 use bevy_pumicite::pumicite::physical_device::PhysicalDevice;
 use gpui::{
     ClipboardItem, Context, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Window, div, px,
+    Window, div, px, relative,
 };
 use gpui_component::accordion::Accordion;
 use gpui_component::button::Button;
@@ -68,16 +68,21 @@ impl Render for GpuInfoPage {
                 h_flex()
                     .items_start()
                     .gap_2()
+                    .line_height(relative(1.25))
                     .child(
                         div()
-                            .w(px(200.))
+                            .w(relative(0.4))
+                            .max_w(px(200.))
                             .flex_shrink_0()
                             .text_color(theme.muted_foreground)
                             .child(SharedString::from(label.clone())),
                     )
                     .child(
+                        // `min_w_0`, or the value is as wide as its unwrapped
+                        // text and runs past the panel instead of wrapping.
                         div()
                             .flex_1()
+                            .min_w_0()
                             .font_family(theme.mono_font_family.clone())
                             .child(SharedString::from(value.clone())),
                     )
@@ -87,7 +92,7 @@ impl Render for GpuInfoPage {
             accordion = accordion.item(move |item| {
                 item.title(section.title)
                     .open(open)
-                    .child(v_flex().gap_0p5().children(rows))
+                    .child(v_flex().gap_1p5().children(rows))
             });
         }
         v_flex()
@@ -96,6 +101,7 @@ impl Render for GpuInfoPage {
                 Button::new("gpu-info-copy")
                     .label("Copy as text")
                     .small()
+                    .self_start()
                     .tooltip("Copy everything below, e.g. for a bug report.")
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))

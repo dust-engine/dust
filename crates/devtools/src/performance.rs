@@ -10,7 +10,7 @@ use gpui::{
     Bounds, Context, Hsla, IntoElement, ParentElement as _, PathBuilder, Pixels, Render,
     Styled as _, canvas, div, point, px, rgb,
 };
-use gpui_component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_component::{h_flex, v_flex};
 
 use crate::watch;
 
@@ -143,7 +143,6 @@ impl Render for PerformanceOverlay {
         watch(window, cx, performance_snapshot, |this, snapshot, _, _| {
             this.snapshot = Some(snapshot)
         });
-        let theme = cx.theme();
         let mut contents = v_flex().gap_0p5();
         if let Some(snapshot) = &self.snapshot {
             let panel = &snapshot.panel;
@@ -155,7 +154,7 @@ impl Render for PerformanceOverlay {
                         .child(format!("{:.0} FPS", panel.current_fps())),
                 )
                 .child(format!("Frame: {:.2} ms", panel.last_frame_ms()))
-                .child(separator(theme.border))
+                .child(separator())
                 .child(format!("Average: {:.0} FPS", panel.average_fps()))
                 .child(format!("Worst: {:.2} ms", panel.max_frame_ms()));
             if let Some(res) = snapshot.display_resolution {
@@ -175,9 +174,7 @@ impl Render for PerformanceOverlay {
             }
             contents = contents.child(frame_time_graph(panel));
             if let Some(gpu) = &snapshot.gpu {
-                contents = contents
-                    .child(separator(theme.border))
-                    .child(gpu_timings(gpu));
+                contents = contents.child(separator()).child(gpu_timings(gpu));
             }
         }
         div()
@@ -191,8 +188,14 @@ impl Render for PerformanceOverlay {
     }
 }
 
-fn separator(color: Hsla) -> impl IntoElement {
-    div().my_1().h(px(1.)).w_full().bg(color)
+/// A rule between groups of figures. The theme's border color is lost on the
+/// overlay's near-black background.
+fn separator() -> impl IntoElement {
+    div()
+        .my_1()
+        .h(px(1.))
+        .w_full()
+        .bg(gpui::white().opacity(0.2))
 }
 
 /// The per-operation GPU timing breakdown.

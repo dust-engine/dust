@@ -8,7 +8,7 @@ use gpui::{
     Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListAlignment, ListState,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
     StyledText, Subscription, Task, WeakEntity, Window, actions, div, list,
-    prelude::FluentBuilder as _, px, rgb,
+    prelude::FluentBuilder as _, px, rems, rgb,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, MoveDown, MoveUp};
@@ -29,6 +29,18 @@ actions!(dust_devtools_console, [ClearConsole]);
 
 /// Width of the column of icons at the start of each row and of the prompt.
 const ICON_WIDTH: f32 = 14.0;
+
+/// Line height of the rows, in rems.
+const LINE_HEIGHT: f32 = 1.25;
+
+/// A box as tall as a row's first line of text, centering what it holds on
+/// that line, for the icons before the message.
+fn first_line() -> gpui::Div {
+    h_flex()
+        .flex_shrink_0()
+        .h(rems(LINE_HEIGHT))
+        .justify_center()
+}
 
 pub(crate) struct ConsoleView {
     console: Console,
@@ -328,6 +340,9 @@ impl ConsoleView {
         }
         h_flex()
             .id(("console-row", row.serial as usize))
+            // A list item is only as wide as its contents unless told to fill
+            // the list.
+            .w_full()
             .items_start()
             .gap_1()
             .px_1p5()
@@ -336,25 +351,24 @@ impl ConsoleView {
             .border_b_1()
             .border_color(theme.border)
             .text_sm()
+            .line_height(rems(LINE_HEIGHT))
             // Commands and their output in monospace, so tables like clap's
             // help line up.
             .when(!expandable, |row| {
                 row.font_family(theme.mono_font_family.clone())
             })
             .child(
-                div()
+                first_line()
                     .w(px(ICON_WIDTH))
-                    .flex_shrink_0()
                     .child(icon(message.kind, theme)),
             )
             .when(row.count > 1, |this| {
-                this.child(count_badge(row.count, message.kind, theme))
+                this.child(first_line().child(count_badge(row.count, message.kind, theme)))
             })
             .when(expandable, |this| {
                 this.child(
-                    div()
+                    first_line()
                         .id(("console-disclosure", row.serial as usize))
-                        .flex_shrink_0()
                         .cursor_pointer()
                         .on_click(move |_, _, cx| {
                             view.update(cx, |view, cx| view.toggle_expanded(ix, cx))
@@ -571,8 +585,6 @@ fn icon(kind: MessageKind, theme: &Theme) -> AnyElement {
         MessageKind::Log(Level::INFO) => icon(IconName::Info, theme.info),
         MessageKind::Log(Level::DEBUG) => icon(IconName::Ellipsis, theme.foreground),
         MessageKind::Log(_) => div()
-            .mt(px(6.))
-            .ml(px(4.))
             .size(px(3.))
             .rounded_full()
             .bg(theme.muted_foreground)

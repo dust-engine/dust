@@ -4,7 +4,7 @@ use std::ops::RangeInclusive;
 
 use gpui::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, SharedString,
-    Styled as _, Subscription, Window, div, px,
+    Styled as _, Subscription, Window, div, px, relative,
 };
 use gpui_component::slider::{Slider, SliderEvent, SliderScale, SliderState};
 use gpui_component::{ActiveTheme as _, h_flex};
@@ -73,19 +73,24 @@ impl NumberSlider {
 
     pub fn render(&self, cx: &App) -> impl IntoElement + use<> {
         let value = self.state.read(cx).value().end();
+        // The label takes a share of the row rather than a fixed width, so the
+        // slider keeps a usable length in a narrow dock.
         h_flex()
             .gap_2()
             .child(
                 div()
-                    .w(px(150.))
+                    .w(relative(0.4))
+                    .max_w(px(180.))
                     .flex_shrink_0()
+                    // A wrapped label's lines as close as a checkbox's.
+                    .line_height(relative(1.25))
                     .text_color(cx.theme().muted_foreground)
                     .child(self.label.clone()),
             )
-            .child(Slider::new(&self.state).flex_1())
+            .child(Slider::new(&self.state).flex_1().min_w(px(48.)))
             .child(
                 div()
-                    .w(px(64.))
+                    .w(px(52.))
                     .flex_shrink_0()
                     .text_right()
                     .font_family(cx.theme().mono_font_family.clone())
@@ -93,6 +98,11 @@ impl NumberSlider {
             )
     }
 }
+
+/// Room on the right of a `RadioGroup` for its labels. gpui-component makes a
+/// radio's label as wide as the whole radio, beside the indicator, so a label
+/// that wraps can run past the group by the indicator's width and the gap.
+pub(crate) const RADIO_LABEL_OVERHANG: f32 = 24.0;
 
 /// A bold heading over a group of controls.
 pub(crate) fn heading(text: impl Into<SharedString>) -> impl IntoElement {

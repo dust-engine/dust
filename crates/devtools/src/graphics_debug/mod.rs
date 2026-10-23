@@ -108,7 +108,7 @@ impl Render for GraphicsDebugView {
         }
         let (s, p) = self.selected;
         let contents = match self.sections[s][p].contents.clone() {
-            Some(view) => div().child(view),
+            Some(view) => div().max_w(px(640.)).child(view),
             None => div()
                 .text_color(theme.muted_foreground)
                 .child("No debug toggles for this stage."),

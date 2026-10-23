@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use dust_pbr::sharc::{SharcConfig, SharcDebugMode, SharcDebugState};
 use dust_ui::BevyChannel;
-use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window};
+use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window, px};
 use gpui_component::accordion::Accordion;
 use gpui_component::button::Button;
 use gpui_component::checkbox::Checkbox;
@@ -11,7 +11,7 @@ use gpui_component::radio::RadioGroup;
 use gpui_component::{Sizable as _, h_flex, v_flex};
 
 use crate::read;
-use crate::widgets::{NumberSlider, heading};
+use crate::widgets::{NumberSlider, RADIO_LABEL_OVERHANG, heading};
 
 pub(super) fn sharc_snapshot(
     config: Res<SharcConfig>,
@@ -198,6 +198,7 @@ impl Render for SharcPage {
             .gap_1()
             .child(
                 RadioGroup::vertical("sharc-debug-mode")
+                    .pr(px(RADIO_LABEL_OVERHANG))
                     .children(DEBUG_MODES.map(|(_, label)| label))
                     .selected_index(mode)
                     .on_click(cx.listener(|this, index: &usize, _, cx| {

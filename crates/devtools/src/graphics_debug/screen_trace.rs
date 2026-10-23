@@ -4,13 +4,13 @@ use bevy::prelude::*;
 use dust_pbr::HdrRenderTarget;
 use dust_pbr::screen_trace::{ScreenTraceConfig, ScreenTraceDebugMode, ScreenTraceState};
 use dust_ui::BevyChannel;
-use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window};
+use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window, px};
 use gpui_component::accordion::Accordion;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::radio::RadioGroup;
 use gpui_component::{Disableable as _, v_flex};
 
-use crate::widgets::NumberSlider;
+use crate::widgets::{NumberSlider, RADIO_LABEL_OVERHANG};
 use crate::{read, watch};
 
 pub(super) fn screen_trace_config(config: Res<ScreenTraceConfig>) -> ScreenTraceConfig {
@@ -211,6 +211,7 @@ impl Render for ScreenTracePage {
             .gap_1()
             .child(
                 RadioGroup::vertical("screen-trace-debug-mode")
+                    .pr(px(RADIO_LABEL_OVERHANG))
                     .children(DEBUG_MODES.map(|(_, label)| label))
                     .selected_index(mode)
                     .on_click(cx.listener(|this, index: &usize, _, cx| {

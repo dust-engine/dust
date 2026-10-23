@@ -161,6 +161,7 @@ impl Render for SkyPage {
                     .label("Reset to Earth Defaults")
                     .small()
                     .mt_2()
+                    .self_start()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.show(&AtmosphereState::default(), window, cx);
                         atmosphere(cx, |a| *a = AtmosphereState::default())
