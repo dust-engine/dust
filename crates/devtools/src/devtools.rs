@@ -1,13 +1,16 @@
 //! DevTools: a Chrome-DevTools-style dock that hosts debug panels as tabs.
 //!
 //! The dock is a GPUI view on the UI thread, drawn over the game by
-//! [`overlay`]. A Bevy plugin adds a tab with
-//! [`DevToolsAppExt::add_devtools_tab`], passing the constructor of the tab's
-//! view. A view shows the world with [`watch`] or [`read`], called from its
-//! `render`, and edits it through `dust_ui`'s `BevyChannel`:
+//! [`overlay`]. Its tabs are GPUI views too: the dock creates its own, and
+//! [`DevTools::add_tab`] adds more. A view shows the world with [`watch`] or
+//! [`read`], called from its `render`, and edits it through `dust_ui`'s
+//! `BevyChannel`:
 //!
 //! ```ignore
-//! app.add_devtools_tab("Physics", PhysicsTab::new);
+//! let devtools = dust_devtools::overlay(console_log, window, cx);
+//! devtools.update(cx, |devtools, cx| {
+//!     devtools.add_tab("Physics", cx.new(|cx| PhysicsTab::new(window, cx)), cx)
+//! });
 //!
 //! impl Render for PhysicsTab {
 //!     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -26,9 +29,7 @@
 use std::panic::Location;
 
 use bevy::ecs::system::{RunSystemOnce as _, SystemHandle};
-use bevy::prelude::{
-    DetectChanges as _, In, IntoSystem, Res, ResMut, Resource, Startup, World, warn_once,
-};
+use bevy::prelude::{DetectChanges as _, In, IntoSystem, Res, World, warn_once};
 use dust_profiler::GpuProfiler;
 use dust_ui::{BevyChannel, GPUIChannel};
 use gpui::{
@@ -44,7 +45,8 @@ use gpui_component::{
     resizable_panel, v_flex, v_resizable,
 };
 
-use crate::console::ConsoleSink;
+use crate::console::{ConsoleLog, ConsoleView};
+use crate::graphics_debug::GraphicsDebugView;
 use crate::performance::{PerformanceOverlay, PerformancePanel};
 use crate::player::PlayerOverlay;
 
@@ -61,17 +63,16 @@ pub enum DockSide {
     Floating,
 }
 
-/// Builds the overlay drawn over the game's `BevyView`: the DevTools dock and the
-/// performance and player overlays.
-pub fn overlay(window: &mut Window, cx: &mut App) -> AnyView {
+/// Builds the overlay drawn over the game's `BevyView`: the DevTools dock, with
+/// its Graphics Debug and Console tabs, and the performance and player
+/// overlays. [`DevTools::add_tab`] adds more tabs.
+///
+/// The console shows the messages logged to `console_log`; see
+/// [`console_layer`](crate::console_layer).
+pub fn overlay(console_log: ConsoleLog, window: &mut Window, cx: &mut App) -> Entity<DevTools> {
     Theme::change(ThemeMode::Dark, Some(window), cx);
-    cx.set_global(ConsoleSink::new(window.window_handle()));
 
-    let devtools = cx.new(|cx| DevTools::new(window, cx));
-    cx.set_global(DevToolsHandle {
-        view: devtools.downgrade(),
-        window: window.window_handle(),
-    });
+    let devtools = cx.new(|cx| DevTools::new(console_log, window, cx));
     cx.bind_keys([
         KeyBinding::new("f12", ToggleDevTools, None),
         KeyBinding::new("cmd-alt-i", ToggleDevTools, None),
@@ -87,27 +88,7 @@ pub fn overlay(window: &mut Window, cx: &mut App) -> AnyView {
                 .ok();
         }
     });
-    devtools.into()
-}
-
-/// The [`DevTools`] view and its window, for the tabs and the console's `dock`
-/// command.
-#[derive(Clone)]
-struct DevToolsHandle {
-    view: WeakEntity<DevTools>,
-    window: AnyWindowHandle,
-}
-
-impl gpui::Global for DevToolsHandle {}
-
-pub(crate) fn set_dock(side: DockSide, cx: &mut App) {
-    let devtools = cx.global::<DevToolsHandle>().view.clone();
     devtools
-        .update(cx, |devtools, cx| {
-            devtools.dock = side;
-            cx.notify();
-        })
-        .ok();
 }
 
 /// The overlay's root view: the dock, and the overlays over the part of the
@@ -116,9 +97,10 @@ pub struct DevTools {
     /// Whether DevTools is shown. Toggled by F12 / ⌘⌥I and the ✕ button.
     open: bool,
     dock: DockSide,
-    /// Index of the shown tab, in registration order.
+    /// Index of the shown tab in `tabs`.
     selected: usize,
-    tabs: Vec<(&'static str, AnyView)>,
+    /// Title and view of each tab, in the order they show.
+    tabs: Vec<(SharedString, AnyView)>,
     performance: Entity<PerformanceOverlay>,
     performance_open: bool,
     player: Entity<PlayerOverlay>,
@@ -142,12 +124,17 @@ fn gpu_timings(profiler: Option<Res<GpuProfiler>>) -> Option<(bool, bool)> {
 }
 
 impl DevTools {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(console_log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let graphics_debug = cx.new(|cx| GraphicsDebugView::new(window, cx));
+        let console = cx.new(|cx| ConsoleView::new(console_log, window, cx));
         DevTools {
             open: true,
             dock: DockSide::Right,
             selected: 0,
-            tabs: Vec::new(),
+            tabs: vec![
+                ("Graphics Debug".into(), graphics_debug.into()),
+                ("Console".into(), console.into()),
+            ],
             performance: cx.new(|cx| PerformanceOverlay::new(window, cx)),
             performance_open: true,
             player: cx.new(|cx| PlayerOverlay::new(window, cx)),
@@ -157,11 +144,14 @@ impl DevTools {
         }
     }
 
-    fn add_tabs(&mut self, tabs: Vec<Tab>, window: &mut Window, cx: &mut Context<Self>) {
-        for tab in tabs {
-            let view = (tab.build)(window, cx);
-            self.tabs.push((tab.title, view));
-        }
+    /// Adds a tab titled `title` showing `view`, after the tabs already there.
+    pub fn add_tab(
+        &mut self,
+        title: impl Into<SharedString>,
+        view: impl Into<AnyView>,
+        cx: &mut Context<Self>,
+    ) {
+        self.tabs.push((title.into(), view.into()));
         cx.notify();
     }
 
@@ -198,11 +188,7 @@ impl DevTools {
             .underline()
             .small()
             .flex_1()
-            .children(
-                self.tabs
-                    .iter()
-                    .map(|(title, _)| SharedString::from(*title)),
-            )
+            .children(self.tabs.iter().map(|(title, _)| title.clone()))
             .selected_index(self.selected)
             .on_click(cx.listener(|this, index: &usize, _, cx| {
                 this.selected = *index;
@@ -484,69 +470,6 @@ fn send_to_view<V: 'static, T: Send + 'static>(
                     apply(view, value, window, cx);
                     cx.notify();
                 })
-            })
-            .ok();
-    });
-}
-
-pub trait DevToolsAppExt {
-    /// Adds a dock tab titled `title`, showing the view `new` creates. Tabs
-    /// appear in the order they are added.
-    fn add_devtools_tab<V: Render>(
-        &mut self,
-        title: &'static str,
-        new: fn(&mut Window, &mut Context<V>) -> V,
-    ) -> &mut Self;
-}
-
-impl DevToolsAppExt for bevy::app::App {
-    fn add_devtools_tab<V: Render>(
-        &mut self,
-        title: &'static str,
-        new: fn(&mut Window, &mut Context<V>) -> V,
-    ) -> &mut Self {
-        let build = move |window: &mut Window, cx: &mut App| -> AnyView {
-            cx.new(|cx| new(window, cx)).into()
-        };
-        self.world_mut().get_resource_or_init::<Tabs>().0.push(Tab {
-            title,
-            build: Box::new(build),
-        });
-        self
-    }
-}
-
-struct Tab {
-    title: &'static str,
-    build: Box<dyn FnOnce(&mut Window, &mut App) -> AnyView + Send>,
-}
-
-/// The tabs added while the app is built, handed to the dock at startup.
-#[derive(Resource, Default)]
-struct Tabs(Vec<Tab>);
-
-// `Tab::build` is only called on the UI thread; the resource only moves it.
-unsafe impl Sync for Tabs {}
-
-/// Hands the tabs to the dock once the app starts.
-pub(crate) struct TabsPlugin;
-
-impl bevy::app::Plugin for TabsPlugin {
-    fn build(&self, app: &mut bevy::app::App) {
-        app.init_resource::<Tabs>().add_systems(Startup, send_tabs);
-    }
-}
-
-fn send_tabs(mut tabs: ResMut<Tabs>, ui: Option<Res<GPUIChannel>>) {
-    let tabs = std::mem::take(&mut tabs.0);
-    let Some(ui) = ui else {
-        return;
-    };
-    ui.update(move |cx| {
-        let DevToolsHandle { view, window } = cx.global::<DevToolsHandle>().clone();
-        window
-            .update(cx, |_, window, cx| {
-                view.update(cx, |devtools, cx| devtools.add_tabs(tabs, window, cx))
             })
             .ok();
     });

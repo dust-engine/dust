@@ -49,6 +49,7 @@ gpui-kit-assets.workspace = true
 bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.dependencies.bevy]
 version = "0.20.0"
@@ -56,7 +57,6 @@ default-features = false
 features = [
     "std",
     "async_executor",
-    "bevy_log",
     "bevy_asset",
     "bevy_color",
     "bevy_scene",
@@ -83,7 +83,6 @@ bevy_tasks = { git = "https://github.com/dust-engine/bevy.git", branch = "releas
 bevy_reflect = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_ptr = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_math = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
-bevy_log = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_input = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_diagnostic = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }
 bevy_derive = { git = "https://github.com/dust-engine/bevy.git", branch = "release-0.20.0" }

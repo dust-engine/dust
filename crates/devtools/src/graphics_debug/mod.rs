@@ -9,7 +9,6 @@ mod screen_trace;
 mod sharc;
 mod sky;
 
-use bevy::prelude::*;
 use gpui::{
     AnyView, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
@@ -17,18 +16,6 @@ use gpui::{
 };
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::{ActiveTheme as _, h_flex, v_flex};
-
-use crate::DevToolsAppExt;
-
-/// Adds the "Graphics Debug" DevTools tab.
-#[derive(Default)]
-pub struct GraphicsDebugPlugin;
-
-impl Plugin for GraphicsDebugPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_devtools_tab("Graphics Debug", GraphicsDebugView::new);
-    }
-}
 
 struct Page {
     name: &'static str,
@@ -44,7 +31,7 @@ pub(crate) struct GraphicsDebugView {
 }
 
 impl GraphicsDebugView {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let page = |name, contents: Option<AnyView>| Page { name, contents };
         let info = vec![page(
             "GPU Info",

@@ -5,7 +5,7 @@
 //! "Console" tab with the log and a command prompt; the performance overlay
 //! tracking frame rate and GPU timings; and the player overlay showing the
 //! player's position and orientation. Other crates can add DevTools tabs with
-//! [`DevToolsAppExt::add_devtools_tab`].
+//! [`DevTools::add_tab`].
 //!
 //! The panels are GPUI views on the UI thread, drawn over the game's
 //! `BevyView` by [`overlay`]. They show the Bevy world with [`watch`]
@@ -21,18 +21,17 @@ mod performance;
 mod player;
 mod widgets;
 
-pub use console::{ConsolePlugin, console_layer};
-pub use devtools::{DevTools, DevToolsAppExt, DockSide, ToggleDevTools, overlay, read, watch};
-pub use graphics_debug::GraphicsDebugPlugin;
+pub use console::{ConsoleLayer, ConsoleLog, console_layer};
+pub use devtools::{DevTools, DockSide, ToggleDevTools, overlay, read, watch};
 pub use performance::{PerformancePanel, PerformancePanelPlugin};
 
 use bevy::prelude::*;
 use dust_profiler::GpuProfilerPlugin;
 
-/// Adds the Bevy side of everything in this crate: the DevTools dock's
-/// Graphics Debug and Console tabs, the GPU profiler, and the frame timings the
-/// performance overlay shows. It is the single entry point so callers don't
-/// have to track individual plugins as the crate grows.
+/// Adds the Bevy side of everything in this crate: the GPU profiler, and the
+/// frame timings the performance overlay shows. It is the single entry point
+/// so callers don't have to track individual plugins as the crate grows. The
+/// panels themselves are created on the UI thread, by [`overlay`].
 ///
 /// The app has to be run by a `dust_ui::BevyView`.
 #[derive(Default)]
@@ -40,9 +39,6 @@ pub struct GfxDebugPlugin;
 
 impl Plugin for GfxDebugPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(devtools::TabsPlugin);
-        app.add_plugins(GraphicsDebugPlugin);
-        app.add_plugins(ConsolePlugin);
         app.add_plugins(GpuProfilerPlugin);
         app.add_plugins(PerformancePanelPlugin);
     }

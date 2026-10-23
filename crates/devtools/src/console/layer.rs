@@ -2,57 +2,24 @@
 
 use std::fmt::{self, Write as _};
 
-use bevy::log::BoxedLayer;
-use bevy::log::tracing::field::{self as tracing_field, Visit};
-use bevy::log::tracing::{Event, Subscriber, span};
-use bevy::log::tracing_subscriber::Layer;
-use bevy::log::tracing_subscriber::layer::Context;
-use bevy::log::tracing_subscriber::registry::LookupSpan;
 use bevy::platform::time::Instant;
-use bevy::prelude::*;
+use futures_channel::mpsc::UnboundedSender;
+use tracing::field::{self as tracing_field, Visit};
+use tracing::{Event, Subscriber, span};
 use tracing_log::NormalizeEvent;
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
 
-use dust_ui::GPUIChannel;
-
-use super::ConsoleSink;
 use super::{ConsoleEvent, ConsoleMessage, Field, MessageKind, Source, SpanContext, ValueKind};
 
-/// Copies log messages into the DevTools console. Install it as
-/// `LogPlugin::custom_layer`:
+/// The `tracing` layer that copies log messages into the DevTools console;
+/// made by [`console_layer`](super::console_layer).
 ///
-/// ```ignore
-/// app.add_plugins(DefaultPlugins.set(LogPlugin {
-///     custom_layer: dust_devtools::console_layer,
-///     ..default()
-/// }));
-/// ```
-///
-/// The console gets what passes `LogPlugin`'s filter, the same messages it
-/// prints to stderr: `tracing` events, and `log` records, which `LogPlugin`
-/// turns into `tracing` events.
-///
-/// The messages go to the UI thread through `dust_ui`'s `GPUIChannel`, which an
-/// app run by a `BevyView` has from the start. Without the channel there is no
-/// layer.
-pub fn console_layer(app: &mut App) -> Option<BoxedLayer> {
-    let ui = app.world().get_resource::<GPUIChannel>()?.clone();
-    app.init_resource::<LayerInstalled>();
-    let startup = Instant::now();
-    ui.update(move |cx| ConsoleSink::set_startup(startup, cx));
-    Some(Box::new(ConsoleLayer {
-        send: Box::new(move |message| {
-            ui.update(move |cx| ConsoleSink::send(ConsoleEvent::Message(message), cx))
-        }),
-    }))
-}
-
-/// Present once [`console_layer`] has installed the layer.
-#[derive(Resource, Default)]
-pub(super) struct LayerInstalled;
-
-/// Sends each message on, from whichever thread logged it.
-pub(super) struct ConsoleLayer {
-    pub(super) send: Box<dyn Fn(ConsoleMessage) + Send + Sync>,
+/// It sends each message on from whichever thread logged it, to the
+/// [`ConsoleLog`](super::ConsoleLog) made with it.
+pub struct ConsoleLayer {
+    pub(super) events: UnboundedSender<ConsoleEvent>,
 }
 
 /// A span's fields, kept in the span's extensions for the events logged in
@@ -137,7 +104,10 @@ where
             }),
             time: Instant::now(),
         };
-        (self.send)(message);
+        // Fails only once the console is gone.
+        self.events
+            .unbounded_send(ConsoleEvent::Message(message))
+            .ok();
     }
 }
 

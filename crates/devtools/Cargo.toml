@@ -14,7 +14,11 @@ dust_profiler.workspace = true
 dust_character.workspace = true
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 shlex = "2"
+tracing = "0.1"
 tracing-log = "0.2"
+tracing-subscriber = "0.3"
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
-futures-channel = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

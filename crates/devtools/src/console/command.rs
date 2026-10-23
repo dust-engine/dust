@@ -1,14 +1,12 @@
 //! The commands the console's prompt runs, parsed with clap.
 
-use bevy::log::Level;
-use bevy::log::tracing::{self, event};
-use bevy::prelude::*;
+use bevy::prelude::World;
 use clap::error::ErrorKind;
 use clap::{Parser, Subcommand, ValueEnum};
+use tracing::{Level, event};
 use tracing_log::log;
 
 use super::ConsoleEvent;
-use crate::DockSide;
 
 /// A line typed at the prompt. As in a shell, its first word names the
 /// command: `multicall` has clap match it against the subcommands instead of
@@ -41,11 +39,6 @@ enum Command {
     },
     /// Remove all messages from the console
     Clear,
-    /// Move DevTools to a side of the window, or into a window of its own
-    Dock {
-        /// Where DevTools goes
-        side: Side,
-    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -57,20 +50,12 @@ enum LogLevel {
     Trace,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum Side {
-    Left,
-    Bottom,
-    Right,
-    Undock,
-}
-
 /// What a command did, when it didn't fail.
 pub(super) enum Outcome {
     Nothing,
     /// What it printed.
     Output(String),
-    /// A change to the console or DevTools, which live on the UI thread.
+    /// A change to the console, which lives on the UI thread.
     Console(ConsoleEvent),
 }
 
@@ -93,24 +78,18 @@ pub(super) fn run(line: &str, _world: &mut World) -> Result<Outcome, String> {
             message,
         } => log_message(level, log_crate, &message.join(" ")).map(|()| Outcome::Nothing),
         Command::Clear => Ok(Outcome::Console(ConsoleEvent::Clear)),
-        Command::Dock { side } => Ok(Outcome::Console(ConsoleEvent::Dock(match side {
-            Side::Left => DockSide::Left,
-            Side::Bottom => DockSide::Bottom,
-            Side::Right => DockSide::Right,
-            Side::Undock => DockSide::Floating,
-        }))),
     }
 }
 
-/// Logs `message` with the target "console". A message `LogPlugin`'s filter
-/// drops would never show, so for one the command fails, saying so.
+/// Logs `message` with the target "console". A message the subscriber's
+/// filter drops would never show, so for one the command fails, saying so.
 fn log_message(level: LogLevel, log_crate: bool, message: &str) -> Result<(), String> {
     // The `tracing` macros need the level as a constant.
     macro_rules! log_at {
         ($tracing_level:expr, $log_level:expr) => {{
             if !tracing::enabled!(target: "console", $tracing_level) {
                 return Err(format!(
-                    "error: LogPlugin's filter drops {} messages with the target \"console\"; \
+                    "error: the log filter drops {} messages with the target \"console\"; \
                      RUST_LOG=console={} lets them through",
                     $tracing_level,
                     $tracing_level.as_str().to_lowercase(),

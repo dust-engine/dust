@@ -2576,6 +2576,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "pumicite",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2612,10 +2613,13 @@ dependencies = [
  "dust_profiler",
  "dust_ui",
  "futures-channel",
+ "futures-util",
  "gpui-component",
  "gpui-pre",
  "shlex",
+ "tracing",
  "tracing-log",
+ "tracing-subscriber",
 ]
 
 [[package]]

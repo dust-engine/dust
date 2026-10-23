@@ -1,28 +1,22 @@
-use std::sync::mpsc;
-
-use bevy::log::tracing::{self, subscriber};
-use bevy::log::tracing_subscriber::filter::LevelFilter;
-use bevy::log::tracing_subscriber::layer::SubscriberExt;
-use bevy::log::tracing_subscriber::registry::Registry;
+use tracing::subscriber;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::Registry;
 
 use super::command::Outcome;
-use super::layer::ConsoleLayer;
 use super::*;
-use crate::DockSide;
 
 /// Runs `f` with a subscriber of only a [`ConsoleLayer`], whose filter lets
 /// through messages up to `max_level`, and returns what the layer sent.
 fn capture_at(max_level: LevelFilter, f: impl FnOnce()) -> Vec<ConsoleMessage> {
-    let (sender, receiver) = mpsc::channel();
-    let subscriber = Registry::default()
-        .with(ConsoleLayer {
-            send: Box::new(move |message| {
-                let _ = sender.send(message);
-            }),
+    let (layer, mut log) = console_layer();
+    subscriber::with_default(Registry::default().with(layer).with(max_level), f);
+    std::iter::from_fn(|| log.events.try_recv().ok())
+        .map(|event| match event {
+            ConsoleEvent::Message(message) => message,
+            ConsoleEvent::Clear => panic!("the layer sent a `Clear`"),
         })
-        .with(max_level);
-    subscriber::with_default(subscriber, f);
-    receiver.try_iter().collect()
+        .collect()
 }
 
 fn capture(f: impl FnOnce()) -> Vec<ConsoleMessage> {
@@ -85,7 +79,7 @@ fn tracing_event() {
 
 #[test]
 fn log_record() {
-    // Turns `log` records into `tracing` events, as `LogPlugin` does. It's
+    // Turns `log` records into `tracing` events, as the app's subscriber does. It's
     // global, so another test may have installed it already.
     let _ = tracing_log::LogTracer::init();
     let messages = capture(|| tracing_log::log::error!(target: "assets", "missing {}", "a.vox"));
@@ -145,7 +139,7 @@ fn error_with_sources() {
 
 #[test]
 fn filter_default_level() {
-    use bevy::log::tracing_subscriber::EnvFilter;
+    use tracing_subscriber::EnvFilter;
 
     let allows = |directives: &str, level| {
         let filter = EnvFilter::builder().parse_lossy(directives);
@@ -153,11 +147,10 @@ fn filter_default_level() {
             filter_default_allows(level)
         })
     };
-    // Built as `LogPlugin` builds it. It lets debug messages through for one
-    // target, `calloop::sources`, but not by default.
-    let log_plugin = format!("{},{}", Level::INFO, bevy::log::DEFAULT_FILTER);
-    assert!(allows(&log_plugin, Level::INFO));
-    assert!(!allows(&log_plugin, Level::DEBUG));
+    // Debug messages from one target, but not by default.
+    let one_target = "info,dust_pbr=debug";
+    assert!(allows(one_target, Level::INFO));
+    assert!(!allows(one_target, Level::DEBUG));
     assert!(allows("debug", Level::DEBUG) && !allows("debug", Level::TRACE));
     assert!(!allows("warn,dust_pbr=debug", Level::INFO));
 }
@@ -245,15 +238,9 @@ fn commands() {
 
     assert_eq!(printed(command::run("echo 'a  b' c", &mut world)), "a  b c");
     let help = printed(command::run("help", &mut world));
-    assert!(help.contains("echo") && help.contains("dock"));
+    assert!(help.contains("echo") && help.contains("clear"));
     let typo = command::run("ecko hi", &mut world).err().unwrap();
     assert!(typo.contains("a similar subcommand exists: 'echo'"));
-
-    assert!(matches!(
-        command::run("dock left", &mut world),
-        Ok(Outcome::Console(ConsoleEvent::Dock(DockSide::Left)))
-    ));
-    assert!(command::run("dock top", &mut world).is_err());
 
     let mut console = Console::default();
     console.push(output("x"));
@@ -330,22 +317,4 @@ fn submitted_lines_run() {
             ),
         ]
     );
-}
-
-#[test]
-fn plugin_builds_with_and_without_layer() {
-    let mut app = App::new();
-    app.add_plugins(ConsolePlugin);
-    app.update();
-
-    let mut app = App::new();
-    assert!(console_layer(&mut app).is_none());
-
-    let mut app = App::new();
-    let (to_ui, _from_bevy) = futures_channel::mpsc::unbounded();
-    app.insert_resource(dust_ui::GPUIChannel(to_ui));
-    let layer = console_layer(&mut app);
-    assert!(layer.is_some());
-    app.add_plugins(ConsolePlugin);
-    app.update();
 }

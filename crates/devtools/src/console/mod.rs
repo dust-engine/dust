@@ -2,13 +2,11 @@
 //! `tracing` and `log`, a scope bar filtering them by severity, and a prompt
 //! that runs commands.
 //!
-//! The console's rows live with its view on the UI thread. Log messages reach
-//! them through [`console_layer`], which has to be installed as
-//! `LogPlugin::custom_layer`; it sends each message to the UI thread through
-//! `dust_ui`'s `GPUIChannel`.
-//! A line submitted at the prompt runs on the Bevy thread, with the world, and
-//! what it does to the console comes back the same way. The commands live in
-//! [`command`].
+//! The console's rows live with its view on the UI thread. Changes reach them
+//! through a channel, the [`ConsoleLog`], which the view drains: log messages,
+//! sent by the [`ConsoleLayer`] from whichever thread logged them, and what
+//! the commands submitted at the prompt did. A command runs on the Bevy
+//! thread, with the world. The commands live in [`command`].
 
 mod command;
 mod layer;
@@ -18,43 +16,60 @@ mod ui;
 
 use std::collections::VecDeque;
 
-use bevy::log::{Level, tracing};
 use bevy::platform::time::Instant;
-use bevy::prelude::*;
+use bevy::prelude::World;
+use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::Level;
 
-use crate::DevToolsAppExt;
-use crate::DockSide;
-use dust_ui::{BevyChannel, GPUIChannel};
-use layer::LayerInstalled;
-pub use layer::console_layer;
-pub(crate) use ui::{ConsoleSink, ConsoleView};
+use dust_ui::BevyChannel;
+pub use layer::ConsoleLayer;
+pub(crate) use ui::ConsoleView;
 
-/// Adds the "Console" DevTools tab.
+/// Makes the `tracing` layer that copies log messages into the DevTools
+/// console, and the [`ConsoleLog`] they wait in until the console takes them.
+/// Add the layer to the global subscriber before anything logs, and pass the
+/// log to [`overlay`](crate::overlay):
 ///
-/// Without [`console_layer`] installed, the tab only shows commands and their
-/// output.
-#[derive(Default)]
-pub struct ConsolePlugin;
-
-impl Plugin for ConsolePlugin {
-    fn build(&self, app: &mut App) {
-        if !app.world().contains_resource::<LayerInstalled>() {
-            warn!(
-                "The DevTools console won't show log messages: \
-                 set `LogPlugin::custom_layer` to `dust_devtools::console_layer`."
-            );
-        }
-        app.add_devtools_tab("Console", ConsoleView::new);
-    }
+/// ```ignore
+/// let (console_layer, console_log) = dust_devtools::console_layer();
+/// tracing_subscriber::registry()
+///     .with(EnvFilter::new("info"))
+///     .with(tracing_subscriber::fmt::layer())
+///     .with(console_layer)
+///     .init();
+/// ```
+///
+/// The console gets the messages that pass the subscriber's filter: `tracing`
+/// events, and `log` records, which the subscriber's `init` has turned into
+/// `tracing` events.
+pub fn console_layer() -> (ConsoleLayer, ConsoleLog) {
+    let (sender, events) = futures_channel::mpsc::unbounded();
+    let layer = ConsoleLayer {
+        events: sender.clone(),
+    };
+    let log = ConsoleLog {
+        sender,
+        events,
+        startup: Instant::now(),
+    };
+    (layer, log)
 }
 
-/// A change to the console, sent from the Bevy thread to its view.
+/// The changes on their way to the console view: the messages its
+/// [`ConsoleLayer`] copies, and what the commands run at its prompt did.
+pub struct ConsoleLog {
+    /// Where the commands send what they did.
+    sender: UnboundedSender<ConsoleEvent>,
+    events: UnboundedReceiver<ConsoleEvent>,
+    /// When logging started; the console shows message times from it.
+    startup: Instant,
+}
+
+/// A change to the console, sent to its view from another thread.
 pub(crate) enum ConsoleEvent {
     Message(ConsoleMessage),
     /// Removes all rows.
     Clear,
-    /// Moves DevTools.
-    Dock(DockSide),
 }
 
 /// The most rows the console keeps; the oldest are dropped first.
@@ -62,7 +77,8 @@ const MAX_ROWS: usize = 10_000;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum MessageKind {
-    /// A `tracing` event, or a `log` record, which `LogPlugin` turns into one.
+    /// A `tracing` event, or a `log` record, which the subscriber turns into
+    /// one.
     Log(Level),
     /// A line submitted at the prompt.
     Command,
@@ -308,7 +324,6 @@ impl Console {
         match event {
             ConsoleEvent::Message(message) => self.push(message),
             ConsoleEvent::Clear => self.rows.clear(),
-            ConsoleEvent::Dock(_) => {}
         }
     }
 }
@@ -353,13 +368,12 @@ impl Prompt {
     }
 }
 
-/// Whether `LogPlugin`'s filter lets through messages at `level` from the
+/// Whether the subscriber's filter lets through messages at `level` from the
 /// targets it has no directive for. The empty target matches only the
-/// filter's default directive: `LogPlugin::level`, or a bare `RUST_LOG=debug`.
+/// filter's default directive, such as the `debug` of `RUST_LOG=debug`.
 ///
 /// Not the filter's maximum level (`LevelFilter::current()`): that includes
-/// directives for single targets, and Bevy's default filter has
-/// `calloop::sources=debug`.
+/// directives for single targets, such as `RUST_LOG=dust_pbr=debug`.
 fn filter_default_allows(level: Level) -> bool {
     // `enabled!` needs the level as a constant.
     match level {
@@ -374,7 +388,7 @@ fn filter_default_allows(level: Level) -> bool {
 /// Runs a line submitted at the prompt in a `command` span, and returns what
 /// it did to the console.
 fn run_line(line: &str, world: &mut World) -> Option<ConsoleEvent> {
-    let result = info_span!(target: "console", "command", line = line)
+    let result = tracing::info_span!(target: "console", "command", line = line)
         .in_scope(|| command::run(line, world));
     let (kind, text) = match result {
         Ok(command::Outcome::Nothing) => return None,
@@ -388,13 +402,12 @@ fn run_line(line: &str, world: &mut World) -> Option<ConsoleEvent> {
     )))
 }
 
-/// Runs `line` on the Bevy thread, sending what it did back to the console.
-fn submit_line(cx: &gpui::App, line: String) {
+/// Runs `line` on the Bevy thread, sending what it did back to the console
+/// through `console`.
+fn submit_line(cx: &gpui::App, console: UnboundedSender<ConsoleEvent>, line: String) {
     cx.global::<BevyChannel>().update(move |world| {
-        if let Some(event) = run_line(&line, world)
-            && let Some(ui) = world.get_resource::<GPUIChannel>()
-        {
-            ui.update(move |cx| ConsoleSink::send(event, cx));
+        if let Some(event) = run_line(&line, world) {
+            console.unbounded_send(event).ok();
         }
     });
 }

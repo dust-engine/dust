@@ -1,15 +1,13 @@
 //! The console tab's view: the toolbar, the message list and the prompt.
 
-use std::collections::VecDeque;
-use std::rc::Rc;
-
-use bevy::log::Level;
 use bevy::platform::time::Instant;
+use futures_channel::mpsc::UnboundedSender;
+use futures_util::StreamExt as _;
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, FollowMode,
-    HighlightStyle, Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListAlignment,
-    ListState, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, StyledText, Subscription, WeakEntity, Window, actions, div, list,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FollowMode, HighlightStyle,
+    Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListAlignment, ListState,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    StyledText, Subscription, Task, WeakEntity, Window, actions, div, list,
     prelude::FluentBuilder as _, px, rgb,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -20,8 +18,10 @@ use gpui_component::{
     h_flex, v_flex,
 };
 
+use tracing::Level;
+
 use super::{
-    Console, ConsoleEvent, ConsoleMessage, Field, MessageKind, Scope, ValueKind,
+    Console, ConsoleEvent, ConsoleLog, ConsoleMessage, Field, MessageKind, Scope, ValueKind,
     filter_default_allows, submit_line,
 };
 
@@ -29,81 +29,6 @@ actions!(dust_devtools_console, [ClearConsole]);
 
 /// Width of the column of icons at the start of each row and of the prompt.
 const ICON_WIDTH: f32 = 14.0;
-
-/// Where console events go on the UI thread, a global of the GPUI app: the
-/// console view once it exists, a backlog before. Events come from the Bevy
-/// thread, and from whichever thread logs.
-pub(crate) struct ConsoleSink {
-    window: AnyWindowHandle,
-    /// When logging started; set by [`super::console_layer`].
-    startup: Instant,
-    sink: Sink,
-}
-
-impl gpui::Global for ConsoleSink {}
-
-enum Sink {
-    Backlog(VecDeque<ConsoleEvent>),
-    View(Rc<dyn Fn(ConsoleEvent, &mut Window, &mut App)>),
-}
-
-/// The most console events kept before the console view exists.
-const MAX_BACKLOG: usize = 10_000;
-
-impl ConsoleSink {
-    pub fn new(window: AnyWindowHandle) -> Self {
-        ConsoleSink {
-            window,
-            startup: Instant::now(),
-            sink: Sink::Backlog(VecDeque::new()),
-        }
-    }
-
-    /// Passes `event` to the console view, or keeps it until the view exists.
-    pub fn send(event: ConsoleEvent, cx: &mut App) {
-        let console = cx.global_mut::<ConsoleSink>();
-        let sink = match &mut console.sink {
-            Sink::Backlog(backlog) => {
-                if backlog.len() == MAX_BACKLOG {
-                    backlog.pop_front();
-                }
-                backlog.push_back(event);
-                return;
-            }
-            Sink::View(sink) => sink.clone(),
-        };
-        let window = console.window;
-        window
-            .update(cx, |_, window, cx| sink(event, window, cx))
-            .ok();
-    }
-
-    /// Passes the console events to `sink` from now on, after those that
-    /// arrived before.
-    pub fn attach(sink: impl Fn(ConsoleEvent, &mut Window, &mut App) + 'static, cx: &mut App) {
-        let sink: Rc<dyn Fn(ConsoleEvent, &mut Window, &mut App)> = Rc::new(sink);
-        let console = cx.global_mut::<ConsoleSink>();
-        let window = console.window;
-        let previous = std::mem::replace(&mut console.sink, Sink::View(sink.clone()));
-        if let Sink::Backlog(backlog) = previous {
-            window
-                .update(cx, |_, window, cx| {
-                    for event in backlog {
-                        sink(event, window, cx);
-                    }
-                })
-                .ok();
-        }
-    }
-
-    pub fn set_startup(startup: Instant, cx: &mut App) {
-        cx.global_mut::<ConsoleSink>().startup = startup;
-    }
-
-    pub fn startup(cx: &App) -> Instant {
-        cx.global::<ConsoleSink>().startup
-    }
-}
 
 pub(crate) struct ConsoleView {
     console: Console,
@@ -116,12 +41,17 @@ pub(crate) struct ConsoleView {
     last_count: u32,
     /// The rows changed since the list was last updated.
     dirty: bool,
+    /// Where the commands run at the prompt send what they did.
+    commands: UnboundedSender<ConsoleEvent>,
+    /// When logging started.
     startup: Instant,
+    /// Applies the changes sent to the console.
+    _receive: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl ConsoleView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.bind_keys([KeyBinding::new("cmd-k", ClearConsole, Some("Console"))]);
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
         let prompt =
@@ -141,7 +71,7 @@ impl ConsoleView {
                     if let InputEvent::PressEnter { .. } = event {
                         this.console.prompt.line = prompt.read(cx).value().to_string();
                         if let Some(line) = this.console.submit() {
-                            submit_line(cx, line);
+                            submit_line(cx, this.commands.clone(), line);
                         }
                         prompt.update(cx, |prompt, cx| prompt.set_value("", window, cx));
                         this.list.scroll_to_end();
@@ -152,24 +82,22 @@ impl ConsoleView {
             ),
         ];
 
-        // Attached once this view exists, as the backlog is delivered at once.
-        let view = cx.weak_entity();
-        cx.defer(move |cx| {
-            ConsoleSink::attach(
-                move |event, _, cx| {
-                    if let ConsoleEvent::Dock(side) = event {
-                        crate::devtools::set_dock(side, cx);
-                        return;
-                    }
-                    view.update(cx, |view, cx| {
-                        view.console.apply(event);
-                        view.dirty = true;
-                        cx.notify();
-                    })
-                    .ok();
-                },
-                cx,
-            );
+        let ConsoleLog {
+            sender,
+            mut events,
+            startup,
+        } = log;
+        let receive = cx.spawn(async move |view, cx| {
+            while let Some(event) = events.next().await {
+                let applied = view.update(cx, |view, cx| {
+                    view.console.apply(event);
+                    view.dirty = true;
+                    cx.notify();
+                });
+                if applied.is_err() {
+                    break;
+                }
+            }
         });
 
         let list = ListState::new(0, ListAlignment::Top, px(200.));
@@ -182,7 +110,9 @@ impl ConsoleView {
             shown: Vec::new(),
             last_count: 0,
             dirty: false,
-            startup: ConsoleSink::startup(cx),
+            commands: sender,
+            startup,
+            _receive: receive,
             _subscriptions: subscriptions,
         }
     }
@@ -281,7 +211,7 @@ impl ConsoleView {
     /// Safari's scope bar: "All", or only the picked scopes. A click picks one
     /// scope; a click with Cmd held adds or removes one.
     ///
-    /// The scope of a level `LogPlugin`'s filter drops is disabled, with a
+    /// The scope of a level the subscriber's filter drops is disabled, with a
     /// tooltip saying how to let the level through, until a message of that
     /// level arrives anyway, from a target with a directive of its own.
     fn scope_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -308,7 +238,7 @@ impl ConsoleView {
                 Some(level) => {
                     let level = level.as_str().to_lowercase();
                     format!(
-                        "LogPlugin filters out {level} messages. \
+                        "The log filter drops {level} messages. \
                          Restart with RUST_LOG={level} to show them."
                     )
                 }

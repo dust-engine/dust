@@ -17,6 +17,9 @@ use pumicite::Allocator;
 
 use dust_character::{Character, CharacterCamera, CharacterPlugin, View, ViewChanged};
 use gpui::{AppContext as _, Focusable as _, ParentElement as _, Styled as _};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::util::SubscriberInitExt as _;
 
 #[derive(Component)]
 struct MovingTeapot {
@@ -57,9 +60,10 @@ struct RainbowDemo {
 /// overlay over it. The Bevy app runs on a thread of its own, and the UI on this
 /// one, the main thread.
 pub fn run() {
+    let console_log = init_logging();
     gpui_platform::application()
         .with_assets(gpui_kit_assets::Assets)
-        .run(|cx: &mut gpui::App| {
+        .run(move |cx: &mut gpui::App| {
             gpui_component::init(cx);
             let window_options = gpui::WindowOptions {
                 window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
@@ -86,7 +90,7 @@ pub fn run() {
                         false
                     }
                 });
-                let overlay = dust_devtools::overlay(window, cx);
+                let overlay = dust_devtools::overlay(console_log, window, cx);
                 window.focus(&game.focus_handle(cx), cx);
                 // Transparent, so the game shows through.
                 cx.new(|cx| {
@@ -102,7 +106,7 @@ pub fn run() {
 /// The window's root view: the game, with the DevTools overlay over it.
 struct MainView {
     game: gpui::Entity<dust_ui::BevyView>,
-    overlay: gpui::AnyView,
+    overlay: gpui::Entity<dust_devtools::DevTools>,
 }
 
 impl gpui::Render for MainView {
@@ -118,12 +122,27 @@ impl gpui::Render for MainView {
     }
 }
 
+/// Installs the global `tracing` subscriber, which prints log messages to
+/// stderr and copies them into the DevTools console, and returns the console's
+/// [`ConsoleLog`](dust_devtools::ConsoleLog). `log` records go through it too.
+///
+/// The filter lets through info and above; `RUST_LOG` adds directives to that,
+/// so `RUST_LOG=dust_pbr=debug` keeps info from the other targets.
+fn init_logging() -> dust_devtools::ConsoleLog {
+    let (console_layer, console_log) = dust_devtools::console_layer();
+    let directives = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default();
+    tracing_subscriber::registry()
+        .with(EnvFilter::new(format!("info,{directives}")))
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(console_layer)
+        .init();
+    console_log
+}
+
 fn build_app(app: &mut bevy::app::App) {
     app.add_plugins(dust_app::DustApp)
-        .add_plugins(bevy::DefaultPlugins.set(bevy::log::LogPlugin {
-            custom_layer: dust_devtools::console_layer,
-            ..default()
-        }))
+        // Without `LogPlugin`: `run` has installed the global subscriber.
+        .add_plugins(bevy::DefaultPlugins)
         // After `DefaultPlugins`' `StatesPlugin`.
         .add_plugins(dust_input::InputPlugin)
         .add_plugins(bevy_pumicite::DebugUtilsPlugin::default())
