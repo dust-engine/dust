@@ -7,36 +7,46 @@
 //! systems; and every other entity. The inspector reads component values
 //! through reflection and edits the values of mutable components.
 //!
-//! Drawing borrows the world immutably, so that any entity can be looked up
-//! while drawing, e.g. to label a link to it. What the user does is collected
-//! as [`Action`]s, which [`apply`] carries out once drawing is done.
+//! Showing any of it takes the world, so the tab's state lives on the Bevy
+//! thread, in the [`EntityInspector`] resource: the selection, the filters,
+//! and what is expanded. While the tab is drawn, [`snapshot`] runs at the end
+//! of every Bevy frame (see [`watch`](crate::watch)) and sends what the tab
+//! shows, as plain data, to [`EntitiesView`] on the UI thread. What the user
+//! does there goes back as [`Action`]s, which [`apply`] carries out on the
+//! Bevy thread.
 
 mod inspector;
 #[cfg(test)]
 mod tests;
 mod tree;
+mod ui;
 mod value;
 
-use bevy::ecs::archetype::Archetype;
+use std::time::Duration;
+
+use bevy::ecs::archetype::{Archetype, ArchetypeId};
 use bevy::ecs::component::{ComponentId, Components};
 use bevy::ecs::entity_disabling::{DefaultQueryFilters, Disabled};
 use bevy::ecs::observer::Observer;
 use bevy::ecs::resource::{IS_RESOURCE, IsResource};
 use bevy::ecs::system::SystemIdMarker;
+use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use bevy::reflect::{PartialReflect, ReflectFromPtr, TypeRegistry};
-use pumicite_egui::egui;
+use dust_ui::BevyChannel;
+use gpui::SharedString;
 
-use crate::devtools::DevToolsAppExt;
+pub(crate) use ui::EntitiesView;
 
-/// Adds the "Entities" DevTools tab.
+/// Adds the [`EntityInspector`] the "Entities" DevTools tab shows the world
+/// through. The tab itself is created on the UI thread, by
+/// [`overlay`](crate::overlay).
 #[derive(Default)]
 pub struct EntitiesPlugin;
 
 impl Plugin for EntitiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EntityInspector>();
-        app.add_devtools_tab("Entities", entities_ui);
     }
 }
 
@@ -47,7 +57,7 @@ pub struct EntityInspector {
     /// from elsewhere, the tree expands down to the entity and scrolls it into
     /// view.
     pub selected: Option<Entity>,
-    /// `selected` when the tab was last drawn.
+    /// `selected` when the tab last showed it.
     previous: Option<Entity>,
     history: History,
     names: ComponentNames,
@@ -55,90 +65,38 @@ pub struct EntityInspector {
     inspector: inspector::InspectorState,
 }
 
-fn entities_ui(InMut(ui): InMut<egui::Ui>, world: &mut World) {
-    world.resource_scope(|world, mut state: Mut<EntityInspector>| {
-        let state = &mut *state;
-        let selection_changed = state.selected != state.previous;
-        if selection_changed {
-            if let Some(entity) = state.selected {
-                state.history.visit(entity);
-            }
-            state.previous = state.selected;
-        }
-        state.names.update(world.components());
-        // A handle of its own, so that the registry stays reachable while
-        // `apply` mutates the world.
-        let registry = world.get_resource::<AppTypeRegistry>().cloned();
-        let read = registry.as_ref().map(|registry| registry.read());
-
-        let mut actions = Vec::new();
-        if ui.rect_contains_pointer(ui.max_rect()) {
-            // The mouse's back and forward buttons, as in a browser.
-            ui.input(|input| {
-                if input.pointer.button_pressed(egui::PointerButton::Extra1) {
-                    actions.push(Action::Back);
-                }
-                if input.pointer.button_pressed(egui::PointerButton::Extra2) {
-                    actions.push(Action::Forward);
-                }
-            });
-        }
-        let info = WorldInfo::new(world, &state.names);
-        // Side by side when there is more width than height, stacked
-        // otherwise, as Chrome lays out the Elements panel.
-        let tree_panel = if ui.available_width() > ui.available_height() {
-            egui::Panel::left("devtools_entities_tree_left")
-                .default_size(ui.available_width() * 0.45)
-        } else {
-            egui::Panel::top("devtools_entities_tree_top")
-                .default_size(ui.available_height() * 0.45)
-        };
-        tree_panel
-            .resizable(true)
-            .size_range(120.0..=f32::INFINITY)
-            .show(ui, |ui| {
-                tree::tree_ui(
-                    ui,
-                    &info,
-                    &mut state.selected,
-                    &mut state.tree,
-                    selection_changed,
-                    &mut actions,
-                );
-            });
-        egui::CentralPanel::default().show(ui, |ui| {
-            inspector::inspector_ui(
-                ui,
-                &info,
-                read.as_deref(),
-                state.selected,
-                &mut state.inspector,
-                &state.history,
-                &mut actions,
-            );
-        });
-        // Despawning and inserting run hooks and observers, which may want to
-        // write the registry.
-        drop(read);
-        apply(world, state, registry.as_ref(), actions);
-    });
-}
-
-/// Something the user did while the tab was drawn, carried out by [`apply`]
-/// afterwards.
+/// Something the user did in the tab, carried out on the Bevy thread by
+/// [`apply`].
 enum Action {
     Select(Entity),
     Back,
     Forward,
+    /// An arrow key, pressed while the tree has the keyboard focus.
+    Key(tree::TreeKey),
     /// Show only the tree's entities matching this text.
     Filter(String),
+    /// Show or hide a section's entities.
+    ToggleSection(Section),
+    /// Expand (`open`) or collapse the entity, and with `recursive`, its
+    /// descendants.
+    SetExpanded {
+        entity: Entity,
+        open: bool,
+        recursive: bool,
+    },
+    /// Show only the inspector's components whose name contains this text.
+    ComponentFilter(String),
+    /// Show or hide a component's value.
+    ToggleComponent(ComponentId),
+    /// Open or close the value at a path within a component.
+    ToggleValue(ComponentId, Vec<usize>),
     /// Set the value at `path` within `entity`'s `component`; `path` is as
     /// [`value::element_mut`] follows it.
     Edit {
         entity: Entity,
         component: ComponentId,
         path: Vec<usize>,
-        value: Box<dyn PartialReflect>,
+        value: Edit,
     },
     Rename(Entity, String),
     /// Add `Disabled` to (`true`) or remove it from (`false`) the entity and
@@ -148,11 +106,31 @@ enum Action {
     RemoveComponent(Entity, ComponentId),
 }
 
+/// A new value for [`Action::Edit`].
+enum Edit {
+    Value(Box<dyn PartialReflect>),
+    /// The variant of this name of the enum edited, with its fields' default
+    /// values.
+    Variant(SharedString),
+}
+
+/// Has the Bevy thread carry out `action`.
+fn send(cx: &gpui::App, action: Action) {
+    cx.global::<BevyChannel>().update(move |world| {
+        world.try_resource_scope(|world, mut state: Mut<EntityInspector>| {
+            // A handle of its own, so that the registry stays reachable while
+            // `apply` mutates the world.
+            let registry = world.get_resource::<AppTypeRegistry>().cloned();
+            apply(world, &mut state, registry.as_ref(), [action]);
+        });
+    });
+}
+
 fn apply(
     world: &mut World,
     state: &mut EntityInspector,
     registry: Option<&AppTypeRegistry>,
-    actions: Vec<Action>,
+    actions: impl IntoIterator<Item = Action>,
 ) {
     for action in actions {
         match action {
@@ -167,7 +145,23 @@ fn apply(
                     state.selected = Some(entity);
                 }
             }
+            Action::Key(key) => {
+                let info = WorldInfo::new(world, &state.names);
+                state.tree.key(&info, key, &mut state.selected);
+            }
             Action::Filter(text) => state.tree.filter = text,
+            Action::ToggleSection(section) => state.tree.toggle_section(section),
+            Action::SetExpanded {
+                entity,
+                open,
+                recursive,
+            } => {
+                let info = WorldInfo::new(world, &state.names);
+                state.tree.set_expanded(&info, entity, open, recursive);
+            }
+            Action::ComponentFilter(text) => state.inspector.filter = text,
+            Action::ToggleComponent(component) => state.inspector.toggle_component(component),
+            Action::ToggleValue(component, path) => state.inspector.toggle_value(component, path),
             Action::Edit {
                 entity,
                 component,
@@ -175,7 +169,7 @@ fn apply(
                 value,
             } => {
                 if let Some(registry) = registry {
-                    edit(world, &registry.read(), entity, component, &path, &*value);
+                    edit(world, &registry.read(), entity, component, &path, &value);
                 }
             }
             Action::Rename(entity, name) => {
@@ -212,7 +206,7 @@ fn edit(
     entity: Entity,
     component: ComponentId,
     path: &[usize],
-    value: &dyn PartialReflect,
+    value: &Edit,
 ) {
     let Some(type_id) = world
         .components()
@@ -238,11 +232,112 @@ fn edit(
     // `from_ptr` was checked to be for.
     let reflect =
         unsafe { from_ptr.ptr_as_reflect_mut(component.bypass_change_detection().reborrow()) };
-    let applied = value::element_mut(reflect.as_partial_reflect_mut(), path)
-        .is_some_and(|target| target.try_apply(value).is_ok());
+    let applied = value::element_mut(reflect.as_partial_reflect_mut(), path).is_some_and(
+        |target| match value {
+            Edit::Value(value) => target.try_apply(value.as_partial_reflect()).is_ok(),
+            Edit::Variant(name) => value::named_variant(target, name, registry)
+                .is_some_and(|variant| target.try_apply(&variant).is_ok()),
+        },
+    );
     if applied {
         component.set_changed();
     }
+}
+
+/// How often the tab is sent while nothing it watches changed, to catch up
+/// with the changes it doesn't watch, such as entities spawned or renamed.
+const REFRESH: Duration = Duration::from_millis(250);
+
+/// What the tab shows, sent to the UI thread by [`snapshot`]. Each part is
+/// `None` when it's unchanged since the last snapshot.
+struct Snapshot {
+    tree: Option<tree::TreeSnapshot>,
+    inspector: Option<inspector::InspectorSnapshot>,
+}
+
+/// What [`snapshot`] last sent.
+#[derive(Default)]
+struct Sent {
+    /// When the tree was last sent.
+    tree: Option<Instant>,
+    /// The entity the inspector last showed, and its archetype then.
+    inspected: Option<(Entity, ArchetypeId)>,
+}
+
+/// The tab's contents, each Bevy frame while it's drawn: the tree when the
+/// tab's state changed or [`REFRESH`] passed, and the inspector also when the
+/// selected entity's components changed.
+fn snapshot(world: &mut World, mut sent: Local<Sent>) -> Option<Snapshot> {
+    let snapshot = world.try_resource_scope(|world, mut state: Mut<EntityInspector>| {
+        let changed = state.is_changed();
+        // What follows only records that the tab caught up, which shouldn't
+        // make the next frame send again.
+        let state = state.bypass_change_detection();
+        let now = Instant::now();
+        let refresh = sent.tree.is_none_or(|at| now.duration_since(at) >= REFRESH);
+        // A selection changed from the tab or from elsewhere goes into the
+        // history, and is revealed in the tree.
+        let reveal = state.selected != state.previous;
+        if reveal {
+            if let Some(entity) = state.selected {
+                state.history.visit(entity);
+            }
+            state.previous = state.selected;
+        }
+
+        let selected = state
+            .selected
+            .and_then(|entity| world.get_entity(entity).ok());
+        let inspected = selected.map(|entity| (entity.id(), entity.archetype().id()));
+        // None for an entity the inspector didn't show before, which would
+        // otherwise all show as changed.
+        let changed_components: Vec<ComponentId> = match selected {
+            Some(entity) if inspected == sent.inspected => {
+                let (last_run, this_run) = (world.last_change_tick(), world.read_change_tick());
+                entity
+                    .archetype()
+                    .iter_components()
+                    .filter(|&id| {
+                        entity
+                            .get_change_ticks_by_id(id)
+                            .is_some_and(|ticks| ticks.is_changed(last_run, this_run))
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        let send_tree = changed || refresh || reveal;
+        let send_inspector =
+            send_tree || inspected != sent.inspected || !changed_components.is_empty();
+        if !send_inspector {
+            return None;
+        }
+
+        state.names.update(world.components());
+        let registry = world.get_resource::<AppTypeRegistry>();
+        let registry = registry.map(|registry| registry.read());
+        let info = WorldInfo::new(world, &state.names);
+        let tree = send_tree.then(|| state.tree.snapshot(&info, state.selected, reveal));
+        let inspector = state.inspector.snapshot(
+            &info,
+            registry.as_deref(),
+            state.selected,
+            &state.history,
+            changed_components,
+        );
+        if send_tree {
+            sent.tree = Some(now);
+        }
+        sent.inspected = inspected;
+        Some(Snapshot {
+            tree,
+            inspector: Some(inspector),
+        })
+    });
+    if snapshot.is_none() {
+        warn_once!("The Entities tab needs `EntitiesPlugin`.");
+    }
+    snapshot.flatten()
 }
 
 /// The entities selected in turn, for the back and forward buttons.
@@ -289,7 +384,7 @@ impl History {
 /// `alloc::vec::Vec<bevy_ecs::entity::Entity>`, indexed by
 /// `ComponentId::index`.
 #[derive(Default)]
-struct ComponentNames(Vec<String>);
+struct ComponentNames(Vec<SharedString>);
 
 impl ComponentNames {
     /// Adds the names of the components registered since the last call.
@@ -302,7 +397,7 @@ impl ComponentNames {
             let Some(info) = components.get_info(ComponentId::new(index)) else {
                 break;
             };
-            self.0.push(info.name().shortname().to_string());
+            self.0.push(info.name().shortname().to_string().into());
         }
     }
 }
@@ -341,10 +436,21 @@ impl Section {
             Section::Entities => "All other entities, nested by `ChildOf`.",
         }
     }
+
+    /// What the inspector calls an entity of the section; `None` for a plain
+    /// entity.
+    fn kind(self) -> Option<&'static str> {
+        match self {
+            Section::Resources => Some("Resource"),
+            Section::Observers => Some("Observer"),
+            Section::Systems => Some("One-shot system"),
+            Section::Entities => None,
+        }
+    }
 }
 
 /// Facts about the world that the tree and the inspector look up while
-/// drawing.
+/// building a snapshot.
 struct WorldInfo<'w> {
     world: &'w World,
     names: &'w ComponentNames,
@@ -366,6 +472,7 @@ struct KnownComponents {
     children: Option<ComponentId>,
     observer: Option<ComponentId>,
     system: Option<ComponentId>,
+    disabled: Option<ComponentId>,
 }
 
 impl<'w> WorldInfo<'w> {
@@ -391,6 +498,7 @@ impl<'w> WorldInfo<'w> {
                 children: world.component_id::<Children>(),
                 observer: world.component_id::<Observer>(),
                 system: world.component_id::<SystemIdMarker>(),
+                disabled: world.component_id::<Disabled>(),
             },
             disabling: world
                 .get_resource::<DefaultQueryFilters>()
@@ -400,8 +508,12 @@ impl<'w> WorldInfo<'w> {
     }
 
     /// The component's short type name.
-    fn name(&self, id: ComponentId) -> &'w str {
-        self.names.0.get(id.index()).map_or("?", String::as_str)
+    fn name(&self, id: ComponentId) -> SharedString {
+        self.names
+            .0
+            .get(id.index())
+            .cloned()
+            .unwrap_or(SharedString::new_static("?"))
     }
 
     fn section(&self, archetype: &Archetype) -> Section {
@@ -445,11 +557,11 @@ impl<'w> WorldInfo<'w> {
         let title = entity
             .get::<Name>()
             .filter(|name| !name.as_str().is_empty())
-            .map(|name| name.as_str().to_owned())
-            .or_else(|| resource.map(|id| self.name(id).to_owned()))
+            .map(|name| SharedString::from(name.as_str().to_owned()))
+            .or_else(|| resource.map(|id| self.name(id)))
             .or_else(|| {
                 let observer = entity.get::<Observer>()?;
-                Some(observer.system_name().shortname().to_string())
+                Some(observer.system_name().shortname().to_string().into())
             });
         // Without the components the title or the tree already shows.
         let shown = [
@@ -465,143 +577,44 @@ impl<'w> WorldInfo<'w> {
             .filter(|&id| !shown.contains(&Some(id)))
             .collect();
         components.sort_by_key(|&id| (self.counts.get(id.index()).copied().unwrap_or(0), id));
+        let has = |id: Option<ComponentId>| id.is_some_and(|id| archetype.contains(id));
         Some(Label {
             title,
-            components,
+            components: components.into_iter().map(|id| self.name(id)).collect(),
             section,
             disabled: self.disabling.iter().any(|&id| archetype.contains(id)),
+            has_disabled: has(self.known.disabled),
         })
     }
 }
 
 /// What identifies an entity in the tree, in links to it, and in the
 /// inspector's title.
+#[derive(Clone, Debug)]
 struct Label {
     /// The entity's `Name`, or else the type of its resource or the system of
     /// its observer.
-    title: Option<String>,
-    /// The entity's other components, those on the fewest entities first:
-    /// the rarer a component, the better it tells the entity apart.
-    components: Vec<ComponentId>,
+    title: Option<SharedString>,
+    /// The names of the entity's other components, those on the fewest
+    /// entities first: the rarer a component, the better it tells the entity
+    /// apart.
+    components: Vec<SharedString>,
     section: Section,
     /// Whether the entity has a component that disables it, such as
     /// `Disabled`.
     disabled: bool,
+    /// Whether the entity has `Disabled` itself, which "Enable" removes.
+    has_disabled: bool,
 }
 
 impl Label {
     /// The title, or else the rarest component's name.
-    fn short<'a>(&'a self, info: &WorldInfo<'a>) -> &'a str {
+    fn short(&self) -> SharedString {
         match (&self.title, self.components.first()) {
-            (Some(title), _) => title,
-            (None, Some(&id)) => info.name(id),
-            (None, None) => "empty",
+            (Some(title), _) => title.clone(),
+            (None, Some(name)) => name.clone(),
+            (None, None) => SharedString::new_static("empty"),
         }
-    }
-}
-
-/// The colors of the DOM tree in Chrome's DevTools, which the tab borrows.
-#[derive(Clone, Copy)]
-enum Syntax {
-    /// A tag's name; an entity's title here.
-    Tag,
-    /// An attribute's name; a component's or a field's here.
-    Attribute,
-    /// An attribute's value, which is a string; any string here.
-    Value,
-    /// A number or a boolean, as Chrome's console colors them.
-    Number,
-}
-
-impl Syntax {
-    fn color(self, visuals: &egui::Visuals) -> egui::Color32 {
-        let [r, g, b] = match (self, visuals.dark_mode) {
-            (Syntax::Tag, true) => [0x5d, 0xb0, 0xd7],
-            (Syntax::Tag, false) => [0x88, 0x12, 0x80],
-            (Syntax::Attribute, true) => [0x9b, 0xbb, 0xdc],
-            (Syntax::Attribute, false) => [0x99, 0x45, 0x00],
-            (Syntax::Value, true) => [0xf2, 0x97, 0x66],
-            (Syntax::Value, false) => [0x1a, 0x1a, 0xa6],
-            (Syntax::Number, true) => [0x99, 0x80, 0xff],
-            (Syntax::Number, false) => [0x1c, 0x00, 0xcf],
-        };
-        egui::Color32::from_rgb(r, g, b)
-    }
-}
-
-/// A link to `entity`, labeled with its title or rarest component and its id.
-/// Clicking it selects the entity.
-fn entity_link(
-    ui: &mut egui::Ui,
-    info: &WorldInfo,
-    entity: Entity,
-    actions: &mut Vec<Action>,
-) -> egui::Response {
-    let Some(label) = info.label(entity) else {
-        let error = ui.visuals().error_fg_color;
-        return ui.label(egui::RichText::new(format!("{entity} (despawned)")).color(error));
-    };
-    let response = ui.link(format!("{} {entity}", label.short(info)));
-    if response.clicked() {
-        actions.push(Action::Select(entity));
-    }
-    response.on_hover_ui(|ui| label_tooltip(ui, info, &label))
-}
-
-/// The entity's title and all of its components.
-fn label_tooltip(ui: &mut egui::Ui, info: &WorldInfo, label: &Label) {
-    if let Some(title) = &label.title {
-        ui.strong(title);
-    }
-    let components: Vec<&str> = label.components.iter().map(|&id| info.name(id)).collect();
-    ui.label(components.join(", "));
-}
-
-/// The actions on `entity` offered both in the tree's context menu and in the
-/// inspector's ⋮ menu.
-fn entity_menu(
-    ui: &mut egui::Ui,
-    info: &WorldInfo,
-    entity: Entity,
-    label: &Label,
-    actions: &mut Vec<Action>,
-) {
-    if ui.button("Copy ID").clicked() {
-        ui.ctx().copy_text(entity.to_string());
-    }
-    if let Some(title) = &label.title
-        && ui.button("Copy title").clicked()
-    {
-        ui.ctx().copy_text(title.clone());
-    }
-    // Resources, observers and one-shot systems aren't meant to be despawned.
-    if label.section != Section::Entities {
-        return;
-    }
-    ui.separator();
-    if info.world.get::<Disabled>(entity).is_some() {
-        if ui
-            .button("Enable")
-            .on_hover_text("Removes `Disabled` from the entity and its descendants.")
-            .clicked()
-        {
-            actions.push(Action::SetDisabled(entity, false));
-        }
-    } else if ui
-        .button("Disable")
-        .on_hover_text(
-            "Adds `Disabled` to the entity and its descendants, hiding them from queries.",
-        )
-        .clicked()
-    {
-        actions.push(Action::SetDisabled(entity, true));
-    }
-    let error = ui.visuals().error_fg_color;
-    if ui
-        .button(egui::RichText::new("Despawn").color(error))
-        .clicked()
-    {
-        actions.push(Action::Despawn(entity));
     }
 }
 
@@ -612,88 +625,4 @@ fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
             .as_bytes()
             .windows(needle.len())
             .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
-}
-
-/// Width of a disclosure triangle's column, which is also the indentation of
-/// each level of the tree.
-const INDENT: f32 = 14.0;
-
-/// ▶ when closed, ▼ when open, as the console's disclosure triangles.
-fn paint_triangle(painter: &egui::Painter, center: egui::Pos2, open: bool, color: egui::Color32) {
-    let v = egui::vec2;
-    let points = if open {
-        vec![
-            center + v(-4.0, -2.0),
-            center + v(4.0, -2.0),
-            center + v(0.0, 3.0),
-        ]
-    } else {
-        vec![
-            center + v(-2.0, -4.0),
-            center + v(3.0, 0.0),
-            center + v(-2.0, 4.0),
-        ]
-    };
-    painter.add(egui::Shape::convex_polygon(
-        points,
-        color,
-        egui::Stroke::NONE,
-    ));
-}
-
-/// A row of the inspector's width, filled with `background`, with a
-/// disclosure triangle on the left when `open` is `Some`, and `header` drawn
-/// after the triangle. Clicks on the row, outside the header's own widgets,
-/// go to the returned response.
-fn header_row(
-    ui: &mut egui::Ui,
-    open: Option<bool>,
-    background: egui::Color32,
-    header: impl FnOnce(&mut egui::Ui),
-) -> egui::Response {
-    let height = ui.spacing().interact_size.y;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::click(),
-    );
-    ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same(2), background);
-    if let Some(open) = open {
-        let color = if response.hovered() {
-            ui.visuals().strong_text_color()
-        } else {
-            ui.visuals().weak_text_color()
-        };
-        let center = egui::pos2(rect.left() + INDENT / 2.0, rect.center().y);
-        paint_triangle(ui.painter(), center, open, color);
-    }
-    let mut header_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.with_min_x(rect.left() + INDENT))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    // Selectable labels would take the clicks meant to toggle the row.
-    header_ui.style_mut().interaction.selectable_labels = false;
-    header(&mut header_ui);
-    response
-}
-
-/// A [`header_row`] whose clicks open and close it. Returns the row's response
-/// and whether it's open, in which case the caller draws what the row holds
-/// below it. The open state is kept in egui's memory under `id`, so it
-/// persists while the row is out of view.
-fn collapsible_row(
-    ui: &mut egui::Ui,
-    id: egui::Id,
-    default_open: bool,
-    background: egui::Color32,
-    header: impl FnOnce(&mut egui::Ui),
-) -> (egui::Response, bool) {
-    let mut open = ui.data_mut(|data| *data.get_temp_mut_or(id, default_open));
-    let response = header_row(ui, Some(open), background, header);
-    if response.clicked() {
-        open = !open;
-        ui.data_mut(|data| data.insert_temp(id, open));
-    }
-    (response, open)
 }

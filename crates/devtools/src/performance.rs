@@ -105,27 +105,6 @@ struct GpuTimings {
     timings: Vec<(&'static str, f32)>,
 }
 
-/// The overlay's contents, each frame.
-fn performance_snapshot(
-    panel: Res<PerformancePanel>,
-    profiler: Option<Res<GpuProfiler>>,
-    hdr_target: Option<Res<HdrRenderTarget>>,
-) -> Option<PerformanceSnapshot> {
-    if !panel.is_changed() {
-        return None;
-    }
-    Some(PerformanceSnapshot {
-        panel: panel.clone(),
-        display_resolution: hdr_target.as_ref().map(|hdr| hdr.display_extent),
-        render_resolution: hdr_target.as_ref().map(|hdr| hdr.render_extent),
-        gpu: profiler.map(|profiler| GpuTimings {
-            supported: profiler.is_supported(),
-            enabled: profiler.enabled,
-            timings: profiler.timings().collect(),
-        }),
-    })
-}
-
 /// The overlay, semi-transparent, in the top-left corner of the scene. Clicks
 /// go through it to the game.
 pub(crate) struct PerformanceOverlay {
@@ -140,9 +119,29 @@ impl PerformanceOverlay {
 
 impl Render for PerformanceOverlay {
     fn render(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
-        watch(window, cx, performance_snapshot, |this, snapshot, _, _| {
-            this.snapshot = Some(snapshot)
-        });
+        watch(
+            window,
+            cx,
+            |panel: Res<PerformancePanel>,
+             profiler: Option<Res<GpuProfiler>>,
+             hdr_target: Option<Res<HdrRenderTarget>>|
+             -> Option<PerformanceSnapshot> {
+                if !panel.is_changed() {
+                    return None;
+                }
+                Some(PerformanceSnapshot {
+                    panel: panel.clone(),
+                    display_resolution: hdr_target.as_ref().map(|hdr| hdr.display_extent),
+                    render_resolution: hdr_target.as_ref().map(|hdr| hdr.render_extent),
+                    gpu: profiler.map(|profiler| GpuTimings {
+                        supported: profiler.is_supported(),
+                        enabled: profiler.enabled,
+                        timings: profiler.timings().collect(),
+                    }),
+                })
+            },
+            |this, snapshot, _, _| this.snapshot = Some(snapshot),
+        );
         let mut contents = v_flex().gap_0p5();
         if let Some(snapshot) = &self.snapshot {
             let panel = &snapshot.panel;

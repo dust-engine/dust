@@ -46,6 +46,7 @@ use gpui_component::{
 };
 
 use crate::console::{ConsoleLog, ConsoleView};
+use crate::entities::EntitiesView;
 use crate::graphics_debug::GraphicsDebugView;
 use crate::performance::{PerformanceOverlay, PerformancePanel};
 use crate::player::PlayerOverlay;
@@ -64,8 +65,8 @@ pub enum DockSide {
 }
 
 /// Builds the overlay drawn over the game's `BevyView`: the DevTools dock, with
-/// its Graphics Debug and Console tabs, and the performance and player
-/// overlays. [`DevTools::add_tab`] adds more tabs.
+/// its Graphics Debug, Entities and Console tabs, and the performance and
+/// player overlays. [`DevTools::add_tab`] adds more tabs.
 ///
 /// The console shows the messages logged to `console_log`; see
 /// [`console_layer`](crate::console_layer).
@@ -126,6 +127,7 @@ fn gpu_timings(profiler: Option<Res<GpuProfiler>>) -> Option<(bool, bool)> {
 impl DevTools {
     fn new(console_log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let graphics_debug = cx.new(|cx| GraphicsDebugView::new(window, cx));
+        let entities = cx.new(|cx| EntitiesView::new(window, cx));
         let console = cx.new(|cx| ConsoleView::new(console_log, window, cx));
         DevTools {
             open: true,
@@ -133,6 +135,7 @@ impl DevTools {
             selected: 0,
             tabs: vec![
                 ("Graphics Debug".into(), graphics_debug.into()),
+                ("Entities".into(), entities.into()),
                 ("Console".into(), console.into()),
             ],
             performance: cx.new(|cx| PerformanceOverlay::new(window, cx)),

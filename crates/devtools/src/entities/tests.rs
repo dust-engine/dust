@@ -1,6 +1,9 @@
+use bevy::ecs::system::RunSystemOnce as _;
 use bevy::reflect::Typed;
 
-use super::tree::{Filter, Row, RowKind, TreeState, roots};
+use super::inspector::{Body, EntityView};
+use super::tree::{Filter, Row, RowKind, RowView, TreeKey, TreeState, roots};
+use super::value::{LeafValue, Number, Piece, ValueRowKind};
 use super::*;
 
 #[derive(Component, Reflect, Default, Clone, Copy)]
@@ -26,6 +29,12 @@ enum Stance {
     },
 }
 
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+struct Inventory {
+    items: Vec<u32>,
+}
+
 #[derive(Resource, Reflect, Default)]
 #[reflect(Resource)]
 struct Score(u32);
@@ -36,15 +45,18 @@ struct Marker;
 
 fn on_add_health(_: On<Add<Health>>) {}
 
-/// A world with the test types registered for reflection.
+/// A world with the test types registered for reflection, and the tab's
+/// state.
 fn world() -> World {
     let mut world = World::new();
     world.init_resource::<AppTypeRegistry>();
+    world.init_resource::<EntityInspector>();
     let registry = world.resource::<AppTypeRegistry>().clone();
     let mut registry = registry.write();
     registry.register::<Health>();
     registry.register::<Team>();
     registry.register::<Stance>();
+    registry.register::<Inventory>();
     registry.register::<Score>();
     registry.register::<Name>();
     registry.register::<Transform>();
@@ -60,6 +72,22 @@ fn names(world: &World) -> ComponentNames {
 fn sorted(mut entities: Vec<Entity>) -> Vec<Entity> {
     entities.sort();
     entities
+}
+
+/// Carries out `actions` as the tab does.
+fn act(world: &mut World, actions: impl IntoIterator<Item = Action>) {
+    world.resource_scope(|world, mut state: Mut<EntityInspector>| {
+        let registry = world.get_resource::<AppTypeRegistry>().cloned();
+        apply(world, &mut state, registry.as_ref(), actions);
+    });
+}
+
+/// The inspector's view of the selected entity, from a snapshot taken
+/// afresh, as when the tab is first shown.
+fn inspect(world: &mut World, entity: Entity) -> EntityView {
+    world.resource_mut::<EntityInspector>().selected = Some(entity);
+    let snapshot = world.run_system_once(snapshot).unwrap().unwrap();
+    snapshot.inspector.unwrap().entity.unwrap()
 }
 
 #[test]
@@ -95,13 +123,18 @@ fn sections() {
     let info = WorldInfo::new(&world, &names);
     let [resources, observers, systems, entities] = roots(&info);
 
-    let resources: Vec<String> = resources
+    let resources: Vec<SharedString> = resources
         .iter()
         .map(|&entity| info.label(entity).unwrap().title.unwrap())
         .collect();
     assert_eq!(
         resources,
-        ["AppTypeRegistry", "DefaultQueryFilters", "Score"]
+        [
+            "AppTypeRegistry",
+            "DefaultQueryFilters",
+            "EntityInspector",
+            "Score"
+        ]
     );
     assert_eq!(observers, [observer]);
     assert_eq!(systems, [system]);
@@ -122,16 +155,16 @@ fn labels() {
     world.despawn(despawned);
     world.insert_resource(Score(1));
     let observer = world.add_observer(on_add_health).id();
+    let disabled = world.spawn((Marker, Disabled)).id();
     let names = names(&world);
     let info = WorldInfo::new(&world, &names);
 
     let label = info.label(named).unwrap();
     assert_eq!(label.title.as_deref(), Some("teapot"));
-    // `Marker` is on two entities and `Health` on five, so `Marker` comes
+    // `Marker` is on three entities and `Health` on five, so `Marker` comes
     // first. `Name` is the title, so it isn't listed.
-    let components: Vec<&str> = label.components.iter().map(|&id| info.name(id)).collect();
-    assert_eq!(components, ["Marker", "Health"]);
-    assert_eq!(info.label(unnamed).unwrap().short(&info), "Marker");
+    assert_eq!(label.components, ["Marker", "Health"]);
+    assert_eq!(info.label(unnamed).unwrap().short(), "Marker");
 
     let score = world.resource_entity::<Score>().unwrap();
     let label = info.label(score).unwrap();
@@ -141,6 +174,8 @@ fn labels() {
     assert_eq!(label.title.as_deref(), Some("on_add_health"));
     assert_eq!(label.section, Section::Observers);
     assert!(info.label(despawned).is_none());
+    let label = info.label(disabled).unwrap();
+    assert!(label.disabled && label.has_disabled);
 }
 
 #[test]
@@ -218,6 +253,36 @@ fn rows() {
 }
 
 #[test]
+fn keys() {
+    let mut world = world();
+    let castle = world.spawn(Name::new("Castle")).id();
+    let tower = world.spawn((Name::new("Tower"), ChildOf(castle))).id();
+    world.spawn((Name::new("Guard"), ChildOf(tower)));
+    let names = names(&world);
+    let info = WorldInfo::new(&world, &names);
+    let mut state = TreeState::default();
+    let mut selected = None;
+    let mut press = |key, selected: &mut Option<Entity>| state.key(&info, key, selected);
+
+    // ↓ with nothing selected selects the first entity; sections are skipped.
+    press(TreeKey::Down, &mut selected);
+    assert_eq!(selected, Some(castle));
+    // → first expands, then moves to the first child.
+    press(TreeKey::Right, &mut selected);
+    assert_eq!(selected, Some(castle));
+    press(TreeKey::Right, &mut selected);
+    assert_eq!(selected, Some(tower));
+    // ← on a closed entity moves to its parent, then collapses it.
+    press(TreeKey::Left, &mut selected);
+    assert_eq!(selected, Some(castle));
+    press(TreeKey::Left, &mut selected);
+    press(TreeKey::Down, &mut selected);
+    assert_eq!(selected, Some(castle));
+    press(TreeKey::Up, &mut selected);
+    assert_eq!(selected, Some(castle));
+}
+
+#[test]
 fn edits() {
     let mut world = world();
     let entity = world
@@ -236,7 +301,6 @@ fn edits() {
         world.component_id::<Stance>(),
     ]
     .map(Option::unwrap);
-    let registry = world.resource::<AppTypeRegistry>().clone();
     let changed = |world: &World| {
         world
             .entity(entity)
@@ -244,43 +308,44 @@ fn edits() {
             .unwrap()
             .changed
     };
-    let edit = |component, path: &[usize], value: Box<dyn PartialReflect>| Action::Edit {
+    let edit = |component, path: &[usize], value: Edit| Action::Edit {
         entity,
         component,
         path: path.to_vec(),
         value,
     };
-    let enum_info = Stance::type_info().as_enum().unwrap();
-    let variant = |name| value::default_variant(enum_info.variant(name).unwrap(), &registry.read());
-    let mut state = EntityInspector::default();
 
     world.increment_change_tick();
     let before = changed(&world);
     // A path to no field changes nothing.
-    apply(
+    act(
         &mut world,
-        &mut state,
-        Some(&registry),
-        vec![edit(health, &[7], Box::new(5.0f32))],
+        [edit(health, &[7], Edit::Value(Box::new(5.0f32)))],
     );
     assert_eq!(changed(&world), before);
-    apply(
+    act(
         &mut world,
-        &mut state,
-        Some(&registry),
-        vec![
-            edit(health, &[0], Box::new(5.0f32)),
+        [
+            edit(health, &[0], Edit::Value(Box::new(5.0f32))),
             // Immutable, so not edited in place.
-            edit(team, &[0], Box::new(2u8)),
-            edit(stance, &[], Box::new(variant("Moving").unwrap())),
+            edit(team, &[0], Edit::Value(Box::new(2u8))),
+            edit(stance, &[], Edit::Variant("Moving".into())),
         ],
     );
     assert_eq!(world.get::<Health>(entity).unwrap().current, 5.0);
     assert_ne!(changed(&world), before);
     assert_eq!(world.get::<Team>(entity).unwrap().0, 1);
     assert_eq!(world.get::<Stance>(entity), Some(&Stance::Moving(0.0)));
+
     // `Entity` has no `Default`, so the variant can't be built.
-    assert!(variant("Hiding").is_none());
+    act(
+        &mut world,
+        [edit(stance, &[], Edit::Variant("Hiding".into()))],
+    );
+    assert_eq!(world.get::<Stance>(entity), Some(&Stance::Moving(0.0)));
+    let registry = world.resource::<AppTypeRegistry>().read();
+    let enum_info = Stance::type_info().as_enum().unwrap();
+    assert!(value::default_variant(enum_info.variant("Hiding").unwrap(), &registry).is_none());
 }
 
 #[test]
@@ -289,12 +354,9 @@ fn entity_actions() {
     let parent = world.spawn(Name::new("a")).id();
     let child = world.spawn(ChildOf(parent)).id();
     let other = world.spawn_empty().id();
-    let mut state = EntityInspector::default();
-    apply(
+    act(
         &mut world,
-        &mut state,
-        None,
-        vec![
+        [
             Action::SetDisabled(parent, true),
             Action::Rename(parent, "b".to_owned()),
             Action::Despawn(other),
@@ -305,14 +367,10 @@ fn entity_actions() {
     assert!(world.get::<Disabled>(child).is_some());
     assert_eq!(world.get::<Name>(parent).unwrap().as_str(), "b");
     assert!(world.get_entity(other).is_err());
+    let state = world.resource::<EntityInspector>();
     assert_eq!(state.selected, Some(child));
     assert_eq!(state.tree.filter, "x");
-    apply(
-        &mut world,
-        &mut state,
-        None,
-        vec![Action::SetDisabled(parent, false)],
-    );
+    act(&mut world, [Action::SetDisabled(parent, false)]);
     assert!(world.get::<Disabled>(child).is_none());
 }
 
@@ -343,33 +401,19 @@ fn preview_stops_at_max() {
     assert_eq!(value::preview(&3.5f32, 20), "3.5");
 }
 
-/// Draws the tab with `selected` selected and `filter` in the tree's filter.
-/// Twice, as egui sizes some widgets in the pass after they first show.
-fn draw(world: &mut World, selected: Option<Entity>, filter: &str) {
-    world.init_resource::<EntityInspector>();
-    let mut state = world.resource_mut::<EntityInspector>();
-    state.selected = selected;
-    state.tree.filter = filter.to_owned();
-    let system = world.register_system(entities_ui);
-    let ctx = egui::Context::default();
-    for _ in 0..2 {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1280.0, 720.0),
-            )),
-            ..Default::default()
-        };
-        let mut output = ctx.run_ui(input, |ui| {
-            world.run_system_with(system, ui).unwrap();
-        });
-        // No renderer takes the font atlas; egui asserts that something did.
-        output.textures_delta.clear();
-    }
+#[test]
+fn numbers() {
+    assert_eq!(Number::U8(3).parse(" 200 "), Some(Number::U8(200)));
+    assert_eq!(Number::U8(3).parse("300"), None);
+    assert_eq!(Number::F32(0.0).parse("1.5"), Some(Number::F32(1.5)));
+    // Dragged to, an integer rounds and stays within its type.
+    assert_eq!(Number::I8(0).with_f64(2.6), Number::I8(3));
+    assert_eq!(Number::U8(0).with_f64(-4.0), Number::U8(0));
+    assert_eq!(Number::F64(0.0).with_f64(2.6), Number::F64(2.6));
 }
 
 #[test]
-fn draws_each_kind_of_entity() {
+fn snapshots_each_kind_of_entity() {
     let mut world = world();
     world.insert_resource(Score(7));
     let observer = world.add_observer(on_add_health).id();
@@ -395,7 +439,214 @@ fn draws_each_kind_of_entity() {
         Some(despawned),
     ] {
         for filter in ["", "teapot", "health 0v"] {
-            draw(&mut world, selected, filter);
+            act(
+                &mut world,
+                [
+                    Action::Filter(filter.to_owned()),
+                    Action::ComponentFilter(filter.to_owned()),
+                ],
+            );
+            world.resource_mut::<EntityInspector>().selected = selected;
+            let snapshot = world.run_system_once(snapshot).unwrap().unwrap();
+            let tree = snapshot.tree.unwrap();
+            let inspector = snapshot.inspector.unwrap();
+            assert_eq!(inspector.selected, selected);
+            let shown = selected.filter(|&entity| entity != despawned);
+            assert_eq!(inspector.entity.map(|view| view.entity), shown);
+            // The tree reveals the selection when it shows.
+            if let Some(index) = tree.reveal {
+                assert!(matches!(
+                    tree.rows[index],
+                    RowView::Entity { entity, .. } if Some(entity) == selected
+                ));
+            }
         }
     }
+
+    act(&mut world, [Action::Filter(String::new())]);
+    let snapshot = world.run_system_once(snapshot).unwrap().unwrap();
+    let tree = snapshot.tree.unwrap();
+    // Selecting the lid expanded the teapot to show it.
+    let row = |entity| {
+        tree.rows.iter().find_map(|row| match row {
+            RowView::Entity {
+                entity: shown,
+                depth,
+                open,
+                ..
+            } if *shown == entity => Some((*depth, *open)),
+            _ => None,
+        })
+    };
+    assert_eq!(row(teapot), Some((1, true)));
+    assert_eq!(row(lid), Some((2, false)));
+}
+
+#[test]
+fn inspector_values() {
+    let mut world = world();
+    let teapot = world
+        .spawn((
+            Name::new("teapot"),
+            Health {
+                current: 1.0,
+                max: 2.0,
+            },
+            Stance::Moving(1.0),
+            Team(3),
+            Inventory {
+                items: vec![1, 2, 3],
+            },
+            Marker,
+        ))
+        .id();
+    act(&mut world, [Action::ComponentFilter(String::new())]);
+    let view = inspect(&mut world, teapot);
+    fn component<'a>(view: &'a EntityView, name: &str) -> (ComponentId, Option<&'a Body>) {
+        let component = view
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap();
+        (component.id, component.body.as_ref())
+    }
+
+    let (_, name) = component(&view, "Name");
+    assert!(matches!(name, Some(Body::Name(text)) if text == "teapot"));
+    // A marker has no value to show.
+    let (_, marker) = component(&view, "Marker");
+    assert!(marker.is_none());
+
+    // A struct of two numbers fits on one row, and can be edited.
+    let (_, Some(Body::Rows(rows))) = component(&view, "Health") else {
+        panic!("Health has rows");
+    };
+    let [row] = &rows[..] else {
+        panic!("Health fits on one row");
+    };
+    let ValueRowKind::Inline { name: None, pieces } = &row.kind else {
+        panic!("Health is inline");
+    };
+    let numbers: Vec<(&[usize], Number, bool)> = pieces
+        .iter()
+        .filter_map(|piece| match piece {
+            Piece::Leaf(leaf) => match leaf.value {
+                LeafValue::Number(number) => Some((&leaf.path[..], number, leaf.editable)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        numbers,
+        [
+            (&[0][..], Number::F32(1.0), true),
+            (&[1][..], Number::F32(2.0), true)
+        ]
+    );
+
+    // An immutable component's value can't be edited.
+    let (_, Some(Body::Rows(rows))) = component(&view, "Team") else {
+        panic!("Team has rows");
+    };
+    assert!(matches!(
+        &rows[0].kind,
+        ValueRowKind::Inline { pieces, .. }
+            if matches!(&pieces[..], [Piece::Leaf(leaf)] if !leaf.editable)
+    ));
+
+    // An enum's variant can be picked from all of its variants.
+    let (_, Some(Body::Rows(rows))) = component(&view, "Stance") else {
+        panic!("Stance has rows");
+    };
+    let ValueRowKind::Inline { pieces, .. } = &rows[0].kind else {
+        panic!("Moving(f32) is inline");
+    };
+    let Piece::Variant(variant) = &pieces[0] else {
+        panic!("the variant comes first");
+    };
+    assert_eq!(variant.current, "Moving");
+    assert_eq!(
+        variant.choices.as_deref(),
+        Some(
+            &[
+                ("Idle".into(), true),
+                ("Moving".into(), true),
+                ("Hiding".into(), false)
+            ][..]
+        )
+    );
+
+    // A list is closed until opened, which shows its elements.
+    let (inventory, Some(Body::Rows(rows))) = component(&view, "Inventory") else {
+        panic!("Inventory has rows");
+    };
+    assert!(matches!(
+        &rows[..],
+        [row] if matches!(&row.kind, ValueRowKind::Nested { open: false, .. })
+    ));
+    act(&mut world, [Action::ToggleValue(inventory, vec![0])]);
+    let view = inspect(&mut world, teapot);
+    let (_, Some(Body::Rows(rows))) = component(&view, "Inventory") else {
+        panic!("Inventory has rows");
+    };
+    let depths: Vec<usize> = rows.iter().map(|row| row.depth).collect();
+    assert_eq!(depths, [0, 1, 1, 1]);
+
+    // A closed component sends no value.
+    act(&mut world, [Action::ToggleComponent(inventory)]);
+    let view = inspect(&mut world, teapot);
+    assert!(component(&view, "Inventory").1.is_none());
+
+    // The component filter leaves the others out.
+    act(&mut world, [Action::ComponentFilter("heal".to_owned())]);
+    let view = inspect(&mut world, teapot);
+    let names: Vec<&str> = view
+        .components
+        .iter()
+        .map(|component| &*component.name)
+        .collect();
+    assert_eq!(names, ["Health"]);
+    assert!(view.filtered);
+}
+
+#[test]
+fn snapshot_sends_changes() {
+    let mut world = world();
+    let teapot = world.spawn((Name::new("teapot"), Health::default())).id();
+    let other = world.spawn(Health::default()).id();
+    let health = world.component_id::<Health>().unwrap();
+    world.resource_mut::<EntityInspector>().selected = Some(teapot);
+    let system = world.register_system(snapshot);
+    let run = |world: &mut World| {
+        // As the systems run between two frames do.
+        world.increment_change_tick();
+        world.run_system(system).unwrap()
+    };
+
+    // Everything when first shown, then nothing while nothing changes.
+    let first = run(&mut world).unwrap();
+    assert!(first.tree.is_some());
+    assert!(first.inspector.unwrap().changed.is_empty());
+    assert!(run(&mut world).is_none());
+
+    // The inspector when the selected entity changes, with what changed.
+    world.get_mut::<Health>(teapot).unwrap().current = 2.0;
+    let snapshot = run(&mut world).unwrap();
+    assert!(snapshot.tree.is_none());
+    assert_eq!(snapshot.inspector.unwrap().changed, [health]);
+    // Not when another entity changes.
+    world.get_mut::<Health>(other).unwrap().current = 2.0;
+    assert!(run(&mut world).is_none());
+
+    // Both when the tab's state changes.
+    act(&mut world, [Action::Select(other)]);
+    let snapshot = run(&mut world).unwrap();
+    assert!(snapshot.tree.unwrap().reveal.is_some());
+    // A newly selected entity doesn't show as all changed.
+    assert!(snapshot.inspector.unwrap().changed.is_empty());
+    assert!(run(&mut world).is_none());
+    // And when a component is added to the selected entity.
+    world.entity_mut(other).insert(Marker);
+    assert!(run(&mut world).unwrap().inspector.is_some());
 }

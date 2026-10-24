@@ -1,29 +1,30 @@
-//! Drawing of reflected values, such as a component's fields. An edit is
-//! recorded as the new value and the path to it, which [`element_mut`]
-//! follows.
+//! Reflected values, such as a component's fields, as rows of plain data for
+//! the inspector to draw. An edit is sent as the new value and the path to it,
+//! which [`element_mut`] follows.
 
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::fmt::{self, Write as _};
 use std::time::Duration;
 
-use bevy::math::EulerRot;
+use bevy::ecs::component::ComponentId;
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::reflect::enums::{DynamicEnum, DynamicVariant, Enum, VariantInfo, VariantType};
 use bevy::reflect::std_traits::ReflectDefault;
 use bevy::reflect::structs::DynamicStruct;
 use bevy::reflect::tuple::DynamicTuple;
 use bevy::reflect::{PartialReflect, ReflectMut, ReflectRef, TypeRegistry};
-use pumicite_egui::egui::{self, emath::Numeric};
+use gpui::SharedString;
 
-use super::{Action, INDENT, Syntax, WorldInfo, collapsible_row, entity_link};
+use super::{Label, WorldInfo};
 
-/// The most elements of a list, map or set drawn; the rest are counted.
+/// The most elements of a list, map or set shown; the rest are counted.
 pub(super) const MAX_ELEMENTS: usize = 100;
 
 /// The value at `path` within `value`. Each index in `path` picks a field of
 /// a struct, tuple or enum variant, or an element of a list or array, as
-/// [`ValueUi`] records them.
+/// [`ValueRows`] records them.
 pub(super) fn element_mut<'a>(
     value: &'a mut dyn PartialReflect,
     path: &[usize],
@@ -72,71 +73,300 @@ pub(super) fn preview(value: &dyn PartialReflect, max: usize) -> String {
     bounded.text
 }
 
-/// Draws a component's value and records the user's edits to it.
-pub(super) struct ValueUi<'a, 'w> {
+/// A value of `variant` whose fields are their types' defaults, or `None` if
+/// one of them doesn't reflect `Default`.
+pub(super) fn default_variant(
+    variant: &VariantInfo,
+    registry: &TypeRegistry,
+) -> Option<DynamicEnum> {
+    let default = |type_id| {
+        let default = registry.get_type_data::<ReflectDefault>(type_id)?;
+        Some(default.default().into_partial_reflect())
+    };
+    let fields = match variant {
+        VariantInfo::Unit(_) => DynamicVariant::Unit,
+        VariantInfo::Tuple(variant) => {
+            let mut fields = DynamicTuple::default();
+            for field in variant.iter() {
+                fields.insert_boxed(default(field.type_id())?);
+            }
+            DynamicVariant::Tuple(fields)
+        }
+        VariantInfo::Struct(variant) => {
+            let mut fields = DynamicStruct::default();
+            for field in variant.iter() {
+                fields.insert_boxed(field.name(), default(field.type_id())?);
+            }
+            DynamicVariant::Struct(fields)
+        }
+    };
+    Some(DynamicEnum::new(variant.name(), fields))
+}
+
+/// [`default_variant`] of the variant named `name` of `value`, an enum.
+pub(super) fn named_variant(
+    value: &dyn PartialReflect,
+    name: &str,
+    registry: &TypeRegistry,
+) -> Option<DynamicEnum> {
+    let ReflectRef::Enum(value) = value.reflect_ref() else {
+        return None;
+    };
+    default_variant(value.get_represented_enum_info()?.variant(name)?, registry)
+}
+
+/// Whether [`default_variant`] can build a value of `variant`, without
+/// building it.
+fn has_default(variant: &VariantInfo, registry: &TypeRegistry) -> bool {
+    let default = |type_id| registry.get_type_data::<ReflectDefault>(type_id).is_some();
+    match variant {
+        VariantInfo::Unit(_) => true,
+        VariantInfo::Tuple(variant) => variant.iter().all(|field| default(field.type_id())),
+        VariantInfo::Struct(variant) => variant.iter().all(|field| default(field.type_id())),
+    }
+}
+
+macro_rules! numbers {
+    ($($variant:ident($ty:ty)),* $(,)?) => {
+        /// A number of one of the primitive types, which the inspector edits
+        /// keeping its type.
+        #[derive(Clone, Copy, PartialEq, Debug)]
+        pub(super) enum Number {
+            $($variant($ty),)*
+        }
+
+        impl Number {
+            fn from_reflect(value: &dyn PartialReflect) -> Option<Self> {
+                $(
+                    if let Some(&value) = value.try_downcast_ref::<$ty>() {
+                        return Some(Number::$variant(value));
+                    }
+                )*
+                None
+            }
+
+            /// `text` as a number of the same type.
+            pub(super) fn parse(self, text: &str) -> Option<Self> {
+                match self {
+                    $(Number::$variant(_) => text.trim().parse().ok().map(Number::$variant),)*
+                }
+            }
+
+            pub(super) fn into_reflect(self) -> Box<dyn PartialReflect> {
+                match self {
+                    $(Number::$variant(value) => Box::new(value),)*
+                }
+            }
+
+            pub(super) fn to_f64(self) -> f64 {
+                match self {
+                    $(Number::$variant(value) => value as f64,)*
+                }
+            }
+
+            /// `value` as a number of the same type: rounded for an integer,
+            /// and clamped to what the type holds.
+            pub(super) fn with_f64(self, value: f64) -> Self {
+                let value = if self.is_integer() { value.round() } else { value };
+                match self {
+                    $(Number::$variant(_) => Number::$variant(value as $ty),)*
+                }
+            }
+        }
+
+        impl fmt::Display for Number {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                match self {
+                    $(Number::$variant(value) => value.fmt(f),)*
+                }
+            }
+        }
+
+        /// Whether the fields are two to four numbers, as in `Vec3` or `UVec2`.
+        fn is_vector<'a>(fields: impl Iterator<Item = &'a dyn PartialReflect>) -> bool {
+            let fields: Vec<&dyn PartialReflect> = fields.collect();
+            let numbers = [$(TypeId::of::<$ty>(),)*];
+            (2..=4).contains(&fields.len())
+                && fields.into_iter().all(|field| {
+                    field
+                        .get_represented_type_info()
+                        .is_some_and(|info| numbers.contains(&info.type_id()))
+                })
+        }
+    };
+}
+
+numbers!(
+    F32(f32),
+    F64(f64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128(i128),
+    Isize(isize),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+    Usize(usize),
+);
+
+impl Number {
+    pub(super) fn is_integer(self) -> bool {
+        !matches!(self, Number::F32(_) | Number::F64(_))
+    }
+}
+
+/// A row of a component's value in the inspector.
+pub(super) struct ValueRow {
+    /// How many collapsible rows the row is nested in.
+    pub(super) depth: usize,
+    pub(super) kind: ValueRowKind,
+}
+
+pub(super) enum ValueRowKind {
+    /// A value on one row, after its field's name if it's a field.
+    Inline {
+        name: Option<SharedString>,
+        pieces: Vec<Piece>,
+    },
+    /// A field whose value doesn't fit on one row. Closed, its header shows a
+    /// preview of the value; open, its fields or elements follow, one level
+    /// deeper.
+    Nested {
+        name: SharedString,
+        path: Vec<usize>,
+        open: bool,
+        header: Vec<Piece>,
+    },
+    /// How many elements weren't sent.
+    More(usize),
+}
+
+/// A piece of a value's row.
+pub(super) enum Piece {
+    /// A name within the value, such as the `x` of a `Vec3`.
+    Name(SharedString),
+    /// What says there is nothing to show, such as `[]`.
+    Weak(SharedString),
+    /// Text about the value, such as an observer's system.
+    Text(SharedString),
+    /// A value without a control of its own, as `Debug` formats it.
+    Preview(SharedString),
+    Leaf(Leaf),
+    Variant(Variant),
+    Entity(Link),
+}
+
+/// A value with a control of its own.
+pub(super) struct Leaf {
+    /// The path to the value, as [`element_mut`] follows it.
+    pub(super) path: Vec<usize>,
+    pub(super) value: LeafValue,
+    pub(super) editable: bool,
+}
+
+pub(super) enum LeafValue {
+    Number(Number),
+    Bool(bool),
+    String(String),
+    /// A string the inspector can't edit, such as a `&'static str`, quoted.
+    Quoted(SharedString),
+    Duration(Duration),
+    Rotation(Quat),
+}
+
+/// An enum's variant.
+pub(super) struct Variant {
+    pub(super) path: Vec<usize>,
+    pub(super) current: SharedString,
+    /// The variants to pick from, each with whether its fields' values can be
+    /// built from their types' defaults; `None` if the value isn't editable.
+    pub(super) choices: Option<Vec<(SharedString, bool)>>,
+}
+
+/// A link to an entity.
+pub(super) struct Link {
+    pub(super) entity: Entity,
+    /// `None` if the entity isn't spawned.
+    pub(super) label: Option<Label>,
+}
+
+impl Link {
+    pub(super) fn new(info: &WorldInfo, entity: Entity) -> Self {
+        Link {
+            entity,
+            label: info.label(entity),
+        }
+    }
+}
+
+/// Builds the rows of a component's value.
+pub(super) struct ValueRows<'a, 'w> {
     info: &'a WorldInfo<'w>,
     registry: &'a TypeRegistry,
-    /// Whether the value drawn can be edited: `false` within an immutable
+    /// Whether the value can be edited: `false` within an immutable
     /// component, and within maps and sets, whose elements `element_mut`
     /// can't reach.
     editable: bool,
-    /// Indices from the component down to the value being drawn, as
+    /// The component whose value it is, which keys the open rows.
+    component: ComponentId,
+    /// The paths of the open rows within each component. Keyed by the
+    /// component, so that the same fields are open whichever entity shows.
+    open: &'a HashSet<(ComponentId, Vec<usize>)>,
+    /// Indices from the component down to the value being built, as
     /// `element_mut` follows them.
     path: Vec<usize>,
-    /// Keys the open state of nested values. Derived from the component's
-    /// type, so that the same fields are open whichever entity shows.
-    id: egui::Id,
-    /// New values, each with its path.
-    edits: Vec<(Vec<usize>, Box<dyn PartialReflect>)>,
-    /// Where entity links record their clicks.
-    actions: &'a mut Vec<Action>,
+    depth: usize,
+    rows: Vec<ValueRow>,
 }
 
-impl<'a, 'w> ValueUi<'a, 'w> {
+impl<'a, 'w> ValueRows<'a, 'w> {
     pub(super) fn new(
         info: &'a WorldInfo<'w>,
         registry: &'a TypeRegistry,
         editable: bool,
-        id: egui::Id,
-        actions: &'a mut Vec<Action>,
+        component: ComponentId,
+        open: &'a HashSet<(ComponentId, Vec<usize>)>,
     ) -> Self {
         Self {
             info,
             registry,
             editable,
+            component,
+            open,
             path: Vec::new(),
-            id,
-            edits: Vec::new(),
-            actions,
+            depth: 0,
+            rows: Vec::new(),
         }
     }
 
-    /// The edits recorded, each a new value and the path to it.
-    pub(super) fn into_edits(self) -> Vec<(Vec<usize>, Box<dyn PartialReflect>)> {
-        self.edits
+    pub(super) fn into_rows(self) -> Vec<ValueRow> {
+        self.rows
     }
 
-    /// Draws a component's value: on one row if it fits, or else a row per
-    /// field or element, after the variant for an enum.
-    pub(super) fn show(&mut self, ui: &mut egui::Ui, value: &dyn PartialReflect) {
+    /// A component's value: on one row if it fits, or else a row per field or
+    /// element, after the variant for an enum.
+    pub(super) fn show(&mut self, value: &dyn PartialReflect) {
         if self.is_inline(value) {
-            ui.horizontal_wrapped(|ui| {
-                ui.add_space(INDENT);
-                self.inline(ui, value);
-            });
+            let pieces = self.inline(value);
+            self.push(ValueRowKind::Inline { name: None, pieces });
             return;
         }
         if let ReflectRef::Enum(value) = value.reflect_ref() {
-            ui.horizontal(|ui| {
-                ui.add_space(INDENT);
-                self.variant(ui, value);
-            });
+            let pieces = vec![self.variant(value)];
+            self.push(ValueRowKind::Inline { name: None, pieces });
         }
-        self.elements(ui, value);
+        self.elements(value);
     }
 
-    fn edit(&mut self, value: Box<dyn PartialReflect>) {
-        self.edits.push((self.path.clone(), value));
+    fn push(&mut self, kind: ValueRowKind) {
+        self.rows.push(ValueRow {
+            depth: self.depth,
+            kind,
+        });
     }
 
     /// Whether `value` fits on one row: a single value, a vector of numbers,
@@ -167,98 +397,102 @@ impl<'a, 'w> ValueUi<'a, 'w> {
         }
     }
 
-    /// One row for a field: its name, then its value on the same row if
-    /// [`Self::is_inline`], or else below it, collapsed.
-    fn field(&mut self, ui: &mut egui::Ui, name: &str, value: &dyn PartialReflect) {
+    /// The row of a field: its name, then its value on the same row if
+    /// [`Self::is_inline`], or else below it.
+    fn field(&mut self, name: SharedString, value: &dyn PartialReflect) {
         if self.is_inline(value) {
-            ui.horizontal_wrapped(|ui| {
-                // Lines the name up with those of collapsible fields, which
-                // start after a disclosure triangle.
-                ui.add_space(INDENT);
-                field_name(ui, name);
-                self.inline(ui, value);
+            let pieces = self.inline(value);
+            self.push(ValueRowKind::Inline {
+                name: Some(name),
+                pieces,
             });
         } else {
-            self.nested(ui, name, value);
+            self.nested(name, value);
         }
     }
 
     /// A collapsible row for a value that doesn't fit on one: closed, it
     /// shows a preview of the value; open, its fields or elements below.
-    fn nested(&mut self, ui: &mut egui::Ui, name: &str, value: &dyn PartialReflect) {
-        let id = self.id.with(&self.path);
-        let (_, open) = collapsible_row(ui, id, false, egui::Color32::TRANSPARENT, |ui| {
-            field_name(ui, name);
-            match value.reflect_ref() {
-                // The variant can be picked without opening the row.
-                ReflectRef::Enum(value) => self.variant(ui, value),
-                reflected => {
-                    let count = match reflected {
-                        ReflectRef::List(value) => Some(value.len()),
-                        ReflectRef::Array(value) => Some(value.len()),
-                        ReflectRef::Map(value) => Some(value.len()),
-                        ReflectRef::Set(value) => Some(value.len()),
-                        _ => None,
-                    };
-                    if let Some(count) = count {
-                        ui.weak(format!("({count})"));
-                    }
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(preview(value, 200)).weak())
-                            .truncate(),
-                    );
+    fn nested(&mut self, name: SharedString, value: &dyn PartialReflect) {
+        let open = self.open.contains(&(self.component, self.path.clone()));
+        let header = match value.reflect_ref() {
+            // The variant can be picked without opening the row.
+            ReflectRef::Enum(value) => vec![self.variant(value)],
+            reflected => {
+                let count = match reflected {
+                    ReflectRef::List(value) => Some(value.len()),
+                    ReflectRef::Array(value) => Some(value.len()),
+                    ReflectRef::Map(value) => Some(value.len()),
+                    ReflectRef::Set(value) => Some(value.len()),
+                    _ => None,
+                };
+                let mut header = Vec::new();
+                if let Some(count) = count {
+                    header.push(Piece::Weak(format!("({count})").into()));
                 }
+                if !open {
+                    header.push(Piece::Preview(preview(value, 200).into()));
+                }
+                header
             }
+        };
+        self.push(ValueRowKind::Nested {
+            name,
+            path: self.path.clone(),
+            open,
+            header,
         });
         if open {
-            ui.indent(id, |ui| self.elements(ui, value));
+            self.depth += 1;
+            self.elements(value);
+            self.depth -= 1;
         }
     }
 
     /// A row per field or element of `value`.
-    fn elements(&mut self, ui: &mut egui::Ui, value: &dyn PartialReflect) {
+    fn elements(&mut self, value: &dyn PartialReflect) {
         let mut more = 0;
         match value.reflect_ref() {
             ReflectRef::Struct(value) => {
                 for (index, (name, element)) in value.iter_fields().enumerate() {
-                    self.element(ui, index, name, element);
+                    self.element(index, SharedString::new(name), element);
                 }
             }
             ReflectRef::TupleStruct(value) => {
                 for (index, element) in value.iter_fields().enumerate() {
-                    self.element(ui, index, &index.to_string(), element);
+                    self.element(index, index.to_string().into(), element);
                 }
             }
             ReflectRef::Tuple(value) => {
                 for (index, element) in value.iter_fields().enumerate() {
-                    self.element(ui, index, &index.to_string(), element);
+                    self.element(index, index.to_string().into(), element);
                 }
             }
             ReflectRef::Enum(value) => {
                 for (index, element) in value.iter_fields().enumerate() {
                     let name = match element.name() {
-                        Some(name) => Cow::Borrowed(name),
-                        None => Cow::Owned(index.to_string()),
+                        Some(name) => SharedString::new(name),
+                        None => index.to_string().into(),
                     };
-                    self.element(ui, index, &name, element.value());
+                    self.element(index, name, element.value());
                 }
             }
             ReflectRef::List(value) => {
                 for (index, element) in value.iter().take(MAX_ELEMENTS).enumerate() {
-                    self.element(ui, index, &index.to_string(), element);
+                    self.element(index, index.to_string().into(), element);
                 }
                 more = value.len().saturating_sub(MAX_ELEMENTS);
             }
             ReflectRef::Array(value) => {
                 for (index, element) in value.iter().take(MAX_ELEMENTS).enumerate() {
-                    self.element(ui, index, &index.to_string(), element);
+                    self.element(index, index.to_string().into(), element);
                 }
                 more = value.len().saturating_sub(MAX_ELEMENTS);
             }
             ReflectRef::Map(value) => {
                 let editable = std::mem::replace(&mut self.editable, false);
                 for (index, (key, element)) in value.iter().take(MAX_ELEMENTS).enumerate() {
-                    self.element(ui, index, &preview(key, 40), element);
+                    self.element(index, preview(key, 40).into(), element);
                 }
                 self.editable = editable;
                 more = value.len().saturating_sub(MAX_ELEMENTS);
@@ -266,324 +500,149 @@ impl<'a, 'w> ValueUi<'a, 'w> {
             ReflectRef::Set(value) => {
                 let editable = std::mem::replace(&mut self.editable, false);
                 for (index, element) in value.iter().take(MAX_ELEMENTS).enumerate() {
-                    self.element(ui, index, &index.to_string(), element);
+                    self.element(index, index.to_string().into(), element);
                 }
                 self.editable = editable;
                 more = value.len().saturating_sub(MAX_ELEMENTS);
             }
             _ => {
-                ui.horizontal_wrapped(|ui| self.inline(ui, value));
+                let pieces = self.inline(value);
+                self.push(ValueRowKind::Inline { name: None, pieces });
             }
         }
         if more > 0 {
-            ui.horizontal(|ui| {
-                ui.add_space(INDENT);
-                ui.weak(format!("… {more} more"));
-            });
+            self.push(ValueRowKind::More(more));
         }
     }
 
-    /// The row of the field or element at `index` of the value drawn.
-    fn element(&mut self, ui: &mut egui::Ui, index: usize, name: &str, value: &dyn PartialReflect) {
+    /// The row of the field or element at `index` of the value being built.
+    fn element(&mut self, index: usize, name: SharedString, value: &dyn PartialReflect) {
         self.path.push(index);
-        self.field(ui, name, value);
+        self.field(name, value);
         self.path.pop();
     }
 
-    /// `value` on the current row, after its field's name.
-    fn inline(&mut self, ui: &mut egui::Ui, value: &dyn PartialReflect) {
-        if self.leaf(ui, value) {
+    /// `value` on one row.
+    fn inline(&mut self, value: &dyn PartialReflect) -> Vec<Piece> {
+        let mut pieces = Vec::new();
+        self.inline_into(value, &mut pieces);
+        pieces
+    }
+
+    fn inline_into(&mut self, value: &dyn PartialReflect, pieces: &mut Vec<Piece>) {
+        if let Some(leaf) = self.leaf(value) {
+            pieces.push(leaf);
             return;
         }
         match value.reflect_ref() {
             ReflectRef::Struct(fields) if fields.field_len() > 0 => {
                 for (index, (name, field)) in fields.iter_fields().enumerate() {
-                    ui.weak(name);
+                    pieces.push(Piece::Name(SharedString::new(name)));
                     self.path.push(index);
-                    self.inline(ui, field);
+                    self.inline_into(field, pieces);
                     self.path.pop();
                 }
             }
             ReflectRef::TupleStruct(fields) if fields.field_len() == 1 => {
                 // A newtype shows as the value it wraps.
                 self.path.push(0);
-                self.inline(ui, fields.field(0).expect("one field"));
+                self.inline_into(fields.field(0).expect("one field"), pieces);
                 self.path.pop();
             }
             ReflectRef::TupleStruct(fields) if fields.field_len() > 0 => {
                 for (index, field) in fields.iter_fields().enumerate() {
-                    ui.weak(index.to_string());
+                    pieces.push(Piece::Name(index.to_string().into()));
                     self.path.push(index);
-                    self.inline(ui, field);
+                    self.inline_into(field, pieces);
                     self.path.pop();
                 }
             }
             ReflectRef::Tuple(fields) if fields.field_len() > 0 => {
                 for (index, field) in fields.iter_fields().enumerate() {
-                    ui.weak(index.to_string());
+                    pieces.push(Piece::Name(index.to_string().into()));
                     self.path.push(index);
-                    self.inline(ui, field);
+                    self.inline_into(field, pieces);
                     self.path.pop();
                 }
             }
             ReflectRef::Enum(value) => {
-                self.variant(ui, value);
+                pieces.push(self.variant(value));
                 if let Some(field) = value.field_at(0) {
                     self.path.push(0);
-                    self.inline(ui, field);
+                    self.inline_into(field, pieces);
                     self.path.pop();
                 }
             }
             ReflectRef::List(_) | ReflectRef::Array(_) => {
-                ui.weak("[]");
+                pieces.push(Piece::Weak(SharedString::new_static("[]")));
             }
             ReflectRef::Map(_) | ReflectRef::Set(_) => {
-                ui.weak("{}");
+                pieces.push(Piece::Weak(SharedString::new_static("{}")));
             }
             ReflectRef::Struct(_) | ReflectRef::TupleStruct(_) | ReflectRef::Tuple(_) => {
                 // A unit struct; its type is all there is to it.
-                ui.weak(value.reflect_short_type_path());
+                pieces.push(Piece::Weak(
+                    value.reflect_short_type_path().to_owned().into(),
+                ));
             }
             _ => {
-                // An opaque type without a widget of its own.
-                ui.label(egui::RichText::new(preview(value, 200)).monospace().weak());
+                // An opaque type without a control of its own.
+                pieces.push(Piece::Preview(preview(value, 200).into()));
             }
         }
     }
 
-    /// Draws `value` if it's of a type with a widget of its own, and returns
-    /// whether it was.
-    fn leaf(&mut self, ui: &mut egui::Ui, value: &dyn PartialReflect) -> bool {
-        if self.number::<f32>(ui, value)
-            || self.number::<f64>(ui, value)
-            || self.number::<i8>(ui, value)
-            || self.number::<i16>(ui, value)
-            || self.number::<i32>(ui, value)
-            || self.number::<i64>(ui, value)
-            || self.number::<isize>(ui, value)
-            || self.number::<u8>(ui, value)
-            || self.number::<u16>(ui, value)
-            || self.number::<u32>(ui, value)
-            || self.number::<u64>(ui, value)
-            || self.number::<usize>(ui, value)
-        {
-            return true;
-        }
-        let visuals = ui.visuals();
-        let number_color = Syntax::Number.color(visuals);
-        let string_color = Syntax::Value.color(visuals);
-        if let Some(&value) = value.try_downcast_ref::<bool>() {
-            if self.editable {
-                let mut edited = value;
-                if ui.checkbox(&mut edited, "").changed() {
-                    self.edit(Box::new(edited));
-                }
-            } else {
-                ui.label(egui::RichText::new(value.to_string()).color(number_color));
-            }
+    /// `value` if it's of a type with a control of its own.
+    fn leaf(&self, value: &dyn PartialReflect) -> Option<Piece> {
+        let leaf = |value, editable| {
+            Some(Piece::Leaf(Leaf {
+                path: self.path.clone(),
+                value,
+                editable,
+            }))
+        };
+        if let Some(number) = Number::from_reflect(value) {
+            leaf(LeafValue::Number(number), self.editable)
+        } else if let Some(&value) = value.try_downcast_ref::<bool>() {
+            leaf(LeafValue::Bool(value), self.editable)
         } else if let Some(value) = value.try_downcast_ref::<String>() {
-            if self.editable {
-                let mut edited = value.clone();
-                let field = egui::TextEdit::singleline(&mut edited).desired_width(f32::INFINITY);
-                if ui.add(field).changed() {
-                    self.edit(Box::new(edited));
-                }
-            } else {
-                ui.label(egui::RichText::new(format!("{value:?}")).color(string_color));
-            }
+            leaf(LeafValue::String(value.clone()), self.editable)
         } else if let Some(value) = value
             .try_downcast_ref::<Cow<'static, str>>()
             .map(|value| &**value)
             .or_else(|| value.try_downcast_ref::<&'static str>().copied())
         {
-            ui.label(egui::RichText::new(format!("{value:?}")).color(string_color));
+            leaf(LeafValue::Quoted(format!("{value:?}").into()), false)
         } else if let Some(value) = value.try_downcast_ref::<char>() {
-            ui.label(egui::RichText::new(format!("{value:?}")).color(string_color));
-        } else if let Some(value) = value.try_downcast_ref::<i128>() {
-            ui.label(egui::RichText::new(value.to_string()).color(number_color));
-        } else if let Some(value) = value.try_downcast_ref::<u128>() {
-            ui.label(egui::RichText::new(value.to_string()).color(number_color));
+            leaf(LeafValue::Quoted(format!("{value:?}").into()), false)
         } else if let Some(&entity) = value.try_downcast_ref::<Entity>() {
-            entity_link(ui, self.info, entity, self.actions);
+            Some(Piece::Entity(Link::new(self.info, entity)))
         } else if let Some(&duration) = value.try_downcast_ref::<Duration>() {
-            if self.editable {
-                let mut seconds = duration.as_secs_f64();
-                let field = egui::DragValue::new(&mut seconds)
-                    .speed(0.01)
-                    .range(0.0..=f64::MAX)
-                    .suffix(" s");
-                // Seconds past what a `Duration` holds are ignored.
-                if ui.add(field).changed()
-                    && let Ok(duration) = Duration::try_from_secs_f64(seconds)
-                {
-                    self.edit(Box::new(duration));
-                }
-            } else {
-                ui.label(egui::RichText::new(format!("{duration:?}")).color(number_color));
-            }
+            leaf(LeafValue::Duration(duration), self.editable)
         } else if let Some(&rotation) = value.try_downcast_ref::<Quat>() {
-            self.rotation(ui, rotation);
+            leaf(LeafValue::Rotation(rotation), self.editable)
         } else {
-            return false;
-        }
-        true
-    }
-
-    /// Draws `value` if it's a `T`, and returns whether it was.
-    fn number<T: Numeric + PartialReflect + fmt::Display>(
-        &mut self,
-        ui: &mut egui::Ui,
-        value: &dyn PartialReflect,
-    ) -> bool {
-        let Some(&value) = value.try_downcast_ref::<T>() else {
-            return false;
-        };
-        if !self.editable {
-            let color = Syntax::Number.color(ui.visuals());
-            ui.label(egui::RichText::new(value.to_string()).color(color));
-            return true;
-        }
-        // A pixel of dragging moves a float by a hundredth of its magnitude,
-        // so that small and large values both edit smoothly.
-        let speed = if T::INTEGRAL {
-            0.25
-        } else {
-            (value.to_f64().abs() * 0.01).max(0.001)
-        };
-        let mut edited = value;
-        if ui
-            .add(egui::DragValue::new(&mut edited).speed(speed))
-            .changed()
-        {
-            self.edit(Box::new(edited));
-        }
-        true
-    }
-
-    /// A rotation as Euler angles in degrees, which are easier to read and
-    /// edit than a quaternion's components.
-    fn rotation(&mut self, ui: &mut egui::Ui, rotation: Quat) {
-        let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
-        let mut angles = [x, y, z].map(f32::to_degrees);
-        let mut changed = false;
-        for (axis, angle) in ["x", "y", "z"].into_iter().zip(&mut angles) {
-            ui.weak(axis);
-            if self.editable {
-                let field = egui::DragValue::new(angle).speed(0.5).suffix("°");
-                changed |= ui
-                    .add(field)
-                    .on_hover_text("Euler angle, XYZ order")
-                    .changed();
-            } else {
-                let color = Syntax::Number.color(ui.visuals());
-                ui.label(egui::RichText::new(format!("{angle:.1}°")).color(color));
-            }
-        }
-        if changed {
-            let [x, y, z] = angles.map(f32::to_radians);
-            self.edit(Box::new(Quat::from_euler(EulerRot::XYZ, x, y, z)));
+            None
         }
     }
 
-    /// The enum's variant, picked from a combo box when editable. A variant
-    /// picked whose fields have no reflected `Default` can't be built, and is
-    /// disabled.
-    fn variant(&mut self, ui: &mut egui::Ui, value: &dyn Enum) {
-        let current = value.variant_name();
-        let info = value.get_represented_enum_info().filter(|_| self.editable);
-        let Some(info) = info else {
-            let color = Syntax::Value.color(ui.visuals());
-            ui.label(egui::RichText::new(current).color(color));
-            return;
-        };
-        let mut picked = None;
-        egui::ComboBox::from_id_salt(self.id.with(&self.path).with("variant"))
-            .selected_text(current)
-            .show_ui(ui, |ui| {
-                for variant in info.iter() {
-                    let name = variant.name();
-                    if name == current {
-                        ui.add(egui::Button::selectable(true, name));
-                        continue;
-                    }
-                    match default_variant(variant, self.registry) {
-                        Some(value) => {
-                            if ui.add(egui::Button::selectable(false, name)).clicked() {
-                                picked = Some(value);
-                            }
-                        }
-                        None => {
-                            ui.add_enabled(false, egui::Button::selectable(false, name))
-                                .on_disabled_hover_text(
-                                    "Some of the variant's fields don't reflect `Default`.",
-                                );
-                        }
-                    }
-                }
+    /// The enum's variant, with the variants to pick from when editable.
+    fn variant(&self, value: &dyn Enum) -> Piece {
+        let choices = value
+            .get_represented_enum_info()
+            .filter(|_| self.editable)
+            .map(|info| {
+                info.iter()
+                    .map(|variant| {
+                        let name = SharedString::new_static(variant.name());
+                        (name, has_default(variant, self.registry))
+                    })
+                    .collect()
             });
-        if let Some(value) = picked {
-            self.edit(Box::new(value));
-        }
-    }
-}
-
-/// A field's name, before its value.
-pub(super) fn field_name(ui: &mut egui::Ui, name: &str) {
-    let color = Syntax::Attribute.color(ui.visuals());
-    ui.label(egui::RichText::new(format!("{name}:")).color(color));
-}
-
-/// Whether the fields are two to four numbers, as in `Vec3` or `UVec2`.
-fn is_vector<'a>(fields: impl Iterator<Item = &'a dyn PartialReflect>) -> bool {
-    let fields: Vec<&dyn PartialReflect> = fields.collect();
-    let numbers = [
-        TypeId::of::<f32>(),
-        TypeId::of::<f64>(),
-        TypeId::of::<i8>(),
-        TypeId::of::<i16>(),
-        TypeId::of::<i32>(),
-        TypeId::of::<i64>(),
-        TypeId::of::<isize>(),
-        TypeId::of::<u8>(),
-        TypeId::of::<u16>(),
-        TypeId::of::<u32>(),
-        TypeId::of::<u64>(),
-        TypeId::of::<usize>(),
-    ];
-    (2..=4).contains(&fields.len())
-        && fields.into_iter().all(|field| {
-            field
-                .get_represented_type_info()
-                .is_some_and(|info| numbers.contains(&info.type_id()))
+        Piece::Variant(Variant {
+            path: self.path.clone(),
+            current: value.variant_name().to_owned().into(),
+            choices,
         })
-}
-
-/// A value of `variant` whose fields are their types' defaults, or `None` if
-/// one of them doesn't reflect `Default`.
-pub(super) fn default_variant(
-    variant: &VariantInfo,
-    registry: &TypeRegistry,
-) -> Option<DynamicEnum> {
-    let default = |type_id| {
-        let default = registry.get_type_data::<ReflectDefault>(type_id)?;
-        Some(default.default().into_partial_reflect())
-    };
-    let fields = match variant {
-        VariantInfo::Unit(_) => DynamicVariant::Unit,
-        VariantInfo::Tuple(variant) => {
-            let mut fields = DynamicTuple::default();
-            for field in variant.iter() {
-                fields.insert_boxed(default(field.type_id())?);
-            }
-            DynamicVariant::Tuple(fields)
-        }
-        VariantInfo::Struct(variant) => {
-            let mut fields = DynamicStruct::default();
-            for field in variant.iter() {
-                fields.insert_boxed(field.name(), default(field.type_id())?);
-            }
-            DynamicVariant::Struct(fields)
-        }
-    };
-    Some(DynamicEnum::new(variant.name(), fields))
+    }
 }

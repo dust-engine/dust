@@ -6,19 +6,9 @@ use bevy::ecs::entity::EntityHashSet;
 use bevy::ecs::observer::Observer;
 use bevy::ecs::resource::IsResource;
 use bevy::prelude::*;
-use pumicite_egui::egui;
+use gpui::SharedString;
 
-use super::{
-    Action, INDENT, Label, Section, Syntax, WorldInfo, contains_ignore_case, entity_menu,
-    label_tooltip, paint_triangle,
-};
-
-const FIND_SHORTCUT: egui::KeyboardShortcut =
-    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F);
-
-/// The most components a row lists after the entity's title; the rest are
-/// counted.
-const ROW_COMPONENTS: usize = 3;
+use super::{Label, Section, WorldInfo, contains_ignore_case};
 
 pub(super) struct TreeState {
     /// Entities whose children show.
@@ -40,7 +30,20 @@ impl Default for TreeState {
     }
 }
 
+/// The arrow keys, which move through the tree as in Chrome's Elements panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum TreeKey {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 impl TreeState {
+    pub(super) fn toggle_section(&mut self, section: Section) {
+        self.open_sections[section as usize] ^= true;
+    }
+
     /// Expands the ancestors of `entity`, and opens the section of its root,
     /// so that its row shows.
     pub(super) fn expand_to(&mut self, info: &WorldInfo, entity: Entity) {
@@ -132,6 +135,127 @@ impl TreeState {
         }
         rows
     }
+
+    /// ↑ and ↓ select the entity above or below; → expands the selected entity,
+    /// or moves to its first child; ← collapses it, or moves to its parent.
+    pub(super) fn key(&mut self, info: &WorldInfo, key: TreeKey, selected: &mut Option<Entity>) {
+        let filter = Filter::new(info, &self.filter);
+        let rows = self.rows(info, filter.as_ref());
+        let entity_at = |index: usize| match rows.get(index)?.kind {
+            RowKind::Entity(entity) => Some(entity),
+            RowKind::Section(_) => None,
+        };
+        let current = selected.and_then(|selected| {
+            rows.iter()
+                .position(|row| row.kind == RowKind::Entity(selected))
+        });
+        let Some(index) = current else {
+            if key == TreeKey::Down {
+                *selected = (0..rows.len()).find_map(entity_at);
+            }
+            return;
+        };
+        let row = &rows[index];
+        let RowKind::Entity(entity) = row.kind else {
+            return;
+        };
+        match key {
+            TreeKey::Up => {
+                if let Some(above) = (0..index).rev().find_map(entity_at) {
+                    *selected = Some(above);
+                }
+            }
+            TreeKey::Down => {
+                if let Some(below) = (index + 1..rows.len()).find_map(entity_at) {
+                    *selected = Some(below);
+                }
+            }
+            TreeKey::Right if row.children > 0 => {
+                if row.open {
+                    *selected = entity_at(index + 1);
+                } else {
+                    self.set_expanded(info, entity, true, false);
+                }
+            }
+            TreeKey::Right => {}
+            TreeKey::Left => {
+                if row.open {
+                    self.set_expanded(info, entity, false, false);
+                } else if let Some(parent) = info.parent(entity) {
+                    *selected = Some(parent);
+                }
+            }
+        }
+    }
+
+    /// What the tree shows. With `reveal`, the selected entity's ancestors are
+    /// expanded, and the snapshot asks for its row to be scrolled into view.
+    pub(super) fn snapshot(
+        &mut self,
+        info: &WorldInfo,
+        selected: Option<Entity>,
+        reveal: bool,
+    ) -> TreeSnapshot {
+        self.expanded
+            .retain(|&entity| info.world.entities().contains_spawned(entity));
+        if reveal && let Some(entity) = selected {
+            self.expand_to(info, entity);
+        }
+        let filter = Filter::new(info, &self.filter);
+        let rows: Vec<RowView> = self
+            .rows(info, filter.as_ref())
+            .into_iter()
+            .filter_map(|row| {
+                Some(match row.kind {
+                    RowKind::Section(section) => RowView::Section {
+                        section,
+                        roots: row.children,
+                        open: row.open,
+                    },
+                    RowKind::Entity(entity) => RowView::Entity {
+                        entity,
+                        depth: row.depth,
+                        children: row.children,
+                        open: row.open,
+                        label: info.label(entity)?,
+                        matched: filter
+                            .as_ref()
+                            .is_none_or(|filter| filter.matches.contains(&entity)),
+                    },
+                })
+            })
+            .collect();
+        let count = match &filter {
+            Some(filter) => format!("{} found", filter.matches.len()),
+            None => format!("{} entities", info.entity_count),
+        };
+        let breadcrumbs = match selected.filter(|&entity| info.world.get_entity(entity).is_ok()) {
+            Some(entity) => {
+                let mut path: Vec<Entity> = info.ancestors(entity).collect();
+                path.reverse();
+                path.push(entity);
+                path.into_iter()
+                    .filter_map(|entity| Some((entity, info.label(entity)?)))
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        let reveal = reveal
+            .then(|| {
+                let selected = selected?;
+                rows.iter().position(
+                    |row| matches!(row, RowView::Entity { entity, .. } if *entity == selected),
+                )
+            })
+            .flatten();
+        TreeSnapshot {
+            rows,
+            count: count.into(),
+            selected,
+            breadcrumbs,
+            reveal,
+        }
+    }
 }
 
 /// Each section's root entities, those without a parent, indexed by
@@ -205,7 +329,7 @@ impl Filter {
                 .map(|word| {
                     archetype
                         .iter_components()
-                        .any(|id| contains_ignore_case(info.name(id), word))
+                        .any(|id| contains_ignore_case(&info.name(id), word))
                 })
                 .collect();
             let observers = info.known.observer.is_some_and(|id| archetype.contains(id));
@@ -255,455 +379,35 @@ fn title_or_id_matches(info: &WorldInfo, entity: Entity, word: &str, observer: b
             })
 }
 
-pub(super) fn tree_ui(
-    ui: &mut egui::Ui,
-    info: &WorldInfo,
-    selected: &mut Option<Entity>,
-    state: &mut TreeState,
-    selection_changed: bool,
-    actions: &mut Vec<Action>,
-) {
-    // Revealed on any change of the selection, including one from outside
-    // the tree. Within the tree, the row is already in view, which makes
-    // revealing it do nothing.
-    let reveal = selection_changed.then_some(*selected).flatten();
-    state
-        .expanded
-        .retain(|&entity| info.world.entities().contains_spawned(entity));
-    if let Some(entity) = reveal {
-        state.expand_to(info, entity);
-    }
-    // From the text as it was before this frame's typing, which shows a
-    // frame later.
-    let filter = Filter::new(info, &state.filter);
-    let rows = state.rows(info, filter.as_ref());
-
-    toolbar(ui, info, state, filter.as_ref());
-    if let Some(entity) = *selected
-        && info.world.get_entity(entity).is_ok()
-    {
-        egui::Panel::bottom("devtools_entities_breadcrumbs").show(ui, |ui| {
-            breadcrumbs(ui, info, entity, actions);
-        });
-    }
-    rows_ui(
-        ui,
-        info,
-        &rows,
-        selected,
-        state,
-        reveal.is_some(),
-        filter.as_ref(),
-        actions,
-    );
+/// What the tree shows, sent to the UI thread.
+pub(super) struct TreeSnapshot {
+    pub(super) rows: Vec<RowView>,
+    /// How many entities there are, or match the filter.
+    pub(super) count: SharedString,
+    pub(super) selected: Option<Entity>,
+    /// The selected entity and its ancestors, from the root down.
+    pub(super) breadcrumbs: Vec<(Entity, Label)>,
+    /// The row to scroll into view: the selected entity's, after the
+    /// selection changed.
+    pub(super) reveal: Option<usize>,
 }
 
-/// The filter field, and how many entities there are or match.
-fn toolbar(ui: &mut egui::Ui, info: &WorldInfo, state: &mut TreeState, filter: Option<&Filter>) {
-    let id = egui::Id::new("devtools_entities_filter");
-    if ui.input_mut(|input| input.consume_shortcut(&FIND_SHORTCUT)) {
-        ui.memory_mut(|memory| memory.request_focus(id));
-    }
-    ui.horizontal(|ui| {
-        // Right-to-left first, so the count keeps its place at the end and the
-        // field takes the width left.
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let count = match filter {
-                Some(filter) => format!("{} found", filter.matches.len()),
-                None => format!("{} entities", info.entity_count),
-            };
-            ui.weak(count);
-            let shortcut =
-                FIND_SHORTCUT.format(&egui::ModifierNames::NAMES, ui.ctx().os().is_mac());
-            let field = ui
-                .add(
-                    egui::TextEdit::singleline(&mut state.filter)
-                        .id(id)
-                        .hint_text(format!("Filter ({shortcut})"))
-                        .desired_width(f32::INFINITY),
-                )
-                .on_hover_text(
-                    "Shows the entities whose name, component names or id contain each word.",
-                );
-            if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                state.filter.clear();
-            }
-        });
-    });
-}
-
-/// The selected entity and its ancestors, from the root down. Clicking one
-/// selects it.
-fn breadcrumbs(ui: &mut egui::Ui, info: &WorldInfo, selected: Entity, actions: &mut Vec<Action>) {
-    let mut path: Vec<Entity> = info.ancestors(selected).collect();
-    path.reverse();
-    path.push(selected);
-    egui::ScrollArea::horizontal()
-        .id_salt("devtools_entities_breadcrumbs")
-        .stick_to_right(true)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for (i, &entity) in path.iter().enumerate() {
-                    if i > 0 {
-                        let height = ui.spacing().interact_size.y;
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(6.0, height), egui::Sense::hover());
-                        paint_separator(
-                            ui.painter(),
-                            rect.center(),
-                            ui.visuals().weak_text_color(),
-                        );
-                    }
-                    let Some(label) = info.label(entity) else {
-                        continue;
-                    };
-                    let crumb = ui
-                        .selectable_label(entity == selected, label.short(info))
-                        .on_hover_ui(|ui| label_tooltip(ui, info, &label));
-                    if crumb.clicked() {
-                        actions.push(Action::Select(entity));
-                    }
-                }
-            });
-        });
-}
-
-/// ">", between breadcrumbs.
-fn paint_separator(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.0, color);
-    let tip = c + egui::vec2(1.5, 0.0);
-    painter.line_segment([tip + egui::vec2(-3.0, -3.5), tip], stroke);
-    painter.line_segment([tip + egui::vec2(-3.0, 3.5), tip], stroke);
-}
-
-/// The rows in view. Rows all have the same height, so the ones out of view
-/// are skipped without being laid out.
-#[expect(clippy::too_many_arguments, reason = "the tree's drawing state")]
-fn rows_ui(
-    ui: &mut egui::Ui,
-    info: &WorldInfo,
-    rows: &[Row],
-    selected: &mut Option<Entity>,
-    state: &mut TreeState,
-    reveal: bool,
-    filter: Option<&Filter>,
-    actions: &mut Vec<Action>,
-) {
-    // The tree takes the keyboard focus when clicked, and then moves the
-    // selection with the arrow keys.
-    let tree_id = egui::Id::new("devtools_entities_tree");
-    let focused = ui.memory(|memory| memory.has_focus(tree_id));
-    if focused {
-        keyboard(ui, info, rows, selected, state, tree_id);
-    }
-    let selected_index = selected.and_then(|selected| {
-        rows.iter()
-            .position(|row| row.kind == RowKind::Entity(selected))
-    });
-    let row_height = ui.spacing().interact_size.y;
-    egui::ScrollArea::vertical()
-        .id_salt(tree_id)
-        .auto_shrink(false)
-        .show_viewport(ui, |ui, viewport| {
-            let content = ui.max_rect();
-            ui.set_height(row_height * rows.len() as f32);
-            // Behind the rows, taking the clicks between and below them.
-            let background = ui.interact(
-                viewport.translate(content.min.to_vec2()),
-                tree_id,
-                egui::Sense::click(),
-            );
-            if background.clicked() {
-                background.request_focus();
-            }
-            let row_rect = |index: usize| {
-                egui::Rect::from_min_size(
-                    egui::pos2(content.left(), content.top() + index as f32 * row_height),
-                    egui::vec2(content.width(), row_height),
-                )
-            };
-            let first = (viewport.min.y / row_height).floor().max(0.0) as usize;
-            let end = ((viewport.max.y / row_height).ceil() as usize).min(rows.len());
-            if reveal && let Some(index) = selected_index {
-                // A row out of view is centered, rather than brought to the
-                // nearest edge, so that its surroundings show too.
-                let in_view = (first..end).contains(&index);
-                ui.scroll_to_rect(row_rect(index), (!in_view).then_some(egui::Align::Center));
-            }
-            for (index, row) in rows.iter().enumerate().take(end).skip(first) {
-                let rect = row_rect(index);
-                match row.kind {
-                    RowKind::Section(section) => section_row(ui, rect, row, section, state),
-                    RowKind::Entity(entity) => {
-                        let row = EntityRow {
-                            entity,
-                            row,
-                            focused,
-                            matched: filter.is_none_or(|filter| filter.matches.contains(&entity)),
-                        };
-                        entity_row(ui, info, rect, row, selected, state, tree_id, actions);
-                    }
-                }
-            }
-        });
-}
-
-/// ↑ and ↓ select the entity above or below; → expands the selected entity,
-/// or moves to its first child; ← collapses it, or moves to its parent. As in
-/// Chrome's Elements panel.
-fn keyboard(
-    ui: &mut egui::Ui,
-    info: &WorldInfo,
-    rows: &[Row],
-    selected: &mut Option<Entity>,
-    state: &mut TreeState,
-    tree_id: egui::Id,
-) {
-    ui.memory_mut(|memory| {
-        // Keeps egui from moving the focus to another widget on arrow keys.
-        memory.set_focus_lock_filter(
-            tree_id,
-            egui::EventFilter {
-                horizontal_arrows: true,
-                vertical_arrows: true,
-                ..Default::default()
-            },
-        );
-    });
-    let [up, down, left, right] = ui.input_mut(|input| {
-        [
-            egui::Key::ArrowUp,
-            egui::Key::ArrowDown,
-            egui::Key::ArrowLeft,
-            egui::Key::ArrowRight,
-        ]
-        .map(|key| input.consume_key(egui::Modifiers::NONE, key))
-    });
-    let entity_at = |index: usize| match rows.get(index)?.kind {
-        RowKind::Entity(entity) => Some(entity),
-        RowKind::Section(_) => None,
-    };
-    let current = selected.and_then(|selected| {
-        rows.iter()
-            .position(|row| row.kind == RowKind::Entity(selected))
-    });
-    let Some(index) = current else {
-        if down {
-            *selected = (0..rows.len()).find_map(entity_at);
-        }
-        return;
-    };
-    let row = &rows[index];
-    let RowKind::Entity(entity) = row.kind else {
-        return;
-    };
-    if up && let Some(above) = (0..index).rev().find_map(entity_at) {
-        *selected = Some(above);
-    } else if down && let Some(below) = (index + 1..rows.len()).find_map(entity_at) {
-        *selected = Some(below);
-    } else if right && row.children > 0 {
-        if row.open {
-            *selected = entity_at(index + 1);
-        } else {
-            state.set_expanded(info, entity, true, false);
-        }
-    } else if left {
-        if row.open {
-            state.set_expanded(info, entity, false, false);
-        } else if let Some(parent) = info.parent(entity) {
-            *selected = Some(parent);
-        }
-    }
-}
-
-fn section_row(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    row: &Row,
-    section: Section,
-    state: &mut TreeState,
-) {
-    let id = egui::Id::new(("devtools_entities_section", section as usize));
-    let response = ui
-        .interact(rect, id, egui::Sense::click())
-        .on_hover_text(section.description());
-    if response.clicked() {
-        state.open_sections[section as usize] ^= true;
-    }
-    let visuals = ui.visuals();
-    let painter = ui.painter();
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, visuals.faint_bg_color);
-    let triangle = egui::pos2(rect.left() + INDENT / 2.0, rect.center().y);
-    let color = if response.hovered() {
-        visuals.strong_text_color()
-    } else {
-        visuals.weak_text_color()
-    };
-    paint_triangle(painter, triangle, row.open, color);
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        section.title(),
-        0.0,
-        egui::TextFormat::simple(font.clone(), visuals.strong_text_color()),
-    );
-    job.append(
-        &row.children.to_string(),
-        8.0,
-        egui::TextFormat::simple(font, visuals.weak_text_color()),
-    );
-    let galley = painter.layout_job(job);
-    let pos = egui::pos2(
-        rect.left() + INDENT,
-        rect.center().y - galley.size().y / 2.0,
-    );
-    painter.galley(pos, galley, visuals.text_color());
-}
-
-struct EntityRow<'a> {
-    entity: Entity,
-    row: &'a Row,
-    /// Whether the tree has the keyboard focus, which colors the selection.
-    focused: bool,
-    /// `false` for an ancestor shown only to keep a match in place.
-    matched: bool,
-}
-
-/// An entity's row: its disclosure triangle, its title followed by its
-/// rarest components, and its id at the right end.
-#[expect(clippy::too_many_arguments, reason = "the tree's drawing state")]
-fn entity_row(
-    ui: &mut egui::Ui,
-    info: &WorldInfo,
-    rect: egui::Rect,
-    row: EntityRow,
-    selected: &mut Option<Entity>,
-    state: &mut TreeState,
-    tree_id: egui::Id,
-    actions: &mut Vec<Action>,
-) {
-    let EntityRow {
-        entity,
-        row,
-        focused,
-        matched,
-    } = row;
-    let Some(label) = info.label(entity) else {
-        return;
-    };
-    let id = egui::Id::new(("devtools_entities_row", entity));
-    let response = ui.interact(rect, id, egui::Sense::click());
-    let visuals = ui.visuals().clone();
-    let painter = ui.painter();
-    let background = if *selected == Some(entity) {
-        // Gray, as Chrome's, while the keyboard focus is elsewhere.
-        if focused {
-            visuals.selection.bg_fill
-        } else {
-            visuals.widgets.inactive.weak_bg_fill
-        }
-    } else if response.hovered() {
-        visuals.widgets.hovered.weak_bg_fill
-    } else {
-        egui::Color32::TRANSPARENT
-    };
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, background);
-
-    let triangle_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.left() + row.depth as f32 * INDENT, rect.top()),
-        egui::vec2(INDENT, rect.height()),
-    );
-    // Registered after the row, so that it takes the clicks on it.
-    let toggled = row.children > 0 && {
-        let triangle = ui.interact(triangle_rect, id.with("toggle"), egui::Sense::click());
-        let color = if triangle.hovered() {
-            visuals.strong_text_color()
-        } else {
-            visuals.weak_text_color()
-        };
-        paint_triangle(ui.painter(), triangle_rect.center(), row.open, color);
-        triangle.clicked()
-    };
-    if toggled || (row.children > 0 && response.double_clicked()) {
-        // ⌥-click expands or collapses the whole subtree, as in Chrome.
-        let recursive = ui.input(|input| input.modifiers.alt);
-        state.set_expanded(info, entity, !row.open, recursive);
-    } else if response.clicked() {
-        *selected = Some(entity);
-        ui.memory_mut(|memory| memory.request_focus(tree_id));
-    }
-
-    let painter = ui.painter();
-    let id_galley = painter.layout_no_wrap(
-        entity.to_string(),
-        egui::TextStyle::Monospace.resolve(ui.style()),
-        visuals.weak_text_color(),
-    );
-    let id_pos = egui::pos2(
-        rect.right() - 6.0 - id_galley.size().x,
-        rect.center().y - id_galley.size().y / 2.0,
-    );
-    let text_left = triangle_rect.right() + 2.0;
-    let mut job = label_job(ui.style(), info, &label, !matched);
-    job.wrap = egui::text::TextWrapping::truncate_at_width((id_pos.x - 8.0 - text_left).max(0.0));
-    let galley = painter.layout_job(job);
-    let text_pos = egui::pos2(text_left, rect.center().y - galley.size().y / 2.0);
-    painter.galley(text_pos, galley, visuals.text_color());
-    painter.galley(id_pos, id_galley, visuals.weak_text_color());
-
-    response
-        .on_hover_ui(|ui| label_tooltip(ui, info, &label))
-        .context_menu(|ui| {
-            if row.children > 0 {
-                if ui.button("Expand recursively").clicked() {
-                    state.set_expanded(info, entity, true, true);
-                }
-                if ui.button("Collapse children").clicked() {
-                    state.set_expanded(info, entity, false, true);
-                }
-                ui.separator();
-            }
-            entity_menu(ui, info, entity, &label, actions);
-        });
-}
-
-/// The entity's title in the tag color, followed by its rarest components in
-/// the attribute color, as Chrome shows an element's tag and attributes.
-/// Disabled entities are in italics. With `dimmed`, all of it is weak.
-fn label_job(
-    style: &egui::Style,
-    info: &WorldInfo,
-    label: &Label,
-    dimmed: bool,
-) -> egui::text::LayoutJob {
-    let visuals = &style.visuals;
-    let weak = visuals.weak_text_color();
-    let (tag, attribute) = if dimmed || label.disabled {
-        (weak, weak)
-    } else {
-        (Syntax::Tag.color(visuals), Syntax::Attribute.color(visuals))
-    };
-    let font = egui::TextStyle::Body.resolve(style);
-    let format = |color| egui::TextFormat {
-        font_id: font.clone(),
-        color,
-        italics: label.disabled,
-        ..Default::default()
-    };
-    let mut job = egui::text::LayoutJob::default();
-    if let Some(title) = &label.title {
-        job.append(title, 0.0, format(tag));
-    }
-    for &id in label.components.iter().take(ROW_COMPONENTS) {
-        let space = if job.is_empty() { 0.0 } else { 6.0 };
-        job.append(info.name(id), space, format(attribute));
-    }
-    let more = label.components.len().saturating_sub(ROW_COMPONENTS);
-    if more > 0 {
-        job.append(&format!("+{more}"), 6.0, format(weak));
-    }
-    if job.is_empty() {
-        job.append("empty", 0.0, format(weak));
-    }
-    job
+pub(super) enum RowView {
+    Section {
+        section: Section,
+        /// How many root entities the section has, or match the filter.
+        roots: usize,
+        open: bool,
+    },
+    Entity {
+        entity: Entity,
+        /// 1 for a root.
+        depth: usize,
+        children: usize,
+        /// Whether its children show below it.
+        open: bool,
+        label: Label,
+        /// `false` for an ancestor shown only to keep a match in place.
+        matched: bool,
+    },
 }
