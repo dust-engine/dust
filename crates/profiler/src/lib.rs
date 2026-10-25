@@ -401,13 +401,10 @@ pub struct GpuProfilerPlugin;
 impl Plugin for GpuProfilerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_gpu_profiler.after(CreateDevice));
-        app.add_systems(
-            PostUpdate,
-            (
-                gpu_profiler_begin_frame.before(DefaultRenderSet),
-                gpu_profiler_end_frame.after(DefaultRenderSet),
-            ),
-        );
+        app.add_systems(PostUpdate, gpu_profiler_begin_frame.before(DefaultRenderSet));
+        // In `Last`, after the submissions that follow `DefaultRenderSet`'s in
+        // `PostUpdate`, such as the swapchain's.
+        app.add_systems(Last, gpu_profiler_end_frame);
     }
 }
 
