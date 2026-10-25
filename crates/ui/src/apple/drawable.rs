@@ -3,16 +3,17 @@
 //!
 //! Each frame, [`acquire`] imports the drawable's texture into Vulkan as a `VkImage`
 //! (`VK_EXT_metal_objects`) and makes it the swapchain's current image; [`present`]
-//! presents the drawable once the frame's work is committed. kosmickrisp runs the
-//! Vulkan queue on a Metal 4 command queue and commits to it inside `vkQueueSubmit`,
-//! so both talk to that queue directly: `waitForDrawable` before the frame's work,
-//! `signalDrawable` after it, as Metal 4 requires of anything drawing into a
-//! drawable.
+//! presents the drawable once the work writing into it is committed. kosmickrisp
+//! runs the Vulkan queue on a Metal 4 command queue and commits to it inside
+//! `vkQueueSubmit`, so both talk to that queue directly, as Metal 4 requires of
+//! anything drawing into a drawable: `waitForDrawable` between `DefaultRenderSet`'s
+//! submission and [`SwapchainSet`]'s, so that only the latter waits for the
+//! drawable, and `signalDrawable` after [`SwapchainSet`]'s.
 
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy_pumicite::{
-    CreateDevice,
+    CreateDevice, DefaultRenderSet, PumiciteApp, SubmissionSetConfig,
     pumicite::{
         Device,
         ash::{ext, vk, vk::TaggedStructure as _},
@@ -31,10 +32,20 @@ use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTL4CommandQueue, MTLDrawable, MTLResource, MTLTexture};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
-use crate::SwapchainSet;
+/// Where systems using the [`MetalDrawable`]'s current image run: in a submission
+/// of their own on the render queue, after `DefaultRenderSet`'s, between the
+/// image's acquisition and its presentation. It's skipped on frames without an
+/// image.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SwapchainSet;
 
-/// Inserts the [`MetalDrawable`], and acquires and presents its images around
-/// [`SwapchainSet`].
+/// The run condition for [`SwapchainSet`].
+fn swapchain_image_acquired(swapchain: Res<MetalDrawable>) -> bool {
+    swapchain.current_image().is_some()
+}
+
+/// Inserts the [`MetalDrawable`], makes [`SwapchainSet`] a submission after
+/// `DefaultRenderSet`'s, and acquires and presents the drawables' images around it.
 pub(super) struct CAMetalLayerPlugin {
     pub(super) layer: Retained<CAMetalLayer>,
 }
@@ -61,9 +72,33 @@ impl Plugin for CAMetalLayerPlugin {
             .before(CreateDevice),
         )
         .add_systems(Startup, add_layer_to_residency_set.after(CreateDevice))
+        .add_submission_set::<RenderQueue>(
+            SwapchainSet,
+            SubmissionSetConfig {
+                debug_color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+            },
+        )
+        .configure_sets(
+            PostUpdate,
+            (
+                SwapchainSet.run_if(swapchain_image_acquired),
+
+                // TODO: This is also probably bad. Why DefaultRenderSet has to
+                // run before SwapchainSet but not DefaultComputeSet / DefaultTransferSet?
+                // Feels like AI slop to me.
+                DefaultRenderSet.before(SwapchainSet),
+            ),
+        )
         .add_systems(
             PostUpdate,
-            (acquire.before(SwapchainSet), present.after(SwapchainSet)),
+            (
+                // TODO: This is really temporary. Idea is that waitForDrawable will
+                // run as late as possible. But on Metal all presentation should
+                // probably happen on a separate MTL4CommandQueue to make this more
+                // maintainable.
+                acquire.after(DefaultRenderSet).before(SwapchainSet),
+                present.after(SwapchainSet),
+            ),
         );
     }
 }
@@ -85,14 +120,25 @@ pub struct MetalDrawable {
     state: ResourceState,
 }
 
-// SAFETY: only `BevyDisplayLinkDelegate::update`, `acquire` and `present` touch
-// `drawable`, and only `add_layer_to_residency_set` touches `layer`, all on the
-// Bevy thread (the systems take `NonSendMarker`). The app is dropped there too,
-// and with it both. The rest is `Send` and `Sync`.
+// SAFETY: only `BevyDisplayLinkDelegate::update`, `acquire` and `present` set and
+// take `drawable`, and only `add_layer_to_residency_set` touches `layer`, all on
+// the Bevy thread (the systems take `NonSendMarker`). The app is dropped there
+// too, and with it both. `extent` reads the drawable's texture size from any
+// thread. The rest is `Send` and `Sync`.
 unsafe impl Send for MetalDrawable {}
 unsafe impl Sync for MetalDrawable {}
 
 impl MetalDrawable {
+    /// The size of the current frame's image, or zero outside of a frame. Unlike
+    /// the image, it's known for the whole frame, e.g. to size the images that
+    /// `DefaultRenderSet` renders.
+    pub fn extent(&self) -> UVec2 {
+        self.drawable.as_ref().map_or(UVec2::ZERO, |drawable| {
+            let texture = drawable.texture();
+            UVec2::new(texture.width() as u32, texture.height() as u32)
+        })
+    }
+
     /// The image the current frame renders into, from its acquisition until it's
     /// presented: in [`SwapchainSet`].
     pub fn current_image(&self) -> Option<&GPUMutex<DrawableImage>> {
@@ -133,14 +179,15 @@ fn acquire(
     )));
     metal_drawable.state = ResourceState::default();
     metal_drawable.state.write.stage = vk::PipelineStageFlags2::ALL_COMMANDS;
-    // Work committed from here on, the frame's included, waits for the drawable.
+    // Work committed from here on, `SwapchainSet`'s included, waits for the
+    // drawable. `DefaultRenderSet`'s is already committed.
     queue
         .mtl_command_queue()
         .waitForDrawable(ProtocolObject::from_ref(&**drawable));
 }
 
-/// Presents the drawable once the frame's work, committed in [`SwapchainSet`], is
-/// done.
+/// Presents the drawable once the work writing into it, committed in
+/// [`SwapchainSet`]'s submission, is done.
 fn present(
     _bevy_thread: NonSendMarker,
     queue: Queue<RenderQueue>,

@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 bevy.workspace = true
-bevy_pumicite.workspace = true
 pumicite.workspace = true
 dust_input.workspace = true
 gpui.workspace = true
@@ -13,7 +12,13 @@ futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false }
 raw-window-handle = "0.6"
 
-[target.'cfg(target_os = "macos")'.dependencies]
+# Apple platforms use the `apple` module's swapchain, made from a display link's
+# drawables; the others use `bevy_pumicite`'s.
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+bevy_pumicite = { workspace = true, features = ["swapchain"] }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+bevy_pumicite.workspace = true
 objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFRunLoop"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace"] }

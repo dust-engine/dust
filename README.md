@@ -9,7 +9,7 @@ A Rust-based 3D voxel rendering engine using physically-based ray tracing. Built
 - MagicaVoxel `.vox` file loading
 - HDR output with tone-mapping and sky atmosphere
 - DLSS upscaling on supported NVIDIA GPUs
-- egui debug overlay
+- gpui debug overlay
 
 
 
@@ -51,7 +51,7 @@ Cargo also works for code-only builds (`cargo build`, `cargo test`), but Bazel i
 1. PBR ray-tracing pass — HDR color output and G-buffers (albedo, normal, depth, motion vectors)
 2. Shadow pass — visibility
 3. Tone-mapping compute pass — HDR to LDR
-4. egui overlay
+4. gpui overlay
 
 ## Shaders
 

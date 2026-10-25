@@ -168,7 +168,7 @@ impl Plugin for PbrRenderPlugin {
             PostUpdate,
             (
                 create_sbt.before(PbrRenderSet),
-                ensure_hdr_target.in_set(SwapchainSet).before(render),
+                ensure_hdr_target.before(render),
                 clear_debug_overlay
                     .in_set(DefaultRenderSet)
                     .after(ensure_hdr_target),
@@ -222,7 +222,7 @@ impl Plugin for PbrRenderPlugin {
                     .after(final_gather_pass)
                     .after(autoexposure_pass),
                 tonemap_pass
-                    .in_set(DefaultRenderSet)
+                    .in_set(SwapchainSet)
                     .after(render)
                     .after(shadow_pass)
                     .after(final_gather_pass)
@@ -880,11 +880,9 @@ fn ensure_hdr_target(
     quality_settings: Res<RenderQualitySettings>,
     upscaler: Option<Res<Upscaler>>,
 ) {
-    let swapchain = swapchain.into_inner();
-    let Some(current) = swapchain.current_image() else {
-        return;
-    };
-    let extent = UVec2::new(current.extent().x, current.extent().y);
+    // The swapchain's, not its current image's: this runs before the image is
+    // acquired.
+    let extent = swapchain.extent();
 
     // Reallocate when the display resolution changes or the user picks a new
     // quality mode. Both alter the internal render resolution; otherwise the

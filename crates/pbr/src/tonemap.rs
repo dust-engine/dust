@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 use bevy_pumicite::{SubmissionState, prelude::ComputePipeline, staging::UniformRingBuffer};
 use bytemuck::NoUninit;
-use dust_ui::{Swapchain, SwapchainImageMetadata as _};
+use dust_ui::Swapchain;
+// `bevy_pumicite`'s swapchain image has these methods without a trait.
+#[cfg(target_vendor = "apple")]
+use dust_ui::SwapchainImageMetadata as _;
 use pumicite::{
     ash::vk,
     tracking::Access,

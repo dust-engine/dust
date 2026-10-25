@@ -21,7 +21,6 @@ We own pumicite (`dust-engine/pumicite`, local checkout at `../pumicite`), so fi
 [patch."https://github.com/dust-engine/pumicite.git"]
 pumicite = { path = "../pumicite" }
 bevy_pumicite = { path = "../pumicite/crates/bevy" }
-pumicite_egui = { path = "../pumicite/crates/egui" }
 pumicite_types = { path = "../pumicite/crates/types" }
 ```
 

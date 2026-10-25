@@ -1,10 +1,3 @@
-//! The tab's view on the UI thread: the tree beside or above the inspector,
-//! drawn from the snapshots [`snapshot`] sends.
-//!
-//! Values are text, as in Chrome's Styles pane: clicking an editable one
-//! turns it into a field, which Enter or clicking elsewhere applies and Escape
-//! cancels. Numbers can also be dragged left and right, as egui's `DragValue`.
-
 use std::cell::Cell;
 use std::time::Duration;
 
