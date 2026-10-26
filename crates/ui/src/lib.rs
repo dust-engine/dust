@@ -1,10 +1,11 @@
 //! The game in a GPUI window, and the thread split between the game and the UI.
 //!
 //! [`BevyView`] is a GPUI view that runs a Bevy app on a thread of its own. GPUI
-//! draws the UI into its own `CAMetalLayer`; the game draws into a second
-//! `CAMetalLayer`, in a view placed under GPUI's. The window is transparent, so
-//! the game shows wherever the UI draws nothing. Each layer is presented by its
-//! own thread, independently: a `CAMetalDisplayLink` on the game's layer updates
+//! draws the UI into its own compositor layer; the game draws into a second
+//! layer, placed under GPUI's: the platform module's `GameLayer`. The window is
+//! transparent, so the game shows wherever the UI draws nothing. Each layer is
+//! presented by its own thread, independently. On macOS, the game's layer is a
+//! `CAMetalLayer` in a view under GPUI's: a `CAMetalDisplayLink` on it updates
 //! the Bevy app once per display frame, and the game renders straight into the
 //! link's drawables (see the `apple` module).
 //!
@@ -25,20 +26,28 @@
 
 #[cfg(not(target_os = "macos"))]
 compile_error!(
-    "dust_ui only has a game layer for macOS (the `apple` module); other platforms need their own"
+    "dust_ui only has a game layer for macOS (the `apple` module); other platforms need a module with a `GameLayer` of their own"
 );
 
 pub mod bridge;
 
 mod view;
 
+// Each platform has a module with a `GameLayer`: the layer the game draws into,
+// under GPUI's. `BevyView` creates it with `new(&Window)`, fits it to the view
+// with `set_bounds(bounds, scale_factor)`, locks the cursor for the game with
+// `set_cursor_locked(bool)`, and runs the Bevy app with the runner from
+// `create_bevy_runner()`, which adds the `Swapchain` and calls
+// `finish_plugins` before the first update.
 #[cfg(target_vendor = "apple")]
 mod apple;
+#[cfg(target_vendor = "apple")]
+use apple as platform;
 
 use std::sync::mpsc::Receiver;
 
 use bevy::{
-    app::{App, Last},
+    app::{App, Last, PluginsState},
     ecs::{
         schedule::IntoScheduleConfigs,
         system::{LocalBuilder, ParamBuilder, SystemParamBuilder},
@@ -72,4 +81,16 @@ fn build_gpui_app(app: &mut App, ui: GPUIChannel, bevy: Receiver<bridge::BevyCal
         Last,
         run_every_frame.after(bevy::ecs::system::despawn_unused_registered_systems),
     );
+}
+
+/// Finishes building `app`, as a runner does before its first update: waits for
+/// plugins that are still being added, then finishes and cleans them up.
+fn finish_plugins(app: &mut App) {
+    if app.plugins_state() != PluginsState::Cleaned {
+        while app.plugins_state() == PluginsState::Adding {
+            bevy::tasks::tick_global_task_pools_on_main_thread();
+        }
+        app.finish();
+        app.cleanup();
+    }
 }
