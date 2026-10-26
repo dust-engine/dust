@@ -1,7 +1,7 @@
-//! The game's layer, under GPUI's, the cursor lock, and the runner that updates
-//! the Bevy app from a `CAMetalDisplayLink` on the layer.
+//! The macOS [`GameLayer`]: the game's layer, under GPUI's, the cursor lock, and
+//! the runner that updates the Bevy app from a `CAMetalDisplayLink` on the layer.
 
-use gpui::{Bounds, Pixels, Window, WindowBackgroundAppearance};
+use gpui::{Bounds, Pixels, Window};
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSCursor, NSView, NSWindowOrderingMode};
@@ -10,7 +10,7 @@ use objc2_quartz_core::CAMetalLayer;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::{Cell, RefCell};
 
-use bevy::app::{AppExit, PluginsState};
+use bevy::app::AppExit;
 use objc2::runtime::ProtocolObject;
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_core_foundation::CFRunLoop;
@@ -26,13 +26,13 @@ unsafe extern "C" {
 }
 /// The game's view and layer, under GPUI's view in the window's content view,
 /// where the `BevyView` is laid out.
-pub(crate) struct NSViewWithMetalLayer {
+pub(crate) struct GameLayer {
     view: Retained<NSView>,
     layer: Retained<CAMetalLayer>,
     cursor_locked: bool,
 }
 
-impl NSViewWithMetalLayer {
+impl GameLayer {
     pub fn set_cursor_locked(&mut self, locked: bool) {
         if self.cursor_locked == locked {
             return;
@@ -48,8 +48,7 @@ impl NSViewWithMetalLayer {
     }
     /// Adds a layer-hosting view for the game under GPUI's view, filling the
     /// window's content view until [`Self::set_bounds`] fits it to the
-    /// `BevyView`, and makes the window transparent so the game shows wherever
-    /// the UI draws nothing.
+    /// `BevyView`.
     pub(crate) fn new(window: &Window) -> Self {
         let mtm = MainThreadMarker::new().expect("the UI runs on the main thread");
         let RawWindowHandle::AppKit(handle) =
@@ -84,8 +83,7 @@ impl NSViewWithMetalLayer {
             NSWindowOrderingMode::Below,
             Some(gpui_view),
         );
-        window.set_background_appearance(WindowBackgroundAppearance::Transparent);
-        NSViewWithMetalLayer {
+        GameLayer {
             view,
             layer,
             cursor_locked: false,
@@ -143,13 +141,7 @@ impl NSViewWithMetalLayer {
 
 /// Runs `app` until it exits or the UI quits, one update per display frame of `layer`.
 pub(crate) fn displaylink_runner(mut app: bevy::app::App, layer: &CAMetalLayer) -> AppExit {
-    if app.plugins_state() != PluginsState::Cleaned {
-        while app.plugins_state() == PluginsState::Adding {
-            bevy::tasks::tick_global_task_pools_on_main_thread();
-        }
-        app.finish();
-        app.cleanup();
-    }
+    crate::finish_plugins(&mut app);
 
     let delegate = BevyDisplayLinkDelegate::new(app);
     let link = CAMetalDisplayLink::initWithMetalLayer(CAMetalDisplayLink::alloc(), layer);

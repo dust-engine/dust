@@ -5,15 +5,15 @@ use bevy::prelude::NextState;
 use futures_util::StreamExt;
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled, Task, Window, canvas,
-    div,
+    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled, Task, Window,
+    WindowBackgroundAppearance, canvas, div,
 };
 
 use dust_input::CursorMode;
 
-use crate::apple::NSViewWithMetalLayer;
 use crate::bridge::{BevyChannel, GPUIChannel};
 use crate::build_gpui_app;
+use crate::platform::GameLayer;
 
 /// Shows a Bevy app, which runs on a thread of its own and draws into a layer
 /// under GPUI's (see the crate docs).
@@ -35,7 +35,7 @@ use crate::build_gpui_app;
 pub struct BevyView {
     focus: FocusHandle,
     bevy: BevyChannel,
-    game_layer: NSViewWithMetalLayer,
+    game_layer: GameLayer,
     /// Runs the calls the Bevy app queues for the UI thread.
     _ui_calls: Task<()>,
 }
@@ -70,7 +70,9 @@ impl BevyView {
         })
         .detach();
 
-        let mut game_layer = NSViewWithMetalLayer::new(window);
+        let mut game_layer = GameLayer::new(window);
+        // The game shows wherever the UI draws nothing.
+        window.set_background_appearance(WindowBackgroundAppearance::Transparent);
         let runner = game_layer.create_bevy_runner();
 
         let view = cx.weak_entity();
