@@ -40,7 +40,7 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 
 - **`crates/input/`** (`dust_input`) — The game's keyboard and mouse, read on the Bevy thread from the platform (GameController on macOS) and written as `bevy_input` messages, only while the `CursorMode` state is attached (for gameplay); while it is detached (for the UI) the backend doesn't read, and keys held at detach are released. `BevyView` sets it: a click on the game attaches the cursor, Escape and window deactivation detach it.
 
-- **`crates/devtools/`** (`dust_devtools`) — DevTools dock and overlays as GPUI views. A view shows the world with `watch` (a system run every Bevy frame while the view is drawn) or `read` (once, when it is shown), and edits it through `dust_ui`'s `BevyChannel` (see `devtools.rs`).
+- **`crates/devtools/`** (`dust_devtools`) — DevTools dock and overlays as GPUI views. A view shows the world with `watch` (a system run every Bevy frame while the view is drawn), `read` (once, when it is shown) or `fetch` (once, each time it's called, as when the user picks something), and edits it through `dust_ui`'s `BevyChannel` (see `devtools.rs`).
 
 - **`src/main.rs`** — Application entry point.
 

@@ -3,8 +3,8 @@
 //! The dock is a GPUI view on the UI thread, drawn over the game by
 //! [`overlay`]. Its tabs are GPUI views too: the dock creates its own, and
 //! [`DevTools::add_tab`] adds more. A view shows the world with [`watch`] or
-//! [`read`], called from its `render`, and edits it through `dust_ui`'s
-//! `BevyChannel`:
+//! [`read`], called from its `render`, or [`fetch`], called when the user
+//! asks for something else, and edits it through `dust_ui`'s `BevyChannel`:
 //!
 //! ```ignore
 //! let devtools = dust_devtools::overlay(console_log, window, cx);
@@ -50,6 +50,7 @@ use crate::entities::EntitiesView;
 use crate::graphics_debug::GraphicsDebugView;
 use crate::performance::{PerformanceOverlay, PerformancePanel};
 use crate::player::PlayerOverlay;
+use crate::schedules::SchedulesView;
 
 actions!(dust_devtools, [ToggleDevTools]);
 
@@ -65,8 +66,8 @@ pub enum DockSide {
 }
 
 /// Builds the overlay drawn over the game's `BevyView`: the DevTools dock, with
-/// its Graphics Debug, Entities and Console tabs, and the performance and
-/// player overlays. [`DevTools::add_tab`] adds more tabs.
+/// its Graphics Debug, Entities, Schedules and Console tabs, and the
+/// performance and player overlays. [`DevTools::add_tab`] adds more tabs.
 ///
 /// The console shows the messages logged to `console_log`; see
 /// [`console_layer`](crate::console_layer).
@@ -128,6 +129,7 @@ impl DevTools {
     fn new(console_log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let graphics_debug = cx.new(|cx| GraphicsDebugView::new(window, cx));
         let entities = cx.new(|cx| EntitiesView::new(window, cx));
+        let schedules = cx.new(|cx| SchedulesView::new(window, cx));
         let console = cx.new(|cx| ConsoleView::new(console_log, window, cx));
         DevTools {
             open: true,
@@ -136,6 +138,7 @@ impl DevTools {
             tabs: vec![
                 ("Graphics Debug".into(), graphics_debug.into()),
                 ("Entities".into(), entities.into()),
+                ("Schedules".into(), schedules.into()),
                 ("Console".into(), console.into()),
             ],
             performance: cx.new(|cx| PerformanceOverlay::new(window, cx)),
@@ -451,14 +454,35 @@ pub fn read<V: 'static, T: Send + 'static, M>(
     let handle = window.window_handle();
     let key = ElementId::CodeLocation(*Location::caller());
     window.use_keyed_state(key, cx, move |_, cx| {
-        cx.global::<BevyChannel>()
-            .update(move |world| match world.run_system_once(system) {
-                Ok(value) => {
-                    send_to_view(world.resource::<GPUIChannel>(), view, handle, apply, value)
-                }
-                Err(error) => warn_once!("DevTools read failed: {error}"),
-            });
+        run_once(view, handle, system, apply, cx)
     });
+}
+
+/// Runs `system` on the Bevy thread once, at the end of the next Bevy frame,
+/// and passes what it returns to `apply`, as [`read`] does, but each time
+/// it's called: from an event handler, to read the world again when the user
+/// asks for something else.
+pub fn fetch<V: 'static, T: Send + 'static, M>(
+    window: &Window,
+    cx: &mut Context<V>,
+    system: impl IntoSystem<(), T, M> + Send + 'static,
+    apply: Apply<V, T>,
+) {
+    run_once(cx.weak_entity(), window.window_handle(), system, apply, cx);
+}
+
+fn run_once<V: 'static, T: Send + 'static, M>(
+    view: WeakEntity<V>,
+    window: AnyWindowHandle,
+    system: impl IntoSystem<(), T, M> + Send + 'static,
+    apply: Apply<V, T>,
+    cx: &App,
+) {
+    cx.global::<BevyChannel>()
+        .update(move |world| match world.run_system_once(system) {
+            Ok(value) => send_to_view(world.resource::<GPUIChannel>(), view, window, apply, value),
+            Err(error) => warn_once!("DevTools read failed: {error}"),
+        });
 }
 
 /// Has the UI thread pass `value` to `apply` on `view`, then redraw the view.
