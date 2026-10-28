@@ -1,0 +1,783 @@
+//! The game's [`Swapchain`](crate::Swapchain) on Windows: buffers the game renders
+//! into, presented to the `GameLayer`'s visual with the composition swapchain API
+//! (`IPresentationManager`), with no copy.
+//!
+//! The buffers are D3D11 textures on Vulkan's GPU, imported into Vulkan
+//! (`VK_KHR_external_memory_win32`) and registered with a presentation manager.
+//! Each frame, [`acquire`] picks the next of three, waiting until the compositor is
+//! done with it, and has the submission of [`SwapchainSet`] signal a fence shared
+//! with D3D11 (`VK_KHR_external_semaphore_win32`); [`release`] hands the buffer
+//! over to D3D11 (`VK_QUEUE_FAMILY_EXTERNAL`); and [`present`] presents it, once
+//! that fence is signaled.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+use bevy::ecs::system::NonSendMarker;
+use bevy::prelude::*;
+use bevy_pumicite::{
+    CreateDevice, DefaultRenderSet, PumiciteApp, SubmissionSetConfig, SubmissionState,
+    pumicite::{
+        Device,
+        ash::{khr, vk, vk::TaggedStructure as _},
+        device::DeviceBuilder,
+        image::ImageLike,
+        project_host_metadata,
+        sync::GPUMutex,
+        tracking::{Access, ResourceState},
+        utils::AsVkHandle,
+    },
+    queue::{Queue, RenderQueue},
+};
+use windows::Win32::Foundation::{
+    CloseHandle, GENERIC_ALL, HANDLE, HMODULE, LUID, PRESENTATION_ERROR_LOST, RECT, WAIT_OBJECT_0,
+};
+use windows::Win32::Graphics::CompositionSwapchain::{
+    CreatePresentationFactory, IPresentationBuffer, IPresentationFactory, IPresentationManager,
+    IPresentationSurface,
+};
+use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1};
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    D3D11_CREATE_DEVICE_FLAG, D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+    D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_FEATURE_DATA_DISPLAYABLE, D3D11_FEATURE_DISPLAYABLE,
+    D3D11_FENCE_FLAG_SHARED, D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE,
+    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11CreateDevice, ID3D11Device, ID3D11Device5, ID3D11DeviceContext4,
+    ID3D11Fence, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_ALPHA_MODE_IGNORE, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+    DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_SAMPLE_DESC,
+};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, IDXGIAdapter1, IDXGIFactory4, IDXGIResource1,
+};
+use windows::Win32::System::Threading::{
+    CreateEventW, ResetEvent, WaitForMultipleObjects, WaitForSingleObject,
+};
+use windows::core::{Interface, PCWSTR};
+
+/// How many buffers the game renders into in turn: one being written, one queued
+/// for the compositor, and one on screen.
+const BUFFER_COUNT: usize = 3;
+
+/// How long [`acquire`] waits for the compositor to be done with a buffer before
+/// giving up on the frame. It's done within a frame or two unless nothing is being
+/// shown, such as while the window is minimized; the app keeps updating then.
+const RETIRE_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// Where systems using the [`Swapchain`]'s current image run: in a submission of
+/// their own on the render queue, after `DefaultRenderSet`'s, between [`acquire`]
+/// and [`release`]. It's skipped on frames without an image.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SwapchainSet;
+
+/// The submission set that [`acquire`], [`SwapchainSet`] and [`release`] are in.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SwapchainSubmissionSet;
+
+/// The run condition for [`SwapchainSet`].
+fn swapchain_image_acquired(swapchain: Res<Swapchain>) -> bool {
+    swapchain.current_image().is_some()
+}
+
+/// The composition surface handle the swapchain presents to. The `GameLayer`'s
+/// visual shows the surface.
+#[derive(Clone, Copy)]
+pub(super) struct SurfaceHandle(pub(super) HANDLE);
+
+// SAFETY: a handle names a kernel object of the process, from any thread. Only the
+// Bevy thread presents to it.
+unsafe impl Send for SurfaceHandle {}
+unsafe impl Sync for SurfaceHandle {}
+
+/// Packs a size in physical pixels into the `u64` that the `GameLayer` shares with
+/// the [`Swapchain`]: `width << 32 | height`.
+pub(super) fn pack_size(width: i32, height: i32) -> u64 {
+    (width.max(0) as u64) << 32 | height.max(0) as u64
+}
+
+fn unpack_size(size: u64) -> UVec2 {
+    UVec2::new((size >> 32) as u32, size as u32)
+}
+
+/// Inserts the [`Swapchain`], makes [`SwapchainSet`] part of a submission after
+/// `DefaultRenderSet`'s, and acquires, releases and presents its buffers around it.
+pub(super) struct CompositionSwapchainPlugin {
+    pub(super) surface: SurfaceHandle,
+    pub(super) size: Arc<AtomicU64>,
+}
+
+impl Plugin for CompositionSwapchainPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(Swapchain {
+            surface: self.surface,
+            size: self.size.clone(),
+            presenter: None,
+            buffers: Vec::new(),
+            retiring: Vec::new(),
+            next: 0,
+            current: None,
+            state: ResourceState::default(),
+        })
+        .add_systems(
+            Startup,
+            (|mut device_builder: ResMut<DeviceBuilder>| {
+                device_builder
+                    .enable_extension::<khr::external_memory_win32::Meta>()
+                    .unwrap();
+                device_builder
+                    .enable_extension::<khr::external_semaphore_win32::Meta>()
+                    .unwrap();
+            })
+            .before(CreateDevice),
+        )
+        .add_systems(Startup, create_presenter.after(CreateDevice))
+        .add_submission_set::<RenderQueue>(
+            SwapchainSubmissionSet,
+            SubmissionSetConfig {
+                debug_color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+            },
+        )
+        .configure_sets(
+            PostUpdate,
+            (
+                SwapchainSet
+                    .in_set(SwapchainSubmissionSet)
+                    .run_if(swapchain_image_acquired),
+                DefaultRenderSet.before(SwapchainSubmissionSet),
+            ),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                acquire.in_set(SwapchainSubmissionSet).before(SwapchainSet),
+                release.in_set(SwapchainSubmissionSet).after(SwapchainSet),
+                present.after(SwapchainSubmissionSet),
+            ),
+        );
+    }
+}
+
+/// The swapchain's state on Windows: the presentation manager and the buffers the
+/// game renders into.
+#[derive(Resource)]
+pub struct Swapchain {
+    surface: SurfaceHandle,
+    /// The game's size in physical pixels, which the `GameLayer` sets.
+    size: Arc<AtomicU64>,
+    /// Created at startup, and again if it's lost. `None` if it can't be.
+    presenter: Option<Presenter>,
+    /// The buffers of the current size, used in turn.
+    buffers: Vec<Buffer>,
+    /// Buffers of an earlier size, kept until their last present has retired.
+    retiring: Vec<Buffer>,
+    /// The index in `buffers` of the next frame's buffer.
+    next: usize,
+    /// The current frame's buffer, from [`acquire`] until [`present`], and the
+    /// value of `render_done` its present waits for.
+    current: Option<(usize, u64)>,
+    /// The current image's resource state.
+    state: ResourceState,
+}
+
+// SAFETY: the D3D11 and presentation objects are only used by the systems taking
+// `NonSendMarker`, which run on the Bevy thread; the app is dropped there too.
+// `extent` reads an atomic. The rest is `Send` and `Sync`.
+unsafe impl Send for Swapchain {}
+unsafe impl Sync for Swapchain {}
+
+impl Swapchain {
+    /// The size of the game's images, known for the whole frame, e.g. to size the
+    /// images that `DefaultRenderSet` renders.
+    pub fn extent(&self) -> UVec2 {
+        unpack_size(self.size.load(Ordering::Relaxed))
+    }
+
+    /// The image the current frame renders into, from its acquisition until it's
+    /// presented: in [`SwapchainSet`].
+    pub fn current_image(&self) -> Option<&GPUMutex<PresentationImage>> {
+        self.current.map(|(index, _)| &self.buffers[index].image)
+    }
+
+    /// The current image's resource state, for the barriers of the work using it.
+    pub fn state_mut(&mut self) -> &mut ResourceState {
+        &mut self.state
+    }
+}
+
+/// A buffer the game renders into: a D3D11 texture registered with the
+/// presentation manager, and imported into Vulkan.
+struct Buffer {
+    image: GPUMutex<PresentationImage>,
+    presentation: IPresentationBuffer,
+    /// Keeps the texture, which the Vulkan image's memory is, alive.
+    _texture: ID3D11Texture2D,
+    size: UVec2,
+    /// The id of the last present that showed it, or 0.
+    last_present: u64,
+}
+
+/// The presentation manager, the D3D11 device it presents on, and the fences
+/// between it and Vulkan.
+struct Presenter {
+    device: Device,
+    d3d: ID3D11Device5,
+    context: ID3D11DeviceContext4,
+    /// Whether the buffers can be scanned out, skipping composition.
+    displayable: bool,
+    manager: IPresentationManager,
+    surface: IPresentationSurface,
+    /// Reaches a present's id once the present begins retiring.
+    retiring: ID3D11Fence,
+    /// Set by `retiring` for [`Presenter::wait_retired`].
+    retired: HANDLE,
+    /// Set once the presentation manager is lost.
+    lost: HANDLE,
+    /// Signaled by the submission of [`SwapchainSet`] once it's done writing a
+    /// buffer; the buffer's present waits for it.
+    render_done: ID3D11Fence,
+    /// `render_done`, imported into Vulkan.
+    render_done_semaphore: vk::Semaphore,
+    render_done_value: u64,
+    /// The render queue's family, which releases the buffers to D3D11.
+    queue_family: u32,
+}
+
+/// The flags the composition swapchain API requires of the D3D11 device: without
+/// `PREVENT_INTERNAL_THREADING_OPTIMIZATIONS`, `CreatePresentationFactory` fails.
+const DEVICE_FLAGS: D3D11_CREATE_DEVICE_FLAG = D3D11_CREATE_DEVICE_FLAG(
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT.0
+        | D3D11_CREATE_DEVICE_SINGLETHREADED.0
+        | D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS.0,
+);
+
+impl Presenter {
+    /// Creates a presentation manager on Vulkan's GPU, presenting to `surface`.
+    fn new(device: &Device, queue_family: u32, surface: SurfaceHandle) -> windows::core::Result<Self> {
+        let id = device
+            .physical_device()
+            .properties()
+            .get::<vk::PhysicalDeviceIDProperties>();
+        assert_eq!(id.device_luid_valid, vk::TRUE, "the GPU has no LUID");
+        let luid = LUID {
+            LowPart: u32::from_le_bytes(id.device_luid[..4].try_into().unwrap()),
+            HighPart: i32::from_le_bytes(id.device_luid[4..].try_into().unwrap()),
+        };
+        let factory: IDXGIFactory4 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }?;
+        let adapter: IDXGIAdapter1 = unsafe { factory.EnumAdapterByLuid(luid) }?;
+        let mut d3d: Option<ID3D11Device> = None;
+        let mut context = None;
+        unsafe {
+            D3D11CreateDevice(
+                &adapter,
+                D3D_DRIVER_TYPE_UNKNOWN,
+                HMODULE::default(),
+                DEVICE_FLAGS,
+                Some(&[D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0]),
+                D3D11_SDK_VERSION,
+                Some(&mut d3d),
+                None,
+                Some(&mut context),
+            )
+        }?;
+        let d3d = d3d.unwrap();
+        let mut displayable = D3D11_FEATURE_DATA_DISPLAYABLE::default();
+        let displayable = unsafe {
+            d3d.CheckFeatureSupport(
+                D3D11_FEATURE_DISPLAYABLE,
+                (&raw mut displayable).cast(),
+                size_of::<D3D11_FEATURE_DATA_DISPLAYABLE>() as u32,
+            )
+        }
+        .is_ok_and(|()| displayable.DisplayableTexture.as_bool());
+
+        let presentation: IPresentationFactory = unsafe { CreatePresentationFactory(&d3d) }?;
+        assert!(
+            unsafe { presentation.IsPresentationSupported() } != 0,
+            "the composition swapchain API isn't supported on this system (it needs Windows 11 and a WDDM 2.0 driver)"
+        );
+        let manager = unsafe { presentation.CreatePresentationManager() }?;
+        let surface = unsafe { manager.CreatePresentationSurface(surface.0) }?;
+        unsafe {
+            surface.SetAlphaMode(DXGI_ALPHA_MODE_IGNORE)?;
+            surface.SetColorSpace(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)?;
+        }
+        let retiring: ID3D11Fence = unsafe { manager.GetPresentRetiringFence() }?;
+        let lost = unsafe { manager.GetLostEvent() }?;
+        let retired = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }?;
+
+        let d3d: ID3D11Device5 = d3d.cast()?;
+        let mut render_done: Option<ID3D11Fence> = None;
+        unsafe { d3d.CreateFence(0, D3D11_FENCE_FLAG_SHARED, &mut render_done) }?;
+        let render_done = render_done.unwrap();
+        let shared = unsafe { render_done.CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null()) }?;
+        let mut timeline = vk::SemaphoreTypeCreateInfo::default()
+            .semaphore_type(vk::SemaphoreType::TIMELINE)
+            .initial_value(0);
+        let render_done_semaphore = unsafe {
+            device.create_semaphore(&vk::SemaphoreCreateInfo::default().push(&mut timeline), None)
+        }
+        .unwrap();
+        // Importing doesn't take the handle, so it's closed after.
+        unsafe {
+            device
+                .extension::<khr::external_semaphore_win32::Meta>()
+                .import_semaphore_win32_handle(
+                    &vk::ImportSemaphoreWin32HandleInfoKHR::default()
+                        .semaphore(render_done_semaphore)
+                        .handle_type(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE)
+                        .handle(shared.0 as vk::HANDLE),
+                )
+                .unwrap();
+            CloseHandle(shared).ok();
+        }
+
+        Ok(Presenter {
+            device: device.clone(),
+            d3d,
+            context: context.unwrap().cast()?,
+            displayable,
+            manager,
+            surface,
+            retiring,
+            retired,
+            lost,
+            render_done,
+            render_done_semaphore,
+            render_done_value: 0,
+            queue_family,
+        })
+    }
+
+    fn is_lost(&self) -> bool {
+        (unsafe { WaitForSingleObject(self.lost, 0) }) == WAIT_OBJECT_0
+    }
+
+    /// Whether `buffer`'s last present has retired: a later present has been shown,
+    /// so the compositor is done with it.
+    fn retired(&self, buffer: &Buffer) -> bool {
+        buffer.last_present == 0
+            || unsafe { self.retiring.GetCompletedValue() } > buffer.last_present
+    }
+
+    /// Waits until `buffer`'s last present has retired, for up to `timeout`. Only
+    /// then can Vulkan write it: the presentation API holds back D3D work on a
+    /// buffer still in use, but not Vulkan's. Returns whether it has.
+    fn wait_retired(&self, buffer: &Buffer, timeout: Duration) -> bool {
+        if self.retired(buffer) {
+            return true;
+        }
+        unsafe {
+            ResetEvent(self.retired).unwrap();
+            self.retiring
+                .SetEventOnCompletion(buffer.last_present + 1, self.retired)
+                .unwrap();
+            let result = WaitForMultipleObjects(
+                &[self.lost, self.retired],
+                false,
+                timeout.as_millis() as u32,
+            );
+            result.0 == WAIT_OBJECT_0.0 + 1
+        }
+    }
+
+    /// Creates a buffer of `size`, registered with the presentation manager and
+    /// imported into Vulkan.
+    fn create_buffer(&self, size: UVec2) -> windows::core::Result<Buffer> {
+        let mut misc = D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0;
+        if self.displayable {
+            misc |= D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE.0;
+        }
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: size.x,
+            Height: size.y,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_R10G10B10A2_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_DEFAULT,
+            // Shader resource: the presentation API requires it of RGB buffers.
+            // Unordered access and render target: the Vulkan image's storage and
+            // color attachment usages. Tonemap writes it as a storage image.
+            BindFlags: (D3D11_BIND_SHADER_RESOURCE.0
+                | D3D11_BIND_UNORDERED_ACCESS.0
+                | D3D11_BIND_RENDER_TARGET.0) as u32,
+            CPUAccessFlags: 0,
+            MiscFlags: misc as u32,
+        };
+        let mut texture = None;
+        unsafe { self.d3d.CreateTexture2D(&desc, None, Some(&mut texture)) }?;
+        let texture: ID3D11Texture2D = texture.unwrap();
+        let presentation = unsafe { self.manager.AddBufferFromResource(&texture) }?;
+        let shared = unsafe {
+            texture
+                .cast::<IDXGIResource1>()?
+                .CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null())
+        }?;
+        let image = PresentationImage::import(self.device.clone(), shared, size);
+        // Importing doesn't take the handle, so it's closed after.
+        unsafe { CloseHandle(shared) }.ok();
+        Ok(Buffer {
+            image: GPUMutex::new(image),
+            presentation,
+            _texture: texture,
+            size,
+            last_present: 0,
+        })
+    }
+
+    /// Presents `buffer` once `render_done` reaches `value`.
+    fn present(&self, buffer: &mut Buffer, value: u64) {
+        unsafe {
+            // A present is shown only once the work issued to the context before
+            // it is done: here, Vulkan's writes into the buffer.
+            self.context.Wait(&self.render_done, value).unwrap();
+            self.context.Flush();
+            self.surface.SetBuffer(&buffer.presentation).unwrap();
+            // The source rect starts out empty, and nothing shows until it's set.
+            // Buffers can differ in size, so it's set with each one.
+            self.surface
+                .SetSourceRect(&RECT {
+                    left: 0,
+                    top: 0,
+                    right: buffer.size.x as i32,
+                    bottom: buffer.size.y as i32,
+                })
+                .unwrap();
+            buffer.last_present = self.manager.GetNextPresentId();
+            match self.manager.Present() {
+                Ok(()) => {}
+                // `acquire` recreates the presentation manager.
+                Err(error) if error.code() == PRESENTATION_ERROR_LOST => {}
+                Err(error) => panic!("failed to present: {error}"),
+            }
+        }
+    }
+}
+
+impl Drop for Presenter {
+    fn drop(&mut self) {
+        unsafe {
+            // Submissions may still signal the semaphore. It's dropped only at
+            // exit, or when the presentation manager is lost.
+            self.device.device_wait_idle().ok();
+            self.device
+                .destroy_semaphore(self.render_done_semaphore, None);
+            CloseHandle(self.retired).ok();
+            CloseHandle(self.lost).ok();
+        }
+    }
+}
+
+fn create_presenter(
+    _bevy_thread: NonSendMarker,
+    device: Res<Device>,
+    queue: Queue<RenderQueue>,
+    mut swapchain: ResMut<Swapchain>,
+) {
+    let surface = swapchain.surface;
+    match Presenter::new(&device, queue.family_index(), surface) {
+        Ok(presenter) => swapchain.presenter = Some(presenter),
+        Err(error) => tracing::error!("The game can't present: {error}"),
+    }
+}
+
+/// Picks the next buffer once the compositor is done with it, and makes it the
+/// current image. The submission it's in, [`SwapchainSet`]'s, signals
+/// `render_done` once it's done writing the buffer.
+fn acquire(
+    _bevy_thread: NonSendMarker,
+    mut submission: SubmissionState,
+    swapchain: ResMut<Swapchain>,
+) {
+    let Swapchain {
+        surface,
+        size,
+        presenter,
+        buffers,
+        retiring,
+        next,
+        current,
+        state,
+    } = swapchain.into_inner();
+    let Some(live) = presenter else {
+        return;
+    };
+    if live.is_lost() {
+        tracing::warn!("The presentation manager was lost; creating another");
+        // The buffers are registered with the lost one.
+        buffers.clear();
+        retiring.clear();
+        let queue_family = live.queue_family;
+        let device = live.device.clone();
+        *presenter = None;
+        match Presenter::new(&device, queue_family, *surface) {
+            Ok(new) => *presenter = Some(new),
+            Err(error) => {
+                tracing::error!("The game can't present: {error}");
+                return;
+            }
+        }
+    }
+    let presenter = presenter.as_mut().unwrap();
+    retiring.retain(|buffer| !presenter.retired(buffer));
+
+    let size = unpack_size(size.load(Ordering::Relaxed));
+    if buffers.first().is_none_or(|buffer| buffer.size != size) {
+        // Buffers can differ in size, so the old ones are presented until the new
+        // ones are, and dropped once the compositor is done with them.
+        retiring.append(buffers);
+        for _ in 0..BUFFER_COUNT {
+            match presenter.create_buffer(size) {
+                Ok(buffer) => buffers.push(buffer),
+                Err(error) => panic!("failed to create a presentation buffer: {error}"),
+            }
+        }
+        *next = 0;
+    }
+    let index = *next;
+    if !presenter.wait_retired(&buffers[index], RETIRE_TIMEOUT) {
+        return;
+    }
+    *next = (index + 1) % buffers.len();
+
+    presenter.render_done_value += 1;
+    let value = presenter.render_done_value;
+    // SAFETY: the semaphore outlives the submission: it's destroyed only after the
+    // device is idle. Only this submission signals it, with increasing values.
+    unsafe {
+        submission.signal_semaphore(
+            presenter.render_done_semaphore,
+            value,
+            vk::PipelineStageFlags2::ALL_COMMANDS,
+        );
+    }
+    *current = Some((index, value));
+    // The buffer's earlier contents are discarded, so it needn't be acquired from
+    // D3D11 (`VK_QUEUE_FAMILY_EXTERNAL`) first. Its first barrier waits for the
+    // whole submission's start, as on macOS.
+    *state = ResourceState::default();
+    state.write.stage = vk::PipelineStageFlags2::ALL_COMMANDS;
+}
+
+/// Hands the current image over to D3D11, after [`SwapchainSet`] is done with it.
+fn release(mut submission: SubmissionState, swapchain: ResMut<Swapchain>) {
+    let swapchain = swapchain.into_inner();
+    let Some(queue_family) = swapchain.presenter.as_ref().map(|p| p.queue_family) else {
+        return;
+    };
+    submission.record(|encoder| {
+        let Some(image) = swapchain.current_image() else {
+            return;
+        };
+        let image = encoder.lock(image, vk::PipelineStageFlags2::ALL_COMMANDS);
+        let state = swapchain.state_mut();
+        encoder.image_ownership_transfer(
+            image,
+            Access {
+                stage: vk::PipelineStageFlags2::ALL_COMMANDS,
+                access: vk::AccessFlags2::MEMORY_WRITE,
+            },
+            Access::NONE,
+            state.layout,
+            vk::ImageLayout::GENERAL,
+            queue_family,
+            vk::QUEUE_FAMILY_EXTERNAL,
+            0..1,
+            0..1,
+        );
+        state.layout = vk::ImageLayout::GENERAL;
+        encoder.emit_barriers();
+    });
+}
+
+/// Presents the current image once the submission of [`SwapchainSet`] is done
+/// writing it.
+fn present(_bevy_thread: NonSendMarker, swapchain: ResMut<Swapchain>) {
+    let swapchain = swapchain.into_inner();
+    let Some((index, value)) = swapchain.current.take() else {
+        return;
+    };
+    if let Some(presenter) = &swapchain.presenter {
+        presenter.present(&mut swapchain.buffers[index], value);
+    }
+}
+
+/// A presentation buffer's texture imported as a `VkImage`, with a view of all of
+/// it: the image a frame renders into.
+pub struct PresentationImage {
+    device: Device,
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    view: PresentationImageView,
+    extent: UVec2,
+}
+
+/// The texture's format, `DXGI_FORMAT_R10G10B10A2_UNORM` in Vulkan's terms, as on
+/// macOS.
+const FORMAT: vk::Format = vk::Format::A2B10G10R10_UNORM_PACK32;
+
+impl PresentationImage {
+    /// Imports the texture behind `shared`, an NT handle from
+    /// `IDXGIResource1::CreateSharedHandle`.
+    fn import(device: Device, shared: HANDLE, extent: UVec2) -> Self {
+        let handle_type = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE;
+        let mut external = vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
+        let info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(FORMAT)
+            .extent(vk::Extent3D {
+                width: extent.x,
+                height: extent.y,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .push(&mut external);
+        let image = unsafe { device.create_image(&info, None) }.unwrap();
+        let mut handle_properties = vk::MemoryWin32HandlePropertiesKHR::default();
+        unsafe {
+            device
+                .extension::<khr::external_memory_win32::Meta>()
+                .get_memory_win32_handle_properties(
+                    handle_type,
+                    shared.0 as vk::HANDLE,
+                    &mut handle_properties,
+                )
+        }
+        .unwrap();
+        let requirements = unsafe { device.get_image_memory_requirements(image) };
+        let memory_types = handle_properties.memory_type_bits & requirements.memory_type_bits;
+        assert_ne!(memory_types, 0, "no memory type can hold the imported texture");
+        // The texture is the image's memory; the driver requires it be dedicated.
+        let mut import = vk::ImportMemoryWin32HandleInfoKHR::default()
+            .handle_type(handle_type)
+            .handle(shared.0 as vk::HANDLE);
+        let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(image);
+        let memory = unsafe {
+            device.allocate_memory(
+                &vk::MemoryAllocateInfo::default()
+                    .allocation_size(requirements.size)
+                    .memory_type_index(memory_types.trailing_zeros())
+                    .push(&mut import)
+                    .push(&mut dedicated),
+                None,
+            )
+        }
+        .unwrap();
+        unsafe { device.bind_image_memory(image, memory, 0) }.unwrap();
+        let view = unsafe {
+            device.create_image_view(
+                &vk::ImageViewCreateInfo::default()
+                    .image(image)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .format(FORMAT)
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    }),
+                None,
+            )
+        }
+        .unwrap();
+        PresentationImage {
+            device,
+            image,
+            memory,
+            view: PresentationImageView(view),
+            extent,
+        }
+    }
+
+    /// A view of the whole image, in its own format.
+    pub fn linear_view(&self) -> &PresentationImageView {
+        &self.view
+    }
+
+    /// The color space the visual shows the image in.
+    pub fn color_space(&self) -> vk::ColorSpaceKHR {
+        vk::ColorSpaceKHR::SRGB_NONLINEAR
+    }
+}
+
+project_host_metadata! {
+    /// [`PresentationImage`]'s accessors on a `GPUMutex` holding it, and on the
+    /// tokens locking it.
+    pub trait PresentationImageMetadata for impl[] PresentationImage {
+        /// A view of the whole image, in its own format.
+        fn linear_view(&self) -> &PresentationImageView;
+        /// The color space the visual shows the image in.
+        fn color_space(&self) -> vk::ColorSpaceKHR;
+    }
+}
+
+impl AsVkHandle for PresentationImage {
+    type Handle = vk::Image;
+
+    fn vk_handle(&self) -> Self::Handle {
+        self.image
+    }
+}
+
+// SAFETY: one `PresentationImage` names each imported image, which it creates and
+// destroys. It isn't `Clone`.
+unsafe impl ImageLike for PresentationImage {
+    fn aspects(&self) -> vk::ImageAspectFlags {
+        vk::ImageAspectFlags::COLOR
+    }
+
+    fn array_layer_count(&self) -> u32 {
+        1
+    }
+
+    fn mip_level_count(&self) -> u32 {
+        1
+    }
+
+    fn extent(&self) -> UVec3 {
+        self.extent.extend(1)
+    }
+
+    fn format(&self) -> vk::Format {
+        FORMAT
+    }
+
+    fn ty(&self) -> vk::ImageType {
+        vk::ImageType::TYPE_2D
+    }
+}
+
+impl Drop for PresentationImage {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_image_view(self.view.0, None);
+            self.device.destroy_image(self.image, None);
+            self.device.free_memory(self.memory, None);
+        }
+    }
+}
+
+/// The view [`PresentationImage::linear_view`] returns.
+pub struct PresentationImageView(vk::ImageView);
+
+impl AsVkHandle for PresentationImageView {
+    type Handle = vk::ImageView;
+
+    fn vk_handle(&self) -> Self::Handle {
+        self.0
+    }
+}

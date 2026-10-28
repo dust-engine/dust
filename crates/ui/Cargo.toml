@@ -11,11 +11,28 @@ gpui.workspace = true
 futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false }
 raw-window-handle = "0.6"
+tracing = "0.1"
 
 # Apple platforms use the `apple` module's swapchain, made from a display link's
-# drawables; the others use `bevy_pumicite`'s.
-[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+# drawables, and Windows the `win32` module's, presented with the composition
+# swapchain API; the others use `bevy_pumicite`'s.
+[target.'cfg(not(any(target_vendor = "apple", windows)))'.dependencies]
 bevy_pumicite = { workspace = true, features = ["swapchain"] }
+
+[target.'cfg(windows)'.dependencies]
+bevy_pumicite.workspace = true
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_CompositionSwapchain",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_DirectComposition",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Security",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 bevy_pumicite.workspace = true
