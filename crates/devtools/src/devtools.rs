@@ -1,7 +1,8 @@
 //! DevTools: a Chrome-DevTools-style dock that hosts debug panels as tabs.
 //!
 //! The dock is a GPUI view on the UI thread, drawn over the game by
-//! [`overlay`]. Its tabs are GPUI views too: the dock creates its own, and
+//! [`overlay`], or, detached, in a window of its own. Its tabs are GPUI views
+//! too, drawn in whichever window the dock is in: the dock creates its own, and
 //! [`DevTools::add_tab`] adds more. A view shows the world with [`watch`] or
 //! [`read`], called from its `render`, or [`fetch`], called when the user
 //! asks for something else, and edits it through `dust_ui`'s `BevyChannel`:
@@ -29,19 +30,20 @@
 use std::panic::Location;
 
 use bevy::ecs::system::{RunSystemOnce as _, SystemHandle};
-use bevy::prelude::{DetectChanges as _, In, IntoSystem, Res, World, warn_once};
+use bevy::prelude::{DetectChanges as _, In, IntoSystem, Res, World, warn, warn_once};
 use dust_profiler::GpuProfiler;
 use dust_ui::{BevyChannel, GPUIChannel};
 use gpui::{
-    AnyView, AnyWindowHandle, App, AppContext as _, Context, ElementId, Entity,
+    AnyView, AnyWindowHandle, App, AppContext as _, Bounds, Context, ElementId, Entity,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
-    Styled as _, WeakEntity, Window, actions, div, prelude::FluentBuilder as _, px,
+    Styled as _, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions,
+    actions, div, prelude::FluentBuilder as _, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::tab::TabBar;
 use gpui_component::{
-    ActiveTheme as _, IconName, Sizable as _, Theme, ThemeMode, h_flex, h_resizable,
+    ActiveTheme as _, IconName, Root, Sizable as _, Theme, ThemeMode, h_flex, h_resizable,
     resizable_panel, v_flex, v_resizable,
 };
 
@@ -60,9 +62,9 @@ pub enum DockSide {
     Left,
     Bottom,
     Right,
-    /// A panel floating over the game, standing in for Chrome's "Undock into
-    /// separate window".
-    Floating,
+    /// In a window of its own, as Chrome's "Undock into separate window".
+    /// Closing the window closes DevTools.
+    Detached,
 }
 
 /// Builds the overlay drawn over the game's `BevyView`: the DevTools dock, with
@@ -83,10 +85,7 @@ pub fn overlay(console_log: ConsoleLog, window: &mut Window, cx: &mut App) -> En
         let devtools = devtools.downgrade();
         move |_: &ToggleDevTools, cx| {
             devtools
-                .update(cx, |devtools, cx| {
-                    devtools.open = !devtools.open;
-                    cx.notify();
-                })
+                .update(cx, |devtools, cx| devtools.set_open(!devtools.open, cx))
                 .ok();
         }
     });
@@ -94,11 +93,19 @@ pub fn overlay(console_log: ConsoleLog, window: &mut Window, cx: &mut App) -> En
 }
 
 /// The overlay's root view: the dock, and the overlays over the part of the
-/// window it leaves to the game.
+/// window it leaves to the game. Detached, the dock is in a window of its own,
+/// drawn by a [`DetachedPanel`], and the overlays have the whole window.
 pub struct DevTools {
-    /// Whether DevTools is shown. Toggled by F12 / ⌘⌥I and the ✕ button.
+    /// Whether DevTools is shown. Toggled by F12 / ⌘⌥I and the ✕ button, and
+    /// cleared by closing the detached window.
     open: bool,
     dock: DockSide,
+    /// The window the dock is in while DevTools is open and detached; see
+    /// [`DevTools::sync_window`].
+    window: Option<WindowHandle<Root>>,
+    /// Where the detached window was when it last closed, to open it there
+    /// again.
+    window_bounds: Option<WindowBounds>,
     /// Index of the shown tab in `tabs`.
     selected: usize,
     /// Title and view of each tab, in the order they show.
@@ -134,6 +141,8 @@ impl DevTools {
         DevTools {
             open: true,
             dock: DockSide::Right,
+            window: None,
+            window_bounds: None,
             selected: 0,
             tabs: vec![
                 ("Graphics Debug".into(), graphics_debug.into()),
@@ -161,6 +170,52 @@ impl DevTools {
         cx.notify();
     }
 
+    /// Shows or hides DevTools.
+    fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.open = open;
+        self.sync_window(cx);
+    }
+
+    fn set_dock(&mut self, dock: DockSide, cx: &mut Context<Self>) {
+        self.dock = dock;
+        self.sync_window(cx);
+    }
+
+    /// Redraws, and opens or closes the detached window to match `open` and
+    /// `dock`: it is open while DevTools is open and detached.
+    ///
+    /// The window opens and closes once the current update is over: opening it
+    /// draws it, which reads DevTools, being updated now; and the change can
+    /// come from a click in the window, which can't be closed while it handles
+    /// the click.
+    fn sync_window(&self, cx: &mut Context<Self>) {
+        cx.notify();
+        let devtools = cx.entity();
+        cx.defer(move |cx| {
+            let this = devtools.read(cx);
+            let detached = this.open && this.dock == DockSide::Detached;
+            match (detached, this.window, this.window_bounds) {
+                (true, None, bounds) => {
+                    let window = open_detached(devtools.clone(), bounds, cx);
+                    devtools.update(cx, |this, _| this.window = window);
+                }
+                (false, Some(window), _) => {
+                    let bounds = window
+                        .update(cx, |_, window, _| {
+                            window.remove_window();
+                            window.window_bounds()
+                        })
+                        .ok();
+                    devtools.update(cx, |this, _| {
+                        this.window = None;
+                        this.window_bounds = bounds.or(this.window_bounds);
+                    });
+                }
+                _ => {}
+            }
+        });
+    }
+
     /// The part of the window the dock leaves uncovered, with the overlays.
     fn scene(&self) -> impl IntoElement + use<> {
         div()
@@ -186,8 +241,15 @@ impl DevTools {
             })
     }
 
-    /// Tab strip, then the selected tab's contents.
-    fn panel(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// Tab strip, then the selected tab's contents; drawn in `window`, the
+    /// game's or the detached one.
+    fn panel(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        watch(window, cx, average_fps, |this, fps, _, _| {
+            this.average_fps = fps
+        });
+        read(window, cx, gpu_timings, |this, timings, _, _| {
+            this.gpu_timings = timings
+        });
         let menu = self.menu(cx);
         let theme = cx.theme();
         // The tab bar draws the border under the header, so the frame rate and
@@ -215,17 +277,17 @@ impl DevTools {
                             .child(format!("{:.0} FPS", self.average_fps)),
                     )
                     .child(menu)
-                    .child(
-                        Button::new("devtools-close")
-                            .icon(IconName::Close)
-                            .ghost()
-                            .xsmall()
-                            .tooltip("Close DevTools (F12)")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open = false;
-                                cx.notify();
-                            })),
-                    ),
+                    // Detached, the window's own close button closes DevTools.
+                    .when(self.dock != DockSide::Detached, |suffix| {
+                        suffix.child(
+                            Button::new("devtools-close")
+                                .icon(IconName::Close)
+                                .ghost()
+                                .xsmall()
+                                .tooltip("Close DevTools (F12)")
+                                .on_click(cx.listener(|this, _, _, cx| this.set_open(false, cx))),
+                        )
+                    }),
             );
         let contents = match self.tabs.get(self.selected) {
             Some((_, view)) => div().flex_1().min_h_0().child(view.clone()),
@@ -247,7 +309,7 @@ impl DevTools {
                 DockSide::Left => panel.border_r_1(),
                 DockSide::Right => panel.border_l_1(),
                 DockSide::Bottom => panel.border_t_1(),
-                DockSide::Floating => panel.border_1().rounded_md().shadow_lg(),
+                DockSide::Detached => panel,
             })
             .child(header)
             .child(contents)
@@ -268,7 +330,7 @@ impl DevTools {
                 let this = this.read(cx);
                 menu = menu.label("Dock side");
                 for (side, label) in [
-                    (DockSide::Floating, "Undock"),
+                    (DockSide::Detached, "Detached"),
                     (DockSide::Left, "Left"),
                     (DockSide::Bottom, "Bottom"),
                     (DockSide::Right, "Right"),
@@ -279,10 +341,7 @@ impl DevTools {
                             .checked(this.dock == side)
                             .on_click(move |_, _, cx| {
                                 devtools
-                                    .update(cx, |devtools, cx| {
-                                        devtools.dock = side;
-                                        cx.notify();
-                                    })
+                                    .update(cx, |devtools, cx| devtools.set_dock(side, cx))
                                     .ok();
                             }),
                     );
@@ -345,13 +404,6 @@ impl Render for DevTools {
         if !self.open {
             return div().size_full().child(scene).into_any_element();
         }
-        watch(window, cx, average_fps, |this, fps, _, _| {
-            this.average_fps = fps
-        });
-        read(window, cx, gpu_timings, |this, timings, _, _| {
-            this.gpu_timings = timings
-        });
-        let panel = self.panel(cx);
         match self.dock {
             DockSide::Right => h_resizable("devtools-dock-right")
                 .child(resizable_panel().child(scene))
@@ -359,7 +411,7 @@ impl Render for DevTools {
                     resizable_panel()
                         .size(px(480.))
                         .size_range(px(160.)..px(4096.))
-                        .child(panel),
+                        .child(self.panel(window, cx)),
                 )
                 .into_any_element(),
             DockSide::Left => h_resizable("devtools-dock-left")
@@ -367,7 +419,7 @@ impl Render for DevTools {
                     resizable_panel()
                         .size(px(480.))
                         .size_range(px(160.)..px(4096.))
-                        .child(panel),
+                        .child(self.panel(window, cx)),
                 )
                 .child(resizable_panel().child(scene))
                 .into_any_element(),
@@ -377,25 +429,60 @@ impl Render for DevTools {
                     resizable_panel()
                         .size(px(320.))
                         .size_range(px(120.)..px(4096.))
-                        .child(panel),
+                        .child(self.panel(window, cx)),
                 )
                 .into_any_element(),
-            DockSide::Floating => div()
-                .size_full()
-                .relative()
-                .child(scene)
-                .child(
-                    div()
-                        .absolute()
-                        .top(px(40.))
-                        .right(px(40.))
-                        .w(px(640.))
-                        .h(px(480.))
-                        .child(panel),
-                )
-                .into_any_element(),
+            // The panel is in its own window.
+            DockSide::Detached => div().size_full().child(scene).into_any_element(),
         }
     }
+}
+
+/// The detached window's root view: DevTools' panel, filling the window.
+struct DetachedPanel(Entity<DevTools>);
+
+impl Render for DetachedPanel {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Updating DevTools here, as reading it, has this window redrawn when
+        // DevTools notifies.
+        self.0.update(cx, |devtools, cx| devtools.panel(window, cx))
+    }
+}
+
+/// Opens the window the panel is in while DevTools is detached, at `bounds`,
+/// or centered on the screen. Closing the window closes DevTools.
+fn open_detached(
+    devtools: Entity<DevTools>,
+    bounds: Option<WindowBounds>,
+    cx: &mut App,
+) -> Option<WindowHandle<Root>> {
+    let bounds = bounds.unwrap_or_else(|| {
+        WindowBounds::Windowed(Bounds::centered(None, size(px(800.), px(600.)), cx))
+    });
+    let options = WindowOptions {
+        window_bounds: Some(bounds),
+        titlebar: Some(TitlebarOptions {
+            title: Some("DevTools".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    cx.open_window(options, |window, cx| {
+        window.on_window_should_close(cx, {
+            let devtools = devtools.downgrade();
+            move |_, cx| {
+                // Which closes the window, through `sync_window`.
+                devtools
+                    .update(cx, |devtools, cx| devtools.set_open(false, cx))
+                    .ok();
+                false
+            }
+        });
+        let panel = cx.new(|_| DetachedPanel(devtools));
+        cx.new(|cx| Root::new(panel, window, cx))
+    })
+    .inspect_err(|error| warn!("Failed to open the DevTools window: {error}"))
+    .ok()
 }
 
 /// What [`watch`] and [`read`] do with a value from the Bevy thread, on the UI

@@ -10,7 +10,8 @@
 //! add DevTools tabs with [`DevTools::add_tab`].
 //!
 //! The panels are GPUI views on the UI thread, drawn over the game's
-//! `BevyView` by [`overlay`]. They show the Bevy world with [`watch`],
+//! `BevyView` by [`overlay`], or in a window of their own when DevTools is
+//! detached. They show the Bevy world with [`watch`],
 //! [`read`] and [`fetch`], and edit it through `dust_ui`'s `BevyChannel`.
 
 mod console;
