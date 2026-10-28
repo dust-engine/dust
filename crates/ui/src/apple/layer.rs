@@ -1,5 +1,6 @@
-//! The macOS [`GameLayer`]: the game's layer, under GPUI's, the cursor lock, and
-//! the runner that updates the Bevy app from a `CAMetalDisplayLink` on the layer.
+//! The macOS [`GameLayer`]: the game's layer beneath GPUI's layer, along with the
+//! cursor lock and the runner that updates the Bevy app from a
+//! `CAMetalDisplayLink` on the layer.
 
 use gpui::{Bounds, Pixels, Window};
 use objc2::rc::Retained;
@@ -94,7 +95,7 @@ impl GameLayer {
     /// drawables to them, unless they already are. GPUI's coordinates start at
     /// the top left of its view, which fills the content view; the content
     /// view's start at the bottom left.
-    pub(crate) fn set_bounds(&self, bounds: Bounds<Pixels>, scale_factor: f32) {
+    pub(crate) fn set_bounds(&mut self, bounds: Bounds<Pixels>, scale_factor: f32) {
         let content_view =
             unsafe { self.view.superview() }.expect("the game's view is in the content view");
         let content_height = content_view.bounds().size.height;

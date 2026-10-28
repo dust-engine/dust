@@ -140,9 +140,10 @@ impl Render for BevyView {
             .child(
                 canvas(
                     move |bounds, window, cx| {
-                        this.read(cx)
-                            .game_layer
-                            .set_bounds(bounds, window.scale_factor());
+                        let scale_factor = window.scale_factor();
+                        this.update(cx, |this, _| {
+                            this.game_layer.set_bounds(bounds, scale_factor);
+                        });
                     },
                     |_, _, _, _| {},
                 )

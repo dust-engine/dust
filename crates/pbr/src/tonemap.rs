@@ -3,7 +3,7 @@ use bevy_pumicite::{SubmissionState, prelude::ComputePipeline, staging::UniformR
 use bytemuck::NoUninit;
 use dust_ui::Swapchain;
 // `bevy_pumicite`'s swapchain image has these methods without a trait.
-#[cfg(target_vendor = "apple")]
+#[cfg(any(target_vendor = "apple", windows))]
 use dust_ui::SwapchainImageMetadata as _;
 use pumicite::{
     ash::vk,

@@ -1157,7 +1157,7 @@ source = "git+https://github.com/dust-engine/bevy.git?branch=release-0.20.0#12cf
 [[package]]
 name = "bevy_pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=e42bf3ffd8b4fd3eea8ed19759fe49ceed661ae5#e42bf3ffd8b4fd3eea8ed19759fe49ceed661ae5"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=f2f8cc8ec7834f09c71442591fc3f8e8e94f030d#f2f8cc8ec7834f09c71442591fc3f8e8e94f030d"
 dependencies = [
  "async-lock",
  "bevy_app",
@@ -2692,6 +2692,8 @@ dependencies = [
  "objc2-quartz-core 0.3.2",
  "pumicite",
  "raw-window-handle",
+ "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -6685,7 +6687,7 @@ checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
 [[package]]
 name = "pumicite"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=e42bf3ffd8b4fd3eea8ed19759fe49ceed661ae5#e42bf3ffd8b4fd3eea8ed19759fe49ceed661ae5"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=f2f8cc8ec7834f09c71442591fc3f8e8e94f030d#f2f8cc8ec7834f09c71442591fc3f8e8e94f030d"
 dependencies = [
  "ash",
  "bevy_asset",
@@ -6712,7 +6714,7 @@ dependencies = [
 [[package]]
 name = "pumicite_types"
 version = "0.1.0"
-source = "git+https://github.com/dust-engine/pumicite.git?rev=e42bf3ffd8b4fd3eea8ed19759fe49ceed661ae5#e42bf3ffd8b4fd3eea8ed19759fe49ceed661ae5"
+source = "git+https://github.com/dust-engine/pumicite.git?rev=f2f8cc8ec7834f09c71442591fc3f8e8e94f030d#f2f8cc8ec7834f09c71442591fc3f8e8e94f030d"
 dependencies = [
  "ash",
  "glam",

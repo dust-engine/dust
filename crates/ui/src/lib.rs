@@ -1,13 +1,18 @@
 //! The game in a GPUI window, and the thread split between the game and the UI.
 //!
 //! [`BevyView`] is a GPUI view that runs a Bevy app on a thread of its own. GPUI
-//! draws the UI into its own compositor layer; the game draws into a second
-//! layer, placed under GPUI's: the platform module's `GameLayer`. The window is
+//! draws the UI into its own compositor layer, and the game draws into a second
+//! layer beneath it: the platform module's `GameLayer`. The window is
 //! transparent, so the game shows wherever the UI draws nothing. Each layer is
-//! presented by its own thread, independently. On macOS, the game's layer is a
-//! `CAMetalLayer` in a view under GPUI's: a `CAMetalDisplayLink` on it updates
-//! the Bevy app once per display frame, and the game renders straight into the
-//! link's drawables (see the `apple` module).
+//! presented by its own thread, independently.
+//!
+//! On macOS, the game's layer is a `CAMetalLayer` in a view beneath GPUI's view.
+//! A `CAMetalDisplayLink` on it updates the Bevy app once per display frame, and
+//! the game renders straight into the link's drawables (see the `apple` module).
+//! On Windows, the game's layer is a DirectComposition visual beneath GPUI's
+//! visuals. The Bevy app updates once per compositor frame, and the game renders
+//! straight into buffers that it presents to the visual with the composition
+//! swapchain API (see the `win32` module).
 //!
 //! The two threads reach each other by queueing closures, through
 //! [`GPUIChannel`] (a resource of the Bevy app) and [`BevyChannel`] (a global of
@@ -19,14 +24,16 @@
 //! them on the Bevy thread.
 //!
 //! The game renders into the [`Swapchain`] resource's current image in
-//! [`SwapchainSet`], a submission of its own after `bevy_pumicite`'s
-//! `DefaultRenderSet`. On Apple platforms they're the `apple` module's, made from
-//! the display link's drawables; elsewhere they're `bevy_pumicite`'s. Both have
-//! the same API.
+//! [`SwapchainSet`], a submission of its own after the submission of
+//! `bevy_pumicite`'s `DefaultRenderSet`. On Apple platforms, the `apple` module
+//! provides both, and makes the images from the display link's drawables. On
+//! Windows, the `win32` module provides them, and the images are the presentation
+//! buffers. Other platforms use the swapchain and set from `bevy_pumicite`. All
+//! three have the same API.
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 compile_error!(
-    "dust_ui only has a game layer for macOS (the `apple` module); other platforms need a module with a `GameLayer` of their own"
+    "dust_ui only has game layers for macOS (the `apple` module) and Windows (the `win32` module); other platforms need a module with a `GameLayer` of their own"
 );
 
 pub mod bridge;
@@ -34,15 +41,19 @@ pub mod bridge;
 mod view;
 
 // Each platform has a module with a `GameLayer`: the layer the game draws into,
-// under GPUI's. `BevyView` creates it with `new(&Window)`, fits it to the view
-// with `set_bounds(bounds, scale_factor)`, locks the cursor for the game with
-// `set_cursor_locked(bool)`, and runs the Bevy app with the runner from
-// `create_bevy_runner()`, which adds the `Swapchain` and calls
-// `finish_plugins` before the first update.
+// beneath GPUI's layer. `BevyView` creates it with `new(&Window)`, fits it to
+// the view with `set_bounds(bounds, scale_factor)`, locks the cursor for the game
+// with `set_cursor_locked(bool)`, and runs the Bevy app with the runner from
+// `create_bevy_runner()`, which adds the `Swapchain` and calls `finish_plugins`
+// before the first update.
 #[cfg(target_vendor = "apple")]
 mod apple;
 #[cfg(target_vendor = "apple")]
 use apple as platform;
+#[cfg(windows)]
+mod win32;
+#[cfg(windows)]
+use win32 as platform;
 
 use std::sync::mpsc::Receiver;
 
@@ -63,7 +74,13 @@ pub use apple::drawable::{
     MetalDrawable as Swapchain, SwapchainSet,
 };
 
-#[cfg(not(target_vendor = "apple"))]
+#[cfg(windows)]
+pub use win32::swapchain::{
+    PresentationImage as SwapchainImage, PresentationImageMetadata as SwapchainImageMetadata,
+    Swapchain, SwapchainSet,
+};
+
+#[cfg(not(any(target_vendor = "apple", windows)))]
 pub use bevy_pumicite::{
     pumicite::swapchain::SwapchainImageInner as SwapchainImage,
     swapchain::{Swapchain, SwapchainSet},
