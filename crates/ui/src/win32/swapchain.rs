@@ -33,8 +33,9 @@ use windows::Win32::Foundation::{
     CloseHandle, GENERIC_ALL, HANDLE, HMODULE, LUID, PRESENTATION_ERROR_LOST, RECT, WAIT_OBJECT_0,
 };
 use windows::Win32::Graphics::CompositionSwapchain::{
-    CreatePresentationFactory, IPresentationBuffer, IPresentationFactory, IPresentationManager,
-    IPresentationSurface,
+    CreatePresentationFactory, ICompositionFramePresentStatistics, IPresentationBuffer,
+    IPresentationFactory, IPresentationManager, IPresentationSurface,
+    PresentStatisticsKind_CompositionFrame,
 };
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1};
 use windows::Win32::Graphics::Direct3D11::{
@@ -48,7 +49,9 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11Fence, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_ALPHA_MODE_IGNORE, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+    DXGI_ALPHA_MODE_IGNORE, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
+    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+    DXGI_COLOR_SPACE_TYPE,
     DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
@@ -273,6 +276,15 @@ struct Presenter {
     render_done_value: u64,
     /// The render queue's family, which [`release`] transfers the buffers from.
     queue_family: u32,
+    /// The color space that `surface` shows its buffer in. [`Presenter::present`]
+    /// changes it to the color space of the buffer it presents.
+    color_space: vk::ColorSpaceKHR,
+    /// Set while the presentation manager has statistics for
+    /// [`Presenter::preferred_color_space`] to read.
+    statistics_available: HANDLE,
+    /// The color space that [`Presenter::preferred_color_space`] last found. It
+    /// starts as sRGB, until the first statistics arrive.
+    preferred_color_space: vk::ColorSpaceKHR,
 }
 
 /// The flags the composition swapchain API requires of the D3D11 device: without
@@ -332,10 +344,15 @@ impl Presenter {
         }
         let manager = unsafe { presentation.CreatePresentationManager() }?;
         let surface = unsafe { manager.CreatePresentationSurface(surface.0) }?;
+        let color_space = vk::ColorSpaceKHR::SRGB_NONLINEAR;
         unsafe {
             surface.SetAlphaMode(DXGI_ALPHA_MODE_IGNORE)?;
-            surface.SetColorSpace(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)?;
+            surface.SetColorSpace(dxgi_color_space(color_space))?;
         }
+        // Each present's composition-frame statistics name the outputs that
+        // showed the present, and the color space of each output.
+        unsafe { manager.EnablePresentStatisticsKind(PresentStatisticsKind_CompositionFrame, 1) }?;
+        let statistics_available = unsafe { manager.GetPresentStatisticsAvailableEvent() }?;
         let retiring: ID3D11Fence = unsafe { manager.GetPresentRetiringFence() }?;
         let lost = unsafe { manager.GetLostEvent() }?;
         let retired = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }?;
@@ -380,7 +397,55 @@ impl Presenter {
             render_done_semaphore,
             render_done_value: 0,
             queue_family,
+            color_space,
+            statistics_available,
+            preferred_color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
         })
+    }
+
+    /// The color space that the game should present in: HDR10 while a display in
+    /// HDR mode shows the game, and sRGB otherwise. The statistics come from the
+    /// composition frame that first showed each present, so they follow the
+    /// window from one display to another, and they follow HDR being turned on or
+    /// off.
+    fn preferred_color_space(&mut self) -> vk::ColorSpaceKHR {
+        // Reading every statistic also keeps the queue from overflowing.
+        while (unsafe { WaitForSingleObject(self.statistics_available, 0) }) == WAIT_OBJECT_0 {
+            let Ok(statistics) = (unsafe { self.manager.GetNextPresentStatistics() }) else {
+                break;
+            };
+            let Ok(frame) = statistics.cast::<ICompositionFramePresentStatistics>() else {
+                continue;
+            };
+            let mut count = 0;
+            let mut instances = std::ptr::null_mut();
+            unsafe { frame.GetDisplayInstanceArray(&mut count, &mut instances) };
+            if instances.is_null() || count == 0 {
+                continue;
+            }
+            // SAFETY: the statistics object owns the array, and outlives this use.
+            let instances = unsafe { std::slice::from_raw_parts(instances, count as usize) };
+            // There's one instance for each output that showed the present, and
+            // its color space is the one that the compositor composes in for that
+            // output. For an output in HDR mode that's linear scRGB
+            // (`G10_NONE_P709`), not the HDR10 signal that the display receives.
+            // For an output in SDR mode it's sRGB. A window that spans an HDR
+            // display and an SDR display presents in HDR10, which the compositor
+            // converts for the SDR display.
+            let color_space = if instances.iter().any(|instance| {
+                instance.colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
+                    || instance.colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
+            }) {
+                vk::ColorSpaceKHR::HDR10_ST2084_EXT
+            } else {
+                vk::ColorSpaceKHR::SRGB_NONLINEAR
+            };
+            if color_space != self.preferred_color_space {
+                tracing::info!("The game now presents in {color_space:?}");
+            }
+            self.preferred_color_space = color_space;
+        }
+        self.preferred_color_space
     }
 
     fn is_lost(&self) -> bool {
@@ -417,9 +482,13 @@ impl Presenter {
         }
     }
 
-    /// Creates a buffer of `size`, registered with the presentation manager and
-    /// imported into Vulkan.
-    fn create_buffer(&self, size: UVec2) -> windows::core::Result<Buffer> {
+    /// Creates a buffer of `size` for an image in `color_space`, registered with
+    /// the presentation manager and imported into Vulkan.
+    fn create_buffer(
+        &self,
+        size: UVec2,
+        color_space: vk::ColorSpaceKHR,
+    ) -> windows::core::Result<Buffer> {
         let mut misc = D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0;
         if self.displayable {
             misc |= D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE.0;
@@ -454,7 +523,7 @@ impl Presenter {
                 .cast::<IDXGIResource1>()?
                 .CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null())
         }?;
-        let image = PresentationImage::import(self.device.clone(), shared, size);
+        let image = PresentationImage::import(self.device.clone(), shared, size, color_space);
         // Importing an NT handle doesn't take ownership of it, so it's closed here.
         unsafe { CloseHandle(shared) }.ok();
         Ok(Buffer {
@@ -467,7 +536,7 @@ impl Presenter {
     }
 
     /// Presents `buffer` once `render_done` reaches `value`.
-    fn present(&self, buffer: &mut Buffer, value: u64) {
+    fn present(&mut self, buffer: &mut Buffer, value: u64) {
         unsafe {
             // A present is shown only once the work issued to the context before
             // the present is done: here, the wait for Vulkan's writes into the
@@ -475,6 +544,15 @@ impl Presenter {
             self.context.Wait(&self.render_done, value).unwrap();
             self.context.Flush();
             self.surface.SetBuffer(&buffer.presentation).unwrap();
+            // Like the buffer, the color space changes with this present, so the
+            // surface never shows a buffer in another color space.
+            let color_space = buffer.image.color_space();
+            if color_space != self.color_space {
+                self.surface
+                    .SetColorSpace(dxgi_color_space(color_space))
+                    .unwrap();
+                self.color_space = color_space;
+            }
             // The source rect starts out empty, and nothing shows until it's set.
             // Buffers can differ in size, so it's set with each one.
             self.surface
@@ -507,7 +585,18 @@ impl Drop for Presenter {
                 .destroy_semaphore(self.render_done_semaphore, None);
             CloseHandle(self.retired).ok();
             CloseHandle(self.lost).ok();
+            CloseHandle(self.statistics_available).ok();
         }
+    }
+}
+
+/// The DXGI color space that matches `color_space`, one of the two that
+/// [`acquire`] picks from.
+fn dxgi_color_space(color_space: vk::ColorSpaceKHR) -> DXGI_COLOR_SPACE_TYPE {
+    match color_space {
+        vk::ColorSpaceKHR::SRGB_NONLINEAR => DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+        vk::ColorSpaceKHR::HDR10_ST2084_EXT => DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+        _ => DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
     }
 }
 
@@ -549,13 +638,17 @@ fn acquire(
     retiring.retain(|buffer| !presenter.retired(buffer));
 
     let size = game_layer_state.size();
-    if buffers.first().is_none_or(|buffer| buffer.size != size) {
-        // Buffers can differ in size, so the old buffers stay on screen until the
-        // new ones are presented. They're dropped once the compositor is done
-        // with them.
+    let color_space = presenter.preferred_color_space();
+    if buffers
+        .first()
+        .is_none_or(|buffer| buffer.size != size || buffer.image.color_space() != color_space)
+    {
+        // Buffers can differ in size and color space, so the old buffers stay on
+        // screen until the new ones are presented. They're dropped once the
+        // compositor is done with them.
         retiring.append(buffers);
         for _ in 0..BUFFER_COUNT {
-            match presenter.create_buffer(size) {
+            match presenter.create_buffer(size, color_space) {
                 Ok(buffer) => buffers.push(buffer),
                 Err(error) => panic!("failed to create a presentation buffer: {error}"),
             }
@@ -636,6 +729,7 @@ pub struct PresentationImage {
     memory: vk::DeviceMemory,
     view: PresentationImageView,
     extent: UVec2,
+    color_space: vk::ColorSpaceKHR,
 }
 
 /// The texture's format: `DXGI_FORMAT_R10G10B10A2_UNORM`, which Vulkan calls
@@ -644,8 +738,14 @@ const FORMAT: vk::Format = vk::Format::A2B10G10R10_UNORM_PACK32;
 
 impl PresentationImage {
     /// Imports the texture behind `shared`, an NT handle from
-    /// `IDXGIResource1::CreateSharedHandle`.
-    fn import(device: Device, shared: HANDLE, extent: UVec2) -> Self {
+    /// `IDXGIResource1::CreateSharedHandle`, as an image that the visual shows in
+    /// `color_space`.
+    fn import(
+        device: Device,
+        shared: HANDLE,
+        extent: UVec2,
+        color_space: vk::ColorSpaceKHR,
+    ) -> Self {
         let handle_type = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE;
         let mut external = vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
         let info = vk::ImageCreateInfo::default()
@@ -719,6 +819,7 @@ impl PresentationImage {
             memory,
             view: PresentationImageView(view),
             extent,
+            color_space,
         }
     }
 
@@ -727,9 +828,10 @@ impl PresentationImage {
         &self.view
     }
 
-    /// The color space the visual shows the image in.
+    /// The color space the visual shows the image in: HDR10 while the display
+    /// is in HDR mode, and sRGB otherwise.
     pub fn color_space(&self) -> vk::ColorSpaceKHR {
-        vk::ColorSpaceKHR::SRGB_NONLINEAR
+        self.color_space
     }
 }
 
