@@ -101,9 +101,10 @@ unsafe impl Send for SurfaceHandle {}
 unsafe impl Sync for SurfaceHandle {}
 
 
-/// Inserts the [`Swapchain`] at startup, puts [`SwapchainSet`] in a submission
-/// that follows the submission of `DefaultRenderSet`, and adds the systems that
-/// acquire, release and present the buffers around the set.
+/// Inserts the [`Swapchain`] and creates its presenter at startup, puts
+/// [`SwapchainSet`] in a submission that follows the submission of
+/// `DefaultRenderSet`, and adds the systems that acquire, release and present the
+/// buffers around the set.
 pub(super) struct CompositionSwapchainPlugin {
     pub(super) surface: SurfaceHandle,
     pub(super) game_layer_state: Arc<GameLayerSharedState>,
@@ -111,29 +112,11 @@ pub(super) struct CompositionSwapchainPlugin {
 
 impl Plugin for CompositionSwapchainPlugin {
     fn build(&self, app: &mut App) {
-        let surface = self.surface;
-        let game_layer_state = self.game_layer_state.clone();
-        // The presenter needs the Vulkan device, so the swapchain is inserted
-        // once the device exists. If the system can't present this way, the
-        // swapchain is never inserted, and the systems that use it are skipped.
-        let insert_swapchain = move |_bevy_thread: NonSendMarker,
-                                     mut commands: Commands,
-                                     device: Res<Device>,
-                                     queue: Queue<RenderQueue>| {
-            match Presenter::new(&device, queue.family_index(), surface) {
-                Ok(presenter) => {
-                    // A clone: the closure is a system, which Bevy may run more
-                    // than once, so it can't give away what it captured.
-                    commands.insert_resource(Swapchain::new(
-                        surface,
-                        game_layer_state.clone(),
-                        presenter,
-                    ))
-                }
-                Err(error) => tracing::error!("The game can't present: {error}"),
-            }
-        };
-        app.add_systems(
+        app.insert_resource(Swapchain::new(
+            self.surface,
+            self.game_layer_state.clone(),
+        ))
+        .add_systems(
             Startup,
             (|mut device_builder: ResMut<DeviceBuilder>| {
                 device_builder
@@ -145,7 +128,7 @@ impl Plugin for CompositionSwapchainPlugin {
             })
             .before(CreateDevice),
         )
-        .add_systems(Startup, insert_swapchain.after(CreateDevice))
+        .add_systems(Startup, create_presenter.after(CreateDevice))
         .add_submission_set::<RenderQueue>(
             SwapchainSubmissionSet,
             SubmissionSetConfig {
@@ -175,17 +158,21 @@ impl Plugin for CompositionSwapchainPlugin {
 /// The swapchain's state on Windows: the presentation manager and the buffers the
 /// game renders into.
 ///
-/// It's inserted at startup, once the Vulkan device exists, and only if the system
-/// supports the composition swapchain API. It's removed if the presentation
-/// manager is lost and another can't be created.
+/// It's inserted without a presenter, which [`create_presenter`] creates at
+/// startup, once the Vulkan device exists. It's removed if the system doesn't
+/// support the composition swapchain API, or if the presentation manager is lost
+/// and another can't be created; the systems that use it are skipped then.
 #[derive(Resource)]
 pub struct Swapchain {
     surface: SurfaceHandle,
     /// The game's size in physical pixels, which the `GameLayer` sets.
     game_layer_state: Arc<GameLayerSharedState>,
     /// The presentation manager and what goes with it. [`acquire`] replaces it
-    /// whenever the presentation manager is lost.
-    presenter: Presenter,
+    /// whenever the presentation manager is lost. It's `None` until
+    /// [`create_presenter`] creates it, and while [`acquire`] replaces it: the
+    /// lost presentation manager has to let go of the surface before another can
+    /// present to it, so it's dropped first.
+    presenter: Option<Presenter>,
     /// The buffers of the current size, used in turn.
     buffers: Vec<Buffer>,
     /// Buffers of an earlier size, kept until their last present has retired.
@@ -206,11 +193,11 @@ unsafe impl Send for Swapchain {}
 unsafe impl Sync for Swapchain {}
 
 impl Swapchain {
-    fn new(surface: SurfaceHandle, game_layer_state: Arc<GameLayerSharedState>, presenter: Presenter) -> Self {
+    fn new(surface: SurfaceHandle, game_layer_state: Arc<GameLayerSharedState>) -> Self {
         Swapchain {
             surface,
             game_layer_state,
-            presenter,
+            presenter: None,
             buffers: Vec::new(),
             retiring: Vec::new(),
             next: 0,
@@ -600,6 +587,24 @@ fn dxgi_color_space(color_space: vk::ColorSpaceKHR) -> DXGI_COLOR_SPACE_TYPE {
     }
 }
 
+/// Creates the [`Swapchain`]'s presenter, once the Vulkan device exists. If the
+/// system can't present this way, it removes the swapchain.
+fn create_presenter(
+    _bevy_thread: NonSendMarker,
+    mut commands: Commands,
+    device: Res<Device>,
+    queue: Queue<RenderQueue>,
+    mut swapchain: ResMut<Swapchain>,
+) {
+    match Presenter::new(&device, queue.family_index(), swapchain.surface) {
+        Ok(presenter) => swapchain.presenter = Some(presenter),
+        Err(error) => {
+            tracing::error!("The game can't present: {error}");
+            commands.remove_resource::<Swapchain>();
+        }
+    }
+}
+
 /// Picks the next buffer once the compositor is done with it, and makes it the
 /// current image. The submission that this system and [`SwapchainSet`] are in
 /// signals `render_done` once it has written the buffer.
@@ -610,14 +615,18 @@ fn acquire(
     If(swapchain): If<ResMut<Swapchain>>,
 ) {
     let swapchain = swapchain.into_inner();
-    if swapchain.presenter.is_lost() {
+    if swapchain.presenter.as_ref().is_some_and(Presenter::is_lost) {
         tracing::warn!("The presentation manager was lost; creating another");
         // The buffers are registered with the lost presentation manager.
         swapchain.buffers.clear();
         swapchain.retiring.clear();
-        let lost = &swapchain.presenter;
-        match Presenter::new(&lost.device, lost.queue_family, swapchain.surface) {
-            Ok(presenter) => swapchain.presenter = presenter,
+        // The lost presentation manager has to let go of the surface before
+        // another can present to it.
+        let lost = swapchain.presenter.take().unwrap();
+        let (device, queue_family) = (lost.device.clone(), lost.queue_family);
+        drop(lost);
+        match Presenter::new(&device, queue_family, swapchain.surface) {
+            Ok(presenter) => swapchain.presenter = Some(presenter),
             Err(error) => {
                 tracing::error!("The game can't present: {error}");
                 commands.remove_resource::<Swapchain>();
@@ -626,7 +635,7 @@ fn acquire(
         }
     }
     let Swapchain {
-        presenter,
+        presenter: Some(presenter),
         buffers,
         game_layer_state,
         retiring,
@@ -634,7 +643,10 @@ fn acquire(
         current,
         state,
         ..
-    } = swapchain;
+    } = swapchain
+    else {
+        return;
+    };
     retiring.retain(|buffer| !presenter.retired(buffer));
 
     let size = game_layer_state.size();
@@ -683,7 +695,10 @@ fn acquire(
 /// Hands the current image over to D3D11, after [`SwapchainSet`] is done with it.
 fn release(mut submission: SubmissionState, If(swapchain): If<ResMut<Swapchain>>) {
     let swapchain = swapchain.into_inner();
-    let queue_family = swapchain.presenter.queue_family;
+    let Some(queue_family) = swapchain.presenter.as_ref().map(|presenter| presenter.queue_family)
+    else {
+        return;
+    };
     submission.record(|encoder| {
         let Some(image) = swapchain.current_image() else {
             return;
@@ -716,9 +731,9 @@ fn present(_bevy_thread: NonSendMarker, If(swapchain): If<ResMut<Swapchain>>) {
     let Some((index, value)) = swapchain.current.take() else {
         return;
     };
-    swapchain
-        .presenter
-        .present(&mut swapchain.buffers[index], value);
+    if let Some(presenter) = &mut swapchain.presenter {
+        presenter.present(&mut swapchain.buffers[index], value);
+    }
 }
 
 /// A presentation buffer's texture imported as a `VkImage`, with a view of all of
