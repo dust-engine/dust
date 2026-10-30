@@ -6,9 +6,9 @@
 //! and orderings that others imply are dropped. Bevy keeps that graph to
 //! itself, so [`read`] builds it again the way Bevy does, from the
 //! schedule's hierarchy of sets and the orderings declared between systems
-//! and sets. The sync points Bevy adds while building the schedule are
-//! ordered only in Bevy's graph; [`ScheduleRecords`](super::ScheduleRecords)
-//! keeps the edges Bevy adds for them.
+//! and sets. The edges Bevy's build passes add while building the schedule,
+//! such as those of the sync points Bevy adds, are only in Bevy's graph;
+//! [`ScheduleRecords`](super::ScheduleRecords) keeps them.
 //!
 //! One difference remains: Bevy drops the orderings declared with
 //! `chain_weak`, `before_weak` and `after_weak` between systems that don't

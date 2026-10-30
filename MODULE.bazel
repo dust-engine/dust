@@ -116,7 +116,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "f2f8cc8ec7834f09c71442591fc3f8e8e94f030d")
+crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "1e40db936683c8961c03d39070027df8f7237444")
 crate.annotation(
     crate = "pumicite_cli",
     repositories = ["bindeps"],

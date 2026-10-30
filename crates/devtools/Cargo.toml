@@ -21,4 +21,6 @@ futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
+# For the sets of systems in the build pass of a test.
+indexmap = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

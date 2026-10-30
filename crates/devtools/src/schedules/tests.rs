@@ -1,6 +1,12 @@
-use bevy::ecs::schedule::{ApplyDeferred, ScheduleLabel};
+use bevy::ecs::schedule::graph::DiGraph;
+use bevy::ecs::schedule::{
+    ApplyDeferred, FlattenedDependencies, NodeId, ScheduleBuildError, ScheduleBuildPass,
+    ScheduleGraph, ScheduleLabel, SystemKey, SystemSetKey,
+};
 use bevy::ecs::system::ScheduleSystem;
+use bevy::platform::hash::FixedHasher;
 use gpui::{Bounds, Point, Size, size};
+use indexmap::IndexSet;
 
 use super::graph::{BuildState, GraphSnapshot, Reason, SystemKind, Target};
 use super::layout::{GRID_HEADING, Layout, SET_PADDING, Tree, layout, tree};
@@ -44,6 +50,48 @@ fn lower(mut score: ResMut<Score>) {
 }
 
 fn exclusive(_: &mut World) {}
+
+fn begin() {}
+
+/// A build pass like pumicite's, which Bevy runs as it builds the schedule:
+/// it orders `begin`, which is in `Outer` like any other system, before the
+/// set's other systems as Bevy collapses the set.
+#[derive(Debug)]
+struct BeginPass {
+    begin: SystemKey,
+}
+
+impl ScheduleBuildPass for BeginPass {
+    type EdgeOptions = ();
+
+    fn add_dependency(&mut self, _: NodeId, _: NodeId, _: Option<&()>) {}
+
+    fn collapse_set(
+        &mut self,
+        set: SystemSetKey,
+        systems: &IndexSet<SystemKey, FixedHasher>,
+        _: &mut World,
+        graph: &mut ScheduleGraph,
+        _: &DiGraph<NodeId>,
+    ) -> impl Iterator<Item = (NodeId, NodeId)> {
+        let outer = graph.system_sets.get(set) == Some(Outer.intern());
+        systems
+            .iter()
+            .filter(|&&system| outer && system != self.begin)
+            .map(|&system| (self.begin.into(), system.into()))
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    fn build(
+        &mut self,
+        _: &mut World,
+        _: &mut ScheduleGraph,
+        _: FlattenedDependencies<'_>,
+    ) -> Result<(), ScheduleBuildError> {
+        Ok(())
+    }
+}
 
 /// A world with the tab's records, as `SchedulesPlugin` adds them.
 fn world() -> World {
@@ -300,6 +348,36 @@ fn sets_are_read_with_their_systems_and_orderings() {
         [Some(Target::System(find(&graph, "d")))]
     );
     assert_eq!(graph.sets[late].before[0].name, "d");
+}
+
+#[test]
+fn edges_build_passes_add_are_shown() {
+    let mut world = world();
+    add(&mut world, ((a, b).in_set(Outer), d.before(Outer)));
+    let mut schedules = world.resource_mut::<Schedules>();
+    let schedule = schedules.get_mut(Update).unwrap();
+    let begin_key = schedule
+        .graph_mut()
+        .process_configs(begin.in_set(Outer).into_configs(), true)
+        .nodes[0]
+        .as_system()
+        .unwrap();
+    schedule.add_build_pass(BeginPass { begin: begin_key });
+    let graph = built(&mut world);
+
+    // The edges the pass returned as Bevy collapsed `Outer`, and `d`'s, which
+    // `d.before(Outer)` gives `begin` as it does the set's other systems.
+    assert_eq!(
+        edges(&graph),
+        [pair("begin", "a"), pair("begin", "b"), pair("d", "begin")]
+    );
+    for edge in &graph.edges {
+        let reasons = match graph.systems[edge.before].name.as_ref() {
+            "d" => vec![declared("d", "Outer")],
+            _ => vec![Reason::Added],
+        };
+        assert_eq!(edge.reasons, reasons);
+    }
 }
 
 #[test]
