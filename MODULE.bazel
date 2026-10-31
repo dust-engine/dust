@@ -108,6 +108,16 @@ crate.annotation(
     override_target_lib = "@rules_rust//rust/runfiles",
 )
 
+# gpui and gpui_macros gate `derive_inspector_reflection` on
+# `any(feature = "inspector", debug_assertions)`. Bazel builds proc macros in
+# the exec configuration (opt, no debug_assertions), so in a fastbuild or dbg
+# build gpui uses the macro and gpui_macros configures it out. The feature only
+# makes the macro available; gpui still decides whether to use it.
+crate.annotation(
+    crate = "gpui-pre-macros",
+    repositories = ["crates"],
+    crate_features = ["inspector"],
+)
 crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
     manifests = ["//:Cargo.toml"],
