@@ -3,12 +3,15 @@
 //! `MouseMotion`, `MouseWheel`).
 //!
 //! The game gets them only while the cursor is attached ([`CursorMode`]). A
-//! backend plugin reads one platform's devices while it is attached and hands
+//! backend plugin reads one platform's devices and, while it is attached, hands
 //! each event to [`InputWriter`]:
 //! - macOS: [`GameControllerPlugin`](game_controller::GameControllerPlugin).
+//! - Windows: [`GameInputPlugin`](game_input::GameInputPlugin).
 
 #[cfg(target_os = "macos")]
 pub mod game_controller;
+#[cfg(windows)]
+pub mod game_input;
 
 use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
@@ -28,6 +31,8 @@ impl Plugin for InputPlugin {
             .add_systems(OnExit(CursorMode::Attached), release_held);
         #[cfg(target_os = "macos")]
         app.add_plugins(game_controller::GameControllerPlugin);
+        #[cfg(windows)]
+        app.add_plugins(game_input::GameInputPlugin);
     }
 }
 
@@ -37,12 +42,11 @@ impl Plugin for InputPlugin {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InputSet;
 
-/// Whether the cursor is the game's. While it is attached, the game gets the
-/// keyboard and mouse; while it is detached, they are the UI's, and the game
-/// gets none of them. The UI sets it (`dust_ui`'s `BevyView`), and locks and
-/// hides the cursor while it is attached: it attaches the cursor when the game
-/// is clicked, and detaches it on Escape and when the window stops being the
-/// active one.
+/// State of cursor grab. While it is attached, the game gets the
+/// keyboard and mouse events; while it is detached, they are sent to the UI only.
+/// `dust_ui`'s `BevyView` sets this state. While detached, a click on the BevyView
+/// reattaches, locks and hides the cursor. While attached, pressing Escape or when
+/// the window stops being active causes it to detach.
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum CursorMode {
     Attached,

@@ -12,3 +12,8 @@ dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSNotification", "NSOperation", "NSString"] }
 objc2-game-controller = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+tracing = "0.1"
+windows = { version = "0.62", features = ["Win32_System_LibraryLoader"] }
+windows-core = "0.62"

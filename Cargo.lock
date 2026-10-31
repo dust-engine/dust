@@ -2603,6 +2603,9 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "objc2-game-controller",
+ "tracing",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
