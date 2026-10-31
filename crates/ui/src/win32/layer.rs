@@ -12,13 +12,11 @@ use gpui::{Bounds, Pixels, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{CloseHandle, HWND, POINT, RECT};
 use windows::Win32::Graphics::DirectComposition::{
-    DCompositionCreateDevice2, DCompositionCreateSurfaceHandle,
-    DCompositionWaitForCompositorClock, IDCompositionDesktopDevice, IDCompositionTarget,
-    IDCompositionVisual2,
+    DCompositionCreateDevice2, DCompositionCreateSurfaceHandle, DCompositionWaitForCompositorClock,
+    IDCompositionDesktopDevice, IDCompositionTarget, IDCompositionVisual2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    ClipCursor, GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, ShowCursor,
-    WS_EX_NOREDIRECTIONBITMAP,
+    ClipCursor, GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, ShowCursor, WS_EX_NOREDIRECTIONBITMAP,
 };
 use windows::core::IUnknown;
 
@@ -51,13 +49,13 @@ pub(crate) struct GameLayerSharedState {
 }
 impl GameLayerSharedState {
     pub fn new(size: UVec2) -> Self {
-        let size =   (size.x as u64) << 32 | size.y as u64;
+        let size = (size.x as u64) << 32 | size.y as u64;
         GameLayerSharedState {
             size: AtomicU64::new(size),
         }
     }
     pub fn set_size(&self, size: UVec2) {
-        let size =   (size.x as u64) << 32 | size.y as u64;
+        let size = (size.x as u64) << 32 | size.y as u64;
         self.size.store(size, Ordering::Relaxed);
     }
     pub fn size(&self) -> UVec2 {
@@ -65,8 +63,6 @@ impl GameLayerSharedState {
         UVec2::new((size >> 32) as u32, size as u32)
     }
 }
-
-
 
 impl GameLayer {
     pub fn set_cursor_locked(&mut self, locked: bool) {
@@ -122,8 +118,9 @@ impl GameLayer {
         let target = unsafe { device.CreateTargetForHwnd(hwnd, false) }
             .expect("failed to create the game's DirectComposition target");
         let visual = unsafe { device.CreateVisual() }.unwrap();
-        let surface = unsafe { DCompositionCreateSurfaceHandle(COMPOSITIONOBJECT_ALL_ACCESS, None) }
-            .expect("failed to create a composition surface handle");
+        let surface =
+            unsafe { DCompositionCreateSurfaceHandle(COMPOSITIONOBJECT_ALL_ACCESS, None) }
+                .expect("failed to create a composition surface handle");
         unsafe {
             visual
                 .SetContent(&device.CreateSurfaceFromHandle(surface).unwrap())
@@ -132,13 +129,18 @@ impl GameLayer {
             device.Commit().unwrap();
         }
 
-        let viewport = window.viewport_size().to_device_pixels(window.scale_factor());
+        let viewport = window
+            .viewport_size()
+            .to_device_pixels(window.scale_factor());
         GameLayer {
             device,
             _target: target,
             visual,
             surface: Some(SurfaceHandle(surface)),
-            state: Arc::new(GameLayerSharedState::new(UVec2 { x: viewport.width.0 as u32, y: viewport.height.0 as u32 })),
+            state: Arc::new(GameLayerSharedState::new(UVec2 {
+                x: viewport.width.0 as u32,
+                y: viewport.height.0 as u32,
+            })),
             offset: (0.0, 0.0),
             cursor_locked: false,
         }
@@ -153,7 +155,10 @@ impl GameLayer {
         if size.width.0 <= 0 || size.height.0 <= 0 {
             return;
         }
-        self.state.set_size(UVec2 { x: size.width.0 as u32, y: size.height.0 as u32 });
+        self.state.set_size(UVec2 {
+            x: size.width.0 as u32,
+            y: size.height.0 as u32,
+        });
         let offset = (
             (bounds.origin.x.as_f32() * scale_factor).round(),
             (bounds.origin.y.as_f32() * scale_factor).round(),
@@ -175,7 +180,10 @@ impl GameLayer {
         let surface = self.surface.take().expect("a GameLayer has one runner");
         let game_layer_state = self.state.clone();
         move |mut app: bevy::app::App| {
-            app.add_plugins(CompositionSwapchainPlugin { surface, game_layer_state });
+            app.add_plugins(CompositionSwapchainPlugin {
+                surface,
+                game_layer_state,
+            });
             let exit = compositor_clock_runner(app);
             // The app, and with it the presentation surface, is gone.
             unsafe { CloseHandle(surface.0) }.ok();

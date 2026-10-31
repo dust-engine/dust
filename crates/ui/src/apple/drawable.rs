@@ -82,7 +82,6 @@ impl Plugin for CAMetalLayerPlugin {
             PostUpdate,
             (
                 SwapchainSet.run_if(swapchain_image_acquired),
-
                 // TODO: This is also probably bad. Why DefaultRenderSet has to
                 // run before SwapchainSet but not DefaultComputeSet / DefaultTransferSet?
                 // Feels like AI slop to me.

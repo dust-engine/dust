@@ -37,11 +37,13 @@ use windows::Win32::Graphics::CompositionSwapchain::{
     IPresentationFactory, IPresentationManager, IPresentationSurface,
     PresentStatisticsKind_CompositionFrame,
 };
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1};
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS,
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-    D3D11_CREATE_DEVICE_FLAG, D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_FLAG,
+    D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
     D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_FEATURE_DATA_DISPLAYABLE, D3D11_FEATURE_DISPLAYABLE,
     D3D11_FENCE_FLAG_SHARED, D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE,
     D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
@@ -51,8 +53,7 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
     DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
-    DXGI_COLOR_SPACE_TYPE,
-    DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_SAMPLE_DESC,
+    DXGI_COLOR_SPACE_TYPE, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_ERROR_UNSUPPORTED, IDXGIAdapter1,
@@ -100,7 +101,6 @@ pub(super) struct SurfaceHandle(pub(super) HANDLE);
 unsafe impl Send for SurfaceHandle {}
 unsafe impl Sync for SurfaceHandle {}
 
-
 /// Inserts the [`Swapchain`] and creates its presenter at startup, puts
 /// [`SwapchainSet`] in a submission that follows the submission of
 /// `DefaultRenderSet`, and adds the systems that acquire, release and present the
@@ -112,46 +112,43 @@ pub(super) struct CompositionSwapchainPlugin {
 
 impl Plugin for CompositionSwapchainPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Swapchain::new(
-            self.surface,
-            self.game_layer_state.clone(),
-        ))
-        .add_systems(
-            Startup,
-            (|mut device_builder: ResMut<DeviceBuilder>| {
-                device_builder
-                    .enable_extension::<khr::external_memory_win32::Meta>()
-                    .unwrap();
-                device_builder
-                    .enable_extension::<khr::external_semaphore_win32::Meta>()
-                    .unwrap();
-            })
-            .before(CreateDevice),
-        )
-        .add_systems(Startup, create_presenter.after(CreateDevice))
-        .add_submission_set::<RenderQueue>(
-            SwapchainSubmissionSet,
-            SubmissionSetConfig {
-                debug_color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-            },
-        )
-        .configure_sets(
-            PostUpdate,
-            (
-                SwapchainSet
-                    .in_set(SwapchainSubmissionSet)
-                    .run_if(swapchain_image_acquired),
-                DefaultRenderSet.before(SwapchainSubmissionSet),
-            ),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                acquire.in_set(SwapchainSubmissionSet).before(SwapchainSet),
-                release.in_set(SwapchainSubmissionSet).after(SwapchainSet),
-                present.after(SwapchainSubmissionSet),
-            ),
-        );
+        app.insert_resource(Swapchain::new(self.surface, self.game_layer_state.clone()))
+            .add_systems(
+                Startup,
+                (|mut device_builder: ResMut<DeviceBuilder>| {
+                    device_builder
+                        .enable_extension::<khr::external_memory_win32::Meta>()
+                        .unwrap();
+                    device_builder
+                        .enable_extension::<khr::external_semaphore_win32::Meta>()
+                        .unwrap();
+                })
+                .before(CreateDevice),
+            )
+            .add_systems(Startup, create_presenter.after(CreateDevice))
+            .add_submission_set::<RenderQueue>(
+                SwapchainSubmissionSet,
+                SubmissionSetConfig {
+                    debug_color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                },
+            )
+            .configure_sets(
+                PostUpdate,
+                (
+                    SwapchainSet
+                        .in_set(SwapchainSubmissionSet)
+                        .run_if(swapchain_image_acquired),
+                    DefaultRenderSet.before(SwapchainSubmissionSet),
+                ),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    acquire.in_set(SwapchainSubmissionSet).before(SwapchainSet),
+                    release.in_set(SwapchainSubmissionSet).after(SwapchainSet),
+                    present.after(SwapchainSubmissionSet),
+                ),
+            );
     }
 }
 
@@ -284,7 +281,11 @@ const DEVICE_FLAGS: D3D11_CREATE_DEVICE_FLAG = D3D11_CREATE_DEVICE_FLAG(
 
 impl Presenter {
     /// Creates a presentation manager on Vulkan's GPU, presenting to `surface`.
-    fn new(device: &Device, queue_family: u32, surface: SurfaceHandle) -> windows::core::Result<Self> {
+    fn new(
+        device: &Device,
+        queue_family: u32,
+        surface: SurfaceHandle,
+    ) -> windows::core::Result<Self> {
         let id = device
             .physical_device()
             .properties()
@@ -348,12 +349,16 @@ impl Presenter {
         let mut render_done: Option<ID3D11Fence> = None;
         unsafe { d3d.CreateFence(0, D3D11_FENCE_FLAG_SHARED, &mut render_done) }?;
         let render_done = render_done.unwrap();
-        let shared = unsafe { render_done.CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null()) }?;
+        let shared =
+            unsafe { render_done.CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null()) }?;
         let mut timeline = vk::SemaphoreTypeCreateInfo::default()
             .semaphore_type(vk::SemaphoreType::TIMELINE)
             .initial_value(0);
         let render_done_semaphore = unsafe {
-            device.create_semaphore(&vk::SemaphoreCreateInfo::default().push(&mut timeline), None)
+            device.create_semaphore(
+                &vk::SemaphoreCreateInfo::default().push(&mut timeline),
+                None,
+            )
         }
         .unwrap();
         // Importing an NT handle doesn't take ownership of it, so it's closed here.
@@ -506,9 +511,11 @@ impl Presenter {
         let texture: ID3D11Texture2D = texture.unwrap();
         let presentation = unsafe { self.manager.AddBufferFromResource(&texture) }?;
         let shared = unsafe {
-            texture
-                .cast::<IDXGIResource1>()?
-                .CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null())
+            texture.cast::<IDXGIResource1>()?.CreateSharedHandle(
+                None,
+                GENERIC_ALL.0,
+                PCWSTR::null(),
+            )
         }?;
         let image = PresentationImage::import(self.device.clone(), shared, size, color_space);
         // Importing an NT handle doesn't take ownership of it, so it's closed here.
@@ -695,7 +702,10 @@ fn acquire(
 /// Hands the current image over to D3D11, after [`SwapchainSet`] is done with it.
 fn release(mut submission: SubmissionState, If(swapchain): If<ResMut<Swapchain>>) {
     let swapchain = swapchain.into_inner();
-    let Some(queue_family) = swapchain.presenter.as_ref().map(|presenter| presenter.queue_family)
+    let Some(queue_family) = swapchain
+        .presenter
+        .as_ref()
+        .map(|presenter| presenter.queue_family)
     else {
         return;
     };
@@ -792,7 +802,10 @@ impl PresentationImage {
         .unwrap();
         let requirements = unsafe { device.get_image_memory_requirements(image) };
         let memory_types = handle_properties.memory_type_bits & requirements.memory_type_bits;
-        assert_ne!(memory_types, 0, "no memory type can hold the imported texture");
+        assert_ne!(
+            memory_types, 0,
+            "no memory type can hold the imported texture"
+        );
         // The memory backing the image is the texture itself. Vulkan can only
         // import a D3D11 texture as a dedicated allocation.
         let mut import = vk::ImportMemoryWin32HandleInfoKHR::default()
