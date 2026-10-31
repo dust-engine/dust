@@ -6,8 +6,9 @@ use futures_util::StreamExt;
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled, Task, Window,
-    WindowBackgroundAppearance, canvas, div,
+    WindowBackgroundAppearance, canvas, div, prelude::FluentBuilder as _,
 };
+use gpui_component::{ActiveTheme as _, Sizable as _, spinner::Spinner};
 
 use dust_input::CursorMode;
 
@@ -24,18 +25,21 @@ use crate::platform::GameLayer;
 /// created next to it, such as an overlay, exist by then.
 ///
 /// The game shows only where nothing is drawn over it, so the views the
-/// `BevyView` is in paint no background.
+/// `BevyView` is in paint no background. Until the app's first update, while
+/// it starts up, the view covers it with a splash.
 ///
 /// The game gets the keyboard and mouse (`dust_input`) while the cursor is
 /// attached; this view sets the [`CursorMode`] that says whether it is. A left
-/// click on the view focuses it and attaches the cursor; elements drawn over the
-/// view that should take the click instead call `.occlude()`. Escape, while the
+/// click on the view, once the splash is down, focuses it and attaches the
+/// cursor; elements drawn over the view that should take the click instead call
+/// `.occlude()`. Escape, while the
 /// view holds focus, detaches the cursor, as does the window stopping being the
 /// active one.
 pub struct BevyView {
     focus: FocusHandle,
     bevy: BevyChannel,
     game_layer: GameLayer,
+    splash: bool,
     /// Runs the calls the Bevy app queues for the UI thread.
     _ui_calls: Task<()>,
 }
@@ -80,7 +84,7 @@ impl BevyView {
             .name("bevy".into())
             .spawn(move || {
                 let mut app = bevy::app::App::new();
-                build_gpui_app(&mut app, ui.clone(), from_ui);
+                build_gpui_app(&mut app, ui.clone(), from_ui, view.clone());
                 build(&mut app);
                 app.set_runner(runner);
                 let exit = app.run();
@@ -100,8 +104,15 @@ impl BevyView {
             focus: cx.focus_handle(),
             bevy,
             game_layer,
+            splash: true,
             _ui_calls: ui_calls,
         }
+    }
+
+    /// Shows or hides the splash over the game.
+    pub fn set_splash_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.splash = shown;
+        cx.notify();
     }
 
     /// Asks the Bevy app to exit. The view emits [`BevyExited`] once it has.
@@ -154,6 +165,9 @@ impl Render for BevyView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    if this.splash {
+                        return;
+                    }
                     window.focus(&this.focus, cx);
                     this.set_cursor_mode(CursorMode::Attached);
                 }),
@@ -165,5 +179,18 @@ impl Render for BevyView {
                     this.set_cursor_mode(CursorMode::Detached);
                 }
             }))
+            .when(self.splash, |view| {
+                let theme = cx.theme();
+                view.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(theme.background)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(Spinner::new().large().color(theme.muted_foreground)),
+                )
+            })
     }
 }

@@ -2655,6 +2655,7 @@ dependencies = [
  "dust_input",
  "futures-channel",
  "futures-util",
+ "gpui-component",
  "gpui-pre",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",

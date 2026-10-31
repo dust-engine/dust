@@ -8,6 +8,7 @@ bevy.workspace = true
 pumicite.workspace = true
 dust_input.workspace = true
 gpui.workspace = true
+gpui-component.workspace = true
 futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false }
 raw-window-handle = "0.6"

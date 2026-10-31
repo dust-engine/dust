@@ -58,12 +58,13 @@ use win32 as platform;
 use std::sync::mpsc::Receiver;
 
 use bevy::{
-    app::{App, Last, PluginsState},
+    app::{App, Last, PluginsState, PostStartup},
     ecs::{
         schedule::IntoScheduleConfigs,
-        system::{LocalBuilder, ParamBuilder, SystemParamBuilder},
+        system::{LocalBuilder, ParamBuilder, Res, SystemParamBuilder},
     },
 };
+use gpui::WeakEntity;
 
 pub use bridge::{BevyChannel, GPUIChannel};
 pub use view::{BevyExited, BevyView};
@@ -86,18 +87,32 @@ pub use bevy_pumicite::{
     swapchain::{Swapchain, SwapchainSet},
 };
 
-/// Adds the Bevy side of the bridge to `app`: the [`GPUIChannel`] resource, and
-/// the system that runs the calls received from the UI thread through `bevy`.
-fn build_gpui_app(app: &mut App, ui: GPUIChannel, bevy: Receiver<bridge::BevyCall>) {
+/// Adds the Bevy side of the bridge to `app`: the [`GPUIChannel`] resource, the
+/// system that runs the calls received from the UI thread through `bevy`, and
+/// the system that takes `view`'s splash down once the app is running, in
+/// `PostStartup` of its first update.
+fn build_gpui_app(
+    app: &mut App,
+    ui: GPUIChannel,
+    bevy: Receiver<bridge::BevyCall>,
+    view: WeakEntity<BevyView>,
+) {
     // Built eagerly: the receiver isn't `Sync`, so a lazy `build_system` builder
     // can't be a system, but the `Local` it ends up in can.
     let run_every_frame = (ParamBuilder, ParamBuilder, LocalBuilder(Some(bevy)))
         .build_state(app.world_mut())
         .build_system(bridge::run_every_frame);
-    app.insert_resource(ui).add_systems(
-        Last,
-        run_every_frame.after(bevy::ecs::system::despawn_unused_registered_systems),
-    );
+    app.insert_resource(ui)
+        .add_systems(
+            Last,
+            run_every_frame.after(bevy::ecs::system::despawn_unused_registered_systems),
+        )
+        .add_systems(PostStartup, move |ui: Res<GPUIChannel>| {
+            let view = view.clone();
+            ui.update(move |cx| {
+                view.update(cx, |view, cx| view.set_splash_shown(false, cx)).ok();
+            });
+        });
 }
 
 /// Finishes building `app`, as a runner does before its first update: waits for
