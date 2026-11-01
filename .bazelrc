@@ -1,4 +1,13 @@
+common --enable_platform_specific_config
+
 build --@rules_rust//rust/toolchain/channel:channel=nightly
+
+# On Windows, Bazel builds every action's PATH from the bash it is given.
+# Without this, it takes BAZEL_SH or else a bash.exe it finds on PATH:
+# `C:\Program Files\Git\usr\bin` from Git Bash, but the nonexistent
+# `c:\msys64\usr\bin` from PowerShell, so switching shells changed every
+# action and rebuilt everything.
+build:windows --shell_executable="C:/Program Files/Git/usr/bin/bash.exe"
 
 # Bundle the DLSS development DLLs (with on-screen debug overlays) instead
 # of the release DLLs. Use as `bazelisk run --config=dlss_dev //:dust`.

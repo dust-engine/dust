@@ -18,4 +18,5 @@ rust_library(
     aliases = aliases(),
     deps = all_crate_deps(normal = True),
     rustc_env_files = [":cargo_toml_env_vars"],
+    rustc_flags = ["-Copt-level=3"],
 )

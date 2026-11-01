@@ -120,13 +120,19 @@ crate.annotation(
 )
 crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
+    isolated = False, # Reuses ~/.cargo making builds faster
     manifests = ["//:Cargo.toml"],
     name = "crates",
 )
 use_repo(crate, "crates")
 
 
-crate.spec(package = "pumicite_cli", git = "https://github.com/dust-engine/pumicite.git", rev = "1e40db936683c8961c03d39070027df8f7237444")
+crate.spec(
+    package = "pumicite_cli",
+    git = "https://github.com/dust-engine/pumicite.git",
+    rev = "1e40db936683c8961c03d39070027df8f7237444",
+    repositories = ["bindeps"],
+)
 crate.annotation(
     crate = "pumicite_cli",
     repositories = ["bindeps"],
@@ -138,7 +144,10 @@ crate.annotation(
     gen_build_script = "off",
     link_deps = ["@@//third_party:slang"],
 )
-crate.from_specs(name = "bindeps")
+crate.from_specs(
+    isolated = False, # Reuses ~/.cargo making builds faster
+    name = "bindeps",
+)
 use_repo(crate, "bindeps")
 
 # -----------------------------------------------------------------------------

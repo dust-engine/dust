@@ -1,2 +1,5 @@
 *.vox filter=lfs diff=lfs merge=lfs -text
 *.png filter=lfs diff=lfs merge=lfs -text
+# cargo and crate_universe write LF. A CRLF checkout (core.autocrlf) makes
+# crate_universe rewrite the file, so Bazel re-runs the extension once more.
+Cargo.lock text eol=lf
