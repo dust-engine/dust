@@ -5,16 +5,20 @@
 //! systems there.
 //!
 //! A set is drawn as a box around its systems and the sets in it, each
-//! system and set in one box, picked by [`tree`]. A box's insides are laid
-//! out first, on their own, and the box is then laid out as one node among
-//! the systems and boxes beside it. An edge between a system in a box and
-//! one outside it crosses the box's border at a port: on its left side
+//! system and set in one box, picked by [`tree`]: a set's box is drawn in
+//! the box of the smallest set holding all its systems. A box's insides are
+//! laid out first, on their own, and the box is then laid out as one node
+//! among the systems and boxes beside it. An edge between a system in a box
+//! and one outside it crosses the box's border at a port: on its left side
 //! where it enters, and on its right side where it leaves, shared by the
 //! edges entering or leaving at the same system. The insides are laid out
-//! with the ports in a column before and after all others. As a box is
-//! drawn after all that its systems wait for, a set that a system outside
-//! it runs between two systems of is drawn without a box: what's in it is
-//! drawn in the box it would be in.
+//! with the ports in a column before and after all others.
+//!
+//! As a box is drawn after all that its systems wait for, boxes can only
+//! wait for each other one way. A set that systems outside it run between
+//! two systems of is drawn as several boxes, one for each stretch of its
+//! systems that run together, and so is one of two sets each with systems
+//! that run before and after the other's (see [`pieces`]).
 //!
 //! Each weakly connected part of the graph, or of a box's insides, is laid
 //! out on its own, and the parts are stacked, the largest first, above a
@@ -105,10 +109,10 @@ pub(super) struct Grid {
     pub count: usize,
 }
 
-/// The set each node and set is drawn in, if any.
+/// The set each node and set is drawn in, if any: a set holding all its
+/// nodes, other than itself.
 pub(super) struct Tree {
     pub homes: Vec<Option<usize>>,
-    /// Each set's, which is a set listed before it.
     pub parents: Vec<Option<usize>>,
 }
 
@@ -124,72 +128,87 @@ impl Tree {
 
     /// Whether `node` is drawn in `set`, or in a set drawn in it.
     pub fn holds(&self, set: usize, node: usize) -> bool {
-        let mut home = self.homes[node];
-        while let Some(s) = home {
-            if s == set {
+        self.homes[node].is_some_and(|home| self.within(home, set))
+    }
+
+    /// Whether `inner` is `outer`, or drawn in it, or in a set drawn in it.
+    pub fn within(&self, inner: usize, outer: usize) -> bool {
+        let mut set = Some(inner);
+        while let Some(s) = set {
+            if s == outer {
                 return true;
             }
-            home = self.parents[s];
+            set = self.parents[s];
         }
         false
     }
 }
 
-/// Whether a node outside `inside` runs between two nodes inside: whether a
-/// path of the edges `after` each node leaves them and comes back.
-fn runs_between(inside: &[bool], after: &[Vec<usize>]) -> bool {
-    let mut seen = vec![false; inside.len()];
-    let mut stack: Vec<usize> = (0..inside.len()).filter(|&v| inside[v]).collect();
-    while let Some(v) = stack.pop() {
-        for &w in &after[v] {
-            if inside[w] {
-                if !inside[v] {
-                    return true;
-                }
-            } else if !std::mem::replace(&mut seen[w], true) {
-                stack.push(w);
-            }
-        }
-    }
-    false
-}
-
-/// Picks the set each node and set is drawn in, of those it's in directly
-/// (`node_sets`, `set_parents`): the deepest, then the one with the most
-/// systems (`set_sizes`), as a set that systems are in besides those they're
-/// drawn in tends to hold systems from all over. Each set is listed after the
-/// sets it's in.
+/// Picks the set each node and set is drawn in.
 ///
-/// A node in no set that `adopts` is drawn in the innermost set holding the
-/// nodes joined to it, as the sync points Bevy adds are drawn with the
-/// systems they apply the commands of.
+/// A set is drawn in the smallest set holding all its systems
+/// (`set_systems`, each sorted) that's one of the sets it's in
+/// (`set_parents`) or is drawn in one, or any if it's in none: so a set
+/// holding some of another's systems is drawn in its box, though Bevy
+/// doesn't put it in that set. Of sets holding the same systems, each is
+/// drawn in the ones listed before it, as a set is listed after the sets
+/// it's in.
+///
+/// A node is drawn in the deepest of the sets it's in directly
+/// (`node_sets`), then the one with the most systems, as a set that systems
+/// are in besides those they're drawn in tends to hold systems from all
+/// over. A node in no set that `adopts` is drawn in the innermost set
+/// holding the nodes joined to it, as the sync points Bevy adds are drawn
+/// with the systems they apply the commands of.
 pub(super) fn tree(
     node_sets: &[Vec<usize>],
     set_parents: &[Vec<usize>],
-    set_sizes: &[usize],
+    set_systems: &[Vec<usize>],
     adopts: &[bool],
     edges: &[(usize, usize)],
 ) -> Tree {
     let sets = set_parents.len();
-    let mut parents: Vec<Option<usize>> = Vec::with_capacity(sets);
-    let mut depth: Vec<usize> = Vec::with_capacity(sets);
-    for (set, options) in set_parents.iter().enumerate() {
-        let parent = options
-            .iter()
-            .copied()
-            .filter(|&parent| parent < set)
-            .max_by_key(|&parent| (depth[parent], set_sizes[parent], Reverse(parent)));
-        depth.push(parent.map_or(0, |parent| depth[parent] + 1));
-        parents.push(parent);
+    let size = |set: usize| set_systems[set].len();
+    let mut tree = Tree {
+        homes: Vec::with_capacity(node_sets.len()),
+        parents: vec![None; sets],
+    };
+    let mut depth = vec![0usize; sets];
+    // Each set after those it may be drawn in, which hold more systems, or
+    // as many and are listed before it.
+    let mut order: Vec<usize> = (0..sets).collect();
+    order.sort_by_key(|&set| (Reverse(size(set)), set));
+    let mut placed = vec![false; sets];
+    for set in order {
+        let declared = &set_parents[set];
+        let holds_all = |other: usize| {
+            size(set) > 0 && other != set && includes(&set_systems[other], &set_systems[set])
+        };
+        let parent = (0..sets)
+            .filter(|&other| placed[other])
+            .filter(|&other| match &declared[..] {
+                [] => holds_all(other),
+                declared => {
+                    declared.contains(&other)
+                        || holds_all(other)
+                            && declared
+                                .iter()
+                                .any(|&parent| placed[parent] && tree.within(other, parent))
+                }
+            })
+            .min_by_key(|&other| (size(other), Reverse(depth[other]), other));
+        tree.parents[set] = parent;
+        depth[set] = parent.map_or(0, |parent| depth[parent] + 1);
+        placed[set] = true;
     }
-    let mut homes: Vec<Option<usize>> = node_sets
+    tree.homes = node_sets
         .iter()
         .map(|options| {
             options
                 .iter()
                 .copied()
                 .filter(|&set| set < sets)
-                .max_by_key(|&set| (depth[set], set_sizes[set], Reverse(set)))
+                .max_by_key(|&set| (depth[set], size(set), Reverse(set)))
         })
         .collect();
 
@@ -207,14 +226,20 @@ pub(super) fn tree(
             let mut around = joined[node]
                 .iter()
                 .filter(|&&other| !adopting(other))
-                .map(|&other| homes[other]);
+                .map(|&other| tree.homes[other]);
             around
                 .next()
-                .and_then(|first| around.fold(first, |a, b| common(a, b, &parents, &depth)))
+                .and_then(|first| around.fold(first, |a, b| common(a, b, &tree.parents, &depth)))
         };
-        homes[node] = home;
+        tree.homes[node] = home;
     }
-    Tree { homes, parents }
+    tree
+}
+
+/// Whether `outer` holds all of `inner`, both sorted.
+fn includes(outer: &[usize], inner: &[usize]) -> bool {
+    let mut outer = outer.iter();
+    inner.iter().all(|x| outer.any(|y| y == x))
 }
 
 /// The innermost set holding both `a` and `b`, which are sets or, as `None`,
@@ -236,10 +261,159 @@ fn common(
     Some(a)
 }
 
+/// A tree with each set cut into pieces, each drawn as a box of its own,
+/// that wait for each other only one way. A box is drawn after all that its
+/// nodes wait for, so a box can't wait for what waits for it: a set that
+/// nodes outside it run between two nodes of is cut into the stretches of
+/// its nodes that run together, and of two sets each holding nodes that run
+/// before and after the other's, one is cut at the other.
+pub(super) struct Pieces {
+    /// The piece each node is drawn in, and the piece each piece is in.
+    pub tree: Tree,
+    /// The set each piece is of.
+    pub sets: Vec<usize>,
+    /// Which of its set's pieces each piece is, in the order their first
+    /// nodes run.
+    pub index: Vec<usize>,
+    /// How many pieces each set is cut into.
+    pub counts: Vec<usize>,
+}
+
+/// Cuts the sets of `tree`, holding nodes joined by `edges`, into pieces.
+/// Where the boxes and nodes beside each other wait for each other in a
+/// cycle, the box holding the node that runs first among them is cut in
+/// two: its nodes waiting for the others, and the rest. Each cut keeps the
+/// pieces of the sets in it in the piece of their nodes.
+pub(super) fn pieces(tree: &Tree, edges: &[(usize, usize)]) -> Pieces {
+    let (n, sets) = (tree.homes.len(), tree.parents.len());
+    let mut after: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut before: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for &(a, b) in edges {
+        after[a].push(b);
+        before[b].push(a);
+    }
+    let mut runs = vec![0usize; n];
+    for (i, node) in topological_order(&after, &before).into_iter().enumerate() {
+        runs[node] = i;
+    }
+    // The sets holding each node, outermost first.
+    let chains: Vec<Vec<usize>> = (0..n)
+        .map(|node| {
+            let mut chain = Vec::new();
+            let mut set = tree.homes[node];
+            while let Some(s) = set {
+                chain.push(s);
+                set = tree.parents[s];
+            }
+            chain.reverse();
+            chain
+        })
+        .collect();
+
+    // Which piece of each set each of its nodes goes in, by the cuts so far.
+    let mut cuts: Vec<Vec<usize>> = vec![vec![0; n]; sets];
+    let mut next = 1;
+    loop {
+        let pieces = Pieces::new(&chains, &cuts, &runs, sets);
+        let kept = vec![true; pieces.sets.len()];
+        let Some(cycle) = Nesting::new(&pieces.tree, &kept).cycle(edges) else {
+            return pieces;
+        };
+        let holds = |item: Item, node: usize| match item {
+            Item::Node(other) => other == node,
+            Item::Set(piece) => pieces.tree.holds(piece, node),
+        };
+        // Each item of a cycle waits for another item of it, so the node
+        // running first is in a box, and doesn't wait for the others.
+        let Some(first) = (0..n)
+            .filter(|&node| cycle.iter().any(|&item| holds(item, node)))
+            .min_by_key(|&node| runs[node])
+        else {
+            return pieces;
+        };
+        let Some(&Item::Set(piece)) = cycle.iter().find(|&&item| holds(item, first)) else {
+            return pieces;
+        };
+        let mut waits = vec![false; n];
+        let mut stack: Vec<usize> = (0..n)
+            .filter(|&node| {
+                cycle
+                    .iter()
+                    .any(|&item| item != Item::Set(piece) && holds(item, node))
+            })
+            .collect();
+        while let Some(node) = stack.pop() {
+            for &next in &after[node] {
+                if !std::mem::replace(&mut waits[next], true) {
+                    stack.push(next);
+                }
+            }
+        }
+        let set = pieces.sets[piece];
+        for node in (0..n).filter(|&node| waits[node] && pieces.tree.holds(piece, node)) {
+            cuts[set][node] = next;
+        }
+        next += 1;
+    }
+}
+
+impl Pieces {
+    /// A piece for each set, cut and piece holding it, of the sets holding
+    /// each node in `chains`, numbered in the order their first nodes `run`.
+    fn new(chains: &[Vec<usize>], cuts: &[Vec<usize>], runs: &[usize], sets: usize) -> Self {
+        let n = chains.len();
+        let mut pieces = Pieces {
+            tree: Tree {
+                homes: vec![None; n],
+                parents: Vec::new(),
+            },
+            sets: Vec::new(),
+            index: Vec::new(),
+            counts: vec![0; sets],
+        };
+        let mut ids: HashMap<(usize, usize, Option<usize>), usize> = HashMap::new();
+        let mut first: Vec<usize> = Vec::new();
+        for (node, chain) in chains.iter().enumerate() {
+            let mut parent = None;
+            for &set in chain {
+                let piece = *ids
+                    .entry((set, cuts[set][node], parent))
+                    .or_insert_with(|| {
+                        pieces.sets.push(set);
+                        pieces.tree.parents.push(parent);
+                        first.push(usize::MAX);
+                        pieces.sets.len() - 1
+                    });
+                first[piece] = first[piece].min(runs[node]);
+                parent = Some(piece);
+            }
+            pieces.tree.homes[node] = parent;
+        }
+        let mut of_set: Vec<Vec<usize>> = vec![Vec::new(); sets];
+        for (piece, &set) in pieces.sets.iter().enumerate() {
+            of_set[set].push(piece);
+        }
+        pieces.index = vec![0; pieces.sets.len()];
+        for (set, list) in of_set.iter_mut().enumerate() {
+            list.sort_by_key(|&piece| first[piece]);
+            pieces.counts[set] = list.len();
+            for (i, &piece) in list.iter().enumerate() {
+                pieces.index[piece] = i;
+            }
+        }
+        pieces
+    }
+}
+
 /// Lays out nodes of the given sizes, joined by `edges`, from the first node
 /// of each pair to the second, in the boxes of the sets of `tree`, whose
 /// names are `titles` wide. The edges form no cycle: Bevy refuses to build a
 /// schedule whose orderings do.
+///
+/// A box is drawn after all that its nodes wait for, so boxes are to wait
+/// for each other only one way, as those of [`pieces`] do. Of boxes that
+/// wait for each other in a cycle, the one holding the fewest nodes is drawn
+/// without a box, until none do.
 pub(super) fn layout(
     sizes: &[Size<f32>],
     edges: &[(usize, usize)],
@@ -247,20 +421,7 @@ pub(super) fn layout(
     titles: &[f32],
 ) -> Layout {
     let (n, sets) = (sizes.len(), tree.parents.len());
-    // A set that a node outside it runs between two nodes of can't be a box
-    // drawn after all that its nodes wait for, nor can both of two sets
-    // whose nodes wait for each other's: of those, the one holding the
-    // fewest nodes goes, until none are left.
-    let mut after: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for &(a, b) in edges {
-        after[a].push(b);
-    }
-    let mut kept: Vec<bool> = (0..sets)
-        .map(|set| {
-            let inside: Vec<bool> = (0..n).map(|node| tree.holds(set, node)).collect();
-            !runs_between(&inside, &after)
-        })
-        .collect();
+    let mut kept = vec![true; sets];
     let nesting = loop {
         let nesting = Nesting::new(tree, &kept);
         match nesting.on_cycle(edges) {
@@ -456,10 +617,16 @@ impl Nesting {
                 set = parent[s];
             }
         }
-        let mut depth = vec![0; sets];
-        for set in 0..sets {
-            depth[set] = parent[set].map_or(0, |parent| depth[parent] + 1);
-        }
+        let depth = (0..sets)
+            .map(|set| {
+                let (mut depth, mut outer) = (0, parent[set]);
+                while let Some(s) = outer {
+                    depth += 1;
+                    outer = parent[s];
+                }
+                depth
+            })
+            .collect();
         Nesting {
             boxed: (0..sets).map(|set| kept[set] && count[set] > 0).collect(),
             home,
@@ -501,15 +668,48 @@ impl Nesting {
     /// waits for it, which it can't be drawn after: the one holding the
     /// fewest nodes, if any.
     fn on_cycle(&self, edges: &[(usize, usize)]) -> Option<usize> {
-        // The edges between the items of each level.
+        let (items, cyclic) = self.cycles(edges);
+        items
+            .iter()
+            .zip(cyclic)
+            .filter_map(|(&(_, item), cyclic)| match item {
+                Item::Set(set) if cyclic => Some(set),
+                _ => None,
+            })
+            .min_by_key(|&set| (self.count[set], Reverse(self.depth[set]), set))
+    }
+
+    /// The items of the first level with items on a cycle there, or between
+    /// two, which are those items; `None` if no level has any.
+    fn cycle(&self, edges: &[(usize, usize)]) -> Option<Vec<Item>> {
+        let (items, cyclic) = self.cycles(edges);
+        let cyclic: Vec<(Option<usize>, Item)> = items
+            .into_iter()
+            .zip(cyclic)
+            .filter_map(|(item, cyclic)| cyclic.then_some(item))
+            .collect();
+        let &(level, _) = cyclic.first()?;
+        Some(
+            cyclic
+                .into_iter()
+                .filter(|&(other, _)| other == level)
+                .map(|(_, item)| item)
+                .collect(),
+        )
+    }
+
+    /// The items each edge joins in the level holding both its nodes, as the
+    /// box holding them or the node, with whether each is on a cycle of its
+    /// level's items, or between two.
+    fn cycles(&self, edges: &[(usize, usize)]) -> (Vec<(Option<usize>, Item)>, Vec<bool>) {
         let mut ids: HashMap<(Option<usize>, Item), usize> = HashMap::new();
-        let mut items: Vec<Item> = Vec::new();
+        let mut items: Vec<(Option<usize>, Item)> = Vec::new();
         let mut joined: Vec<(usize, usize)> = Vec::with_capacity(edges.len());
         for &(a, b) in edges {
             let (leaves, across, enters) = self.route(a, b);
             let mut id = |item: Item| {
                 *ids.entry((across, item)).or_insert_with(|| {
-                    items.push(item);
+                    items.push((across, item));
                     items.len() - 1
                 })
             };
@@ -517,14 +717,8 @@ impl Nesting {
             let to = id(enters.last().map_or(Item::Node(b), |&set| Item::Set(set)));
             joined.push((from, to));
         }
-        items
-            .iter()
-            .zip(on_cycles(items.len(), &joined))
-            .filter_map(|(&item, cyclic)| match item {
-                Item::Set(set) if cyclic => Some(set),
-                _ => None,
-            })
-            .min_by_key(|&set| (self.count[set], Reverse(self.depth[set]), set))
+        let cyclic = on_cycles(items.len(), &joined);
+        (items, cyclic)
     }
 }
 

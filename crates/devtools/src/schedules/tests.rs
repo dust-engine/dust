@@ -9,7 +9,7 @@ use gpui::{Bounds, Point, Size, size};
 use indexmap::IndexSet;
 
 use super::graph::{BuildState, GraphSnapshot, Reason, SystemKind, Target};
-use super::layout::{GRID_HEADING, Layout, SET_PADDING, Tree, layout, tree};
+use super::layout::{GRID_HEADING, Layout, SET_PADDING, Tree, layout, pieces, tree};
 use super::ui::tree_of;
 use super::*;
 
@@ -567,19 +567,63 @@ fn layout_of_nothing() {
 }
 
 #[test]
-fn tree_draws_each_system_and_set_in_the_deepest_set_it_is_in() {
-    // Set 1 is in set 0, and set 2 beside them.
-    let tree = tree(
-        &[vec![1, 0], vec![0, 2], vec![], vec![0], vec![]],
-        &[vec![], vec![0], vec![]],
-        &[3, 2, 5],
-        &[false, false, true, false, true],
-        &[(0, 2), (2, 3)],
+fn tree_draws_each_set_in_the_smallest_set_holding_its_systems() {
+    // Set 1 is in set 0. Set 2 holds a system of set 1, and set 4 the same
+    // systems as set 3. Set 5 holds a system of set 3 and one of its own,
+    // and set 6, in set 3, one of both.
+    let set_systems = [
+        vec![0, 1, 2, 3],
+        vec![0, 1],
+        vec![1],
+        vec![4, 5, 6],
+        vec![4, 5, 6],
+        vec![6, 7],
+        vec![6],
+    ];
+    let set_parents = [vec![], vec![0], vec![], vec![], vec![], vec![], vec![3]];
+    let node_sets = [
+        vec![1],
+        vec![1, 2],
+        vec![0],
+        vec![0],
+        vec![3, 4],
+        vec![3, 4],
+        vec![3, 4, 5, 6],
+        vec![5],
+        vec![],
+        vec![],
+    ];
+    // 8 and 9 adopt a set: 8 is joined to two nodes of set 0, and 9 to
+    // nodes of sets 1 and 5.
+    let mut adopts = [false; 10];
+    adopts[8] = true;
+    adopts[9] = true;
+    let edges = [(2, 8), (8, 3), (0, 9), (9, 7)];
+    let tree = tree(&node_sets, &set_parents, &set_systems, &adopts, &edges);
+
+    // Set 2 in set 1, the smaller of the sets holding its system; set 4 in
+    // set 3, listed before it; and set 6 in set 4, rather than in set 5,
+    // which isn't in set 3, the set it's in.
+    assert_eq!(
+        tree.parents,
+        [None, Some(0), Some(1), None, Some(3), None, Some(4)]
     );
-    assert_eq!(tree.parents, [None, Some(0), None]);
-    // 0 in the deeper of its sets, and 1 in the larger of its. 2 adopts the
-    // innermost set holding 0 and 3, and 4, joined to nothing, none.
-    assert_eq!(tree.homes, [Some(1), Some(2), Some(0), Some(0), None]);
+    // Each node in the deepest of its sets.
+    assert_eq!(
+        tree.homes,
+        [
+            Some(1),
+            Some(2),
+            Some(0),
+            Some(0),
+            Some(4),
+            Some(4),
+            Some(6),
+            Some(5),
+            Some(0),
+            None,
+        ]
+    );
 }
 
 #[test]
@@ -620,19 +664,51 @@ fn layout_draws_sets_around_their_systems() {
 }
 
 #[test]
-fn layout_draws_a_set_without_a_box_if_a_system_outside_runs_between_its_systems() {
-    // 0 and 2 in set 0, and 1, in set 1, between them: set 1 keeps its box,
-    // though the two sets wait for each other.
+fn pieces_cut_a_set_where_systems_outside_it_run_between_its_systems() {
+    // 0, 2 and 3 in set 0, and 1, in set 1, between 0 and 2; 3 runs after 0
+    // with nothing outside between.
     let tree = Tree {
-        homes: vec![Some(0), Some(1), Some(0)],
+        homes: vec![Some(0), Some(1), Some(0), Some(0)],
         parents: vec![None, None],
     };
+    let edges = [(0, 1), (1, 2), (0, 3)];
+    let pieces = pieces(&tree, &edges);
+    assert_eq!(pieces.counts, [2, 1]);
+    let piece_of = |node: usize| pieces.tree.homes[node].unwrap();
+    assert_eq!(piece_of(0), piece_of(3));
+    assert_ne!(piece_of(0), piece_of(2));
+    assert_eq!(pieces.index[piece_of(0)], 0);
+    assert_eq!(pieces.index[piece_of(2)], 1);
+
+    let sizes = sizes(4);
+    let layout = layout(&sizes, &edges, &pieces.tree, &[]);
+    assert!(layout.sets.iter().all(Option::is_some));
+    check_drawing(&layout, &pieces.tree, &sizes, &edges, "pieces");
+}
+
+#[test]
+fn pieces_of_a_set_cut_the_sets_in_it() {
+    // Set 1 in set 0. 0 in set 0, 1 outside, and 2 and 3 in set 1: 1 runs
+    // between 0 and 2, so set 0 is cut in two, and set 1 with it, though
+    // nothing outside it runs between its own systems.
+    let tree = Tree {
+        homes: vec![Some(0), None, Some(1), Some(1)],
+        parents: vec![None, Some(0)],
+    };
     let edges = [(0, 1), (1, 2)];
-    let sizes = sizes(3);
-    let layout = layout(&sizes, &edges, &tree, &[]);
-    assert!(layout.sets[0].is_none());
-    assert!(layout.sets[1].is_some());
-    check_drawing(&layout, &tree, &sizes, &edges, "between");
+    let pieces = pieces(&tree, &edges);
+    assert_eq!(pieces.counts, [2, 2]);
+    let piece_of = |node: usize| pieces.tree.homes[node].unwrap();
+    assert_ne!(piece_of(2), piece_of(3));
+    // Each piece of set 1 in the piece of set 0 holding its system.
+    for node in [2, 3] {
+        let parent = pieces.tree.parents[piece_of(node)].unwrap();
+        assert_eq!(pieces.sets[parent], 0);
+    }
+
+    let sizes = sizes(4);
+    let layout = layout(&sizes, &edges, &pieces.tree, &[]);
+    check_drawing(&layout, &pieces.tree, &sizes, &edges, "nested pieces");
 }
 
 #[test]
@@ -647,6 +723,28 @@ fn layout_draws_one_of_two_sets_waiting_for_each_other_without_a_box() {
     let layout = layout(&sizes, &edges, &tree, &[]);
     assert_eq!(layout.sets.iter().filter(|set| set.is_some()).count(), 1);
     check_drawing(&layout, &tree, &sizes, &edges, "crossed");
+}
+
+#[test]
+fn pieces_cut_one_of_two_sets_waiting_for_each_other() {
+    // 0 and 1 in set 0, and 2 and 3 in set 1: 0 before 2, and 3 before 1.
+    // Set 0, holding the node that runs first, is cut at what waits for set
+    // 1.
+    let tree = Tree {
+        homes: vec![Some(0), Some(0), Some(1), Some(1)],
+        parents: vec![None, None],
+    };
+    let edges = [(0, 2), (3, 1)];
+    let pieces = pieces(&tree, &edges);
+    assert_eq!(pieces.counts, [2, 1]);
+    let piece_of = |node: usize| pieces.tree.homes[node].unwrap();
+    assert_ne!(piece_of(0), piece_of(1));
+    assert_eq!(pieces.index[piece_of(0)], 0);
+
+    let sizes = sizes(4);
+    let layout = layout(&sizes, &edges, &pieces.tree, &[]);
+    assert!(layout.sets.iter().all(Option::is_some));
+    check_drawing(&layout, &pieces.tree, &sizes, &edges, "crossed pieces");
 }
 
 /// The points edge `e` of `layout` is drawn through, over all its lines.
@@ -807,20 +905,23 @@ fn real_schedules_read_and_lay_out() {
             .iter()
             .map(|edge| (edge.before, edge.after))
             .collect();
-        let tree = tree_of(&graph);
-        let titles: Vec<f32> = graph
+        let pieces = pieces(&tree_of(&graph), &edges);
+        let titles: Vec<f32> = pieces
             .sets
             .iter()
-            .map(|set| 7.0 * set.name.len() as f32)
+            .map(|&set| 7.0 * graph.sets[set].name.len() as f32)
             .collect();
-        let layout = layout(&sizes, &edges, &tree, &titles);
-        check_drawing(&layout, &tree, &sizes, &edges, &entry.name);
+        let layout = layout(&sizes, &edges, &pieces.tree, &titles);
+        check_drawing(&layout, &pieces.tree, &sizes, &edges, &entry.name);
         for &(a, b) in &edges {
             assert!(layout.nodes[a].x + sizes[a].width < layout.nodes[b].x);
         }
         if entry.name == "PostUpdate" {
             let propagate = find_set(&graph, "Propagate");
-            assert!(layout.sets[propagate].is_some());
+            assert!(
+                (0..pieces.sets.len())
+                    .any(|piece| pieces.sets[piece] == propagate && layout.sets[piece].is_some())
+            );
         }
     }
 }

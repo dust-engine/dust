@@ -33,7 +33,7 @@ use gpui_component::{
 use super::graph::{
     BuildState, GraphSnapshot, Neighbor, Reason, SetInfo, SystemInfo, SystemKind, Target,
 };
-use super::layout::{self, Layout, Tree};
+use super::layout::{self, Layout, Pieces, Tree};
 use super::{Group, ScheduleEntry, Snapshot, snapshot};
 use crate::{fetch, read};
 
@@ -156,7 +156,10 @@ struct Graph {
     ambiguous: Vec<Vec<usize>>,
     /// The set each system and set is drawn in.
     tree: Tree,
-    /// The sets drawn with a box, outermost first.
+    /// The sets cut into the stretches their systems run in, each drawn as a
+    /// box of its own.
+    pieces: Pieces,
+    /// The pieces drawn with a box, outermost first.
     boxes: Vec<usize>,
     /// How each system relates to the selected system or set; empty while
     /// none is selected.
@@ -501,10 +504,20 @@ impl SchedulesView {
         self.to_screen(graph.layout.nodes[system], graph.sizes[system])
     }
 
-    /// Where `set`'s box is drawn, if it has one, from the graph's top left
-    /// corner.
+    /// Where `set`'s first box is drawn, if it has one, from the graph's top
+    /// left corner.
     fn set_rect(&self, graph: &Graph, set: usize) -> Option<Bounds<Pixels>> {
-        let bounds = graph.layout.sets[set]?;
+        let pieces = &graph.pieces;
+        (0..pieces.sets.len())
+            .filter(|&piece| pieces.sets[piece] == set && graph.layout.sets[piece].is_some())
+            .min_by_key(|&piece| pieces.index[piece])
+            .and_then(|piece| self.piece_rect(graph, piece))
+    }
+
+    /// Where `piece`'s box is drawn, if it has one, from the graph's top left
+    /// corner.
+    fn piece_rect(&self, graph: &Graph, piece: usize) -> Option<Bounds<Pixels>> {
+        let bounds = graph.layout.sets[piece]?;
         Some(self.to_screen(bounds.origin, bounds.size))
     }
 
@@ -784,9 +797,9 @@ impl SchedulesView {
         let boxes: Vec<AnyElement> = graph
             .boxes
             .iter()
-            .filter_map(|&set| {
-                let rect = self.set_rect(graph, set)?;
-                (!culled(rect)).then(|| self.set_box(graph, set, rect, cx))
+            .filter_map(|&piece| {
+                let rect = self.piece_rect(graph, piece)?;
+                (!culled(rect)).then(|| self.set_box(graph, piece, rect, cx))
             })
             .collect();
         let mut nodes = Vec::new();
@@ -862,21 +875,22 @@ impl SchedulesView {
             .into_any_element()
     }
 
-    /// A set's box, drawn at `rect`, under the systems in it, with the set's
-    /// name at its top, which selects the set when clicked.
+    /// The box of a piece of a set, drawn at `rect`, under the systems in it,
+    /// with the set's name at its top, which selects the set when clicked.
     fn set_box(
         &self,
         graph: &Graph,
-        set: usize,
+        piece: usize,
         rect: Bounds<Pixels>,
         cx: &Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
         let zoom = self.camera.zoom;
+        let set = graph.pieces.sets[piece];
         let selected = self.selected_set == Some(set);
         let foreground = theme.foreground;
         let header = div()
-            .id(("schedules-set", set))
+            .id(("schedules-set", piece))
             .h(px(layout::SET_HEADER * zoom))
             .flex()
             .items_center()
@@ -891,11 +905,11 @@ impl SchedulesView {
             })
             .hover(move |header| header.text_color(foreground))
             .when(zoom >= LABEL_ZOOM, |header| {
-                header.child(
-                    div()
-                        .truncate()
-                        .child(graph.snapshot.sets[set].name.clone()),
-                )
+                header.child(div().truncate().child(piece_title(
+                    &graph.snapshot.sets,
+                    &graph.pieces,
+                    piece,
+                )))
             })
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
@@ -1578,7 +1592,7 @@ impl SchedulesView {
         let mut stack: Vec<(usize, usize)> = roots.iter().rev().map(|&set| (set, 0)).collect();
         while let Some((set, depth)) = stack.pop() {
             let info = &sets[set];
-            let boxed = graph.layout.sets[set].is_some();
+            let boxed = graph.boxed(set);
             rows.push(
                 h_flex()
                     .id(("schedules-set-row", set))
@@ -1635,26 +1649,57 @@ impl SchedulesView {
             .iter()
             .filter(|&&system| graph.tree.holds(set, system))
             .count();
-        let note = if total == 0 {
-            Some("No system is in it.".to_owned())
-        } else if graph.layout.sets[set].is_some() {
-            (inside < total).then(|| {
-                let others = total - inside;
-                format!(
-                    "{others} of its systems {} drawn in the boxes of other sets {} in.",
-                    if others == 1 { "is" } else { "are" },
-                    if others == 1 { "it's" } else { "they're" },
-                )
-            })
-        } else if inside == 0 {
-            Some(
+        let mut notes: Vec<String> = Vec::new();
+        if total == 0 {
+            notes.push("No system is in it.".to_owned());
+        } else if !graph.boxed(set) && inside == 0 {
+            notes.push(
                 "Drawn without a box: its systems are drawn in the boxes of other sets \
                  they're in."
                     .to_owned(),
-            )
+            );
+        } else if !graph.boxed(set) {
+            notes.push(
+                "Drawn without a box, which couldn't be drawn after all that its systems wait \
+                 for."
+                    .to_owned(),
+            );
         } else {
-            Some("Drawn without a box: systems outside it run between its systems.".to_owned())
-        };
+            // Drawn in a set Bevy doesn't put it in, as it holds all its systems.
+            if let Some(outer) = graph.tree.parents[set]
+                && !info.parents.contains(&outer)
+            {
+                notes.push(format!(
+                    "Drawn in the box of {}, which holds all its systems too.",
+                    sets[outer].name
+                ));
+            }
+            let pieces = graph.pieces.counts[set];
+            if pieces > 1 {
+                let between = graph.between(set);
+                notes.push(if between.is_empty() {
+                    format!(
+                        "Drawn as {pieces} boxes, as one couldn't be drawn after all that its \
+                         systems wait for."
+                    )
+                } else {
+                    format!(
+                        "Drawn as {pieces} boxes, one for each stretch of its systems that run \
+                         together, as {} {} between them.",
+                        system_list(&graph.snapshot.systems, &between),
+                        if between.len() == 1 { "runs" } else { "run" },
+                    )
+                });
+            }
+            if inside < total {
+                let others = total - inside;
+                notes.push(format!(
+                    "{others} of its systems {} drawn in the boxes of other sets {} in.",
+                    if others == 1 { "is" } else { "are" },
+                    if others == 1 { "it's" } else { "they're" },
+                ));
+            }
+        }
 
         let chips = |list: &[usize], id: &'static str| {
             h_flex()
@@ -1745,7 +1790,7 @@ impl SchedulesView {
                             }),
                     ),
             )
-            .children(note.map(|note| weak(note, theme)))
+            .children(notes.into_iter().map(|note| weak(note, theme)))
             .children(parents)
             .children(inner)
             .child(orderings(
@@ -1870,16 +1915,20 @@ impl Graph {
             .map(|edge| (edge.before, edge.after))
             .collect();
         let tree = tree_of(&snapshot);
-        let titles: Vec<f32> = snapshot
-            .sets
-            .iter()
-            .map(|set| label_width(&set.name, &font, SET_LABEL_SIZE, window))
+        let pieces = layout::pieces(&tree, &edges);
+        let titles: Vec<f32> = (0..pieces.sets.len())
+            .map(|piece| {
+                let title = piece_title(&snapshot.sets, &pieces, piece);
+                label_width(&title, &font, SET_LABEL_SIZE, window)
+            })
             .collect();
-        let layout = layout::layout(&sizes, &edges, &tree, &titles);
+        let layout = layout::layout(&sizes, &edges, &pieces.tree, &titles);
         // Each box under the boxes in it, which are smaller.
-        let area = |set: usize| layout.sets[set].map_or(0.0, |b| b.size.width * b.size.height);
-        let mut boxes: Vec<usize> = (0..snapshot.sets.len())
-            .filter(|&set| layout.sets[set].is_some())
+        let area = |piece: usize| {
+            layout.sets[piece].map_or(0.0, |bounds| bounds.size.width * bounds.size.height)
+        };
+        let mut boxes: Vec<usize> = (0..pieces.sets.len())
+            .filter(|&piece| layout.sets[piece].is_some())
             .collect();
         boxes.sort_by(|&a, &b| area(b).total_cmp(&area(a)));
 
@@ -1936,9 +1985,52 @@ impl Graph {
             outgoing,
             ambiguous,
             tree,
+            pieces,
             boxes,
             relations: Vec::new(),
         }
+    }
+
+    /// Whether any piece of `set` is drawn with a box.
+    fn boxed(&self, set: usize) -> bool {
+        self.pieces
+            .sets
+            .iter()
+            .zip(&self.layout.sets)
+            .any(|(&of, bounds)| of == set && bounds.is_some())
+    }
+
+    /// The systems outside `set`'s boxes that run between two systems in
+    /// them, through systems outside them.
+    fn between(&self, set: usize) -> Vec<usize> {
+        let (systems, edges) = (&self.snapshot.systems, &self.snapshot.edges);
+        let inside: Vec<bool> = (0..systems.len())
+            .map(|system| self.tree.holds(set, system))
+            .collect();
+        let reached = |joined: &[Vec<usize>], forwards: bool| {
+            let mut seen = vec![false; systems.len()];
+            let mut stack: Vec<usize> = (0..systems.len()).filter(|&s| inside[s]).collect();
+            while let Some(system) = stack.pop() {
+                for &e in &joined[system] {
+                    let other = if forwards {
+                        edges[e].after
+                    } else {
+                        edges[e].before
+                    };
+                    if !inside[other] && !std::mem::replace(&mut seen[other], true) {
+                        stack.push(other);
+                    }
+                }
+            }
+            seen
+        };
+        let (after, before) = (
+            reached(&self.outgoing, true),
+            reached(&self.incoming, false),
+        );
+        (0..systems.len())
+            .filter(|&system| after[system] && before[system])
+            .collect()
     }
 
     /// Which systems are in `set`.
@@ -2002,7 +2094,7 @@ pub(super) fn tree_of(snapshot: &GraphSnapshot) -> Tree {
         &snapshot
             .sets
             .iter()
-            .map(|set| set.systems.len())
+            .map(|set| set.systems.clone())
             .collect::<Vec<_>>(),
         &snapshot
             .systems
@@ -2243,6 +2335,12 @@ fn set_tooltip(
     };
     let parents =
         (!info.parents.is_empty()).then(|| format!("In {}", set_names(graph, &info.parents)));
+    let pieces = graph.pieces.counts[set];
+    let parents = match (parents, pieces) {
+        (parents, 0 | 1) => parents,
+        (Some(parents), pieces) => Some(format!("{parents}; drawn as {pieces} boxes")),
+        (None, pieces) => Some(format!("Drawn as {pieces} boxes")),
+    };
     move |window, cx| {
         let (name, count, parents) = (name.clone(), count.clone(), parents.clone());
         Tooltip::element(move |_, cx| {
@@ -2257,6 +2355,49 @@ fn set_tooltip(
                 .children(parents.clone())
         })
         .build(window, cx)
+    }
+}
+
+/// The name at the top of a piece's box: its set's, and which of the set's
+/// pieces it is, if it has several.
+fn piece_title(sets: &[SetInfo], pieces: &Pieces, piece: usize) -> SharedString {
+    let set = pieces.sets[piece];
+    match pieces.counts[set] {
+        1 => sets[set].name.clone(),
+        count => format!(
+            "{} ({} of {count})",
+            sets[set].name,
+            pieces.index[piece] + 1
+        )
+        .into(),
+    }
+}
+
+/// The names of `list`, systems of `systems`, as a phrase: the first few,
+/// and how many sync points.
+fn system_list(systems: &[SystemInfo], list: &[usize]) -> String {
+    const SHOWN: usize = 3;
+    let (syncs, others): (Vec<usize>, Vec<usize>) = list
+        .iter()
+        .copied()
+        .partition(|&system| systems[system].kind == SystemKind::SyncPoint);
+    let mut names: Vec<String> = others
+        .iter()
+        .take(SHOWN)
+        .map(|&system| systems[system].name.to_string())
+        .collect();
+    if others.len() > SHOWN {
+        names.push(format!("{} more", others.len() - SHOWN));
+    }
+    match syncs.len() {
+        0 => {}
+        1 => names.push("a sync point".to_owned()),
+        count => names.push(format!("{count} sync points")),
+    }
+    match &names[..] {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 
