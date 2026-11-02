@@ -226,17 +226,12 @@ impl FrameTimeline {
 
     /// The complete frames newer than `after`, oldest first, with all their
     /// records: up to [`TimelineConfig::max_frames`] of them.
-    pub fn frames_after(&self, after: Option<u32>) -> Vec<FrameRecord> {
+    pub fn frames_after(&self, after: Option<u32>) -> Vec<Arc<FrameRecord>> {
         let store = lock(&self.shared.store);
-        let Some(completed) = store.completed else {
-            return Vec::new();
-        };
         store
-            .frames
+            .complete
             .iter()
-            .filter(|frame| {
-                frame.index <= completed && after.is_none_or(|after| frame.index > after)
-            })
+            .filter(|frame| after.is_none_or(|after| frame.index > after))
             .cloned()
             .collect()
     }
@@ -380,8 +375,11 @@ impl Shared {
 
 #[derive(Default)]
 struct Store {
-    /// Oldest first: the complete frames, then those still taking records.
-    frames: VecDeque<FrameRecord>,
+    /// The frames still taking records, oldest first.
+    pending: VecDeque<FrameRecord>,
+    /// The complete frames, oldest first. Shared, so readers copy pointers
+    /// rather than records while they hold the lock the frame's end waits on.
+    complete: VecDeque<Arc<FrameRecord>>,
     summaries: VecDeque<FrameSummary>,
     /// The newest complete frame.
     completed: Option<u32>,
@@ -416,23 +414,23 @@ impl Store {
         }
     }
 
-    /// The frame `index`, made if it's new; `None` once it's complete.
+    /// The pending frame `index`, made if it's new; `None` once it's complete.
     fn frame_mut(&mut self, index: u32) -> Option<&mut FrameRecord> {
         if self.completed.is_some_and(|completed| index <= completed) {
             return None;
         }
-        let at = match self.frames.iter().rposition(|frame| frame.index <= index) {
-            Some(at) if self.frames[at].index == index => at,
+        let at = match self.pending.iter().rposition(|frame| frame.index <= index) {
+            Some(at) if self.pending[at].index == index => at,
             Some(at) => {
-                self.frames.insert(at + 1, FrameRecord::new(index));
+                self.pending.insert(at + 1, FrameRecord::new(index));
                 at + 1
             }
             None => {
-                self.frames.push_front(FrameRecord::new(index));
+                self.pending.push_front(FrameRecord::new(index));
                 0
             }
         };
-        Some(&mut self.frames[at])
+        Some(&mut self.pending[at])
     }
 
     /// Completes the frames `complete_after` frames older than the latest, and
@@ -441,37 +439,28 @@ impl Store {
         let Some(latest) = self.latest else {
             return false;
         };
-        let completed = self.completed;
-        let first = self
-            .frames
-            .iter()
-            .position(|frame| completed.is_none_or(|completed| frame.index > completed))
-            .unwrap_or(self.frames.len());
         let mut changed = false;
-        for at in first..self.frames.len() {
-            let frame = &self.frames[at];
-            if frame.index.saturating_add(config.complete_after) > latest {
-                break;
-            }
+        while self
+            .pending
+            .front()
+            .is_some_and(|frame| frame.index.saturating_add(config.complete_after) <= latest)
+        {
+            let frame = self.pending.pop_front().unwrap();
             let next = self
-                .frames
-                .get(at + 1)
+                .pending
+                .front()
                 .map(|next| next.begin)
                 .filter(|&begin| begin > 0);
-            self.summaries.push_back(summarize(frame, next));
+            self.summaries.push_back(summarize(&frame, next));
             self.completed = Some(frame.index);
+            self.complete.push_back(Arc::new(frame));
             changed = true;
         }
         while self.summaries.len() > config.max_summaries {
             self.summaries.pop_front();
         }
-        while self.frames.len() > config.max_frames
-            && let Some(front) = self.frames.front()
-            && self
-                .completed
-                .is_some_and(|completed| front.index <= completed)
-        {
-            self.frames.pop_front();
+        while self.complete.len() > config.max_frames {
+            self.complete.pop_front();
         }
         changed
     }

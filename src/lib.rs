@@ -16,9 +16,12 @@ use dust_vox::{
 use pumicite::Allocator;
 
 use dust_character::{Character, CharacterCamera, CharacterPlugin, View, ViewChanged};
+use dust_profiler::timeline::FrameTimeline;
 use gpui::{AppContext as _, Focusable as _, ParentElement as _, Styled as _};
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::Layer as _;
+use tracing_subscriber::filter::{FilterExt as _, LevelFilter, filter_fn};
+use tracing_subscriber::layer::{Filter, SubscriberExt as _};
 use tracing_subscriber::util::SubscriberInitExt as _;
 
 #[derive(Component)]
@@ -60,7 +63,9 @@ struct RainbowDemo {
 /// overlay over it. The Bevy app runs on a thread of its own, and the UI on this
 /// one, the main thread.
 pub fn run() {
-    let console_log = init_logging();
+    // DevTools shows the timeline once it has a page for it; until then the
+    // layer records into it regardless.
+    let (console_log, _timeline) = init_logging();
     gpui_platform::application()
         .with_assets(gpui_kit_assets::Assets)
         .run(move |cx: &mut gpui::App| {
@@ -123,20 +128,46 @@ impl gpui::Render for MainView {
 }
 
 /// Installs the global `tracing` subscriber, which prints log messages to
-/// stderr and copies them into the DevTools console, and returns the console's
-/// [`ConsoleLog`](dust_devtools::ConsoleLog). `log` records go through it too.
+/// stderr, copies them into the DevTools console, and records the frame
+/// timeline. Returns the console's [`ConsoleLog`](dust_devtools::ConsoleLog)
+/// and the [`FrameTimeline`]. `log` records go through it too.
 ///
-/// The filter lets through info and above; `RUST_LOG` adds directives to that,
-/// so `RUST_LOG=dust_pbr=debug` keeps info from the other targets.
-fn init_logging() -> dust_devtools::ConsoleLog {
+/// The log's filter lets through info and above; `RUST_LOG` adds directives to
+/// that, so `RUST_LOG=dust_pbr=debug` keeps info from the other targets. It
+/// leaves out what the timeline records and Bevy's other spans, such as one
+/// for every system run, which would otherwise prefix log lines. The timeline
+/// has its own filter.
+fn init_logging() -> (dust_devtools::ConsoleLog, FrameTimeline) {
     let (console_layer, console_log) = dust_devtools::console_layer();
+    let (timeline_layer, timeline) = dust_profiler::timeline::timeline_layer();
     let directives = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default();
     tracing_subscriber::registry()
-        .with(EnvFilter::new(format!("info,{directives}")))
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(console_layer)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(log_filter(&directives)),
+        )
+        .with(console_layer.with_filter(log_filter(&directives)))
+        .with(timeline_layer)
         .init();
-    console_log
+    (console_log, timeline)
+}
+
+/// The filter of a layer that logs: info and above, plus `directives`, without
+/// what the frame timeline records or Bevy's other spans.
+fn log_filter<S: 'static>(directives: &str) -> impl Filter<S> + Send + Sync + 'static {
+    EnvFilter::new(format!("info,{directives}")).and(
+        filter_fn(|metadata| {
+            // `bevy_app` and `bevy_ecs` only make spans for their `trace`
+            // feature: the app's run, each update, each plugin build.
+            let bevy_span = metadata.is_span()
+                && (metadata.target().starts_with("bevy_app")
+                    || metadata.target().starts_with("bevy_ecs"));
+            !bevy_span && !dust_profiler::timeline::is_timeline(metadata)
+        })
+        // Not a filter by level: the `EnvFilter`'s level is the hint.
+        .with_max_level_hint(LevelFilter::TRACE),
+    )
 }
 
 fn build_app(app: &mut bevy::app::App) {

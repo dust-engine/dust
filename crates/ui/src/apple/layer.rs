@@ -205,7 +205,7 @@ impl BevyDisplayLinkDelegate {
         app.world_mut()
             .resource_mut::<super::drawable::MetalDrawable>()
             .drawable = Some(update.drawable());
-        app.update();
+        crate::update_frame(&mut app);
         if let Some(exit) = app.should_exit() {
             self.stop(link, exit);
         }

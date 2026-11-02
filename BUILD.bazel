@@ -49,6 +49,7 @@ rust_library(
         "//crates/pbr:dust_pbr",
         "//crates/app:dust_app",
         "//crates/devtools:dust_devtools",
+        "//crates/profiler:dust_profiler",
         "//crates/physics:dust_physics",
         "//crates/character:dust_character",
         "//crates/ui:dust_ui",

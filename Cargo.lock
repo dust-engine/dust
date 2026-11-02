@@ -682,6 +682,7 @@ dependencies = [
  "downcast-rs",
  "log",
  "thiserror 2.0.21",
+ "tracing",
  "variadics_please",
  "wasm-bindgen",
  "web-sys",
@@ -847,6 +848,7 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.21",
+ "tracing",
  "variadics_please",
 ]
 
@@ -2532,6 +2534,8 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy",
+ "bevy_app",
+ "bevy_ecs",
  "bevy_pumicite",
  "dust_app",
  "dust_character",
@@ -2539,6 +2543,7 @@ dependencies = [
  "dust_input",
  "dust_pbr",
  "dust_physics",
+ "dust_profiler",
  "dust_ui",
  "dust_vox",
  "gpui-component",

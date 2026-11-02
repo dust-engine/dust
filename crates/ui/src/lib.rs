@@ -59,6 +59,7 @@ use std::sync::mpsc::Receiver;
 
 use bevy::{
     app::{App, Last, PluginsState, PostStartup},
+    diagnostic::FrameCount,
     ecs::{
         schedule::IntoScheduleConfigs,
         system::{LocalBuilder, ParamBuilder, Res, SystemParamBuilder},
@@ -113,6 +114,18 @@ fn build_gpui_app(
                 view.update(cx, |view, cx| view.set_splash_shown(false, cx)).ok();
             });
         });
+}
+
+/// Runs one update of `app`, in the `frame` span that delimits frames on the
+/// frame timeline (see `dust_profiler::timeline`), named by Bevy's
+/// `FrameCount`, which counts updates from the first.
+fn update_frame(app: &mut App) {
+    let index = app
+        .world()
+        .get_resource::<FrameCount>()
+        .map_or(0, |count| count.0);
+    let _frame = tracing::info_span!(target: "dust::frame", "frame", index).entered();
+    app.update();
 }
 
 /// Finishes building `app`, as a runner does before its first update: waits for

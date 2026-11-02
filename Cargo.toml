@@ -35,6 +35,7 @@ dust_vox.workspace = true
 dust_pbr.workspace = true
 dust_app.workspace = true
 dust_devtools.workspace = true
+dust_profiler.workspace = true
 dust_physics.workspace = true
 dust_character.workspace = true
 dust_ui.workspace = true
@@ -45,6 +46,11 @@ gpui_platform.workspace = true
 gpui-component.workspace = true
 gpui-kit-assets.workspace = true
 bevy.workspace = true
+# Bevy's spans for each schedule and system run, which the frame timeline
+# records. Not `bevy/trace`: that also turns on `bevy_log`, whose `LogPlugin`
+# would join `DefaultPlugins` and fight `init_logging` for the subscriber.
+bevy_app = { version = "0.20.0", default-features = false, features = ["trace"] }
+bevy_ecs = { version = "0.20.0", default-features = false, features = ["trace"] }
 pumicite.workspace = true
 bevy_pumicite.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
