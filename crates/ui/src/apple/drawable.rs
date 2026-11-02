@@ -10,6 +10,9 @@
 //! submission and [`SwapchainSet`]'s, so that only the latter waits for the
 //! drawable, and `signalDrawable` after [`SwapchainSet`]'s.
 
+use std::ptr::NonNull;
+
+use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy_pumicite::{
@@ -27,10 +30,11 @@ use bevy_pumicite::{
     },
     queue::{Queue, RenderQueue},
 };
+use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTL4CommandQueue, MTLDrawable, MTLResource, MTLTexture};
-use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use objc2_quartz_core::{CACurrentMediaTime, CAMetalDrawable, CAMetalLayer};
 
 /// Where systems using the [`MetalDrawable`]'s current image run: in a submission
 /// of their own on the render queue, after `DefaultRenderSet`'s, between the
@@ -168,6 +172,7 @@ fn acquire(
     queue: Queue<RenderQueue>,
     metal_drawable: ResMut<MetalDrawable>,
 ) {
+    let _acquire = tracing::info_span!(target: "dust::swapchain", "acquire").entered();
     let metal_drawable = metal_drawable.into_inner();
     let Some(drawable) = &metal_drawable.drawable else {
         return;
@@ -191,7 +196,9 @@ fn present(
     _bevy_thread: NonSendMarker,
     queue: Queue<RenderQueue>,
     mut metal_drawable: ResMut<MetalDrawable>,
+    frame: Res<FrameCount>,
 ) {
+    let _present = tracing::info_span!(target: "dust::swapchain", "present").entered();
     metal_drawable.image = None;
     let Some(drawable) = metal_drawable.drawable.take() else {
         return;
@@ -199,6 +206,18 @@ fn present(
     queue
         .mtl_command_queue()
         .signalDrawable(ProtocolObject::from_ref(&*drawable));
+    // Tells the frame timeline when the frame is shown, or that it never is.
+    let frame = frame.0;
+    let shown = RcBlock::new(move |drawable: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+        // SAFETY: Metal passes the drawable, valid for the call.
+        let shown_at = unsafe { drawable.as_ref() }.presentedTime();
+        // 0 for a drawable that wasn't shown.
+        let shown = shown_at > 0.0;
+        let offset_ns = shown.then(|| ((shown_at - CACurrentMediaTime()) * 1e9) as i64);
+        tracing::info!(name: "displayed", target: "dust::swapchain", frame, offset_ns, shown);
+    });
+    // SAFETY: the block is valid; Metal copies it.
+    unsafe { drawable.addPresentedHandler(RcBlock::as_ptr(&shown)) };
     drawable.present();
 }
 

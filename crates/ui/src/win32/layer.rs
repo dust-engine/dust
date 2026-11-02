@@ -12,14 +12,17 @@ use gpui::{Bounds, Pixels, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{CloseHandle, HWND, POINT, RECT};
 use windows::Win32::Graphics::DirectComposition::{
-    DCompositionCreateDevice2, DCompositionCreateSurfaceHandle, DCompositionWaitForCompositorClock,
-    IDCompositionDesktopDevice, IDCompositionTarget, IDCompositionVisual2,
+    COMPOSITION_FRAME_ID_CREATED, COMPOSITION_FRAME_STATS, DCompositionCreateDevice2,
+    DCompositionCreateSurfaceHandle, DCompositionGetFrameId, DCompositionGetStatistics,
+    DCompositionWaitForCompositorClock, IDCompositionDesktopDevice, IDCompositionTarget,
+    IDCompositionVisual2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     ClipCursor, GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, ShowCursor, WS_EX_NOREDIRECTIONBITMAP,
 };
 use windows::core::IUnknown;
 
+use super::clock;
 use super::swapchain::{CompositionSwapchainPlugin, SurfaceHandle};
 
 /// `COMPOSITIONOBJECT_READ | COMPOSITIONOBJECT_WRITE`, which the `windows` crate
@@ -192,18 +195,40 @@ impl GameLayer {
     }
 }
 
+/// Reports the compositor frame the runner woke for to the frame timeline: when
+/// the compositor means to show it, and the compositor's frame period.
+fn compositor_tick() {
+    let Ok(frame) = (unsafe { DCompositionGetFrameId(COMPOSITION_FRAME_ID_CREATED) }) else {
+        return;
+    };
+    let mut statistics = COMPOSITION_FRAME_STATS::default();
+    if unsafe { DCompositionGetStatistics(frame, &mut statistics, 0, None, None) }.is_err() {
+        return;
+    }
+    tracing::info!(
+        name: "compositor tick",
+        target: "dust::frame",
+        target_offset_ns = clock::qpc_offset_ns(statistics.targetTime),
+        period_ns = clock::qpc_ns(statistics.framePeriod),
+    );
+}
+
 /// Runs `app` until it exits or the UI quits, one update per compositor frame.
 fn compositor_clock_runner(mut app: bevy::app::App) -> AppExit {
     crate::finish_plugins(&mut app);
     loop {
-        let start = Instant::now();
-        unsafe { DCompositionWaitForCompositorClock(None, 100) };
-        // It returns at once while the display is off; wait about a frame then
-        // instead, as GPUI's `VSyncProvider` does.
-        if start.elapsed() < Duration::from_millis(1) {
-            std::thread::sleep(Duration::from_millis(16));
+        {
+            let _wait =
+                tracing::info_span!(target: "dust::frame", "wait compositor clock").entered();
+            let start = Instant::now();
+            unsafe { DCompositionWaitForCompositorClock(None, 100) };
+            // It returns at once while the display is off; wait about a frame then
+            // instead, as GPUI's `VSyncProvider` does.
+            if start.elapsed() < Duration::from_millis(1) {
+                std::thread::sleep(Duration::from_millis(16));
+            }
         }
-        crate::update_frame(&mut app);
+        crate::update_frame(&mut app, compositor_tick);
         if let Some(exit) = app.should_exit() {
             return exit;
         }

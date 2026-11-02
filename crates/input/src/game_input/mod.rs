@@ -47,13 +47,33 @@ impl Plugin for GameInputPlugin {
 
 /// Compares the readings since the last frame with their devices' states, and
 /// writes the changes while the cursor is attached.
+///
+/// Tells the frame timeline when the readings the game takes were made (see
+/// `dust_profiler::timeline`).
 fn write_device_changes(
     mut device_tracker: ResMut<DeviceTracker>,
     cursor_mode: Res<State<CursorMode>>,
     mut input_writer: InputWriter,
 ) {
+    let _poll = tracing::info_span!(target: "dust::input", "poll").entered();
     let cursor_attached = *cursor_mode.get() == CursorMode::Attached;
-    for reading in device_tracker.new_readings() {
+    let readings: Vec<IGameInputReading> = device_tracker.new_readings().collect();
+    if cursor_attached && let (Some(oldest), Some(newest)) = (readings.first(), readings.last()) {
+        // GameInput's timestamps are microseconds on a clock of its own; how
+        // long ago each reading was made is the same on any clock.
+        let now = unsafe { device_tracker.game_input.GetCurrentTimestamp() };
+        let offset_ns = |reading: &IGameInputReading| {
+            -(now.saturating_sub(unsafe { reading.GetTimestamp() }) as i64 * 1000)
+        };
+        tracing::info!(
+            name: "poll",
+            target: "dust::input",
+            count = readings.len(),
+            oldest_offset_ns = offset_ns(oldest),
+            newest_offset_ns = offset_ns(newest),
+        );
+    }
+    for reading in readings {
         let mut device = None;
         unsafe { reading.GetDevice(&mut device) };
         let Some(device) = device else {

@@ -10,9 +10,11 @@
 //! over to D3D11 (`VK_QUEUE_FAMILY_EXTERNAL`); and [`present`] presents it, once
 //! that fence is signaled.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy_pumicite::{
@@ -33,9 +35,11 @@ use windows::Win32::Foundation::{
     CloseHandle, GENERIC_ALL, HANDLE, HMODULE, LUID, PRESENTATION_ERROR_LOST, RECT, WAIT_OBJECT_0,
 };
 use windows::Win32::Graphics::CompositionSwapchain::{
-    CreatePresentationFactory, ICompositionFramePresentStatistics, IPresentationBuffer,
+    CreatePresentationFactory, ICompositionFramePresentStatistics,
+    IIndependentFlipFramePresentStatistics, IPresentStatusPresentStatistics, IPresentationBuffer,
     IPresentationFactory, IPresentationManager, IPresentationSurface,
-    PresentStatisticsKind_CompositionFrame,
+    PresentStatisticsKind_CompositionFrame, PresentStatisticsKind_IndependentFlipFrame,
+    PresentStatisticsKind_PresentStatus, PresentStatus_Queued,
 };
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
@@ -49,6 +53,9 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
     D3D11_USAGE_DEFAULT, D3D11CreateDevice, ID3D11Device, ID3D11Device5, ID3D11DeviceContext4,
     ID3D11Fence, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::DirectComposition::{
+    COMPOSITION_FRAME_STATS, DCompositionGetStatistics,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
@@ -64,6 +71,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::{Interface, PCWSTR};
 
+use crate::win32::clock;
 use crate::win32::layer::GameLayerSharedState;
 
 /// How many buffers the game renders into in turn: one being written, one queued
@@ -269,7 +277,14 @@ struct Presenter {
     /// The color space that [`Presenter::preferred_color_space`] last found. It
     /// starts as sRGB, until the first statistics arrive.
     preferred_color_space: vk::ColorSpaceKHR,
+    /// The latest presents' ids and the frames that presented them, oldest
+    /// first, for telling the frame timeline when each frame was shown.
+    presented: VecDeque<(u64, u32)>,
 }
+
+/// How many presents [`Presenter::presented`] remembers: enough for their
+/// statistics, which come a few frames later.
+const PRESENTS_REMEMBERED: usize = 16;
 
 /// The flags the composition swapchain API requires of the D3D11 device: without
 /// `PREVENT_INTERNAL_THREADING_OPTIMIZATIONS`, `CreatePresentationFactory` fails.
@@ -338,8 +353,16 @@ impl Presenter {
             surface.SetColorSpace(dxgi_color_space(color_space))?;
         }
         // Each present's composition-frame statistics name the outputs that
-        // showed the present, and the color space of each output.
-        unsafe { manager.EnablePresentStatisticsKind(PresentStatisticsKind_CompositionFrame, 1) }?;
+        // showed the present, and the color space of each output. With those
+        // of a present shown without composition and those of a present
+        // skipped, they also tell when each frame was shown.
+        for kind in [
+            PresentStatisticsKind_CompositionFrame,
+            PresentStatisticsKind_IndependentFlipFrame,
+            PresentStatisticsKind_PresentStatus,
+        ] {
+            unsafe { manager.EnablePresentStatisticsKind(kind, 1) }?;
+        }
         let statistics_available = unsafe { manager.GetPresentStatisticsAvailableEvent() }?;
         let retiring: ID3D11Fence = unsafe { manager.GetPresentRetiringFence() }?;
         let lost = unsafe { manager.GetLostEvent() }?;
@@ -392,6 +415,7 @@ impl Presenter {
             color_space,
             statistics_available,
             preferred_color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+            presented: VecDeque::with_capacity(PRESENTS_REMEMBERED),
         })
     }
 
@@ -400,15 +424,64 @@ impl Presenter {
     /// composition frame that first showed each present, so they follow the
     /// window from one display to another, and they follow HDR being turned on or
     /// off.
+    ///
+    /// Reading the statistics also tells the frame timeline when each frame was
+    /// shown, if at all (see `dust_profiler::timeline`).
     fn preferred_color_space(&mut self) -> vk::ColorSpaceKHR {
         // Reading every statistic also keeps the queue from overflowing.
         while (unsafe { WaitForSingleObject(self.statistics_available, 0) }) == WAIT_OBJECT_0 {
             let Ok(statistics) = (unsafe { self.manager.GetNextPresentStatistics() }) else {
                 break;
             };
+            let present = unsafe { statistics.GetPresentId() };
+            let presented_frame = self
+                .presented
+                .iter()
+                .find(|&&(id, _)| id == present)
+                .map(|&(_, frame)| frame);
+            let kind = unsafe { statistics.GetKind() };
+            if kind == PresentStatisticsKind_PresentStatus {
+                // A present is queued, and then either shown or, replaced by a
+                // later one first, skipped.
+                let skipped = statistics
+                    .cast::<IPresentStatusPresentStatistics>()
+                    .is_ok_and(
+                        |status| unsafe { status.GetPresentStatus() } != PresentStatus_Queued,
+                    );
+                if skipped && let Some(frame) = presented_frame {
+                    displayed(frame, None, false);
+                }
+                continue;
+            }
+            if kind == PresentStatisticsKind_IndependentFlipFrame {
+                // Shown without composition, by the display hardware.
+                if let Ok(flip) = statistics.cast::<IIndependentFlipFramePresentStatistics>()
+                    && let Some(frame) = presented_frame
+                {
+                    let shown = unsafe { flip.GetDisplayedTime() }.value;
+                    displayed(frame, Some(clock::interrupt_time_offset_ns(shown)), true);
+                }
+                continue;
+            }
             let Ok(frame) = statistics.cast::<ICompositionFramePresentStatistics>() else {
                 continue;
             };
+            if let Some(presented_frame) = presented_frame {
+                // Shown by the composition frame that first composed it.
+                let mut composition = COMPOSITION_FRAME_STATS::default();
+                let shown = unsafe {
+                    DCompositionGetStatistics(
+                        frame.GetCompositionFrameId(),
+                        &mut composition,
+                        0,
+                        None,
+                        None,
+                    )
+                }
+                .ok()
+                .map(|()| clock::qpc_offset_ns(composition.targetTime));
+                displayed(presented_frame, shown, true);
+            }
             let mut count = 0;
             let mut instances = std::ptr::null_mut();
             unsafe { frame.GetDisplayInstanceArray(&mut count, &mut instances) };
@@ -460,6 +533,7 @@ impl Presenter {
         if self.retired(buffer) {
             return true;
         }
+        let _wait = tracing::info_span!(target: "dust::swapchain", "wait retired").entered();
         unsafe {
             ResetEvent(self.retired).unwrap();
             self.retiring
@@ -529,8 +603,9 @@ impl Presenter {
         })
     }
 
-    /// Presents `buffer` once `render_done` reaches `value`.
-    fn present(&mut self, buffer: &mut Buffer, value: u64) {
+    /// Presents `buffer`, which `frame` rendered, once `render_done` reaches
+    /// `value`.
+    fn present(&mut self, buffer: &mut Buffer, value: u64, frame: u32) {
         unsafe {
             // A present is shown only once the work issued to the context before
             // the present is done: here, the wait for Vulkan's writes into the
@@ -558,6 +633,10 @@ impl Presenter {
                 })
                 .unwrap();
             buffer.last_present = self.manager.GetNextPresentId();
+            if self.presented.len() == PRESENTS_REMEMBERED {
+                self.presented.pop_front();
+            }
+            self.presented.push_back((buffer.last_present, frame));
             match self.manager.Present() {
                 Ok(()) => {}
                 // The next `acquire` creates another presentation manager.
@@ -621,6 +700,7 @@ fn acquire(
     mut submission: SubmissionState,
     If(swapchain): If<ResMut<Swapchain>>,
 ) {
+    let _acquire = tracing::info_span!(target: "dust::swapchain", "acquire").entered();
     let swapchain = swapchain.into_inner();
     if swapchain.presenter.as_ref().is_some_and(Presenter::is_lost) {
         tracing::warn!("The presentation manager was lost; creating another");
@@ -736,14 +816,25 @@ fn release(mut submission: SubmissionState, If(swapchain): If<ResMut<Swapchain>>
 
 /// Presents the current image once the submission of [`SwapchainSet`] is done
 /// writing it.
-fn present(_bevy_thread: NonSendMarker, If(swapchain): If<ResMut<Swapchain>>) {
+fn present(
+    _bevy_thread: NonSendMarker,
+    If(swapchain): If<ResMut<Swapchain>>,
+    frame: Res<FrameCount>,
+) {
+    let _present = tracing::info_span!(target: "dust::swapchain", "present").entered();
     let swapchain = swapchain.into_inner();
     let Some((index, value)) = swapchain.current.take() else {
         return;
     };
     if let Some(presenter) = &mut swapchain.presenter {
-        presenter.present(&mut swapchain.buffers[index], value);
+        presenter.present(&mut swapchain.buffers[index], value, frame.0);
     }
+}
+
+/// Tells the frame timeline when `frame` was shown, `offset_ns` from now, or
+/// that it never was.
+fn displayed(frame: u32, offset_ns: Option<i64>, shown: bool) {
+    tracing::info!(name: "displayed", target: "dust::swapchain", frame, offset_ns, shown);
 }
 
 /// A presentation buffer's texture imported as a `VkImage`, with a view of all of

@@ -126,6 +126,112 @@ pub(super) fn lanes(frames: &[&FrameRecord], threads: &[Name]) -> Lanes {
     }
     lanes.push(frame_lane);
 
+    // The display: the refreshes the runner woke for, as marks where the frame
+    // started then should be shown, and when each frame was.
+    let mut display = Lane {
+        label: Some("display".into()),
+        bars: Vec::new(),
+    };
+    for frame in frames {
+        for tick in &frame.ticks {
+            if let Some(shown) = tick.present.or(tick.target) {
+                display.bars.push(Bar {
+                    begin: shown,
+                    end: shown,
+                    color: hsla(0.0, 0.0, 0.55, 1.0),
+                    text: SharedString::default(),
+                    detail: format!(
+                        "Refresh for frame #{}: shown at {}{}",
+                        frame.index,
+                        ms(shown.saturating_sub(frame.begin)),
+                        tick.period
+                            .map_or_else(String::new, |period| format!(", every {}", ms(period))),
+                    )
+                    .into(),
+                });
+            }
+        }
+        if let Some(at) = frame.displayed.and_then(|displayed| displayed.at) {
+            end = end.max(at);
+            display.bars.push(Bar {
+                begin: at,
+                end: at,
+                color: hsla(0.38, 0.6, 0.5, 1.0),
+                text: format!("#{}", frame.index).into(),
+                detail: format!(
+                    "Frame #{} shown, {} after it started",
+                    frame.index,
+                    ms(at.saturating_sub(frame.begin))
+                )
+                .into(),
+            });
+        }
+    }
+    if !display.bars.is_empty() {
+        lanes.push(display);
+    }
+
+    // Input: each poll, as a bar from the oldest input it read.
+    let mut input = Lane {
+        label: Some("input".into()),
+        bars: Vec::new(),
+    };
+    for frame in frames {
+        for poll in &frame.inputs {
+            let oldest = poll.oldest.unwrap_or(poll.at);
+            input.bars.push(Bar {
+                begin: oldest,
+                end: poll.at,
+                color: hsla(0.33, 0.5, 0.38, 1.0),
+                text: poll.count.to_string().into(),
+                detail: format!(
+                    "{} inputs read by frame #{}, the oldest {} before",
+                    poll.count,
+                    frame.index,
+                    ms(poll.at.saturating_sub(oldest))
+                )
+                .into(),
+            });
+        }
+    }
+    if !input.bars.is_empty() {
+        lanes.push(input);
+    }
+
+    // Latency: from the oldest input each frame read, or its start, to when it
+    // was shown; a lane per frame, as they overlap.
+    for frame in frames {
+        let Some(shown) = frame.displayed.and_then(|displayed| displayed.at) else {
+            continue;
+        };
+        let oldest_input = frame
+            .inputs
+            .iter()
+            .map(|poll| poll.oldest.unwrap_or(poll.at))
+            .min();
+        let from = oldest_input.unwrap_or(frame.begin);
+        let what = if oldest_input.is_some() {
+            "input"
+        } else {
+            "start"
+        };
+        lanes.push(Lane {
+            label: Some(format!("#{} latency", frame.index).into()),
+            bars: vec![Bar {
+                begin: from,
+                end: shown,
+                color: hsla(0.15, 0.35, 0.35, 1.0),
+                text: format!("{what} → display {}", ms(shown.saturating_sub(from))).into(),
+                detail: format!(
+                    "Frame #{}: {} from its {what} to the display",
+                    frame.index,
+                    ms(shown.saturating_sub(from))
+                )
+                .into(),
+            }],
+        });
+    }
+
     // The Bevy thread runs the frame and the schedules, nested deep: a lane
     // per depth. The other threads run systems: a lane each.
     let mut bevy_lanes: Vec<Lane> = Vec::new();

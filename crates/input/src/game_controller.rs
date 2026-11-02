@@ -3,11 +3,13 @@
 //!
 //! GameController calls our handlers on a dispatch queue of our own, so input
 //! reaches the Bevy thread without waiting on the UI thread, which may be busy
-//! drawing. The handlers only push [`GcEvent`]s into a channel, which
-//! [`GameControllerPlugin`] drains once per frame into [`InputWriter`].
+//! drawing. The handlers only push [`GcEvent`]s into a channel, with when they
+//! got them, which [`GameControllerPlugin`] drains once per frame into
+//! [`InputWriter`].
 
 use std::ptr::{self, NonNull};
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::Instant;
 
 use bevy::input::keyboard::NativeKeyCode;
 use bevy::input::mouse::MouseScrollUnit;
@@ -36,17 +38,27 @@ impl Plugin for GameControllerPlugin {
 
 /// Subscribes to the keyboards and mice while the cursor is attached, and
 /// unsubscribes, dropping the events not yet read, when it is detached.
+///
+/// Tells the frame timeline when the events it reads arrived (see
+/// `dust_profiler::timeline`).
 fn read_events(
     mut subscription: Local<Option<InputSubscription>>,
     cursor_mode: Res<State<CursorMode>>,
     mut input: InputWriter,
 ) {
+    let _poll = tracing::info_span!(target: "dust::input", "poll").entered();
     if *cursor_mode.get() == CursorMode::Detached {
         *subscription = None;
         return;
     }
     let subscription = subscription.get_or_insert_with(InputSubscription::new);
-    for event in subscription.events.try_iter() {
+    // When the oldest and newest events read arrived.
+    let mut arrivals: Option<(Instant, Instant)> = None;
+    let mut count = 0usize;
+    for (arrived, event) in subscription.events.try_iter() {
+        let oldest = arrivals.map_or(arrived, |(oldest, _)| oldest);
+        arrivals = Some((oldest, arrived));
+        count += 1;
         match event {
             GcEvent::Key { usage, pressed } => {
                 input.key(key_code(usage), pressed);
@@ -55,6 +67,17 @@ fn read_events(
             GcEvent::Motion(delta) => input.motion(delta),
             GcEvent::Scroll(delta) => input.scroll(delta, MouseScrollUnit::Line),
         }
+    }
+    if let Some((oldest, newest)) = arrivals {
+        let now = Instant::now();
+        let offset_ns = |arrived: Instant| -(now.duration_since(arrived).as_nanos() as i64);
+        tracing::info!(
+            name: "poll",
+            target: "dust::input",
+            count,
+            oldest_offset_ns = offset_ns(oldest),
+            newest_offset_ns = offset_ns(newest),
+        );
     }
 }
 
@@ -76,7 +99,7 @@ enum GcEvent {
 }
 
 struct InputSubscription {
-    events: Receiver<GcEvent>,
+    events: Receiver<(Instant, GcEvent)>,
 
     /// Observes GCKeyboardDidConnectNotification
     keyboard_observer: Retained<ProtocolObject<dyn NSObjectProtocol>>,
@@ -179,7 +202,7 @@ impl Drop for InputSubscription {
 fn watch_keyboard(
     keyboard: &GCKeyboard,
     queue: &DispatchRetained<DispatchQueue>,
-    send: Sender<GcEvent>,
+    send: Sender<(Instant, GcEvent)>,
 ) {
     let Some(input) = (unsafe { keyboard.keyboardInput() }) else {
         return;
@@ -189,11 +212,11 @@ fn watch_keyboard(
               _: NonNull<GCControllerButtonInput>,
               usage: GCKeyCode,
               pressed: Bool| {
-            send.send(GcEvent::Key {
+            let key = GcEvent::Key {
                 usage,
                 pressed: pressed.as_bool(),
-            })
-            .ok();
+            };
+            send.send((Instant::now(), key)).ok();
         },
     );
     unsafe {
@@ -203,7 +226,11 @@ fn watch_keyboard(
     }
 }
 
-fn watch_mouse(mouse: &GCMouse, queue: &DispatchRetained<DispatchQueue>, send: Sender<GcEvent>) {
+fn watch_mouse(
+    mouse: &GCMouse,
+    queue: &DispatchRetained<DispatchQueue>,
+    send: Sender<(Instant, GcEvent)>,
+) {
     let Some(input) = (unsafe { mouse.mouseInput() }) else {
         return;
     };
@@ -213,7 +240,8 @@ fn watch_mouse(mouse: &GCMouse, queue: &DispatchRetained<DispatchQueue>, send: S
         let send = send.clone();
         // GameController's y points up.
         move |_: NonNull<GCMouseInput>, x: f32, y: f32| {
-            send.send(GcEvent::Motion(Vec2::new(x, -y))).ok();
+            send.send((Instant::now(), GcEvent::Motion(Vec2::new(x, -y))))
+                .ok();
         }
     });
     unsafe { input.setMouseMovedHandler(RcBlock::as_ptr(&moved)) };
@@ -221,7 +249,8 @@ fn watch_mouse(mouse: &GCMouse, queue: &DispatchRetained<DispatchQueue>, send: S
     let scrolled = RcBlock::new({
         let send = send.clone();
         move |_: NonNull<GCControllerDirectionPad>, x: f32, y: f32| {
-            send.send(GcEvent::Scroll(Vec2::new(x, y))).ok();
+            send.send((Instant::now(), GcEvent::Scroll(Vec2::new(x, y))))
+                .ok();
         }
     });
     unsafe {
@@ -234,11 +263,11 @@ fn watch_mouse(mouse: &GCMouse, queue: &DispatchRetained<DispatchQueue>, send: S
         let send = send.clone();
         let handler = RcBlock::new(
             move |_: NonNull<GCControllerButtonInput>, _: f32, pressed: Bool| {
-                send.send(GcEvent::Button {
+                let button = GcEvent::Button {
                     button,
                     pressed: pressed.as_bool(),
-                })
-                .ok();
+                };
+                send.send((Instant::now(), button)).ok();
             },
         );
         unsafe { input.setPressedChangedHandler(RcBlock::as_ptr(&handler)) };

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bevy.workspace = true
+tracing = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
@@ -14,6 +15,5 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-game-controller = "0.3"
 
 [target.'cfg(windows)'.dependencies]
-tracing = "0.1"
 windows = { version = "0.62", features = ["Win32_System_LibraryLoader"] }
 windows-core = "0.62"

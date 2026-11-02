@@ -16,7 +16,9 @@ use objc2::runtime::ProtocolObject;
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_core_foundation::CFRunLoop;
 use objc2_foundation::{NSDefaultRunLoopMode, NSObject, NSObjectProtocol, NSRunLoop};
-use objc2_quartz_core::{CAMetalDisplayLink, CAMetalDisplayLinkDelegate, CAMetalDisplayLinkUpdate};
+use objc2_quartz_core::{
+    CACurrentMediaTime, CAMetalDisplayLink, CAMetalDisplayLinkDelegate, CAMetalDisplayLinkUpdate,
+};
 
 use super::drawable;
 
@@ -162,6 +164,9 @@ struct BevyDisplayLinkDelegateIvars {
     app: RefCell<bevy::app::App>,
     /// Set when the app exits or the UI quits.
     exit: Cell<Option<AppExit>>,
+    /// When the last update's frame was to be shown, in `CACurrentMediaTime`'s
+    /// seconds.
+    last_presentation: Cell<Option<f64>>,
 }
 
 define_class!(
@@ -191,6 +196,7 @@ impl BevyDisplayLinkDelegate {
         let this = Self::alloc().set_ivars(BevyDisplayLinkDelegateIvars {
             app: RefCell::new(app),
             exit: Cell::new(None),
+            last_presentation: Cell::new(None),
         });
         // SAFETY: `NSObject`'s `init` is its designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -205,7 +211,9 @@ impl BevyDisplayLinkDelegate {
         app.world_mut()
             .resource_mut::<super::drawable::MetalDrawable>()
             .drawable = Some(update.drawable());
-        crate::update_frame(&mut app);
+        crate::update_frame(&mut app, || {
+            display_link_tick(update, &ivars.last_presentation)
+        });
         if let Some(exit) = app.should_exit() {
             self.stop(link, exit);
         }
@@ -218,4 +226,25 @@ impl BevyDisplayLinkDelegate {
             .expect("the Bevy thread has a run loop")
             .stop();
     }
+}
+
+/// Reports the display refresh that `update` woke the app for to the frame
+/// timeline: when the frame should be done, when it will be shown, and the time
+/// since the last update's frame was to be shown, the refresh interval while
+/// frames keep up.
+fn display_link_tick(update: &CAMetalDisplayLinkUpdate, last_presentation: &Cell<Option<f64>>) {
+    let now = CACurrentMediaTime();
+    let presentation = update.targetPresentationTimestamp();
+    let period = last_presentation
+        .replace(Some(presentation))
+        .map(|last| presentation - last)
+        .filter(|&period| period > 0.0);
+    let ns = |seconds: f64| (seconds * 1e9) as i64;
+    tracing::info!(
+        name: "display link",
+        target: "dust::frame",
+        target_offset_ns = ns(update.targetTimestamp() - now),
+        present_offset_ns = ns(presentation - now),
+        period_ns = period.map(ns),
+    );
 }

@@ -32,16 +32,19 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Dxgi",
   "Win32_Graphics_Dxgi_Common",
   "Win32_Security",
+  "Win32_System_Performance",
   "Win32_System_Threading",
+  "Win32_System_WindowsProgramming",
   "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 bevy_pumicite.workspace = true
+block2 = "0.6"
 objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFRunLoop"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSObject", "NSRunLoop", "NSString"] }
 objc2-metal = "0.3.2"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-quartz-core", "NSCursor", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
-objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "CALayer", "CAMetalDisplayLink", "CAMetalLayer"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "CABase", "CALayer", "CAMetalDisplayLink", "CAMetalLayer"] }

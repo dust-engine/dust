@@ -2659,6 +2659,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_pumicite",
+ "block2 0.6.2",
  "dust_input",
  "futures-channel",
  "futures-util",

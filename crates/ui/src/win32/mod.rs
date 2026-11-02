@@ -3,6 +3,7 @@
 //! compositor frame ([`layer`]), and the swapchain that presents into that visual
 //! with the composition swapchain API ([`swapchain`]).
 
+mod clock;
 mod layer;
 pub(crate) mod swapchain;
 

@@ -118,13 +118,15 @@ fn build_gpui_app(
 
 /// Runs one update of `app`, in the `frame` span that delimits frames on the
 /// frame timeline (see `dust_profiler::timeline`), named by Bevy's
-/// `FrameCount`, which counts updates from the first.
-fn update_frame(app: &mut App) {
+/// `FrameCount`, which counts updates from the first. `starting` runs in the
+/// span first, for the runner to report the display tick it woke for.
+fn update_frame(app: &mut App, starting: impl FnOnce()) {
     let index = app
         .world()
         .get_resource::<FrameCount>()
         .map_or(0, |count| count.0);
     let _frame = tracing::info_span!(target: "dust::frame", "frame", index).entered();
+    starting();
     app.update();
 }
 

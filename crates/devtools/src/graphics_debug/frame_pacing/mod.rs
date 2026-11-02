@@ -207,11 +207,14 @@ impl FramePacingPage {
             .map(|frame| &**frame)
             .collect();
         let shown = &frames[frames.len().saturating_sub(self.shown)..];
+        // The shortest: a tick's period can be several refreshes when frames
+        // miss some.
         let refresh_interval = frames
             .iter()
-            .rev()
-            .flat_map(|frame| frame.ticks.iter().rev())
-            .find_map(|tick| tick.period)
+            .flat_map(|frame| &frame.ticks)
+            .filter_map(|tick| tick.period)
+            .filter(|&period| period > 0)
+            .min()
             .unwrap_or(SIXTY_HZ);
         self.derived = Some(Derived {
             overview: stats::overview(&window, refresh_interval),
