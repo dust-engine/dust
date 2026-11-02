@@ -63,9 +63,7 @@ struct RainbowDemo {
 /// overlay over it. The Bevy app runs on a thread of its own, and the UI on this
 /// one, the main thread.
 pub fn run() {
-    // DevTools shows the timeline once it has a page for it; until then the
-    // layer records into it regardless.
-    let (console_log, _timeline) = init_logging();
+    let (console_log, timeline) = init_logging();
     gpui_platform::application()
         .with_assets(gpui_kit_assets::Assets)
         .run(move |cx: &mut gpui::App| {
@@ -95,7 +93,7 @@ pub fn run() {
                         false
                     }
                 });
-                let overlay = dust_devtools::overlay(console_log, window, cx);
+                let overlay = dust_devtools::overlay(console_log, timeline, window, cx);
                 window.focus(&game.focus_handle(cx), cx);
                 // Transparent, so the game shows through.
                 cx.new(|cx| {

@@ -30,14 +30,17 @@
 use std::panic::Location;
 
 use bevy::ecs::system::{RunSystemOnce as _, SystemHandle};
-use bevy::prelude::{DetectChanges as _, In, IntoSystem, Res, World, warn, warn_once};
-use dust_profiler::GpuProfiler;
+use std::collections::VecDeque;
+use std::time::Duration;
+
+use bevy::prelude::{In, IntoSystem, Res, warn, warn_once};
+use dust_profiler::timeline::{FrameTimeline, Nanos};
 use dust_ui::{BevyChannel, GPUIChannel};
 use gpui::{
     AnyView, AnyWindowHandle, App, AppContext as _, Bounds, Context, ElementId, Entity,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
-    Styled as _, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions,
-    actions, div, prelude::FluentBuilder as _, px, size,
+    Styled as _, Task, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle,
+    WindowOptions, actions, div, prelude::FluentBuilder as _, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -50,7 +53,6 @@ use gpui_component::{
 use crate::console::{ConsoleLog, ConsoleView};
 use crate::entities::EntitiesView;
 use crate::graphics_debug::GraphicsDebugView;
-use crate::performance::{PerformanceOverlay, PerformancePanel};
 use crate::player::PlayerOverlay;
 use crate::schedules::SchedulesView;
 
@@ -68,15 +70,22 @@ pub enum DockSide {
 }
 
 /// Builds the overlay drawn over the game's `BevyView`: the DevTools dock, with
-/// its Graphics Debug, Entities, Schedules and Console tabs, and the
-/// performance and player overlays. [`DevTools::add_tab`] adds more tabs.
+/// its Graphics Debug, Entities, Schedules and Console tabs, and the player
+/// overlay. [`DevTools::add_tab`] adds more tabs.
 ///
 /// The console shows the messages logged to `console_log`; see
-/// [`console_layer`](crate::console_layer).
-pub fn overlay(console_log: ConsoleLog, window: &mut Window, cx: &mut App) -> Entity<DevTools> {
+/// [`console_layer`](crate::console_layer). Graphics Debug's Frame pacing page
+/// and the frame rate in the tab strip show the frames on `timeline`; see
+/// [`dust_profiler::timeline`].
+pub fn overlay(
+    console_log: ConsoleLog,
+    timeline: FrameTimeline,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<DevTools> {
     Theme::change(ThemeMode::Dark, Some(window), cx);
 
-    let devtools = cx.new(|cx| DevTools::new(console_log, window, cx));
+    let devtools = cx.new(|cx| DevTools::new(console_log, timeline, window, cx));
     cx.bind_keys([
         KeyBinding::new("f12", ToggleDevTools, None),
         KeyBinding::new("cmd-alt-i", ToggleDevTools, None),
@@ -110,31 +119,60 @@ pub struct DevTools {
     selected: usize,
     /// Title and view of each tab, in the order they show.
     tabs: Vec<(SharedString, AnyView)>,
-    performance: Entity<PerformanceOverlay>,
-    performance_open: bool,
     player: Entity<PlayerOverlay>,
     player_open: bool,
-    /// Shown in the tab strip.
+    /// Shown in the tab strip; kept up to date by `_frame_rate`.
     average_fps: f32,
-    /// Whether the device supports GPU timings, and whether they are measured;
-    /// shown in the ⋮ menu.
-    gpu_timings: Option<(bool, bool)>,
+    _frame_rate: Task<()>,
 }
 
-/// The average frame rate, each frame.
-fn average_fps(performance: Option<Res<PerformancePanel>>) -> Option<f32> {
-    performance
-        .filter(|panel| panel.is_changed())
-        .map(|panel| panel.average_fps())
-}
+/// How many of the newest frames the frame rate in the tab strip averages.
+const FRAME_RATE_WINDOW: usize = 120;
 
-fn gpu_timings(profiler: Option<Res<GpuProfiler>>) -> Option<(bool, bool)> {
-    profiler.map(|profiler| (profiler.is_supported(), profiler.enabled))
+/// Keeps the frame rate in the tab strip up to date with the newest frames on
+/// `timeline`, twice a second.
+fn track_frame_rate(timeline: FrameTimeline, cx: &mut Context<DevTools>) -> Task<()> {
+    cx.spawn(async move |this, cx| {
+        let mut intervals: VecDeque<Nanos> = VecDeque::new();
+        let mut newest = None;
+        loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
+            for summary in timeline.summaries_after(newest) {
+                newest = Some(summary.index);
+                intervals.extend(summary.interval);
+            }
+            while intervals.len() > FRAME_RATE_WINDOW {
+                intervals.pop_front();
+            }
+            let total: Nanos = intervals.iter().sum();
+            let fps = if total > 0 {
+                intervals.len() as f32 * 1e9 / total as f32
+            } else {
+                0.0
+            };
+            let updated = this.update(cx, |this, cx| {
+                if this.average_fps != fps {
+                    this.average_fps = fps;
+                    cx.notify();
+                }
+            });
+            if updated.is_err() {
+                break;
+            }
+        }
+    })
 }
 
 impl DevTools {
-    fn new(console_log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let graphics_debug = cx.new(|cx| GraphicsDebugView::new(window, cx));
+    fn new(
+        console_log: ConsoleLog,
+        timeline: FrameTimeline,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let graphics_debug = cx.new(|cx| GraphicsDebugView::new(timeline.clone(), window, cx));
         let entities = cx.new(|cx| EntitiesView::new(window, cx));
         let schedules = cx.new(|cx| SchedulesView::new(window, cx));
         let console = cx.new(|cx| ConsoleView::new(console_log, window, cx));
@@ -150,12 +188,10 @@ impl DevTools {
                 ("Schedules".into(), schedules.into()),
                 ("Console".into(), console.into()),
             ],
-            performance: cx.new(|cx| PerformanceOverlay::new(window, cx)),
-            performance_open: true,
             player: cx.new(|cx| PlayerOverlay::new(window, cx)),
             player_open: true,
             average_fps: 0.0,
-            gpu_timings: None,
+            _frame_rate: track_frame_rate(timeline, cx),
         }
     }
 
@@ -221,15 +257,6 @@ impl DevTools {
         div()
             .relative()
             .size_full()
-            .when(self.performance_open, |scene| {
-                scene.child(
-                    div()
-                        .absolute()
-                        .top_2()
-                        .left_2()
-                        .child(self.performance.clone()),
-                )
-            })
             .when(self.player_open, |scene| {
                 scene.child(
                     div()
@@ -241,15 +268,9 @@ impl DevTools {
             })
     }
 
-    /// Tab strip, then the selected tab's contents; drawn in `window`, the
-    /// game's or the detached one.
-    fn panel(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        watch(window, cx, average_fps, |this, fps, _, _| {
-            this.average_fps = fps
-        });
-        read(window, cx, gpu_timings, |this, timings, _, _| {
-            this.gpu_timings = timings
-        });
+    /// Tab strip, then the selected tab's contents; drawn in the game's window
+    /// or the detached one.
+    fn panel(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let menu = self.menu(cx);
         let theme = cx.theme();
         // The tab bar draws the border under the header, so the frame rate and
@@ -360,46 +381,15 @@ impl DevTools {
                                 .ok();
                         })
                 };
-                menu = menu
-                    .item(toggle("Performance overlay", this.performance_open, |d| {
-                        d.performance_open = !d.performance_open
-                    }))
-                    .item(toggle("Player overlay", this.player_open, |d| {
-                        d.player_open = !d.player_open
-                    }));
-                if let Some((supported, enabled)) = this.gpu_timings {
-                    let devtools = devtools.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(if supported {
-                            "GPU timings"
-                        } else {
-                            "GPU timings (timestamp queries unsupported)"
-                        })
-                        .checked(enabled)
-                        .disabled(!supported)
-                        .on_click(move |_, _, cx| {
-                            devtools
-                                .update(cx, |devtools, cx| {
-                                    devtools.gpu_timings = Some((supported, !enabled));
-                                    cx.notify();
-                                })
-                                .ok();
-                            cx.global::<BevyChannel>().update(move |world: &mut World| {
-                                if let Some(mut profiler) = world.get_resource_mut::<GpuProfiler>()
-                                {
-                                    profiler.enabled = !enabled;
-                                }
-                            });
-                        }),
-                    );
-                }
-                menu
+                menu.item(toggle("Player overlay", this.player_open, |d| {
+                    d.player_open = !d.player_open
+                }))
             })
     }
 }
 
 impl Render for DevTools {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let scene = self.scene();
         if !self.open {
             return div().size_full().child(scene).into_any_element();
@@ -411,7 +401,7 @@ impl Render for DevTools {
                     resizable_panel()
                         .size(px(480.))
                         .size_range(px(160.)..px(4096.))
-                        .child(self.panel(window, cx)),
+                        .child(self.panel(cx)),
                 )
                 .into_any_element(),
             DockSide::Left => h_resizable("devtools-dock-left")
@@ -419,7 +409,7 @@ impl Render for DevTools {
                     resizable_panel()
                         .size(px(480.))
                         .size_range(px(160.)..px(4096.))
-                        .child(self.panel(window, cx)),
+                        .child(self.panel(cx)),
                 )
                 .child(resizable_panel().child(scene))
                 .into_any_element(),
@@ -429,7 +419,7 @@ impl Render for DevTools {
                     resizable_panel()
                         .size(px(320.))
                         .size_range(px(120.)..px(4096.))
-                        .child(self.panel(window, cx)),
+                        .child(self.panel(cx)),
                 )
                 .into_any_element(),
             // The panel is in its own window.
@@ -442,10 +432,10 @@ impl Render for DevTools {
 struct DetachedPanel(Entity<DevTools>);
 
 impl Render for DetachedPanel {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Updating DevTools here, as reading it, has this window redrawn when
         // DevTools notifies.
-        self.0.update(cx, |devtools, cx| devtools.panel(window, cx))
+        self.0.update(cx, |devtools, cx| devtools.panel(cx))
     }
 }
 

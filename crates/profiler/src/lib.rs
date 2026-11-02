@@ -3,8 +3,9 @@
 //! [`GpuProfiler`] lets render passes measure how long specific GPU operations
 //! take. A pass wraps its work in [`GpuTimerCommands::timing_scope`] on the
 //! command encoder; the profiler records a timestamp before and after, and a
-//! few frames later reads the pair back and reports the elapsed time as
-//! `(end - start) * VkPhysicalDeviceLimits::timestampPeriod`.
+//! few frames later reads the pair back and reports the elapsed time,
+//! `(end - start) * VkPhysicalDeviceLimits::timestampPeriod`, as a `gpu` event
+//! on the frame timeline (see [`timeline`]), for the frame that recorded it.
 //!
 //! ## Usage
 //!
@@ -49,6 +50,7 @@ pub mod timeline;
 
 use std::{collections::VecDeque, sync::Arc};
 
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy_pumicite::{CreateDevice, DefaultRenderSet};
 use pumicite::{
@@ -93,6 +95,9 @@ struct ScopeRecord {
 /// to the ring once the frame is resolved or dropped.
 #[derive(Default)]
 struct Frame {
+    /// Bevy's `FrameCount` when the frame was recorded, which names it on the
+    /// frame timeline.
+    index: u32,
     /// First ring slot this frame occupies (`head` when the frame began).
     start: u32,
     scopes: Vec<ScopeRecord>,
@@ -143,10 +148,6 @@ pub struct GpuProfiler {
     current: Frame,
     /// Recorded frames awaiting GPU completion and readback.
     pending: VecDeque<Frame>,
-
-    /// Latest resolved durations as `(label, milliseconds)`, in first-seen
-    /// order for stable display.
-    timings: Vec<(&'static str, f32)>,
 }
 
 impl GpuProfiler {
@@ -183,7 +184,6 @@ impl GpuProfiler {
             overflowed: false,
             current: Frame::default(),
             pending: VecDeque::new(),
-            timings: Vec::new(),
         }
     }
 
@@ -192,16 +192,12 @@ impl GpuProfiler {
         self.supported
     }
 
-    /// Latest resolved timings in first-seen order: `(label, milliseconds)`.
-    pub fn timings(&self) -> impl Iterator<Item = (&'static str, f32)> + '_ {
-        self.timings.iter().copied()
-    }
-
     // ─── Per-frame lifecycle ────────────────────────────────────────────────
 
     /// Reads back every pending frame whose timestamps the GPU has finished
-    /// writing, updating the reported timings and freeing their slots. Stops at
-    /// the first frame that is not yet available (frames complete in order).
+    /// writing, reporting its timings to the frame timeline and freeing their
+    /// slots. Stops at the first frame that is not yet available (frames
+    /// complete in order).
     fn resolve_pending(&mut self) {
         // Take the pool out so `self` can be mutated freely while reading. The
         // `Arc` is moved, not dropped, so the pool stays alive.
@@ -209,7 +205,7 @@ impl GpuProfiler {
             return;
         };
         while let Some(front) = self.pending.front() {
-            let mut results: Vec<(&'static str, f32)> = Vec::with_capacity(front.scopes.len());
+            let mut results: Vec<(&'static str, u64)> = Vec::with_capacity(front.scopes.len());
             let mut state = ReadState::Ready;
             for sc in &front.scopes {
                 let mut pair = [TimestampResult::default(); 2];
@@ -222,8 +218,8 @@ impl GpuProfiler {
                         let s = pair[0].value & self.valid_mask;
                         let e = pair[1].value & self.valid_mask;
                         let ticks = e.wrapping_sub(s) & self.valid_mask;
-                        let ms = ticks as f64 * self.period_ns as f64 / 1.0e6;
-                        results.push((sc.label, ms as f32));
+                        let nanos = ticks as f64 * self.period_ns as f64;
+                        results.push((sc.label, nanos as u64));
                     }
                     Ok(()) => {
                         state = ReadState::NotReady;
@@ -244,8 +240,15 @@ impl GpuProfiler {
                 ReadState::Ready => {
                     let frame = self.pending.pop_front().unwrap();
                     self.free_frame(&pool, &frame);
-                    for (label, ms) in results {
-                        self.record_timing(label, ms);
+                    for (pass, duration_ns) in results {
+                        tracing::info!(
+                            name: "gpu",
+                            target: timeline::target::GPU,
+                            frame = frame.index,
+                            pass,
+                            duration_ns,
+                            calibrated = false,
+                        );
                     }
                 }
                 ReadState::Error => {
@@ -308,14 +311,6 @@ impl GpuProfiler {
             self.pending.clear();
         }
         self.overflowed = false;
-    }
-
-    fn record_timing(&mut self, label: &'static str, ms: f32) {
-        if let Some(entry) = self.timings.iter_mut().find(|(l, _)| *l == label) {
-            entry.1 = ms;
-        } else {
-            self.timings.push((label, ms));
-        }
     }
 
     // ─── Scope recording (called from the command encoder) ──────────────────
@@ -444,7 +439,7 @@ fn setup_gpu_profiler(
 }
 
 /// Drains finished readbacks and (re)allocates the pool if it overflowed.
-fn gpu_profiler_begin_frame(profiler: Option<ResMut<GpuProfiler>>) {
+fn gpu_profiler_begin_frame(profiler: Option<ResMut<GpuProfiler>>, frame_count: Res<FrameCount>) {
     let Some(mut profiler) = profiler else {
         return;
     };
@@ -462,6 +457,7 @@ fn gpu_profiler_begin_frame(profiler: Option<ResMut<GpuProfiler>>) {
 
     // Start a fresh frame at the current ring position.
     profiler.current = Frame {
+        index: frame_count.0,
         start: profiler.head,
         scopes: Vec::new(),
     };

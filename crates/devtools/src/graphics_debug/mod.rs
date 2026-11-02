@@ -1,14 +1,16 @@
 //! The "Graphics Debug" DevTools tab: a sidebar of pages on the left and the
 //! selected page on the right. The sidebar groups the pages into sections
-//! split by separators: information pages such as "GPU Info" first, then the
-//! render stages, in the order they run within a frame, each showing its
-//! debug toggles.
+//! split by separators: information pages such as "GPU Info" and "Frame
+//! pacing" first, then the render stages, in the order they run within a
+//! frame, each showing its debug toggles.
 
+mod frame_pacing;
 mod gpu;
 mod screen_trace;
 mod sharc;
 mod sky;
 
+use dust_profiler::timeline::FrameTimeline;
 use gpui::{
     AnyView, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
@@ -21,6 +23,9 @@ struct Page {
     name: &'static str,
     /// The page's view; `None` for a render stage without debug toggles.
     contents: Option<AnyView>,
+    /// Whether the page takes the whole width, rather than a column of
+    /// controls.
+    wide: bool,
 }
 
 pub(crate) struct GraphicsDebugView {
@@ -31,12 +36,26 @@ pub(crate) struct GraphicsDebugView {
 }
 
 impl GraphicsDebugView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let page = |name, contents: Option<AnyView>| Page { name, contents };
-        let info = vec![page(
-            "GPU Info",
-            Some(cx.new(|cx| gpu::GpuInfoPage::new(window, cx)).into()),
-        )];
+    pub fn new(timeline: FrameTimeline, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let page = |name, contents: Option<AnyView>| Page {
+            name,
+            contents,
+            wide: false,
+        };
+        let info = vec![
+            page(
+                "GPU Info",
+                Some(cx.new(|cx| gpu::GpuInfoPage::new(window, cx)).into()),
+            ),
+            Page {
+                name: "Frame pacing",
+                contents: Some(
+                    cx.new(|cx| frame_pacing::FramePacingPage::new(timeline, window, cx))
+                        .into(),
+                ),
+                wide: true,
+            },
+        ];
         let render_pipeline = vec![
             page(
                 "Sky atmosphere",
@@ -107,8 +126,11 @@ impl Render for GraphicsDebugView {
             }
         }
         let (s, p) = self.selected;
-        let contents = match self.sections[s][p].contents.clone() {
-            Some(view) => div().max_w(px(640.)).child(view),
+        let page = &self.sections[s][p];
+        let contents = match page.contents.clone() {
+            Some(view) => div()
+                .when(!page.wide, |contents| contents.max_w(px(640.)))
+                .child(view),
             None => div()
                 .text_color(theme.muted_foreground)
                 .child("No debug toggles for this stage."),
@@ -116,6 +138,9 @@ impl Render for GraphicsDebugView {
         h_flex().size_full().items_start().child(sidebar).child(
             div()
                 .flex_1()
+                // Or the page is as wide as its widest unwrapped line, past
+                // the panel's edge.
+                .min_w_0()
                 .h_full()
                 .p_2()
                 .overflow_y_scrollbar()
