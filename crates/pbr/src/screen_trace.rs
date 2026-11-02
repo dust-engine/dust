@@ -231,7 +231,6 @@ impl Plugin for ScreenTracePlugin {
                     .before(crate::final_gather_pass),
                 screen_trace_debug_pass
                     .in_set(DefaultRenderSet)
-                    .after(crate::final_gather_pass)
                     // Before the upscaler overwrites the denoised image, so
                     // the "previous color" view shows what the trace read.
                     .before(crate::upscaler::upscaler_evaluate)

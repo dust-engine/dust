@@ -128,8 +128,7 @@ pub struct UpscalerSessionState {
 
 pub(crate) fn ensure_upscaler_session(
     // Only DLSS records work when a session is created.
-    #[cfg_attr(not(feature = "dlss"), allow(unused_mut, unused_variables))]
-    mut ctx: SubmissionState,
+    #[cfg(feature = "dlss")] mut ctx: SubmissionState,
     upscaler: Option<Res<Upscaler>>,
     mut state: ResMut<UpscalerSessionState>,
     hdr_target: Option<Res<HdrRenderTarget>>,

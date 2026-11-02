@@ -356,8 +356,7 @@ impl Plugin for SharcDebugPlugin {
                 clear_sharc_buffers
                     .in_set(DefaultRenderSet)
                     .run_if(crate::screen_trace::hardware_gather_enabled)
-                    .after(PbrRenderSet)
-                    .after(crate::shadow_pass),
+                    .after(PbrRenderSet),
                 sharc_update_pass
                     .in_set(DefaultRenderSet)
                     .run_if(crate::screen_trace::hardware_gather_enabled)

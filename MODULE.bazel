@@ -167,7 +167,7 @@ new_git_repository(
 new_git_repository(
     name = "sharc",
     remote = "https://github.com/NVIDIA-RTX/SHARC.git",
-    commit = "5a976dc60d3a035a63a3f1959c77f1adaa1ec23c",
+    commit = "4e21b585c33c83d723ca9a1e11bbb1090d145793",
     build_file = "//third_party:SHARC.BUILD.bazel",
     # Apple GPUs (Metal) lack 64-bit atomics, so SHARC runs the lock-buffer
     # insert path (HASH_GRID_ENABLE_64_BIT_ATOMICS 0). This patch adds an

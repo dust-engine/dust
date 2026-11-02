@@ -499,7 +499,7 @@
     },
     "@@rules_rust+//crate_universe:extensions.bzl%crate": {
       "general": {
-        "bzlTransitiveDigest": "yiEJ8AorDjkYocmiP8FamHN7+8PiRJWfxHTpFjUWYPI=",
+        "bzlTransitiveDigest": "khQ/8J4ENIuVRz2pnBu+2ZJYa5rAiIeLGa4jlyYks6I=",
         "usagesDigest": "NeKe7yOrgVlB+rin/uSZYUf1HCtXItkX7FvYGZJrL7I=",
         "recordedInputs": [
           "ENV:CARGO_BAZEL_DEBUG \\0",
@@ -525,7 +525,17 @@
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "REPO_MAPPING:rules_rust+,cargo_bazel_bootstrap rules_rust++cu_nr+cargo_bazel_bootstrap",
           "FILE:@@//Cargo.lock 53df9974e2d89c219993e1c06044a142252b8840f14a1b3ec5ace15553d3922b",
-          "FILE:@@//Cargo.toml ac2d05443bb1386d45359d937541c582a94f049f90caae078d0b9b527dbbfe5d"
+          "FILE:@@//Cargo.toml 53fabcf2bb7bc8e9682e9cf759a5ec461dd3c3abacd509e0c50cceeb60afdc92",
+          "FILE:@@//crates/app/Cargo.toml 7edcdfdc3a64e744d6fb9c957de76e448d7c7fc5af2fd78de0d836e123880f4b",
+          "FILE:@@//crates/character/Cargo.toml b2d6392d1943a79044e0e2f909fbdc0c5c7fc1601fefa24229eb9934f598f755",
+          "FILE:@@//crates/devtools/Cargo.toml 9ca98e16d4ef7fea36f6f8d96952086f35b7732e2ab1d4dac238428844b85f61",
+          "FILE:@@//crates/pbr/Cargo.toml a5d632834c3b193c83188606aee50fde678e222e70a268b013ec723ff9155e91",
+          "FILE:@@//crates/profiler/Cargo.toml aa0eafc72e191ec50101e4bdaee85fa0c04cb132399e4cc9b8a008a582ce176b",
+          "FILE:@@//crates/ui/Cargo.toml 96636863f13dc0114145cfb1ba79a5e76ec3d67b5fa2e9a59b471de4e89ccca9",
+          "FILE:@@//crates/input/Cargo.toml bc3c3f3da3438973c07ee3733af85f29a6708ef3fe6d3131d9f1db1bf3e94a35",
+          "FILE:@@//crates/physics/Cargo.toml 729b3d816f69ebfe8d00faf93f9729c517862738f18f2d29376bf992d40d4856",
+          "FILE:@@//crates/vdb/Cargo.toml 6ea73b1b47d5f3ae48e03112413f81dd1b9d29a593c604d7ebabb404da21ee60",
+          "FILE:@@//crates/vox/Cargo.toml b024052fca73d03281ace403b9fedd2515f05140981fff4969a86b63f9973893"
         ],
         "generatedRepoSpecs": {
           "crates": {
@@ -13697,7 +13707,7 @@
     },
     "@@rules_rust+//crate_universe/private:internal_extensions.bzl%cu_nr": {
       "general": {
-        "bzlTransitiveDigest": "OgRXlEvMFxpvHDEnF6m3OQBkBrRtjsXwjfhPLRh1oZo=",
+        "bzlTransitiveDigest": "Ja6MU3EmLu6xGBXeeOHcsDWnl371asFJF33vlAlFTG8=",
         "usagesDigest": "McimNXAztVHDzspa1Kng94T+YeyY/44zx9FkNqIMn2s=",
         "recordedInputs": [
           "REPO_MAPPING:apple_support+,bazel_skylib bazel_skylib+",

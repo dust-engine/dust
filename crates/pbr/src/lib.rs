@@ -172,10 +172,15 @@ impl Plugin for PbrRenderPlugin {
                 clear_debug_overlay
                     .in_set(DefaultRenderSet)
                     .after(ensure_hdr_target),
-                ensure_upscaler_session
-                    .in_set(DefaultRenderSet)
-                    .after(ensure_hdr_target)
-                    .before(render),
+                {
+                    let session = ensure_upscaler_session
+                        .after(ensure_hdr_target)
+                        .before(render);
+
+                    #[cfg(feature = "dlss")]
+                    return session.in_set(DefaultRenderSet);
+                    session
+                },
                 advance_jitter
                     .in_set(DefaultRenderSet)
                     .after(ensure_upscaler_session)
@@ -201,7 +206,6 @@ impl Plugin for PbrRenderPlugin {
                     .in_set(DefaultRenderSet)
                     .after(PbrRenderSet)
                     .after(render)
-                    .after(hzb::hzb_build_pass)
                     .after(create_sbt),
                 final_gather_pass
                     .in_set(DefaultRenderSet)

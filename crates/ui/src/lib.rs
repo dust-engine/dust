@@ -110,7 +110,8 @@ fn build_gpui_app(
         .add_systems(PostStartup, move |ui: Res<GPUIChannel>| {
             let view = view.clone();
             ui.update(move |cx| {
-                view.update(cx, |view, cx| view.set_splash_shown(false, cx)).ok();
+                view.update(cx, |view, cx| view.set_splash_shown(false, cx))
+                    .ok();
             });
         });
 }
