@@ -2644,6 +2644,8 @@ dependencies = [
  "bevy",
  "bevy_pumicite",
  "pumicite",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

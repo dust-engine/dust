@@ -7,3 +7,5 @@ edition = "2024"
 bevy.workspace = true
 pumicite.workspace = true
 bevy_pumicite.workspace = true
+tracing = "0.1"
+tracing-subscriber = "0.3"

@@ -45,6 +45,8 @@
 //! timestamp [`CommandEncoder::retain`]s a clone of the `Arc`, so dropping the
 //! old pool defers its destruction until the GPU stops referencing it.
 
+pub mod timeline;
+
 use std::{collections::VecDeque, sync::Arc};
 
 use bevy::prelude::*;
@@ -53,6 +55,7 @@ use pumicite::{
     Device, Instance, ash::vk, command::CommandEncoder, physical_device::PhysicalDevice,
     query::QueryPool, utils::AsVkHandle,
 };
+use tracing::warn;
 
 /// Initial pool size in timestamp slots. Grows on demand.
 const INITIAL_CAPACITY: u32 = 256;
