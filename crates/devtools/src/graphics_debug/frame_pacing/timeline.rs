@@ -275,30 +275,42 @@ pub(super) fn lanes(frames: &[&FrameRecord], threads: &[Name]) -> Lanes {
     other.sort_by_key(|(thread, _)| *thread);
     lanes.extend(other.into_iter().map(|(_, lane)| lane));
 
-    // GPU work placed on the CPU's clock: a lane per depth.
-    let mut gpu_lanes: Vec<Lane> = Vec::new();
+    // GPU work placed on the CPU's clock: lanes for each queue, as a compute
+    // queue's work overlaps the render queue's, with one per depth, the
+    // submissions first and the scopes in them under them.
+    let mut gpu_lanes: Vec<(Option<Name>, u16, Lane)> = Vec::new();
     for frame in frames {
         for gpu in &frame.gpu {
             let (Some(begin), Some(end_at)) = (gpu.begin, gpu.end) else {
                 continue;
             };
             end = end.max(end_at);
-            let lane = usize::from(gpu.depth);
-            while gpu_lanes.len() <= lane {
-                gpu_lanes.push(Lane {
-                    label: gpu_lanes.is_empty().then(|| "GPU".into()),
-                    bars: Vec::new(),
-                });
-            }
+            let at = match gpu_lanes
+                .iter()
+                .position(|(queue, depth, _)| *queue == gpu.queue && *depth == gpu.depth)
+            {
+                Some(at) => at,
+                None => {
+                    gpu_lanes.push((
+                        gpu.queue.clone(),
+                        gpu.depth,
+                        Lane {
+                            label: None,
+                            bars: Vec::new(),
+                        },
+                    ));
+                    gpu_lanes.len() - 1
+                }
+            };
             let mut detail = format!("{} · GPU · {}", gpu.name, ms(gpu.duration));
             if let Some(set) = &gpu.set {
                 let _ = write!(detail, " · {set}");
             }
-            if !gpu.calibrated {
-                detail.push_str(" · estimated placement");
+            if let Some(queue) = &gpu.queue {
+                let _ = write!(detail, " · queue {queue}");
             }
             let _ = write!(detail, " · frame #{}", frame.index);
-            gpu_lanes[lane].bars.push(Bar {
+            gpu_lanes[at].2.bars.push(Bar {
                 begin,
                 end: end_at,
                 color: hashed_color(&gpu.name, 0.55, 0.45),
@@ -307,7 +319,18 @@ pub(super) fn lanes(frames: &[&FrameRecord], threads: &[Name]) -> Lanes {
             });
         }
     }
-    lanes.extend(gpu_lanes);
+    gpu_lanes.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+    let mut labeled = None;
+    for (queue, _, mut lane) in gpu_lanes {
+        if labeled.as_ref() != Some(&queue) {
+            lane.label = Some(match &queue {
+                Some(queue) => format!("GPU {queue}").into(),
+                None => "GPU".into(),
+            });
+            labeled = Some(queue);
+        }
+        lanes.push(lane);
+    }
 
     Lanes {
         start,

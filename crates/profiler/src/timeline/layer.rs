@@ -451,6 +451,8 @@ impl<'a> EventFields<'a> {
             "duration_ns" => self.duration_ns = unsigned,
             "count" => self.count = unsigned,
             "depth" => self.depth = unsigned,
+            // A queue given as its family's index.
+            "queue" => self.queue = Some(self.shared.intern(&format!("family {value}"))),
             _ => {}
         }
     }

@@ -81,8 +81,16 @@ pub(super) struct FramePacingPage {
     /// Whether the page was drawn since the timeline last changed. While it
     /// isn't, it's hidden, and stops reading.
     drawn: bool,
-    /// Whether the device has GPU timestamps, and whether they're on.
-    gpu_timestamps: Option<(bool, bool)>,
+    gpu_timestamps: Option<GpuTimestamps>,
+}
+
+/// What the GPU profiler can do, and whether it's on.
+#[derive(Clone, Copy)]
+struct GpuTimestamps {
+    supported: bool,
+    /// Whether its timings can be placed on the CPU's clock.
+    calibrated: bool,
+    enabled: bool,
 }
 
 /// What the page draws, worked out from its frames.
@@ -102,8 +110,12 @@ struct Derived {
     details_dropped: bool,
 }
 
-fn gpu_timestamps(profiler: Option<Res<GpuProfiler>>) -> Option<(bool, bool)> {
-    profiler.map(|profiler| (profiler.is_supported(), profiler.enabled))
+fn gpu_timestamps(profiler: Option<Res<GpuProfiler>>) -> Option<GpuTimestamps> {
+    profiler.map(|profiler| GpuTimestamps {
+        supported: profiler.is_supported(),
+        calibrated: profiler.is_calibrated(),
+        enabled: profiler.is_enabled(),
+    })
 }
 
 impl FramePacingPage {
@@ -398,24 +410,25 @@ impl FramePacingPage {
                         cx.notify();
                     })),
             );
-        if let Some((supported, enabled)) = self.gpu_timestamps {
+        if let Some(gpu) = self.gpu_timestamps {
             toolbar = toolbar.child(
                 Checkbox::new("frame-pacing-gpu-timestamps")
-                    .label(if supported {
-                        "GPU timestamps"
-                    } else {
-                        "GPU timestamps (unsupported)"
+                    .label(match (gpu.supported, gpu.calibrated) {
+                        (false, _) => "GPU timestamps (unsupported)",
+                        // Durations, but not when on the CPU's clock.
+                        (true, false) => "GPU timestamps (not calibrated)",
+                        (true, true) => "GPU timestamps",
                     })
-                    .checked(enabled)
-                    .disabled(!supported)
+                    .checked(gpu.enabled)
+                    .disabled(!gpu.supported)
                     .on_click(cx.listener(|this, enabled: &bool, _, cx| {
                         let enabled = *enabled;
-                        if let Some((supported, _)) = this.gpu_timestamps {
-                            this.gpu_timestamps = Some((supported, enabled));
+                        if let Some(gpu) = &mut this.gpu_timestamps {
+                            gpu.enabled = enabled;
                         }
                         cx.global::<BevyChannel>().update(move |world: &mut World| {
-                            if let Some(mut profiler) = world.get_resource_mut::<GpuProfiler>() {
-                                profiler.enabled = enabled;
+                            if let Some(profiler) = world.get_resource::<GpuProfiler>() {
+                                profiler.set_enabled(enabled);
                             }
                         });
                         cx.notify();
