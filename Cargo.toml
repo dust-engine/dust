@@ -53,6 +53,9 @@ bevy_app = { version = "0.20.0", default-features = false, features = ["trace"] 
 bevy_ecs = { version = "0.20.0", default-features = false, features = ["trace"] }
 pumicite.workspace = true
 bevy_pumicite.workspace = true
+# GPUI marks its windows' drawing, presenting and input with the `profiling`
+# crate; as `tracing` spans, the frame timeline records them for the UI thread.
+profiling = { version = "1", features = ["profile-with-tracing"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.dependencies.bevy]

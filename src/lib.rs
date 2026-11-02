@@ -132,9 +132,9 @@ impl gpui::Render for MainView {
 ///
 /// The log's filter lets through info and above; `RUST_LOG` adds directives to
 /// that, so `RUST_LOG=dust_pbr=debug` keeps info from the other targets. It
-/// leaves out what the timeline records and Bevy's other spans, such as one
-/// for every system run, which would otherwise prefix log lines. The timeline
-/// has its own filter.
+/// leaves out what the timeline records and the other spans that only time
+/// things, Bevy's and GPUI's, such as one for every system run, which would
+/// otherwise prefix log lines. The timeline has its own filter.
 fn init_logging() -> (dust_devtools::ConsoleLog, FrameTimeline) {
     let (console_layer, console_log) = dust_devtools::console_layer();
     let (timeline_layer, timeline) = dust_profiler::timeline::timeline_layer();
@@ -152,16 +152,20 @@ fn init_logging() -> (dust_devtools::ConsoleLog, FrameTimeline) {
 }
 
 /// The filter of a layer that logs: info and above, plus `directives`, without
-/// what the frame timeline records or Bevy's other spans.
+/// what the frame timeline records or the other spans that only time things.
 fn log_filter<S: 'static>(directives: &str) -> impl Filter<S> + Send + Sync + 'static {
     EnvFilter::new(format!("info,{directives}")).and(
         filter_fn(|metadata| {
             // `bevy_app` and `bevy_ecs` only make spans for their `trace`
-            // feature: the app's run, each update, each plugin build.
-            let bevy_span = metadata.is_span()
-                && (metadata.target().starts_with("bevy_app")
-                    || metadata.target().starts_with("bevy_ecs"));
-            !bevy_span && !dust_profiler::timeline::is_timeline(metadata)
+            // feature (the app's run, each update, each plugin build), and
+            // GPUI only for `profiling`'s `profile-with-tracing`.
+            let timing_span = metadata.is_span()
+                && ["bevy_app", "bevy_ecs", "gpui"]
+                    .iter()
+                    .any(|target| metadata.target().starts_with(target));
+            // What `profiling::finish_frame!` sends as each UI frame ends.
+            let frame_mark = metadata.fields().field("tracy.frame_mark").is_some();
+            !timing_span && !frame_mark && !dust_profiler::timeline::is_timeline(metadata)
         })
         // Not a filter by level: the `EnvFilter`'s level is the hint.
         .with_max_level_hint(LevelFilter::TRACE),
