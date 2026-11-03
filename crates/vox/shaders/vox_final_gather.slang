@@ -143,7 +143,7 @@ void closestHitShader(uniform VoxModelParams model,
     // sample count. Hit-point albedo (sampled from the voxel palette by this
     // same CHS) rides along in the candidate so the Update path next frame
     // doesn't need a probe ray to recover it.
-    float3 hitAlbedo = mat.albedo().rgb;
+    float3 hitAlbedo = mat.linearAlbedo();
     float visualImpact = dot(primaryAlbedo, float3(0.2126, 0.7152, 0.0722));
     float weight = visualImpact / (1.0 + sampleNum);
     uint seed = xxhash32(

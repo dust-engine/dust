@@ -73,7 +73,7 @@ void closestHitShader(
     // 1/(1+sampleNum) so under-converged cells keep priority. Hit-point albedo
     // rides along so next frame's Update needs no probe ray to recover it.
     float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-    float3 hitAlbedo = color.xyz;
+    float3 hitAlbedo = mat.linearAlbedo();
     float w = dot(hitAlbedo, float3(0.2126, 0.7152, 0.0722)) / (1.0 + bounceSampleNum);
     uint seed = xxhash32(
         uint3(launchSlot, params.sharc.g_sharcConstants.frameIndex, 0xa5cc1c4du));

@@ -68,8 +68,8 @@ public enum SharcDebugMode
 /// Update rays (NEE + bounce) from this point — they don't address the cache,
 /// so sub-pixel jitter in them is harmless. `key` is the precomputed cache
 /// cell key (see `SharcParams::cellKey`); it's what actually addresses the
-/// hash map, decoupled from position. `albedo` rides along so the Update
-/// raygen doesn't fire a probe ray to recover it from the voxel palette.
+/// hash map, decoupled from position. `albedo` is linear, and rides along so the
+/// Update raygen doesn't fire a probe ray to recover it from the voxel palette.
 ///
 /// Layout matches `SharcResources::STRIDE_CANDIDATE` (std430 stride 64 B):
 /// three `float3` at 16 B each + a `uint64_t` key.

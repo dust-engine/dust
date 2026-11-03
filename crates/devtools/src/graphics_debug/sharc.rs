@@ -129,7 +129,7 @@ impl SharcPage {
             ),
             radiance_scale: NumberSlider::new(
                 "Radiance scale",
-                1.0..=1.0e4,
+                1.0..=1.0e6,
                 1.0,
                 true,
                 window,
