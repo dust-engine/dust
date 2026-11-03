@@ -3,9 +3,9 @@
 // One thread per cache entry. Each call to SharcResolveEntry() merges the
 // per-frame accumulation into the resolved buffer, manages stale-frame
 // eviction, and clears the accumulation slot for the next frame
-// (AGENTS.md §5.2 / SDK SharcCommon.h docs).
+// (see SharcCommon.h in the SDK).
 //
-// Has its own playout (set 0 binds: 3 SHARC buffers + a small constants UBO);
+// Has its own playout (set 0 binds: 4 SHARC buffers + a small constants UBO);
 // the layout is auto-derived by slang_playout from this single source.
 
 #define HASH_GRID_ENABLE_64_BIT_ATOMICS 0
@@ -24,7 +24,7 @@
 #include "SharcCommon.h"
 
 // Layout MUST match `SharcConstantsRaw` in crates/pbr/src/sharc.rs and
-// `SharcShaderConstants` in sharc_pt.slang. The resolve shader only uses a
+// `SharcShaderConstants` in sharc.slang. The resolve shader only uses a
 // subset of the fields but the wire format is one shared UBO, so missing /
 // reordering fields here causes Resolve to read `entriesNum` from the wrong
 // offset and degenerate into a 64-entry no-op.
@@ -38,7 +38,6 @@ struct SharcResolveConstants {
     uint staleFrameNum;
     uint entriesNum;
     uint frameIndex;
-    uint downscaleFactor;
     uint poolCapacity;
 }
 

@@ -8,7 +8,7 @@ _SLANG_BASE_OPTS = [
     "-matrix-layout-row-major",
 ]
 
-# SHARC Update raygen: sparse cache-population pass (AGENTS.md §11, §14).
+# SHARC Update raygen: sparse cache-population pass.
 slang_shader(
     name = "sharc_update",
     srcs = ["sharc_update.slang"],

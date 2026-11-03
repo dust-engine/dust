@@ -1,15 +1,15 @@
 //! SHARC integration: hash-grid debug overlay (Phase 1) + Update/Resolve
-//! pipeline (Phase 2, AGENTS.md §1).
+//! pipeline (Phase 2).
 //!
 //! When `SharcConfig::enabled` is true the renderer runs the cache-population
 //! passes each frame:
 //!
 //!     SHARC Update (sparse RT)  →  barrier  →  SHARC Resolve (compute)
 //!
-//! Visible indirect light continues to come from `final_gather_pass`; Update
-//! keeps the cache fresh so future work can sample from it. The Phase 1
-//! colored-hash debug overlay is painted by `final_gather` when SHARC is off,
-//! controlled by `SharcDebugState`.
+//! Visible indirect light comes from `final_gather_pass`, which reads the cache
+//! where its rays hit and pushes those hits into the candidate pool that next
+//! frame's Update traces from. The debug views are picked by `SharcDebugState`
+//! (see `SharcDebugMode`).
 
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
@@ -39,10 +39,12 @@ use crate::{
 
 // ─── SHARC debug visualization ─────────────────────────────────────────────
 
-/// Which SHARC debug view to draw. When not `Off`, the SHARC debug compute pass
-/// (`sharc_debug_overlay_pass`) paints the visualization into the debug overlay,
-/// which tonemap composites over the frame, and the shadow pass is skipped (see
-/// `shadow_pass`). Encoded into `SharcShaderConstants::debugMode`.
+/// Which SHARC debug view to draw. When not `Off`, the visualization is painted
+/// into the debug overlay, which tonemap composites over the frame, and the
+/// shadow pass is skipped (see `shadow_pass`). The per-surface views need voxel
+/// identity, so the primary closest-hit paints them; the SHARC debug compute
+/// pass (`sharc_debug_overlay_pass`) paints `HashOccupancy` and
+/// `CandidatePool`. Encoded into `SharcShaderConstants::debugMode`.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum SharcDebugMode {
     /// Normal rendering — no overlay.
@@ -60,8 +62,8 @@ pub enum SharcDebugMode {
     HashCollisions,
     HashOccupancy,
     /// Splat every occupied candidate-pool slot's world position onto the
-    /// screen — shows where the cache is generating candidates (i.e. where it's
-    /// short on samples). A scatter pass, not per-pixel.
+    /// screen — shows where the cache is generating candidates (weighted toward
+    /// cells short on samples). A scatter pass, not per-pixel.
     CandidatePool,
 }
 
@@ -79,7 +81,7 @@ impl SharcDebugMode {
     }
 }
 
-/// Controls for the SHARC debug visualization painted by the primary pass.
+/// Controls for the SHARC debug visualization (see `SharcDebugMode`).
 #[derive(Resource, Clone, Copy)]
 pub struct SharcDebugState {
     pub mode: SharcDebugMode,
@@ -129,13 +131,12 @@ pub(crate) struct SharcSystemParams<'w> {
 
 // ─── Phase 2: SHARC Update / Resolve pipeline ──────────────────────────────
 
-/// Tunable knobs that drive the SHARC passes (AGENTS.md §10).
+/// Tunable knobs that drive the SHARC passes.
 #[derive(Resource, Clone, Copy)]
 pub struct SharcConfig {
     pub enabled: bool,
     pub reset_pending: bool,
     pub entries_num: u32,
-    pub downscale_factor: u32,
     pub accumulation_frame_num: u32,
     pub stale_frame_num: u32,
     pub scene_scale: f32,
@@ -152,14 +153,13 @@ impl Default for SharcConfig {
         Self {
             enabled: true,
             reset_pending: true,
-            entries_num: 1 << 20, // 40 MiB total
-            downscale_factor: 5,
+            entries_num: 1 << 20, // 44 MiB total (40 B + 4 B lock per entry)
             accumulation_frame_num: 32,
             stale_frame_num: 64,
             scene_scale: 1.0,
             roughness_min: 0.4,
             radiance_scale: 1.0e3,
-            pool_capacity: 1 << 16, // 64K candidates × 32 B = 2 MiB per pool
+            pool_capacity: 1 << 16, // 64K candidates × 64 B = 4 MiB per pool
         }
     }
 }
@@ -177,10 +177,10 @@ pub(crate) struct SharcConstantsRaw {
     pub stale_frame_num: u32,
     pub entries_num: u32,
     pub frame_index: u32,
-    pub downscale_factor: u32,
     pub pool_capacity: u32,
-    /// Primary-pass debug view (`SharcDebugMode::as_u32`). The cache passes
-    /// leave this 0; only `render` sets it from `SharcDebugState`.
+    /// SHARC debug view (`SharcDebugMode::as_u32`). Only `render` and
+    /// `sharc_debug_overlay_pass` set it, for the primary closest-hit and the
+    /// debug shaders; the other passes leave it 0.
     pub debug_mode: u32,
     pub debug_brightness: f32,
 }
@@ -197,8 +197,8 @@ pub(crate) struct SharcFrameState {
 /// parity.
 ///
 /// Layout:
-///   - `candidates`: capacity × 32 B (`Candidate { vec3 worldPos; vec3 normal; }`
-///     padded to std430 stride).
+///   - `candidates`: capacity × 64 B (`Candidate { vec3 worldPos; vec3 normal;
+///     vec3 albedo; uint64_t key; }` at std430 stride, see `STRIDE_CANDIDATE`).
 ///   - `keys`: capacity × 4 B (`asuint(r)` per slot — the WRS-of-1 reservoir
 ///     key; 0 means empty).
 pub struct CandidatePool {
@@ -364,7 +364,7 @@ impl Plugin for SharcDebugPlugin {
                     .after(create_sharc_sbts)
                     // Update consumes this frame's read pool but ALSO writes
                     // cascade entries into the *write* pool — same buffer
-                    // final_gather's CHS pushes into on cache miss.
+                    // final_gather's CHS pushes every gather hit into.
                     // Serializing avoids both dispatches' atomic_max ops
                     // racing on the same shader storage in adjacent
                     // submissions.
@@ -552,9 +552,8 @@ pub(crate) fn build_sharc_constants(
         stale_frame_num: config.stale_frame_num,
         entries_num: config.entries_num,
         frame_index: frame_state.frame_index,
-        downscale_factor: config.downscale_factor,
         pool_capacity: config.pool_capacity,
-        // Debug-off by default; `render` overrides these for the primary pass.
+        // Debug-off by default; `render` and `sharc_debug_overlay_pass` override these.
         debug_mode: 0,
         debug_brightness: 1.0,
     }
@@ -609,10 +608,9 @@ fn sharc_update_pass(
     sbt.push_miss(0, 2, |_| {});
 
     let camera_origin = transform.translation();
-    // Reuse the frame's primary-RT jitter for worldPos reconstruction — the
-    // depth G-buffer was written by the jittered primary ray, so using the
-    // same jitter here makes the reconstructed worldPos coincide with the
-    // actual hit point Update is supposed to populate.
+    // Update traces from the candidates' stored hit points rather than
+    // rebuilding positions from the depth G-buffer, so the jitter here has no
+    // effect.
     let cam_uniform = build_camera_uniform(camera, transform, None, jitter.offset);
     let sharc_constants = build_sharc_constants(&config, &frame_state, camera_origin);
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
@@ -620,7 +618,7 @@ fn sharc_update_pass(
     };
 
     // Advance the canonical frame state — Update is the gate for "SHARC ran
-    // this frame", so `cameraPositionPrev` is tied to it (AGENTS.md §10).
+    // this frame", so `cameraPositionPrev` is tied to it.
     frame_state.prev_camera_position = camera_origin;
     frame_state.prev_has_value = true;
     let frame_index = frame_state.frame_index;

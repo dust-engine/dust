@@ -130,7 +130,8 @@ void shadowMissShader(inout SharcRayPayload payload) {
     float3 sunDir = params.sky.atmosphereParams.sun_direction;
     float ndotL = max(0.0, dot(N, sunDir));
     if (ndotL <= 0.0) return;
-    float3 transmittance = params.sky.sampleTransmittanceAt(cand.worldPos);
+    float3 samplePosFromCamera = cand.worldPos - params.uniforms.cameraOrigin();
+    float3 transmittance = params.sky.sampleTransmittanceAt(samplePosFromCamera);
     float3 irradiance =
         params.sky.atmosphereParams.solar_illuminance * transmittance * ndotL;
     float3 directLighting = cand.albedo * irradiance / kPi;

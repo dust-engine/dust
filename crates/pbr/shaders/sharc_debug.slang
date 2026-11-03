@@ -35,7 +35,7 @@ void main(uint3 threadId: SV_DispatchThreadID) {
 // a per-pixel pass: one thread per pool slot, dispatched over the pool rather
 // than the screen. Each occupied slot's candidate is projected to the current
 // camera and marked, so you can see where the cache is generating candidates —
-// i.e. where it's currently short on samples. The host binds the side
+// weighted toward cells short on samples. The host binds the side
 // final-gather wrote this frame to the read slots the accessors sample.
 [shader("compute")]
 [numthreads(32, 1, 1)]

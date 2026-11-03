@@ -1,8 +1,9 @@
 // Voxel hit group for the SHARC Update path-tracer pipeline.
 //
-// The closest-hit returns hit data (worldPos via t, world-space face normal,
-// albedo) through the payload; the ray-gen owns the SHARC state machine and
-// the multi-bounce loop. The intersection shader mirrors the DDA in
+// The closest-hit ends the ray-gen's single bounce: it deposits the bounce
+// target's emission and cached radiance into the source cell (slot from the
+// payload) and pushes the target into the candidate pool for next frame's
+// Update (the cascade). The intersection shader mirrors the DDA in
 // vox_pbr.slang — we keep it self-contained so this pipeline doesn't depend on
 // G-buffer outputs.
 

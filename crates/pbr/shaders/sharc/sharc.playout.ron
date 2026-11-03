@@ -50,7 +50,7 @@ PipelineLayout(
         ),
     ],
     push_constants: {
-        // sharc_pt.slang push_constant: { uint frameIndex; }
+        // sharc_update.slang push_constant: { uint frameIndex; }
         RayGen: (0, 4),
     }
 )

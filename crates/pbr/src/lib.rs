@@ -215,7 +215,7 @@ impl Plugin for PbrRenderPlugin {
                     .after(create_sbt)
                     // SHARC ping-pong: the write pool's keys must be cleared
                     // to 0 (so the WRS-of-1 atomic_max starts from "empty")
-                    // before vox_final_gather CHS pushes Query misses.
+                    // before vox_final_gather's CHS pushes its hits.
                     .after(sharc::clear_sharc_buffers),
                 autoexposure_pass
                     .in_set(DefaultRenderSet)
@@ -269,7 +269,7 @@ impl Plugin for PbrRenderPlugin {
                     })
                     .ok();
 
-                // SHARC requirements (AGENTS.md §14, SDK v1.8):
+                // SHARC requirements (SDK v1.8):
                 //   * shaderFloat16 + 16-bit storage for the SharcPackedData
                 //     resolved buffer (float16x4 per entry).
                 //   * shaderBufferInt64Atomics for the 64-bit hash-key CAS used
@@ -1452,12 +1452,8 @@ pub(crate) fn final_gather_pass(
     // the depth G-buffer via `primaryRayDirWorldSpace` — that depth was
     // written by the jittered primary ray, so we must reuse the same jitter.
     let uniform = build_camera_uniform(camera, transform, None, jitter.offset);
-    let mut sharc_constants =
+    let sharc_constants =
         sharc::build_sharc_constants(&sharc.config, &sharc.frame_state, transform.translation());
-    // Carry the debug mode so the gather CHS/miss suppress their HDR writes
-    // while a debug view owns the output. Final-gather still runs in that case
-    // to keep the cache seeded (its CHS keeps pushing candidates on misses).
-    sharc_constants.debug_mode = sharc.debug.mode.as_u32();
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.as_ref().cloned() else {
         return;
     };

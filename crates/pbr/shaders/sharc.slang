@@ -1,7 +1,7 @@
 module sharc;
 
-// SHARC SDK plumbing. Mirrors the prefix block in sharc_pt.slang so the cache
-// types (HashGridKey, SharcAccumulationData, SharcPackedData, SharcParameters,
+// SHARC SDK plumbing: configures SharcCommon.h so the cache types
+// (HashGridKey, SharcAccumulationData, SharcPackedData, SharcParameters,
 // SharcHitData, …) resolve when this module is compiled. Headers come from
 // @sharc//:sharc_headers — see crates/pbr/shaders/BUILD.bazel.
 #define HASH_GRID_ENABLE_64_BIT_ATOMICS 0
@@ -26,11 +26,12 @@ module sharc;
 #define BUFFER_AT_OFFSET(name, offset) name[offset]
 #include "SharcCommon.h"
 
-// Public mirror of `SharcConstantsRaw` in crates/pbr/src/sharc.rs and of the
-// hand-rolled `SharcShaderConstants` in sharc_pt.slang. We re-declare it here
-// (as opposed to forwarding) so PbrPipelineParams can carry a public
-// ConstantBuffer<SharcShaderConstants> field — `#include`d struct types are
-// module-private in Slang and can't appear in public APIs.
+// Public mirror of `SharcConstantsRaw` in crates/pbr/src/sharc.rs; Resolve's
+// `SharcResolveConstants` (sharc/sharc_resolve.slang) mirrors a prefix of it.
+// It's declared in this module rather than an `#include`d header so
+// PbrPipelineParams can carry a public ConstantBuffer<SharcShaderConstants>
+// field — `#include`d struct types are module-private in Slang and can't
+// appear in public APIs.
 public struct SharcShaderConstants {
     public float3 cameraPosition;
     public float sceneScale;
@@ -41,7 +42,6 @@ public struct SharcShaderConstants {
     public uint staleFrameNum;
     public uint entriesNum;
     public uint frameIndex;
-    public uint downscaleFactor;
     public uint poolCapacity;
     private uint _debugMode;
     public float debugBrightness;
@@ -114,7 +114,7 @@ public struct SharcParams {
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public ConstantBuffer<SharcShaderConstants> g_sharcConstants;
     // Candidate pool — read side feeds Update's primary vertices, write side
-    // accumulates this frame's final_gather CHS misses and Update cascade
+    // accumulates this frame's final_gather CHS hits and Update cascade
     // pushes for *next* frame to consume.
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public RWStructuredBuffer<Candidate> g_sharcCandidatesRead;

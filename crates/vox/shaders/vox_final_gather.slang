@@ -20,7 +20,7 @@ uint8_t encode_index(uint8_t3 position) {
 
 // DDA mirrored from vox_pbr's dda(), trimmed of the visualization branches.
 // Tracks `positionDelta` so we can hand the face normal to the closest hit
-// shader for SHARC's worldNormal-keyed cache query.
+// shader, for the face in SHARC's cell key and the candidate's normal.
 void final_gather_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
     dir = ddaSafeDirection(dir);
     int8_t3 positionDelta;
@@ -90,9 +90,11 @@ void intersectionShader(uniform VoxModelParams params) {
 // a visible per-cell pulse. By re-seeding every frame the cell stays alive, and
 // we weight the push by 1/(1+sampleNum) so under-sampled / freshly-seen cells
 // still win pool slots over well-converged ones (whose low — but nonzero —
-// weight only refreshes them occasionally). The primary-pixel luminance further
-// modulates by visual impact: dark pixels (shadowed cavities) shouldn't
-// outcompete bright ones for pool slots.
+// weight only refreshes them occasionally). The primary pixel's albedo
+// luminance further modulates by visual impact: the cached radiance reaches the
+// screen scaled by that albedo, so dark-albedo pixels shouldn't outcompete
+// bright ones for pool slots. Lighting isn't in it — a bright surface in
+// shadow weighs fully.
 [shader("closesthit")]
 void closestHitShader(uniform VoxModelParams model,
                       inout FinalGatherPayload payload,
