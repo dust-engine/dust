@@ -70,11 +70,15 @@ void closestHitShader(
     }
 
     // Re-seed the bounce target into the candidate pool (cascade), weighted by
-    // 1/(1+sampleNum) so under-converged cells keep priority. Hit-point albedo
-    // rides along so next frame's Update needs no probe ray to recover it.
+    // 1/(1+sampleNum) so under-converged cells keep priority. Also weighted by
+    // the source's albedo, which scales what this read adds, as final_gather's
+    // pushes are by the primary albedo. Not the target's albedo: its radiance is
+    // proportional to that, so a cell of mixed voxels would pick its bright ones
+    // more and read too bright. Hit-point albedo rides along so next frame's
+    // Update needs no probe ray to recover it.
     float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
     float3 hitAlbedo = mat.linearAlbedo();
-    float w = dot(hitAlbedo, float3(0.2126, 0.7152, 0.0722)) / (1.0 + bounceSampleNum);
+    float w = dot(candAlbedo, float3(0.2126, 0.7152, 0.0722)) / (1.0 + bounceSampleNum);
     uint seed = xxhash32(
         uint3(launchSlot, params.sharc.g_sharcConstants.frameIndex, 0xa5cc1c4du));
     params.sharc.pushCandidate(hitPos, worldNormal, hitAlbedo, bounceKey, w, seed);
