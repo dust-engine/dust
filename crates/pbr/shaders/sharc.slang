@@ -36,7 +36,6 @@ public struct SharcShaderConstants {
     public float3 cameraPosition;
     public float sceneScale;
     public float3 cameraPositionPrev;
-    public float radianceScale;
     public float roughnessMin;
     public uint accumulationFrameNum;
     public uint staleFrameNum;
@@ -149,7 +148,6 @@ public struct SharcParams {
 #endif
         p.accumulationBuffer = g_sharcAccumulation;
         p.resolvedBuffer = g_sharcResolved;
-        p.radianceScale = g_sharcConstants.radianceScale;
         return p;
     }
 

@@ -37,7 +37,6 @@ pub(super) struct SharcPage {
     accumulation_frames: NumberSlider,
     stale_frames: NumberSlider,
     roughness_min: NumberSlider,
-    radiance_scale: NumberSlider,
     brightness: NumberSlider,
     /// Indices of the expanded sections.
     open: Vec<usize>,
@@ -127,15 +126,6 @@ impl SharcPage {
                 cx,
                 |this, v, cx| config(this, cx, move |c| c.roughness_min = v),
             ),
-            radiance_scale: NumberSlider::new(
-                "Radiance scale",
-                1.0..=1.0e6,
-                1.0,
-                true,
-                window,
-                cx,
-                |this, v, cx| config(this, cx, move |c| c.radiance_scale = v),
-            ),
             brightness: NumberSlider::new(
                 "Brightness",
                 0.0..=10.0,
@@ -167,7 +157,6 @@ impl SharcPage {
         self.stale_frames
             .set(config.stale_frame_num as f32, window, cx);
         self.roughness_min.set(config.roughness_min, window, cx);
-        self.radiance_scale.set(config.radiance_scale, window, cx);
         self.brightness.set(debug_state.brightness, window, cx);
         self.snapshot = Some(snapshot);
     }
@@ -189,8 +178,7 @@ impl Render for SharcPage {
             .child(self.pool_capacity.render(cx))
             .child(self.accumulation_frames.render(cx))
             .child(self.stale_frames.render(cx))
-            .child(self.roughness_min.render(cx))
-            .child(self.radiance_scale.render(cx));
+            .child(self.roughness_min.render(cx));
         // Painted by the SHARC debug passes into the debug overlay, composited
         // over the frame by tonemap. While a mode is active the shadow pass is
         // skipped.

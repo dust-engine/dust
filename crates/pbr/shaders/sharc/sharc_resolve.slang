@@ -32,7 +32,6 @@ struct SharcResolveConstants {
     float3 cameraPosition;
     float sceneScale;
     float3 cameraPositionPrev;
-    float radianceScale;
     float roughnessMin;
     uint accumulationFrameNum;
     uint staleFrameNum;
@@ -69,7 +68,6 @@ void main(
 #endif
     sharc.accumulationBuffer = accumulation;
     sharc.resolvedBuffer = resolved;
-    sharc.radianceScale = cb.radianceScale;
 
     SharcResolveParameters rp;
     rp.cameraPositionPrev = cb.cameraPositionPrev;

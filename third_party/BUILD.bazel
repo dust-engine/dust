@@ -2,8 +2,11 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# Patch applied to the @sharc repository (see MODULE.bazel).
-exports_files(["sharc_lock_claim.patch"])
+# Patches applied to the @sharc repository (see MODULE.bazel).
+exports_files([
+    "sharc_float_atomics.patch",
+    "sharc_lock_claim.patch",
+])
 
 alias(
     name = "slang",

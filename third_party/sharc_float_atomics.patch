@@ -1,0 +1,98 @@
+diff --git a/include/SharcCommon.h b/include/SharcCommon.h
+--- a/include/SharcCommon.h
++++ b/include/SharcCommon.h
+@@ -164,6 +164,10 @@
+ #undef HASH_GRID_CONST_PREFIX
+ 
+ // Error checks
++#if SHARC_ENABLE_SH_ENCODING || SHARC_ENABLE_RESPONSIVE_LIGHTING
++#error Radiance accumulates as floats, which SH encoding and responsive lighting do not support
++#endif
++
+ #if SHARC_ENABLE_RESPONSIVE_LIGHTING
+ #if SHARC_RESPONSIVE_ENTRY_PROBE_RANGE < 1
+ #error SHARC_RESPONSIVE_ENTRY_PROBE_RANGE must be at least 1
+@@ -184,7 +188,6 @@
+ {
+     HashGridParameters hashGridParameters;
+     HashGridData hashGridData;
+-    float radianceScale;            // quantization factor for atomic radiance accumulation (u32 per channel during SHARC_UPDATE). Start with 1e3f; reduce for large radiance values to prevent overflow
+ 
+     RW_STRUCTURED_BUFFER(accumulationBuffer, SharcAccumulationData);
+     RW_STRUCTURED_BUFFER(resolvedBuffer, SharcPackedData);
+@@ -387,7 +390,8 @@
+     accumulatedData.data = int4(0, 0, 0, 0);
+     accumulatedData.dataExt = int4(0, 0, 0, 0);
+ #else // !SHARC_ENABLE_SH_ENCODING
+-    accumulatedData.data = uint4(0, 0, 0, 0);
++    accumulatedData.radiance = float3(0, 0, 0);
++    accumulatedData.sampleNum = 0;
+ #endif // SHARC_ENABLE_SH_ENCODING
+ 
+     return accumulatedData;
+@@ -398,19 +402,19 @@
+ #if SHARC_ENABLE_SH_ENCODING
+     return float(accumulatedData.dataExt.z);
+ #else // !SHARC_ENABLE_SH_ENCODING
+-    return float(accumulatedData.data.w);
++    return float(accumulatedData.sampleNum);
+ #endif // SHARC_ENABLE_SH_ENCODING
+ }
+ 
+-SharcRadianceData SharcGetAccumulatedRadianceData(SharcAccumulationData accumulatedData, float radianceScale, float sampleNum)
++SharcRadianceData SharcGetAccumulatedRadianceData(SharcAccumulationData accumulatedData, float sampleNum)
+ {
+     SharcRadianceData radianceData;
+-    float scale = rcp(radianceScale * max(sampleNum, 1e-6f));
++    float scale = rcp(max(sampleNum, 1e-6f));
+ #if SHARC_ENABLE_SH_ENCODING
+     radianceData.luminanceSH = float4(accumulatedData.data) * scale;
+     radianceData.chromaL0 = float2(accumulatedData.dataExt.xy) * scale;
+ #else // !SHARC_ENABLE_SH_ENCODING
+-    radianceData.radiance = float3(accumulatedData.data.xyz) * scale;
++    radianceData.radiance = accumulatedData.radiance * scale;
+ #endif // SHARC_ENABLE_SH_ENCODING
+ 
+     return radianceData;
+@@ -491,12 +495,14 @@
+     if (scaledChromaL0.y != 0) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).dataExt.y, scaledChromaL0.y);
+     if (sampleData != 0) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).dataExt.z, int(sampleData));
+ #else // !SHARC_ENABLE_SH_ENCODING
+-    uint3 scaledRadiance = uint3(sampleValue * sampleWeight * sharcParameters.radianceScale);
++    float3 radiance = sampleValue * sampleWeight;
+ 
+-    if (scaledRadiance.x != 0) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).data.x, scaledRadiance.x);
+-    if (scaledRadiance.y != 0) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).data.y, scaledRadiance.y);
+-    if (scaledRadiance.z != 0) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).data.z, scaledRadiance.z);
+-    if (sampleData != 0) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).data.w, sampleData);
++    // Greater than 0, not different from it, to keep NaN out: in the sum it would reach the
++    // resolved radiance and spread to every cell that gathers from this one.
++    if (radiance.x > 0.0f) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).radiance.x, radiance.x);
++    if (radiance.y > 0.0f) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).radiance.y, radiance.y);
++    if (radiance.z > 0.0f) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).radiance.z, radiance.z);
++    if (sampleData != 0) InterlockedAdd(BUFFER_AT_OFFSET(sharcParameters.accumulationBuffer, hashGridIndex).sampleNum, sampleData);
+ #endif // SHARC_ENABLE_SH_ENCODING
+ }
+ 
+@@ -918,7 +924,7 @@
+         }
+     }
+ 
+-    SharcRadianceData accumulatedRadiance = SharcGetAccumulatedRadianceData(accumulatedData, sharcParameters.radianceScale, sampleNum);
++    SharcRadianceData accumulatedRadiance = SharcGetAccumulatedRadianceData(accumulatedData, sampleNum);
+     SharcRadianceData accumulatedRadiancePrev = sharcVoxelData.accumulatedRadiance;
+     uint accumulationFrameNum = clamp(isResponsiveSignal ? resolveParameters.responsiveFrameNum : resolveParameters.accumulationFrameNum, SHARC_ACCUMULATED_FRAME_NUM_MIN, SHARC_ACCUMULATED_FRAME_NUM_MAX);
+     if (accumulatedFrameNum > accumulationFrameNum)
+diff --git a/include/SharcTypes.h b/include/SharcTypes.h
+--- a/include/SharcTypes.h
++++ b/include/SharcTypes.h
+@@ -21,7 +21,8 @@
+     int4 data;
+     int4 dataExt;
+ #else // !SHARC_ENABLE_SH_ENCODING
+-    uint4 data;
++    float3 radiance;
++    uint sampleNum;
+ #endif // SHARC_ENABLE_SH_ENCODING
+ };
+ 

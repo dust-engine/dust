@@ -130,7 +130,7 @@ use_repo(crate, "crates")
 crate.spec(
     package = "pumicite_cli",
     git = "https://github.com/dust-engine/pumicite.git",
-    rev = "1e40db936683c8961c03d39070027df8f7237444",
+    rev = "838245759fd41d1d517a51503f60a3c6b8f2151f",
     repositories = ["bindeps"],
 )
 crate.annotation(
@@ -172,7 +172,11 @@ new_git_repository(
     # Apple GPUs (Metal) lack 64-bit atomics, so SHARC runs the lock-buffer
     # insert path (HASH_GRID_ENABLE_64_BIT_ATOMICS 0). This patch adds an
     # optional wait-free 32-bit-CAS claim (HASH_GRID_CLAIM_VIA_32BIT_CAS) and the
-    # eviction-time flag reset it needs.
-    patches = ["//third_party:sharc_lock_claim.patch"],
+    # eviction-time flag reset it needs. The second patch makes radiance accumulate
+    # as floats, with an atomic float add instead of SHARC's fixed-point integers.
+    patches = [
+        "//third_party:sharc_lock_claim.patch",
+        "//third_party:sharc_float_atomics.patch",
+    ],
     patch_args = ["-p1"],
 )

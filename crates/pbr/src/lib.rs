@@ -304,6 +304,15 @@ impl Plugin for PbrRenderPlugin {
                         &mut feature.shader_buffer_int64_atomics
                     })
                     .ok();
+                // Radiance accumulates as floats (third_party/sharc_float_atomics.patch).
+                device_builder
+                    .enable_extension::<pumicite::ash::ext::shader_atomic_float::Meta>()
+                    .unwrap();
+                device_builder
+                    .enable_feature::<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>(|feature| {
+                        &mut feature.shader_buffer_float32_atomic_add
+                    })
+                    .unwrap();
             })
             .before(CreateDevice),
         );

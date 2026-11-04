@@ -141,12 +141,6 @@ pub struct SharcConfig {
     pub stale_frame_num: u32,
     pub scene_scale: f32,
     pub roughness_min: f32,
-    /// Fixed-point scale of the per-frame accumulation. Each deposit truncates
-    /// to 1 / `radiance_scale` per channel, and a cell's u32 sum wraps once its
-    /// radiance × samples in one frame pass 2^32 / `radiance_scale`. With
-    /// `solar_illuminance` at 1, sunlit surfaces reflect about 0.05 and dim
-    /// interiors 1e-4, so too low a scale silently drops their bounces.
-    pub radiance_scale: f32,
     /// Size of the candidate pool — each slot is one Update-pass dispatch
     /// invocation. The Update cascade runs a per-slot WRS-of-1, so this is
     /// also the effective Update ray-count budget.
@@ -163,7 +157,6 @@ impl Default for SharcConfig {
             stale_frame_num: 64,
             scene_scale: 1.0,
             roughness_min: 0.4,
-            radiance_scale: 1.0e5,
             pool_capacity: 1 << 16, // 64K candidates × 64 B = 4 MiB per pool
         }
     }
@@ -176,7 +169,6 @@ pub(crate) struct SharcConstantsRaw {
     pub camera_position: [f32; 3],
     pub scene_scale: f32,
     pub camera_position_prev: [f32; 3],
-    pub radiance_scale: f32,
     pub roughness_min: f32,
     pub accumulation_frame_num: u32,
     pub stale_frame_num: u32,
@@ -551,7 +543,6 @@ pub(crate) fn build_sharc_constants(
         camera_position: camera_origin.to_array(),
         scene_scale: config.scene_scale,
         camera_position_prev: prev.to_array(),
-        radiance_scale: config.radiance_scale,
         roughness_min: config.roughness_min,
         accumulation_frame_num: config.accumulation_frame_num,
         stale_frame_num: config.stale_frame_num,
