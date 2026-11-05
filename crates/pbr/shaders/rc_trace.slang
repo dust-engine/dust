@@ -144,8 +144,9 @@ void rcRayGen() {
             }
         }
     } else {
-        // Past the top cascade's interval there's only the sky, which the last
-        // cascade takes as hit (§4). The sun's disk is the direct light's.
+        // The sky, which the top cascade takes as what it hit (§4). Its interval has
+        // no end, so that nothing short of the sky lets the sky through. The sun's
+        // disk belongs to the direct light.
         t = params.uniforms.far;
         radiance = params.sky.atmosphereParams.solar_illuminance * params.sky.sampleScatteredTransfer(direction);
     }

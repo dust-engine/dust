@@ -50,8 +50,9 @@ Cargo also works for code-only builds (`cargo build`, `cargo test`), but Bazel i
 
 1. PBR ray-tracing pass — HDR color output and G-buffers (albedo, normal, depth, motion vectors)
 2. Shadow pass — visibility
-3. Tone-mapping compute pass — HDR to LDR
-4. gpui overlay
+3. Radiance cascades — indirect diffuse light, from [Split Radiance Cascades](https://arxiv.org/abs/2607.20384)
+4. Tone-mapping compute pass — HDR to LDR
+5. gpui overlay
 
 ## Shaders
 

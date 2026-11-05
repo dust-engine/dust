@@ -669,9 +669,9 @@ struct FrameCounter(u32);
 
 /// Sub-pixel jitter for the current frame, in texels. Refreshed once per frame
 /// by [`advance_jitter`] and read by `render`, `shadow_pass`,
-/// `screen_trace_pass`, and `upscaler_evaluate`. All passes that sample the
-/// jittered camera must use the same value, and it must match the
-/// `texel_jitter` handed to the upscaler dispatch.
+/// `screen_trace_pass`, `radiance_cascades_pass`, and `upscaler_evaluate`. All
+/// passes that sample the jittered camera must use the same value, and it must
+/// match the `texel_jitter` handed to the upscaler dispatch.
 #[derive(Resource, Default)]
 pub(crate) struct JitterState {
     pub(crate) frame_count: u32,

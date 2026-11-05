@@ -32,7 +32,7 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 
 - **`crates/vdb/`** (`dust_vdb`) — Hierarchical voxel spatial index. A generic tree structure with configurable depth using const generics. Handles node pooling, bit-packed storage, and tree traversal. Tree shape configurable via `hierarchy!` macro. Performance-critical: compiled with `opt-level = 3` even in dev profile.
 
-- **`crates/pbr/`** (`dust_pbr`) — PBR ray-tracing renderer. Manages the Vulkan ray-tracing pipeline, Shader Binding Table (SBT), camera, and sky atmosphere rendering. Shaders in `crates/pbr/shaders/` are written in Slang.
+- **`crates/pbr/`** (`dust_pbr`) — PBR ray-tracing renderer. Manages the Vulkan ray-tracing pipeline, Shader Binding Table (SBT), camera, sky atmosphere rendering, and the diffuse global illumination: Split Radiance Cascades (`src/radiance_cascades.rs`; `shaders/rc_common.slang` explains it). Shaders in `crates/pbr/shaders/` are written in Slang.
 
 - **`crates/vox/`** (`dust_vox`) — Voxel geometry, materials, and MagicaVoxel `.vox` file loading. Defines the voxel tree hierarchy as `hierarchy!(3, 3, 2, VoxLeafNode)`. Provides hit group shaders for voxel ray intersection and shadow rays.
 
@@ -48,8 +48,9 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 
 1. PBR ray-tracing pass → HDR output + G-buffers (albedo, normal, depth)
 2. Shadow pass → visibility
-3. Tone-mapping compute pass → HDR to LDR
-4. GPUI overlay, drawn and presented separately in its own layer
+3. Radiance cascades → indirect diffuse light, added to the HDR output
+4. Tone-mapping compute pass → HDR to LDR
+5. GPUI overlay, drawn and presented separately in its own layer
 
 ### Shader Compilation
 
