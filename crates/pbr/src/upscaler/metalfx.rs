@@ -131,7 +131,7 @@ unsafe fn texture<'a>(
 ) -> &'a ProtocolObject<dyn MTLTexture> {
     let mut texture_info = vk::ExportMetalTextureInfoEXT::default()
         .image_view(image.view)
-        .plane(vk::ImageAspectFlags::COLOR);
+        .plane(vk::ImageAspectFlags::PLANE_0);
     let mut info = vk::ExportMetalObjectsInfoEXT::default();
     info.p_next = (&mut texture_info as *mut vk::ExportMetalTextureInfoEXT).cast();
     unsafe {

@@ -5,7 +5,8 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba16f) uniform readonly image2D hdrInput;
-layout(set = 0, binding = 1, rgba16f)   uniform writeonly image2D ldrOutput;
+// No format qualifier: the swapchain image's format (A2B10G10R10_UNORM) applies.
+layout(set = 0, binding = 1) uniform writeonly image2D ldrOutput;
 layout(set = 0, binding = 2) uniform texture2D debugOverlay;
 // 1x1 auto-exposure scale written by autoexposure.glsl. The same value is fed
 // to the denoise/upscale engine, so the brightness it was told matches what we

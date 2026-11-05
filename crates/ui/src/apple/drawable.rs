@@ -237,7 +237,9 @@ impl DrawableImage {
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .push(&mut import);
         // The texture is the image's storage: kosmickrisp binds no memory to an
-        // imported image, so none is allocated for it.
+        // imported image, so none is allocated for it. The spec treats such an image
+        // as bound, but the validation layers report it as unbound wherever it's used
+        // (VUID-VkImageViewCreateInfo-image-01020 and others).
         let image = unsafe { device.create_image(&info, None) }.unwrap();
         let view = unsafe {
             device.create_image_view(

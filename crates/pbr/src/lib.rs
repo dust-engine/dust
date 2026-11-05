@@ -178,7 +178,7 @@ impl Plugin for PbrRenderPlugin {
                         .before(render);
 
                     #[cfg(feature = "dlss")]
-                    return session.in_set(DefaultRenderSet);
+                    let session = session.in_set(DefaultRenderSet);
                     session
                 },
                 advance_jitter
@@ -251,10 +251,6 @@ impl Plugin for PbrRenderPlugin {
         app.add_systems(
             Startup,
             (|mut device_builder: ResMut<DeviceBuilder>| {
-                device_builder
-                    .enable_extension::<pumicite::ash::ext::hdr_metadata::Meta>()
-                    .ok();
-
                 // Enable either VK_KHR_robustness2 or VK_EXT_robustness2. This allows us to write
                 // null descriptors - required by pumicite cli codegen
                 device_builder
@@ -919,10 +915,11 @@ fn ensure_hdr_target(
     }
 
     // Resolve the internal render resolution for the active quality mode. Falls
-    // back to native (no upscaling) when no upscaler is available (e.g. a
-    // non-NVIDIA GPU); DLAA also yields render == display (1:1 factor).
+    // back to native (no upscaling) when no reconstructing upscaler is available
+    // (the blit only filters); DLAA also yields render == display (1:1 factor).
     let quality = quality_settings.quality;
-    let render_extent = match upscaler.as_ref() {
+    let render_extent = match upscaler.as_deref() {
+        Some(Upscaler::Blit) | None => extent,
         Some(_) => {
             let factor = quality.scaling_factor();
             // Round-to-nearest of value * denominator / numerator, clamped to
@@ -934,7 +931,6 @@ fn ensure_hdr_target(
             };
             UVec2::new(scale(extent.x), scale(extent.y))
         }
-        None => extent,
     };
 
     // Shared image parameters; only `extent` (and per-image format/usage/flags)
