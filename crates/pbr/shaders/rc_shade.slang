@@ -91,13 +91,15 @@ void rcDebugOverlay(uint3 threadId: SV_DispatchThreadID) {
     case RC_DEBUG_COVERAGE:
         color = irradiance.aaa;
         break;
-    case RC_DEBUG_BOUNCE: {
-        uint bounceLevel = lod.level + params.rc.bounce.lodOffset;
-        float4 bounced = rcSampleIrradiance(
-            params.rc.bounce, params.rcBounceAtlas, bounceLevel, rcGridPoint(position, normal, bounceLevel), normal);
-        color = rcUnpremultiply(bounced) * params.rc.debugScale;
+    case RC_DEBUG_BOUNCE:
+        // Black without a secondary cache.
+        if ((params.rc.flags & RC_FLAG_BOUNCE) != 0) {
+            uint bounceLevel = lod.level + params.rc.bounce.lodOffset;
+            float4 bounced = rcSampleIrradiance(
+                params.rc.bounce, params.rcBounceAtlas, bounceLevel, rcGridPoint(position, normal, bounceLevel), normal);
+            color = rcUnpremultiply(bounced) * params.rc.debugScale;
+        }
         break;
-    }
     default:
         return;
     }
