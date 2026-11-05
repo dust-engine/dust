@@ -202,7 +202,7 @@ impl Render for ScreenTracePage {
                         100.0 * rays as f32 / pixels.max(1) as f32
                     )
                 }
-                _ => "Gather off: direct light only".to_owned(),
+                _ => "Trace off".to_owned(),
             });
         let mode = DEBUG_MODES
             .iter()
