@@ -44,8 +44,8 @@ PipelineLayout(
             )
         ),
     ],
-    // Start and end of each stage's range, which may not overlap: a push must name
-    // every stage whose range it touches, and only stages that cover all of it.
+    // Start and end of each stage's range, kept apart: a push must name every stage
+    // whose range overlaps it, and each of those must cover all of it.
     push_constants: {
         // A per-frame frameIndex sampling seed. Pushed by the shadow pass
         // (ShadowPush, shadow.slang); the primary pipeline shares this layout

@@ -45,11 +45,10 @@ static const uint RC_MAX_LOD = 29;
 public static const uint RC_TILE_INNER = 6;
 public static const uint RC_TILE_SIZE = 8;
 
-// The push constants of the compute passes. The first slot belongs to the ray
-// generation stage (pbr.playout.ron).
+// The push constants of the compute passes, after the ray generation stage's
+// range (pbr.playout.ron).
 public struct RcPush {
-    uint _raygenSlot;
-    public uint cascade;
+    [vk::offset(4)] public uint cascade;
 }
 
 // Directions per probe of a cascade: the paper's 2 * Θ_n^2 with Θ_0 = 4.
