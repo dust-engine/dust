@@ -87,6 +87,29 @@ ron2bin(
     type = "raytracing-pipeline"
 )
 
+slang_shader(
+    name = "vox_rc",
+    srcs = ["vox_rc.slang"],
+    hdrs = [
+        ":vox_common_module",
+        "//crates/pbr/shaders:pbr_module",
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+    ],
+    out = "vox_rc.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+ron2bin(
+    name = "vox_rc_rtx_pipeline_library",
+    src = "vox_rc.rtx.pipeline.ron",
+    out = "vox_rc.rtx.pipeline.bin",
+    type = "raytracing-pipeline"
+)
+
 filegroup(
     name = "runtime",
     srcs = [
@@ -96,6 +119,8 @@ filegroup(
         ":vox_pbr",
         ":vox_pbr_rtx_pipeline_library",
         ":vox_pbr_shadow_pipeline_library",
+        ":vox_rc",
+        ":vox_rc_rtx_pipeline_library",
         ":vox_shadow",
     ],
 )

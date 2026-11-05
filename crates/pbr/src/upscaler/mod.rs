@@ -229,7 +229,7 @@ pub(crate) fn ensure_upscaler_session(
 }
 
 /// The `index`-th value of the Halton low-discrepancy sequence for `base`.
-fn halton(mut index: u32, base: u32) -> f32 {
+pub(crate) fn halton(mut index: u32, base: u32) -> f32 {
     let mut fraction = 1.0;
     let mut result = 0.0;
     while index > 0 {

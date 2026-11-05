@@ -1,0 +1,89 @@
+// Voxel hit group for the radiance cascades' rays (rc_trace.slang). The ray
+// generation shader does the shading, from what the closest hit returns.
+
+import pbr_common;
+import vox_common;
+
+float2 intersectAABB(float3 origin, float3 dir, float3 box_min, float3 box_max, out int8_t3 positionDelta) {
+    float3 tMin = (box_min - origin) / dir;
+    float3 tMax = (box_max - origin) / dir;
+    float3 t1 = min(tMin, tMax);
+    float3 t2 = max(tMin, tMax);
+    float t_min = max(max(t1.x, t1.y), t1.z);
+    float t_max = min(min(t2.x, t2.y), t2.z);
+    float3 compResult = step(t1.yzx, t1.xyz) * step(t1.zxy, t1.xyz);
+    positionDelta = int8_t3(sign(dir) * compResult);
+    return float2(t_min, t_max);
+}
+
+uint8_t encode_index(uint8_t3 position) {
+    return (position.x << 4) | (position.y << 2) | position.z;
+}
+
+// DDA mirrored from vox_pbr's dda(), trimmed of the visualization branches.
+void rc_dda(float3 origin, float3 dir, uint64_t grid, float scale) {
+    dir = ddaSafeDirection(dir);
+    int8_t3 positionDelta;
+    float2 t = intersectAABB(origin, dir, float3(0.0), float3(4.0), positionDelta);
+    if (t.x >= t.y || t.y <= 0.0)
+        return;
+
+    float hitDistance = max(t.x, RayTMin());
+    float3 pos = origin + dir * hitDistance;
+    int8_t3 position = int8_t3(clamp(int3(floor(pos)), 0, 3));
+
+#define STEP sign(dir)
+    float3 t_coef = 1.0 / dir;
+    float3 t_bias = t_coef * origin;
+    float3 tMax = (float3(position) + max(STEP, 0.0)) * t_coef - t_bias;
+    float3 tDelta = float3(1.0) * t_coef * STEP;
+
+    uint8_t hit = encode_index(position);
+    while ((grid & (uint64_t(1) << hit)) == 0) {
+        float3 comp = step(tMax.xyz, tMax.zxy) * step(tMax.xyz, tMax.yzx);
+        positionDelta = int8_t3(STEP * comp);
+        position += positionDelta;
+        // Exit when the step pushed us out of [0,3]^3. Casting to uint8_t maps
+        // any negative position (e.g. -1 → 255) above 3, so a single unsigned
+        // compare catches both under- and over-flow.
+        if (any(uint8_t3(position) > uint8_t(3))) {
+            return;
+        }
+        hitDistance = min(min(tMax.x, tMax.y), tMax.z);
+        tMax += tDelta * comp;
+        hit = encode_index(position);
+    }
+
+    HitAttribute attr;
+    attr.voxelId = hit;
+    attr.setNormal(-positionDelta);
+    ReportHitWithAMDWorkaround(hitDistance / scale, 0, attr);
+}
+
+[shader("intersection")]
+void intersectionShader(uniform VoxModelParams params) {
+    Block block = params.getCurrentPrimitive();
+    float inv_unit = 1.0 / params.unit_size;
+    rc_dda(
+        (ObjectRayOrigin() - float3(block.coords) * params.unit_size) * inv_unit,
+        ObjectRayDirection() * inv_unit,
+        block.mask,
+        1.0
+    );
+}
+
+[shader("closesthit")]
+void closestHitShader(
+    uniform VoxModelParams model,
+    inout RcPayload payload,
+    in HitAttribute hitAttr,
+) {
+    VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);
+    float3x4 o2w = ObjectToWorld3x4();
+    payload.t = RayTCurrent();
+    payload.albedo = mat.linearAlbedo();
+    // Emission scales the sRGB-encoded color, as it does for directly visible
+    // surfaces (vox_pbr.slang).
+    payload.emission = mat.albedo().rgb * float(mat.emission);
+    payload.normal = normalize(mul(float3x3(o2w[0].xyz, o2w[1].xyz, o2w[2].xyz), float3(hitAttr.getNormal())));
+}

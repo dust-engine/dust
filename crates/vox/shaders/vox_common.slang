@@ -93,10 +93,17 @@ public struct VoxMaterial {
 
     // The palette color as 0..1 RGBA, still sRGB-encoded: what goes through the
     // G-buffer's UNORM view (its sRGB view decodes on read) and what emission
-    // scales.
+    // scales. Reflected light takes `linearAlbedo` instead.
     public float4 albedo() {
         uint8_t4 c = bit_cast<uint8_t4>(_albedo);
         return float4(c) / 255.0;
+    }
+
+    // The palette color decoded to linear, the value the G-buffer's sRGB view
+    // returns for the same bytes.
+    public float3 linearAlbedo() {
+        float3 c = albedo().rgb;
+        return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4));
     }
 
     // Default opaque diffuse (black), matching the Rust `VoxGpuMaterial::DEFAULT`.

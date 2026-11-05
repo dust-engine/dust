@@ -1,0 +1,10 @@
+// Radiance cascades compute pass (rc_merge.slang, entry `rcIrradiance`). Shares the ray
+// tracing pipeline layout (pbr.playout.bin).
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/rc_merge.spv",
+        entry_point: "rcIrradiance",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+    disable_optimization: false,
+)

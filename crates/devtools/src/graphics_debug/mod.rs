@@ -5,6 +5,7 @@
 //! debug toggles.
 
 mod gpu;
+mod radiance_cascades;
 mod screen_trace;
 mod sky;
 
@@ -48,6 +49,13 @@ impl GraphicsDebugView {
                 "Screen trace",
                 Some(
                     cx.new(|cx| screen_trace::ScreenTracePage::new(window, cx))
+                        .into(),
+                ),
+            ),
+            page(
+                "Radiance cascades",
+                Some(
+                    cx.new(|cx| radiance_cascades::RadianceCascadesPage::new(window, cx))
                         .into(),
                 ),
             ),

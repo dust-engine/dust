@@ -57,8 +57,8 @@ impl ScreenTraceDebugMode {
 /// Tunables of the screen trace; the devtools "Screen trace" page edits them.
 #[derive(Resource, Clone)]
 pub struct ScreenTraceConfig {
-    /// Off: no gather at all, so the frame holds direct light only (A/B
-    /// reference).
+    /// Adds this trace's light to the frame. Off by default: the radiance
+    /// cascades light it, and both on counts the light twice.
     pub enabled: bool,
     /// The screen trace resolves every pixel, with the sky as the fallback for
     /// rays that leave the screen (SCREEN_TRACE_FLAG_SCREEN_ONLY). Off: only
@@ -89,7 +89,7 @@ impl Default for ScreenTraceConfig {
     fn default() -> Self {
         let env_u32 = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u32>().ok());
         Self {
-            enabled: env_u32("DUST_SCREEN_TRACE").is_none_or(|v| v != 0),
+            enabled: env_u32("DUST_SCREEN_TRACE").is_some_and(|v| v != 0),
             screen_only: env_u32("DUST_SCREEN_ONLY").is_none_or(|v| v != 0),
             max_iterations: env_u32("DUST_SCREEN_TRACE_ITER").unwrap_or(50),
             relative_depth_thickness: 0.02,
@@ -406,8 +406,13 @@ fn compute_read_write() -> Access {
     }
 }
 
+/// Whether anything reads the HZB this frame.
+pub(crate) fn hzb_needed(config: Res<ScreenTraceConfig>) -> bool {
+    config.enabled || config.debug_mode != ScreenTraceDebugMode::Off
+}
+
 /// One thread per pixel: HZB march, on-screen lighting, trace record.
-fn screen_trace_pass(
+pub(crate) fn screen_trace_pass(
     mut ctx: SubmissionState,
     mut params: ScreenTraceSystemParams,
     compute_pipelines: Res<Assets<ComputePipeline>>,
