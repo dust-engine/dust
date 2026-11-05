@@ -119,7 +119,7 @@ pub struct RadianceCascadesConfig {
     /// aren't needed. Half of them leave into the surface's hemisphere of the 32
     /// directions.
     pub rays_per_probe: f32,
-    /// How much one ray moves a direction's history. 1 turns history off, for
+    /// How far a frame's rays move a direction's history. 1 turns history off, for
     /// lighting computed entirely within the frame.
     pub temporal_alpha: f32,
     /// Frames a probe lives on after the last ray left its cell, in either cache.
