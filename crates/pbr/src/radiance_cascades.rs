@@ -112,12 +112,12 @@ pub struct RadianceCascadesConfig {
     pub ray_length_scale: f32,
     /// Chebyshev distance from the camera at which LOD 0 ends, and each next LOD
     /// ends at twice the last. Over the probe spacing, this sets how large cascade
-    /// 0's cells appear on screen.
+    /// 0's cells appear on screen. Limited to 240 probe spacings.
     pub lod_distance: f32,
-    /// The rays a cascade 0 probe gets per frame, when its cell has that many
-    /// pixels. Pixels past that don't trace, and most of the rays near the camera
-    /// aren't needed. Half of them leave into the surface's hemisphere of the 32
-    /// directions.
+    /// The rays a cascade 0 probe gets per frame, if its cell covers that many
+    /// pixels: pixels trace with the probability that gives it this many, so that
+    /// the large cells near the camera don't spend a ray per pixel. A value no cell
+    /// reaches makes every pixel trace, as in the paper.
     pub rays_per_probe: f32,
     /// How far a frame's rays move a direction's history. 1 turns history off, for
     /// lighting computed entirely within the frame.
