@@ -29,16 +29,17 @@ fn stats(state: Option<Res<RadianceCascadesState>>, mut last: Local<Stats>) -> O
     })
 }
 
-/// A cache's statistics as a line of text.
-fn stats_text(name: &str, stats: &CacheStats) -> String {
-    let mut text = format!("{name}: {} rays; probes", stats.rays);
-    for cascade in 0..CASCADES {
-        text += &format!(
-            " c{cascade} {}/{}",
-            stats.probes[cascade], stats.capacity[cascade]
-        );
-    }
-    text
+/// A cache's statistics as lines of text, short enough for the panel: unwrapped
+/// text sets the page's width.
+fn stats_lines(name: &str, stats: &CacheStats) -> [String; 2] {
+    let fullest = (0..CASCADES)
+        .map(|cascade| stats.probes[cascade] as f32 / stats.capacity[cascade] as f32)
+        .fold(0.0, f32::max);
+    let [c0, c1, c2, c3] = stats.probes;
+    [
+        format!("{name}: {} rays", stats.rays),
+        format!("Probes: {c0} {c1} {c2} {c3} ({:.0}% full)", fullest * 100.0),
+    ]
 }
 
 const DEBUG_MODES: [(RadianceCascadesDebugMode, &str); 6] = [
@@ -248,8 +249,18 @@ impl Render for RadianceCascadesPage {
                         config(this, cx, move |c| c.multibounce = multibounce);
                     })),
             )
-            .children(self.stats.0.map(|stats| stats_text("Primary", &stats)))
-            .children(self.stats.1.map(|stats| stats_text("Secondary", &stats)))
+            .children(
+                self.stats
+                    .0
+                    .iter()
+                    .flat_map(|stats| stats_lines("Primary", stats)),
+            )
+            .children(
+                self.stats
+                    .1
+                    .iter()
+                    .flat_map(|stats| stats_lines("Secondary", stats)),
+            )
             .children(self.sliders.iter().map(|(slider, _)| slider.render(cx)))
             .child(
                 Accordion::new("radiance-cascades-sections")
