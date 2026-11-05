@@ -924,8 +924,9 @@ fn record_cache<'a>(
             0,
             descriptors.as_slice(),
         );
+        // One group per probe, which the merge of cascade 0 also has.
         passes.run(encoder, Pass::Irradiance, 0, |encoder| {
-            encoder.dispatch_indirect(frame_token.counters(), probe_args_offset(0));
+            encoder.dispatch_indirect(frame_token.counters(), merge_args_offset(0));
         });
     });
     encoder.use_image_resource(

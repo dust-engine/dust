@@ -7,9 +7,21 @@ import rc_common;
 
 [vk::push_constant] uniform RcPush pc;
 
-// Trilinear weights of a probe's neighbors in the next cascade, by how many axes
-// a neighbor is off the parent: a probe is 1/4 of the way from its parent to them.
-static const float RC_NEIGHBOR_WEIGHTS[4] = { 27.0 / 64.0, 9.0 / 64.0, 3.0 / 64.0, 1.0 / 64.0 };
+// Trilinear weight of a probe's neighbor in the next cascade, by how many axes it
+// is off the parent: a probe is 1/4 of the way from its parent to them, so each
+// such axis is worth a third.
+float neighborWeight(uint axesOff) {
+    switch (axesOff) {
+    case 0:
+        return 27.0 / 64.0;
+    case 1:
+        return 9.0 / 64.0;
+    case 2:
+        return 3.0 / 64.0;
+    default:
+        return 1.0 / 64.0;
+    }
+}
 
 // I_{n+1} at a probe of cascade n, averaged over the four directions merging into
 // a direction of cascade n (the sum in Eq. 7). Sparse trilinear interpolation:
@@ -27,7 +39,7 @@ float4 interpolateUpper(uint cascade, RcCascade c, uint probe, uint direction) {
         }
         float4 value = float4(params.rc.merged[up.mergedOffset + neighbor * directions + direction]);
         if (value.a > 0.0) {
-            float w = RC_NEIGHBOR_WEIGHTS[countbits(k)];
+            float w = neighborWeight(countbits(k));
             sum += w * value.rgb;
             weight += w;
         }
@@ -110,75 +122,68 @@ void rcMerge(uint3 threadId: SV_DispatchThreadID) {
     params.rc.merged[c.mergedOffset + probe * outputs + direction] = float16_t4(average);
 }
 
-// The directions of cascade 0, by index: the centers of rcDecodeDirection's cells.
-static const float3 RC_C0_DIRECTIONS[32] = {
-    float3(0.6110889, 0.2531213, -0.7500000), float3(0.2531213, 0.6110889, -0.7500000),
-    float3(-0.2531213, 0.6110889, -0.7500000), float3(-0.6110889, 0.2531213, -0.7500000),
-    float3(-0.6110889, -0.2531213, -0.7500000), float3(-0.2531213, -0.6110889, -0.7500000),
-    float3(0.2531213, -0.6110889, -0.7500000), float3(0.6110889, -0.2531213, -0.7500000),
-    float3(0.8945425, 0.3705316, -0.2500000), float3(0.3705316, 0.8945425, -0.2500000),
-    float3(-0.3705316, 0.8945425, -0.2500000), float3(-0.8945425, 0.3705316, -0.2500000),
-    float3(-0.8945425, -0.3705316, -0.2500000), float3(-0.3705316, -0.8945425, -0.2500000),
-    float3(0.3705316, -0.8945425, -0.2500000), float3(0.8945425, -0.3705316, -0.2500000),
-    float3(0.8945425, 0.3705316, 0.2500000), float3(0.3705316, 0.8945425, 0.2500000),
-    float3(-0.3705316, 0.8945425, 0.2500000), float3(-0.8945425, 0.3705316, 0.2500000),
-    float3(-0.8945425, -0.3705316, 0.2500000), float3(-0.3705316, -0.8945425, 0.2500000),
-    float3(0.3705316, -0.8945425, 0.2500000), float3(0.8945425, -0.3705316, 0.2500000),
-    float3(0.6110889, 0.2531213, 0.7500000), float3(0.2531213, 0.6110889, 0.7500000),
-    float3(-0.2531213, 0.6110889, 0.7500000), float3(-0.6110889, 0.2531213, 0.7500000),
-    float3(-0.6110889, -0.2531213, 0.7500000), float3(-0.2531213, -0.6110889, 0.7500000),
-    float3(0.2531213, -0.6110889, 0.7500000), float3(0.6110889, -0.2531213, 0.7500000),
-};
-
 // A probe's tile: the rendering equation evaluated per normal over the 32 cones,
-// for a 6x6 octahedral map, then a border copied in from across the map's edges so
+// for a 6x6 octahedral map, with a border copied from across the map's edges so
 // that bilinear sampling doesn't see the next tile (§6). A texel holds the mean
 // radiance weighted by cosine, times the known fraction of its hemisphere (which
 // is its alpha): a probe on the far side of a wall knows nothing of the near side,
 // and sampling skips it instead of darkening.
+//
+// One group per probe and one thread per texel, with no local arrays: on Apple
+// GPUs those live in memory, and an array of the cones here took far longer than
+// the arithmetic.
 [shader("compute")]
-[numthreads(64, 1, 1)]
-void rcIrradiance(uint3 threadId: SV_DispatchThreadID) {
-    uint probe = threadId.x;
-    if (probe >= params.rc.counters[RC_COUNTER_PROBES]) {
-        return;
-    }
-    uint first = params.rc.cascades[0].mergedOffset + probe * rcDirectionCount(0);
-    float4 cones[32];
-    for (uint i = 0; i < 32; i++) {
-        cones[i] = float4(params.rc.merged[first + i]);
-    }
-    float4 texels[RC_TILE_INNER * RC_TILE_INNER];
-    for (uint y = 0; y < RC_TILE_INNER; y++) {
-        for (uint x = 0; x < RC_TILE_INNER; x++) {
-            float3 normal = rcOctDecode((float2(x, y) + 0.5) / float(RC_TILE_INNER));
-            float3 sum = float3(0.0, 0.0, 0.0);
-            float known = 0.0;
-            float total = 0.0;
-            for (uint i = 0; i < 32; i++) {
-                float cosine = max(dot(normal, RC_C0_DIRECTIONS[i]), 0.0);
-                total += cosine;
-                known += cosine * cones[i].a;
-                sum += cosine * cones[i].rgb;
-            }
-            texels[y * RC_TILE_INNER + x] = float4(sum, known) / total;
-        }
-    }
-    uint tilesPerRow = params.rc.own.tilesPerRow;
-    int2 tile = int2(probe % tilesPerRow, probe / tilesPerRow) * int(RC_TILE_SIZE);
+[numthreads(RC_TILE_INNER * RC_TILE_INNER, 1, 1)]
+void rcIrradiance(uint3 groupId: SV_GroupID, uint texelIndex: SV_GroupIndex) {
+    uint probe = groupId.x;
     int last = int(RC_TILE_INNER) - 1;
-    for (int y = -1; y <= last + 1; y++) {
-        for (int x = -1; x <= last + 1; x++) {
-            // Crossing an edge of the map lands on that edge, mirrored about its
-            // middle. Corners cross two.
-            int2 inner = int2(x, y);
-            if (inner.x < 0 || inner.x > last) {
-                inner = int2(clamp(inner.x, 0, last), last - inner.y);
+    int2 texel = int2(texelIndex % RC_TILE_INNER, texelIndex / RC_TILE_INNER);
+    float3 normal = rcOctDecode((float2(texel) + 0.5) / float(RC_TILE_INNER));
+
+    // The directions of cascade 0 are 4 rings of 8, in the order of their indices:
+    // rcDecodeDirection at cell centers. Each is the last rotated by 45 degrees.
+    uint first = params.rc.cascades[0].mergedOffset + probe * rcDirectionCount(0);
+    float3 sum = float3(0.0, 0.0, 0.0);
+    float known = 0.0;
+    float total = 0.0;
+    for (uint ring = 0; ring < 4; ring++) {
+        float z = (float(ring) + 0.5) * 0.5 - 1.0;
+        float r = sqrt(1.0 - z * z);
+        // cos and sin of 22.5 degrees.
+        float2 around = float2(0.92387953, 0.38268343);
+        for (uint step = 0; step < 8; step++) {
+            float cosine = max(dot(normal, float3(r * around, z)), 0.0);
+            total += cosine;
+            if (cosine > 0.0) {
+                float4 cone = float4(params.rc.merged[first + ring * 8u + step]);
+                known += cosine * cone.a;
+                sum += cosine * cone.rgb;
             }
-            if (inner.y < 0 || inner.y > last) {
-                inner = int2(last - inner.x, clamp(inner.y, 0, last));
-            }
-            params.rcIrradianceOutput[uint2(tile + int2(x + 1, y + 1))] = texels[inner.y * int(RC_TILE_INNER) + inner.x];
+            around = float2(around.x - around.y, around.x + around.y) * 0.70710678;
         }
+    }
+    float4 value = float4(sum, known) / total;
+
+    uint tilesPerRow = params.rc.own.tilesPerRow;
+    int2 tile = int2(probe % tilesPerRow, probe / tilesPerRow) * int(RC_TILE_SIZE) + int2(1, 1);
+    params.rcIrradianceOutput[uint2(tile + texel)] = value;
+    // Crossing an edge of the map lands on that edge, mirrored about its middle,
+    // so this texel is also the border just beyond the mirrored spot. Each corner
+    // of the map is the opposite corner of its tile, having crossed two edges.
+    if (texel.x == 0) {
+        params.rcIrradianceOutput[uint2(tile + int2(-1, last - texel.y))] = value;
+    }
+    if (texel.x == last) {
+        params.rcIrradianceOutput[uint2(tile + int2(last + 1, last - texel.y))] = value;
+    }
+    if (texel.y == 0) {
+        params.rcIrradianceOutput[uint2(tile + int2(last - texel.x, -1))] = value;
+    }
+    if (texel.y == last) {
+        params.rcIrradianceOutput[uint2(tile + int2(last - texel.x, last + 1))] = value;
+    }
+    if ((texel.x == 0 || texel.x == last) && (texel.y == 0 || texel.y == last)) {
+        int2 outward = (texel == 0) * -1 + (texel == last) * 1;
+        params.rcIrradianceOutput[uint2(tile + int2(last, last) - texel - outward)] = value;
     }
 }
