@@ -572,7 +572,9 @@ impl Plugin for RadianceCascadesPlugin {
         app.init_resource::<RadianceCascadesConfig>();
         app.add_systems(
             Startup,
-            setup_radiance_cascades.after(CreateDevice).after(crate::setup),
+            setup_radiance_cascades
+                .after(CreateDevice)
+                .after(crate::setup),
         );
         app.add_systems(
             PostUpdate,
@@ -606,11 +608,7 @@ fn setup_radiance_cascades(mut commands: Commands, asset_server: Res<AssetServer
     });
 }
 
-fn create_resources(
-    allocator: &Allocator,
-    render_extent: UVec2,
-    max_probes: u32,
-) -> Resources {
+fn create_resources(allocator: &Allocator, render_extent: UVec2, max_probes: u32) -> Resources {
     Resources {
         primary: Cache::new(allocator, max_probes, 1),
         secondary: None,
@@ -830,7 +828,8 @@ fn record_cache<'a>(
         for cascade in 0..CASCADES {
             if cascade > 0 {
                 passes.run(encoder, Pass::InsertParents, cascade, |encoder| {
-                    encoder.dispatch_indirect(frame_token.counters(), probe_args_offset(cascade - 1));
+                    encoder
+                        .dispatch_indirect(frame_token.counters(), probe_args_offset(cascade - 1));
                 });
             }
             passes.run(encoder, Pass::Allocate, cascade, |encoder| {
@@ -869,25 +868,29 @@ fn record_cache<'a>(
         0,
         descriptors.as_slice(),
     );
-    encoder.timing_scope(profiler.as_deref_mut(), scopes.trace, |encoder| match source {
-        Source::Pixels(extent) => {
-            encoder.trace_rays(
-                bindings.sbt,
-                0,
-                bindings.sbt_buffer,
-                UVec3::new(extent.x, extent.y, 1),
-            );
-        }
-        Source::Hits(counters) => {
-            encoder.trace_rays_indirect(
-                bindings.sbt,
-                0,
-                bindings.sbt_buffer,
-                counters,
-                HIT_TRACE_ARGS_OFFSET,
-            );
-        }
-    });
+    encoder.timing_scope(
+        profiler.as_deref_mut(),
+        scopes.trace,
+        |encoder| match source {
+            Source::Pixels(extent) => {
+                encoder.trace_rays(
+                    bindings.sbt,
+                    0,
+                    bindings.sbt_buffer,
+                    UVec3::new(extent.x, extent.y, 1),
+                );
+            }
+            Source::Hits(counters) => {
+                encoder.trace_rays_indirect(
+                    bindings.sbt,
+                    0,
+                    bindings.sbt_buffer,
+                    counters,
+                    HIT_TRACE_ARGS_OFFSET,
+                );
+            }
+        },
+    );
     pass_barrier(encoder);
 
     let atlas_index = cache.atlas_index(frame);
@@ -946,7 +949,11 @@ fn record_stats<'a>(
 ) {
     let readback = encoder.lock(&cache.readback[slot], vk::PipelineStageFlags2::COPY);
     encoder.memory_barrier(shader_access(), Access::COPY_READ);
-    encoder.use_buffer_resource(readback, &mut cache.readback_state[slot], Access::COPY_WRITE);
+    encoder.use_buffer_resource(
+        readback,
+        &mut cache.readback_state[slot],
+        Access::COPY_WRITE,
+    );
     encoder.emit_barriers();
     encoder.copy_buffer(frame.counters(), readback);
     cache.readback_written[slot] = true;
@@ -1013,7 +1020,11 @@ fn radiance_cascades_pass(
         {
             resources
         }
-        slot => slot.insert(create_resources(&allocator, render_extent, config.max_probes)),
+        slot => slot.insert(create_resources(
+            &allocator,
+            render_extent,
+            config.max_probes,
+        )),
     };
     match (config.multibounce, resources.secondary.is_some()) {
         (true, false) => {
@@ -1053,57 +1064,60 @@ fn radiance_cascades_pass(
         (list.hits.device_address(), list.counters.device_address())
     };
     let lod_offset = config.secondary_lod_offset;
-    let build_constants = |cache: &Cache, lod_offset: u32, flags: u32, bounce: IrradianceSourceRaw| {
-        // SAFETY: only device addresses are read.
-        let (buffers, prev, scratch) = unsafe {
-            (
-                cache.frames[frame].get_unchecked(),
-                cache.frames[prev_frame].get_unchecked(),
-                cache.scratch.get_unchecked(),
-            )
+    let build_constants =
+        |cache: &Cache, lod_offset: u32, flags: u32, bounce: IrradianceSourceRaw| {
+            // SAFETY: only device addresses are read.
+            let (buffers, prev, scratch) = unsafe {
+                (
+                    cache.frames[frame].get_unchecked(),
+                    cache.frames[prev_frame].get_unchecked(),
+                    cache.scratch.get_unchecked(),
+                )
+            };
+            ConstantsRaw {
+                own: cache.irradiance_source(frame, lod_offset),
+                bounce,
+                cascades: cache.layout.cascades,
+                camera_position: transform.translation().to_array(),
+                spacing: config.probe_spacing,
+                jitter: [
+                    crate::upscaler::halton(frame_index % 1024 + 1, 2),
+                    crate::upscaler::halton(frame_index % 1024 + 1, 3),
+                ],
+                base_ray_length: config.probe_spacing * config.ray_length_scale,
+                lod_distance: config
+                    .lod_distance
+                    .min(MAX_LOD_CELLS * config.probe_spacing),
+                render_extent: render_extent.to_array(),
+                lod_offset,
+                temporal_alpha: config.temporal_alpha,
+                flags,
+                max_age: config.max_probe_age,
+                rays_per_probe: config.rays_per_probe,
+                pixels_per_radian: render_extent.y as f32 / (2.0 * camera.tan_half_fov()),
+                frame_index,
+                bounce_ray_fraction: config.bounce_ray_fraction,
+                hit_capacity: HIT_CAPACITY,
+                debug_mode: config.debug_mode.as_u32(),
+                debug_scale: config.debug_scale,
+                _pad: 0,
+                keys: buffers.keys.device_address(),
+                slots: buffers.slots.device_address(),
+                probes: buffers.probes.device_address(),
+                history: buffers.history.device_address(),
+                counters: buffers.counters.device_address(),
+                prev_keys: prev.keys.device_address(),
+                prev_slots: prev.slots.device_address(),
+                prev_probes: prev.probes.device_address(),
+                prev_history: prev.history.device_address(),
+                prev_counters: prev.counters.device_address(),
+                accum: scratch.accum.device_address(),
+                merged: scratch.merged.device_address(),
+                neighbors: scratch.neighbors.device_address(),
+                hits: hit_addresses.0,
+                hit_counters: hit_addresses.1,
+            }
         };
-        ConstantsRaw {
-            own: cache.irradiance_source(frame, lod_offset),
-            bounce,
-            cascades: cache.layout.cascades,
-            camera_position: transform.translation().to_array(),
-            spacing: config.probe_spacing,
-            jitter: [
-                crate::upscaler::halton(frame_index % 1024 + 1, 2),
-                crate::upscaler::halton(frame_index % 1024 + 1, 3),
-            ],
-            base_ray_length: config.probe_spacing * config.ray_length_scale,
-            lod_distance: config.lod_distance.min(MAX_LOD_CELLS * config.probe_spacing),
-            render_extent: render_extent.to_array(),
-            lod_offset,
-            temporal_alpha: config.temporal_alpha,
-            flags,
-            max_age: config.max_probe_age,
-            rays_per_probe: config.rays_per_probe,
-            pixels_per_radian: render_extent.y as f32 / (2.0 * camera.tan_half_fov()),
-            frame_index,
-            bounce_ray_fraction: config.bounce_ray_fraction,
-            hit_capacity: HIT_CAPACITY,
-            debug_mode: config.debug_mode.as_u32(),
-            debug_scale: config.debug_scale,
-            _pad: 0,
-            keys: buffers.keys.device_address(),
-            slots: buffers.slots.device_address(),
-            probes: buffers.probes.device_address(),
-            history: buffers.history.device_address(),
-            counters: buffers.counters.device_address(),
-            prev_keys: prev.keys.device_address(),
-            prev_slots: prev.slots.device_address(),
-            prev_probes: prev.probes.device_address(),
-            prev_history: prev.history.device_address(),
-            prev_counters: prev.counters.device_address(),
-            accum: scratch.accum.device_address(),
-            merged: scratch.merged.device_address(),
-            neighbors: scratch.neighbors.device_address(),
-            hits: hit_addresses.0,
-            hit_counters: hit_addresses.1,
-        }
-    };
     // What the secondary cache's rays hit is lit by its own last frame, on the
     // first frames an empty table, so that its atlas is never sampled.
     let secondary_constants = secondary.as_ref().map(|cache| {
