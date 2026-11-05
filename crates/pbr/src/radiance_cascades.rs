@@ -795,8 +795,9 @@ fn record_cache<'a>(
     let prev_token = encoder.lock(&cache.frames[1 - frame], stages).readonly();
     let scratch_token = encoder.lock(&cache.scratch, stages);
 
-    // This frame's tables start empty.
-    encoder.memory_barrier(shader_access(), Access::CLEAR);
+    // This frame's tables start empty. Its counters were last used two frames ago,
+    // by the shaders and for the statistics.
+    encoder.memory_barrier(shader_access() | Access::COPY_READ, Access::CLEAR);
     encoder.emit_barriers();
     fill_with_zeros(encoder, frame_token.keys().vk_handle());
     fill_with_zeros(encoder, frame_token.slots().vk_handle());
