@@ -93,17 +93,10 @@ public struct VoxMaterial {
 
     // The palette color as 0..1 RGBA, still sRGB-encoded: what goes through the
     // G-buffer's UNORM view (its sRGB view decodes on read) and what emission
-    // scales. Reflected light takes `linearAlbedo` instead.
+    // scales.
     public float4 albedo() {
         uint8_t4 c = bit_cast<uint8_t4>(_albedo);
         return float4(c) / 255.0;
-    }
-
-    // The palette color decoded to linear, the value the G-buffer's sRGB view
-    // returns for the same bytes.
-    public float3 linearAlbedo() {
-        float3 c = albedo().rgb;
-        return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4));
     }
 
     // Default opaque diffuse (black), matching the Rust `VoxGpuMaterial::DEFAULT`.
@@ -145,39 +138,5 @@ public struct VoxModelParams {
 
         // min(x, 255) is a NVIDIA workaround.
         return palette[min(paletteIndex, 255)];
-    }
-
-    // Discrete, jitter-invariant identity of the hit voxel face, for building a
-    // SHARC cell key (see SharcParams::cellKey). All three outputs depend only
-    // on *which* voxel/face the DDA resolved — never on the exact ray hit
-    // point — so sub-pixel camera jitter can't perturb them.
-    //   - `voxelCoord`: integer object-space voxel coordinate (block min corner
-    //      + in-block offset).
-    //   - `faceId`: 0..5, axis*2 + sign — distinguishes all six faces (SHARC's
-    //      3-bit normal octant alone can't separate same-sign axes).
-    //   - `cellCenterWorld`: world-space center of the voxel; used only to pick
-    //      the distance LOD. Using the voxel center (not the hit face) keeps all
-    //      six faces of a voxel on the same LOD, so they coarsen together rather
-    //      than splitting across a level boundary. Must be called from a hit
-    //      shader.
-    public VoxModelCell voxelCellInfo(uint8_t voxelId) {
-        Block block = getCurrentPrimitive();
-        uint32_t3 offsetInBox = uint32_t3(voxelId >> 4, (voxelId >> 2) & 0b11, voxelId & 0b11);
-        VoxModelCell cell;
-        cell.coords = block.coords + offsetInBox;
-        cell.unit_size = unit_size;
-        return cell;
-    }
-}
-
-public struct VoxModelCell {
-    public uint32_t3 coords;
-    public float unit_size;
-    public float3 centerObjectSpace() {
-        return (float3(coords) + 0.5) * unit_size;
-    }
-    public float3 centerWorldSpace() {
-        float3x4 o2w = ObjectToWorld3x4();
-        return mul(o2w, float4(centerObjectSpace(), 1.0));
     }
 }

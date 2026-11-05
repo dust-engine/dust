@@ -4,20 +4,11 @@ load("//third_party:pumicite_cli.bzl", "ron2bin", "slang_playout")
 package(default_visibility = ["//visibility:public"])
 
 slang_shader(
-    name = "sharc_module",
-    srcs = ["sharc.slang"],
-    out = "sharc.slang-module",
-    hdrs = ["@sharc//:sharc_headers"],
-    opts = ["-emit-ir"]
-)
-
-slang_shader(
     name = "pbr_module",
     srcs = ["pbr_common.slang"],
     out = "pbr_common.slang-module",
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-        ":sharc_module",
     ],
     opts = ["-emit-ir"]
 )
@@ -29,7 +20,6 @@ slang_playout(
     format = "codegen",
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-        ":sharc_module",
     ],
 )
 
@@ -39,10 +29,6 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
-        # pbr_common.slang does `__exported import sharc`, so consuming its
-        # precompiled module requires sharc's module on the include path too.
-        # Without it, sandboxed builds fail to resolve the transitive import.
-        ":sharc_module",
     ],
     out = "pbr.spv",
     profile = "lib_6_3",
@@ -59,7 +45,6 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
-        ":sharc_module",
         ":random.slang",
     ],
     out = "shadow.spv",
@@ -92,8 +77,7 @@ ron2bin(
     type = "raytracing-pipeline",
 )
 
-# The gather ray direction, shared by the screen trace and the hardware
-# gather so both passes follow the same ray (gather_common.slang).
+# The gather ray direction (gather_common.slang).
 slang_shader(
     name = "gather_module",
     srcs = ["gather_common.slang"],
@@ -101,80 +85,9 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
-        ":sharc_module",
         ":random.slang",
     ],
     opts = ["-emit-ir"],
-)
-
-slang_shader(
-    name = "final_gather",
-    srcs = ["final_gather.slang"],
-    hdrs = [
-        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-        ":pbr_module",
-        ":sharc_module",
-        ":gather_module",
-        ":random.slang",
-        "@sharc//:sharc_headers",
-    ],
-    out = "final_gather.spv",
-    profile = "lib_6_3",
-    target = "spirv",
-    opts = [
-        "-O3",
-        "-matrix-layout-row-major",
-    ],
-)
-
-ron2bin(
-    name = "final_gather_rtx_pipeline",
-    src = "final_gather.rtx.pipeline.ron",
-    out = "final_gather.rtx.pipeline.bin",
-    type = "raytracing-pipeline",
-)
-
-slang_shader(
-    name = "sharc_debug",
-    srcs = ["sharc_debug.slang"],
-    hdrs = [
-        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-        ":pbr_module",
-        ":sharc_module",
-    ],
-    out = "sharc_debug.spv",
-    profile = "sm_6_6",
-    target = "spirv",
-    opts = [
-        "-O3",
-        "-matrix-layout-row-major",
-        # Emit both compute entry points into one module, keeping their source
-        # names (without -fvk-use-entrypoint-name Slang renames each to `main`,
-        # so they'd collide). Each -stage must follow the -entry it applies to.
-        "-fvk-use-entrypoint-name",
-        "-entry",
-        "main",
-        "-stage",
-        "compute",
-        "-entry",
-        "splatCandidates",
-        "-stage",
-        "compute",
-    ],
-)
-
-ron2bin(
-    name = "sharc_debug_comp_pipeline",
-    src = "sharc_debug.comp.pipeline.ron",
-    out = "sharc_debug.comp.pipeline.bin",
-    type = "compute-pipeline",
-)
-
-ron2bin(
-    name = "sharc_debug_candidate_splat_comp_pipeline",
-    src = "sharc_debug_candidate_splat.comp.pipeline.ron",
-    out = "sharc_debug_candidate_splat.comp.pipeline.bin",
-    type = "compute-pipeline",
 )
 
 # Screen-space gather trace, compaction and debug overlay: three compute entry
@@ -185,7 +98,6 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
-        ":sharc_module",
         ":gather_module",
         ":random.slang",
     ],
@@ -310,11 +222,6 @@ filegroup(
         ":pbr_rtx_pipeline",
         ":shadow",
         ":shadow_rtx_pipeline",
-        ":final_gather",
-        ":final_gather_rtx_pipeline",
-        ":sharc_debug",
-        ":sharc_debug_comp_pipeline",
-        ":sharc_debug_candidate_splat_comp_pipeline",
         ":hzb_build",
         ":hzb_build_layout",
         ":hzb_build_comp_pipeline",

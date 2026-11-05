@@ -1,7 +1,10 @@
 //! Screen-space gather trace (Lumen-style): march each pixel's gather ray
-//! through the HZB, light on-screen hits from last frame's denoised color,
-//! and hand only the misses to the hardware gather through a compacted
-//! indirect dispatch. Shaders: screen_trace.slang, final_gather.slang.
+//! through the HZB, light on-screen hits from last frame's denoised color, and
+//! give the misses the sky. Shader: screen_trace.slang.
+//!
+//! No hardware gather follows the trace any more, so nothing reads the list of
+//! misses the compaction builds (`compact_traces_pass`, skipped in screen-only
+//! mode) or uses [`ScreenTraceConfig::pullback_bias`].
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -31,8 +34,8 @@ pub enum ScreenTraceDebugMode {
     #[default]
     Off,
     /// Per pixel: green = screen hit, yellow = hit rejected by the history or
-    /// edge tests, orange = uncertain (thin feature), red = miss (hardware
-    /// ray), blue = trace skipped.
+    /// edge tests, orange = uncertain (thin feature), red = miss, blue = trace
+    /// skipped.
     TraceTypes,
     /// One HZB level as log-scaled gray (`debug_mip`).
     HzbMip,
@@ -54,12 +57,12 @@ impl ScreenTraceDebugMode {
 /// Tunables of the screen trace; the devtools "Screen trace" page edits them.
 #[derive(Resource, Clone)]
 pub struct ScreenTraceConfig {
-    /// Off: every surface pixel traces a hardware ray from the surface, as
-    /// before the screen trace existed (A/B reference).
+    /// Off: no gather at all, so the frame holds direct light only (A/B
+    /// reference).
     pub enabled: bool,
-    /// No hardware gather rays and no SHARC passes: the screen trace resolves
-    /// every pixel, with the sky as the fallback for rays that leave the
-    /// screen (SCREEN_TRACE_FLAG_SCREEN_ONLY). For GPUs short on ray budget.
+    /// The screen trace resolves every pixel, with the sky as the fallback for
+    /// rays that leave the screen (SCREEN_TRACE_FLAG_SCREEN_ONLY). Off: only
+    /// accepted hits add light.
     pub screen_only: bool,
     pub max_iterations: u32,
     pub relative_depth_thickness: f32,
@@ -67,7 +70,8 @@ pub struct ScreenTraceConfig {
     /// World units. Voxel geometry is all hard edges; about half a voxel.
     pub min_world_thickness: f32,
     pub num_thickness_steps: u32,
-    /// World units the hardware ray backs up from the last visible point.
+    /// World units a hardware ray would back up from the last visible point.
+    /// Unused: no hardware gather follows the trace.
     pub pullback_bias: f32,
     /// Lanes of a wave that must still be marching for the wave to go on;
     /// 0 lets every ray run to its own end.
@@ -86,7 +90,7 @@ impl Default for ScreenTraceConfig {
         let env_u32 = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u32>().ok());
         Self {
             enabled: env_u32("DUST_SCREEN_TRACE").is_none_or(|v| v != 0),
-            screen_only: env_u32("DUST_SCREEN_ONLY").is_some_and(|v| v != 0),
+            screen_only: env_u32("DUST_SCREEN_ONLY").is_none_or(|v| v != 0),
             max_iterations: env_u32("DUST_SCREEN_TRACE_ITER").unwrap_or(50),
             relative_depth_thickness: 0.02,
             history_depth_thickness: 0.005,
@@ -145,7 +149,7 @@ pub struct ScreenTraceResources {
     /// One `u32` per pixel: the compacted list of pixels needing a ray.
     pub compacted_texels: GPUMutex<Buffer>,
     pub compacted_texels_state: ResourceState,
-    /// `[count, 1, 1]`, the gather's VkTraceRaysIndirectCommandKHR.
+    /// `[count, 1, 1]`, a VkTraceRaysIndirectCommandKHR.
     pub compacted_args: GPUMutex<Buffer>,
     pub compacted_args_state: ResourceState,
     /// Host copies of `compacted_args`, for the hit-rate statistic.
@@ -163,19 +167,19 @@ pub struct ScreenTraceState {
     pub debug_pipeline: Handle<ComputePipeline>,
     pub resources: Option<ScreenTraceResources>,
     /// Per-frame sampling seed of the gather ray, advanced by
-    /// `screen_trace_pass` and shared with `final_gather_pass`.
+    /// `screen_trace_pass`.
     pub frame_index: u32,
-    /// Hardware rays traced in the most recent frame whose count has been
-    /// read back (`None` until the first readback, or while disabled).
+    /// Pixels the trace left unresolved in the most recent frame whose count
+    /// has been read back (`None` until the first readback, or while disabled).
     pub hardware_rays: Option<u32>,
     /// `screen_trace_pass` recorded this frame, so the trace records are
-    /// current and `compact_traces_pass` will run: the gather may dispatch
-    /// over the compacted list. False while the pipelines are still loading.
+    /// current and `compact_traces_pass` may run. False while the pipelines are
+    /// still loading.
     pub traced_this_frame: bool,
 }
 
-/// What `final_gather_pass` needs from this module, bundled to stay under
-/// Bevy's system parameter limit.
+/// The state the screen trace passes share, bundled to stay under Bevy's system
+/// parameter limit.
 #[derive(SystemParam)]
 pub(crate) struct ScreenTraceSystemParams<'w> {
     pub state: ResMut<'w, ScreenTraceState>,
@@ -184,23 +188,10 @@ pub(crate) struct ScreenTraceSystemParams<'w> {
 }
 
 impl ScreenTraceSystemParams<'_> {
-    /// Whether this frame's gather resumes from screen-trace records.
+    /// Whether the trace runs this frame.
     pub fn active(&self) -> bool {
         self.config.enabled && self.state.resources.is_some() && self.hzb.resources.is_some()
     }
-}
-
-impl ScreenTraceConfig {
-    /// Whether the hardware gather (and with it the SHARC cache) runs: not in
-    /// screen-only mode, where nothing queries or feeds the cache.
-    pub fn hardware_gather(&self) -> bool {
-        !(self.enabled && self.screen_only)
-    }
-}
-
-/// Run condition of the final gather and the SHARC passes.
-pub(crate) fn hardware_gather_enabled(config: Res<ScreenTraceConfig>) -> bool {
-    config.hardware_gather()
 }
 
 pub struct ScreenTracePlugin;
@@ -224,11 +215,14 @@ impl Plugin for ScreenTracePlugin {
                     .after(crate::hzb::hzb_build_pass)
                     // Adds to the HDR output the shadow miss shader also
                     // read-modify-writes.
-                    .after(crate::shadow_pass),
+                    .after(crate::shadow_pass)
+                    // The lighting is complete only after this pass, and the
+                    // upscaler, which runs after the auto-exposure, overwrites
+                    // the history color it reads.
+                    .before(crate::tonemap::autoexposure_pass),
                 compact_traces_pass
                     .in_set(DefaultRenderSet)
-                    .after(screen_trace_pass)
-                    .before(crate::final_gather_pass),
+                    .after(screen_trace_pass),
                 screen_trace_debug_pass
                     .in_set(DefaultRenderSet)
                     .after(crate::clear_debug_overlay)
@@ -424,8 +418,7 @@ fn screen_trace_pass(
     mut profiler: Option<ResMut<GpuProfiler>>,
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
 ) {
-    // A fresh seed every frame, whether or not the trace runs: the hardware
-    // gather reads it too.
+    // A fresh seed every frame, whether or not the trace runs.
     params.state.frame_index = params.state.frame_index.wrapping_add(1);
     params.state.traced_this_frame = false;
     if !params.active() {
@@ -441,8 +434,7 @@ fn screen_trace_pass(
     let Some(atmosphere_uniform_buffer) = atmosphere_luts.param_buffer.clone() else {
         return;
     };
-    // Both passes or neither: the gather must not consume a list the
-    // compaction never wrote.
+    // Both passes or neither: `traced_this_frame` promises the compaction runs.
     if compute_pipelines
         .get(&params.state.compact_pipeline)
         .is_none()
@@ -625,8 +617,8 @@ fn screen_trace_pass(
     });
 }
 
-/// Builds the list of pixels whose trace missed and the indirect arguments
-/// of the gather dispatch; also reads back an earlier frame's count.
+/// Builds the list of pixels whose trace missed and its indirect arguments;
+/// also reads back an earlier frame's count.
 fn compact_traces_pass(
     mut ctx: SubmissionState,
     mut params: ScreenTraceSystemParams,

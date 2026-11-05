@@ -1,13 +1,13 @@
 // Screen-space gather trace against the closest-depth HZB, plus the
-// compaction that feeds the indirect hardware gather and a debug overlay.
+// compaction that lists the unresolved pixels and a debug overlay.
 //
 // One thread per pixel marches the pixel's gather ray through the HZB
 // (`traceHzb`, a port of Unreal's TraceHZB in HZBTracing.ush). On-screen hits
 // read last frame's lit color at the reprojected hit and add it to the HDR
 // output right here; every pixel writes a packed trace record
-// (`encodeTraceHit`) saying whether a hardware ray is still needed and from
-// what distance it can resume. `compact` turns those records into the
-// dispatch list of final_gather.slang. Mirrors Lumen's
+// (`encodeTraceHit`) saying whether it resolved and how far the ray got.
+// `compact` turns those records into a list of the unresolved pixels, which
+// nothing reads since the hardware gather was removed. Mirrors Lumen's
 // ScreenProbeTraceScreenTexturesCS / ScreenProbeCompactTracesCS
 // (LumenScreenProbeTracing.usf) with one ray per pixel instead of per probe
 // texel.
@@ -179,7 +179,7 @@ HzbTrace traceHzb(float3 rayOrigin, float3 rayDir, float maxWorldDistance) {
 
     // Certainty search: linear steps past the hit along the ray. If the ray
     // would come back out in front of the HZB within a few texels the hit
-    // was on something thin, and a hardware ray decides instead.
+    // was on something thin.
     if (result.hit && st.numThicknessSteps > 0) {
         const float searchMip = 0.0;
         float mipNumTexels = exp2(searchMip);
@@ -272,7 +272,7 @@ void main(uint3 threadId: SV_DispatchThreadID) {
 
     float3 rayOrigin = applyScreenSpaceRayBias(worldPos, N, pixel, deviceZ, screenSize);
     // The bias can push the origin off screen, which the trace cannot start
-    // from; leave the pixel to the hardware ray.
+    // from; the pixel gets no gather this frame.
     bool inFront;
     float3 originUVZ = params.uniforms.projectToScreenUVZ(rayOrigin, screenSize, inFront);
     if (!inFront || any(originUVZ.xy < 0.0) || any(originUVZ.xy > 1.0)) {
@@ -319,8 +319,7 @@ void main(uint3 threadId: SV_DispatchThreadID) {
         }
         if (ok) {
             float3 lighting = params.prevSceneColor.SampleLevel(params.sky.linearSampler, prevUV, 0).rgb;
-            // Cosine-sampled Lambertian: BRDF / pdf leaves `albedo` (see the
-            // gather miss shader).
+            // Cosine-sampled Lambertian: BRDF / pdf leaves `albedo`.
             float3 albedo = params.gbuffer.albedoSRGB[pixel].rgb;
             float4 current = params.outputTexture[pixel];
             params.outputTexture[pixel] = float4(current.rgb + albedo * lighting, current.a);
@@ -330,7 +329,7 @@ void main(uint3 threadId: SV_DispatchThreadID) {
         }
     } else if (!trace.hit && screenOnly) {
         // The ray left the screen unoccluded as far as the trace could see:
-        // take the sky, as the gather miss shader would.
+        // take the sky.
         float3 skyLuminance = params.sky.atmosphereParams.solar_illuminance
             * params.sky.sampleScatteredTransfer(rayDir);
         float3 albedo = params.gbuffer.albedoSRGB[pixel].rgb;
@@ -338,14 +337,14 @@ void main(uint3 threadId: SV_DispatchThreadID) {
         params.outputTexture[pixel] = float4(current.rgb + albedo * skyLuminance, current.a);
     }
 
-    // Resume distance of the hardware ray: the hit (accepted, uncertain or
-    // rejected) or, on a miss, the furthest point the trace could still see.
+    // How far the ray got: the hit (accepted, uncertain or rejected) or, on a
+    // miss, the furthest point the trace could still see.
     float3 resumeWorld = params.uniforms.worldPosFromScreenUVZ(trace.hitUVZ.xy, trace.hitUVZ.z, screenSize);
     float resumeDistance = distance(worldPos, resumeWorld);
     params.traceHit[pixel] = encodeTraceHit(resumeDistance, accepted, trace.uncertain, rejected, false);
 }
 
-// ── Compaction: list of pixels that still need a hardware ray ────────────
+// ── Compaction: list of pixels the trace left unresolved ─────────────────
 
 // Wave-level allocation (WAVE_OPS path of ScreenProbeCompactTracesCS): one
 // atomic per wave on the count, prefix bits give each lane its slot. Every
@@ -382,7 +381,7 @@ static const uint DEBUG_HZB_MIP = 2;       // one HZB level, log-scaled
 static const uint DEBUG_PREV_COLOR = 3;    // the history color the hits sample
 
 // Dispatched at display resolution over the overlay layer (debugOverlayTexture,
-// which tonemap composites), like the SHARC debug overlay.
+// which tonemap composites).
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void debugOverlay(uint3 threadId: SV_DispatchThreadID) {
@@ -408,9 +407,9 @@ void debugOverlay(uint3 threadId: SV_DispatchThreadID) {
         } else if (t.rejected) {
             color = float3(0.9, 0.9, 0.1);        // yellow: hit rejected (history / edge)
         } else if (t.uncertain) {
-            color = float3(1.0, 0.5, 0.0);        // orange: uncertain, hardware retrace
+            color = float3(1.0, 0.5, 0.0);        // orange: uncertain
         } else if (t.distance > 0.0) {
-            color = float3(0.9, 0.1, 0.1);        // red: screen miss, hardware ray
+            color = float3(0.9, 0.1, 0.1);        // red: screen miss
         } else {
             color = float3(0.1, 0.2, 0.9);        // blue: trace skipped
         }

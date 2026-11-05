@@ -5,7 +5,7 @@ package(default_visibility = ["//visibility:public"])
 
 # Shared voxel types (Block, HitAttribute, VoxModelParams,
 # ReportHitWithAMDWorkaround). Compiled to a Slang IR module so the voxel hit
-# groups (vox_pbr, vox_shadow, vox_final_gather, vox_sharc_update) can import it.
+# groups (vox_pbr, vox_shadow) can import it.
 slang_shader(
     name = "vox_common_module",
     srcs = ["vox_common.slang"],
@@ -46,9 +46,6 @@ slang_shader(
     hdrs = [
         ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
-        # pbr_common does `__exported import sharc`; the precompiled module is
-        # needed on the include path to resolve that transitive import.
-        "//crates/pbr/shaders:sharc_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
     ],
     out = "vox_pbr.spv",
@@ -74,7 +71,6 @@ slang_shader(
         ":vox_common_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:pbr_module",
-        "//crates/pbr/shaders:sharc_module",
     ],
     out = "vox_shadow.spv",
     profile = "lib_6_3",
@@ -91,58 +87,6 @@ ron2bin(
     type = "raytracing-pipeline"
 )
 
-slang_shader(
-    name = "vox_final_gather",
-    srcs = ["vox_final_gather.slang"],
-    hdrs = [
-        ":vox_common_module",
-        "//crates/pbr/shaders:pbr_module",
-        "//crates/pbr/shaders:sharc_module",
-        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-        "//crates/pbr/shaders:random.slang",
-    ],
-    out = "vox_final_gather.spv",
-    profile = "lib_6_3",
-    target = "spirv",
-    opts = [
-        "-O3",
-        "-matrix-layout-row-major",
-    ],
-)
-ron2bin(
-    name = "vox_final_gather_pipeline_library",
-    src = "vox_final_gather.rtx.pipeline.ron",
-    out = "vox_final_gather.rtx.pipeline.bin",
-    type = "raytracing-pipeline"
-)
-
-# Voxel hit group attached to the SHARC Update RT pipeline. The SHARC state
-# machine lives in the ray-gen, not the hit shader.
-slang_shader(
-    name = "vox_sharc_update",
-    srcs = ["vox_sharc_update.slang"],
-    hdrs = [
-        ":vox_common_module",
-        "//crates/pbr/shaders:pbr_module",
-        "//crates/pbr/shaders:sharc_module",
-        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-        "//crates/pbr/shaders:random.slang",
-    ],
-    out = "vox_sharc_update.spv",
-    profile = "lib_6_3",
-    target = "spirv",
-    opts = [
-        "-O3",
-        "-matrix-layout-row-major",
-    ],
-)
-ron2bin(
-    name = "vox_sharc_update_pipeline_library",
-    src = "vox_sharc_update.rtx.pipeline.ron",
-    out = "vox_sharc_update.rtx.pipeline.bin",
-    type = "raytracing-pipeline",
-)
-
 filegroup(
     name = "runtime",
     srcs = [
@@ -153,9 +97,5 @@ filegroup(
         ":vox_pbr_rtx_pipeline_library",
         ":vox_pbr_shadow_pipeline_library",
         ":vox_shadow",
-        ":vox_final_gather",
-        ":vox_final_gather_pipeline_library",
-        ":vox_sharc_update",
-        ":vox_sharc_update_pipeline_library",
     ],
 )

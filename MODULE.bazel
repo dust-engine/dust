@@ -160,23 +160,3 @@ new_git_repository(
     commit = "a291cc7d2cc642a51566f3dfd5376f635cd1b284",
     build_file = "//third_party:dlss.BUILD.bazel",
 )
-
-# -----------------------------------------------------------------------------
-# NVIDIA SHARC
-# -----------------------------------------------------------------------------
-new_git_repository(
-    name = "sharc",
-    remote = "https://github.com/NVIDIA-RTX/SHARC.git",
-    commit = "4e21b585c33c83d723ca9a1e11bbb1090d145793",
-    build_file = "//third_party:SHARC.BUILD.bazel",
-    # Apple GPUs (Metal) lack 64-bit atomics, so SHARC runs the lock-buffer
-    # insert path (HASH_GRID_ENABLE_64_BIT_ATOMICS 0). This patch adds an
-    # optional wait-free 32-bit-CAS claim (HASH_GRID_CLAIM_VIA_32BIT_CAS) and the
-    # eviction-time flag reset it needs. The second patch makes radiance accumulate
-    # as floats, with an atomic float add instead of SHARC's fixed-point integers.
-    patches = [
-        "//third_party:sharc_lock_claim.patch",
-        "//third_party:sharc_float_atomics.patch",
-    ],
-    patch_args = ["-p1"],
-)

@@ -2,11 +2,8 @@ module gather_common;
 import pbr_common;
 import random;
 
-// The final-gather ray of `pixel` this frame: a cosine-weighted hemisphere
-// sample around `N`, seeded per pixel and frame. The screen trace and the
-// hardware fallback both call this so a ray resumed from the last
-// screen-visible point continues in exactly the direction the screen trace
-// followed.
+// The gather ray of `pixel` this frame: a cosine-weighted hemisphere sample
+// around `N`, seeded per pixel and frame.
 public float3 gatherRayDirection(uint2 pixel, float3 N, uint frameIndex) {
     uint seed = xxhash32(uint3(pixel.x, pixel.y, frameIndex));
     float u0 = rand(seed);

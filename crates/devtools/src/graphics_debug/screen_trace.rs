@@ -198,11 +198,11 @@ impl Render for ScreenTracePage {
                 (Some(rays), Some(extent)) if cfg.enabled => {
                     let pixels = extent.x * extent.y;
                     format!(
-                        "Hardware rays: {rays} ({:.1}% of pixels)",
+                        "Unresolved pixels: {rays} ({:.1}% of pixels)",
                         100.0 * rays as f32 / pixels.max(1) as f32
                     )
                 }
-                _ => "Hardware rays: every surface pixel".to_owned(),
+                _ => "Gather off: direct light only".to_owned(),
             });
         let mode = DEBUG_MODES
             .iter()
@@ -235,7 +235,7 @@ impl Render for ScreenTracePage {
             )
             .child(
                 Checkbox::new("screen-trace-screen-only")
-                    .label("Screen only (no hardware rays, no SHARC)")
+                    .label("Screen only (misses take the sky)")
                     .checked(cfg.screen_only)
                     .disabled(!cfg.enabled)
                     .on_click(cx.listener(|this, screen_only: &bool, _, cx| {

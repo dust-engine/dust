@@ -10,7 +10,6 @@ filegroup(
         "//assets:runtime",
         "//crates/pbr/shaders:runtime",
         "//crates/pbr/shaders/sky_atmosphere:runtime",
-        "//crates/pbr/shaders/sharc:runtime",
         "//crates/vox/shaders:runtime",
     ] + select({
         # The DLSS Ray Reconstruction runtime library NGX loads (Windows/Linux).

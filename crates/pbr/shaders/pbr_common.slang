@@ -1,6 +1,19 @@
 import sky_atmosphere;
 module pbr_common;
-__exported import sharc;
+
+// Generic pumicite shader-stage flags for the `[Stages(...)]` attribute. The
+// pumicite codegen reads this mask off every ParameterBlock binding and only
+// coalesces consecutive descriptor writes that share it, so each emitted
+// VkWriteDescriptorSet stays stage-uniform. Values mirror VkShaderStageFlagBits.
+public static const int STAGE_COMPUTE = 0x20;
+public static const int STAGE_RAYGEN = 0x100;
+public static const int STAGE_ANY_HIT = 0x200;
+public static const int STAGE_CLOSEST_HIT = 0x400;
+public static const int STAGE_MISS = 0x800;
+public static const int STAGE_INTERSECTION = 0x1000;
+
+[__AttributeUsage(_AttributeTargets.Var)]
+public struct StagesAttribute { int stages; }
 
 public struct SkyAtmosphereParams {
 [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_COMPUTE)]
@@ -109,8 +122,7 @@ public struct CameraUniforms {
     }
 
     // Camera-space direction through a point of the image plane. `pixelNDC` is
-    // in [0, 1]^2 with the origin at the top-left corner of the screen, the
-    // same space `projectToPixel` returns (divided by `screenSize`).
+    // in [0, 1]^2 with the origin at the top-left corner of the screen.
     public float3 rayDirCameraSpaceFromNDC(float2 pixelNDC, uint2 screenSize) {
         float2 pixelCamera = 2 * pixelNDC - 1;
         pixelCamera.y *= -1;
@@ -223,28 +235,6 @@ public struct CameraUniforms {
         float ndcY = -(viewDir.y / negZ) / prev_tan_half_fov * 0.5 + 0.5;
         return float2(ndcX, ndcY) * float2(screenSize) - 0.5;
     }
-
-    // Project a world-space point to a pixel coordinate through the CURRENT
-    // frame's camera. Returns false when the point is behind the camera (the
-    // caller should discard it). Mirrors prevPixelFromWorld but uses this
-    // frame's model / FOV — used by the SHARC candidate-pool splat debug view.
-    public bool projectToPixel(float3 worldPos, uint2 screenSize, out float2 pixel) {
-        matrix<float, 3, 3> rotation =
-            float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
-        float3 origin = float3(model[0].w, model[1].w, model[2].w);
-        float3 viewPos = mul(transpose(rotation), worldPos - origin);
-        // -Z is forward, so a point in front of the camera has viewPos.z < 0.
-        if (viewPos.z >= -1e-6) {
-            pixel = float2(0.0, 0.0);
-            return false;
-        }
-        float negZ = -viewPos.z;
-        float aspect = float(screenSize.x) / float(screenSize.y);
-        float ndcX = (viewPos.x / negZ) / (tan_half_fov * aspect) * 0.5 + 0.5;
-        float ndcY = -(viewPos.y / negZ) / tan_half_fov * 0.5 + 0.5;
-        pixel = float2(ndcX, ndcY) * float2(screenSize);
-        return true;
-    }
 }
 
 // Per-TLAS-instance data uploaded by the PBR plugin's `update_prev_transforms`
@@ -257,19 +247,19 @@ public struct PbrInstanceData {
 
 public struct PbrPipelineGbuffer {
 // [Stages] lists every shader stage that touches each binding across the
-    // engine's pipelines (the gbuffer is also read by a SHARC debug compute pass,
-    // hence Compute on several). The codegen coalesces descriptor writes only
-    // within a matching-stage run, so these must mirror the stages in
-    // pbr.playout.ron / sharc.playout.ron.
+    // engine's pipelines (the gbuffer is also read by the screen trace's compute
+    // passes, hence Compute on several). The codegen coalesces descriptor writes
+    // only within a matching-stage run, so these must mirror the stages in
+    // pbr.playout.ron.
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public RWTexture2D<float4> albedoLinear;
 [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public Texture2D<float4> albedoSRGB;
     // Uint (R8G8B8A8_UINT) view aliasing `albedoLinear`'s storage. The .a (w)
     // channel is a per-pixel miss shader index: the primary pass records which
-    // miss shader the shadow / final-gather passes feed into TraceRay's
-    // MissShaderIndex (real hits store 0; sky/UI store 0xFF as a "no surface"
-    // sentinel those passes skip). Must be uint32_t4, not uint8_t4 — Vulkan
+    // miss shader the shadow pass feeds into TraceRay's MissShaderIndex (real
+    // hits store 0; sky/UI store 0xFF as a "no surface" sentinel that pass
+    // skips). Must be uint32_t4, not uint8_t4 — Vulkan
     // storage images require a 32-bit sampled type even for an 8-bit format; an
     // 8-bit image sampled type is invalid SPIR-V and spirv-val rejects it.
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
@@ -289,7 +279,7 @@ public struct PbrPipelineGbuffer {
     // Specular albedo (F0 reflectance) for the deferred specular lobe and
     // DLSS-RR's specular guide buffer. Written by the primary pass (metalness
     // split: dielectric F0 from IOR, lerped to albedo by metalness), read by the
-    // shadow + final-gather passes. Perceptual roughness rides in
+    // shadow pass. Perceptual roughness rides in
     // normalTexture.w (DLSS reads it there — RoughnessMode::Packed).
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     public RWTexture2D<float4> specularAlbedo;
@@ -306,9 +296,9 @@ public struct PbrPipelineGbuffer {
 
 // ── Screen-space (HZB) gather trace ─────────────────────────────────────
 //
-// Per-frame parameters of the screen trace / compaction / indirect gather
-// passes (screen_trace.slang, final_gather.slang). Layout MUST match
-// `ScreenTraceConstantsRaw` in crates/pbr/src/screen_trace.rs.
+// Per-frame parameters of the screen trace and compaction passes
+// (screen_trace.slang). Layout MUST match `ScreenTraceConstantsRaw` in
+// crates/pbr/src/screen_trace.rs.
 public struct ScreenTraceConstants {
     // Screen UV -> HZB UV: renderExtent / (2 * hzbExtent). Mip 0 of the HZB is
     // half the power-of-two-rounded render extent, so the render area covers
@@ -331,12 +321,12 @@ public struct ScreenTraceConstants {
     // Linear steps past a hit that must all stay in front of the HZB for the
     // hit to count as certain (0 disables the search).
     public uint numThicknessSteps;
-    // World units the hardware ray backs up from the last screen-visible point.
+    // World units a hardware ray would back up from the last screen-visible
+    // point. Unused: no hardware gather follows the trace.
     public float pullbackBias;
     public uint flags;
     public uint debugMode;
-    // Per-frame sampling seed shared by the screen trace and the gather ray,
-    // so both passes trace the same direction.
+    // Per-frame sampling seed of the gather ray.
     public uint frameIndex;
     public uint hzbNumMips;
     // Debug view controls (see `ScreenTraceDebugMode` in screen_trace.rs).
@@ -345,22 +335,19 @@ public struct ScreenTraceConstants {
     // Mip-0 extent of the HZB, for clamped texel fetches.
     public uint2 hzbExtent;
     // Stop marching once fewer lanes of the wave than this are still
-    // tracing; the rest fall through to the hardware ray (Lumen's
-    // MinimumOccupancy). 0 disables the check.
+    // tracing; the rest end as misses (Lumen's MinimumOccupancy). 0 disables
+    // the check.
     public uint minimumOccupancy;
     uint _pad;
 }
 
-// Screen tracing is on: the gather dispatch is 1D over `compactedTraceTexels`,
-// sized by `compactedTraceArgs` through an indirect trace-rays call. Off:
-// the gather covers the screen and every surface pixel takes a hardware ray
-// from t = 0.
+// Screen tracing is on. Off: surface pixels get no gather.
 public static const uint SCREEN_TRACE_FLAG_ENABLED = 1u << 0;
 // Last frame's depth and color are complete (FrameHistory::valid).
 public static const uint SCREEN_TRACE_FLAG_HISTORY_VALID = 1u << 1;
-// Screen-only gather: no hardware rays follow, so the screen trace resolves
-// every pixel itself. Uncertain hits are accepted, misses take the sky
-// radiance along the ray, and rejected hits contribute nothing.
+// Screen-only gather: the screen trace resolves every pixel itself. Uncertain
+// hits are accepted, misses take the sky radiance along the ray, and rejected
+// hits contribute nothing.
 public static const uint SCREEN_TRACE_FLAG_SCREEN_ONLY = 1u << 2;
 
 // ── Trace record (one uint per pixel in `traceHit`) ─────────────────────
@@ -369,8 +356,8 @@ public static const uint SCREEN_TRACE_FLAG_SCREEN_ONLY = 1u << 2;
 // resume distance is stored as a float with the flags packed into its three
 // lowest mantissa bits and its sign bit, so reading the distance back is a
 // mask and an `asfloat`.
-public static const uint TRACE_HIT_FLAG_HIT = 1u << 0;        // accepted screen hit, no hardware ray
-public static const uint TRACE_HIT_FLAG_UNCERTAIN = 1u << 1;  // hit behind a thin feature, retraced
+public static const uint TRACE_HIT_FLAG_HIT = 1u << 0;        // accepted screen hit
+public static const uint TRACE_HIT_FLAG_UNCERTAIN = 1u << 1;  // hit behind a thin feature
 public static const uint TRACE_HIT_FLAG_REJECTED = 1u << 2;   // hit failed the history / edge tests
 public static const uint TRACE_HIT_FLAG_REACHED_MAX = 1u << 31;
 public static const uint TRACE_HIT_DISTANCE_MASK = 0x7FFFFFF8u;
@@ -402,13 +389,6 @@ public TraceHit decodeTraceHit(uint encoded) {
     return t;
 }
 
-// Payload of the final-gather ray. The gather dispatch is 1D over the
-// compacted trace list, so the miss and closest-hit shaders learn the pixel
-// they light from the payload rather than DispatchRaysIndex().
-public struct [raypayload] FinalGatherPayload {
-    public uint2 pixel : read(closesthit, miss) : write(caller);
-}
-
 public struct PbrPipelineParams {
     [Stages(STAGE_RAYGEN)]
     public RaytracingAccelerationStructure sceneBVH;
@@ -423,32 +403,31 @@ public struct PbrPipelineParams {
     // frame's world-from-object transform.
     [Stages(STAGE_CLOSEST_HIT)]
     public StructuredBuffer<PbrInstanceData> perInstanceData;
-    public SharcParams sharc;
 
-    // Screen-space gather trace (bindings 25..31). Read by the screen-trace,
-    // compaction and debug compute passes and by the final-gather ray-gen.
+    // Screen-space gather trace (bindings 16..22). Read by the screen-trace,
+    // compaction and debug compute passes.
     // The set is a push-descriptor set, which this device caps at 32
     // descriptors, so the trace fetches texels (no point sampler) and the
     // history color goes through `sky.linearSampler` (bilinear, clamp).
     // Closest-depth HZB of this frame's depth G-buffer (hzb_build.slang).
-    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    [Stages(STAGE_COMPUTE)]
     public Texture2D<float> hzbTexture;
     // Last frame's denoised radiance, display resolution.
-    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    [Stages(STAGE_COMPUTE)]
     public Texture2D<float4> prevSceneColor;
     // Last frame's depth G-buffer, render resolution.
-    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    [Stages(STAGE_COMPUTE)]
     public Texture2D<float> prevDepthTexture;
-    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    [Stages(STAGE_COMPUTE)]
     public ConstantBuffer<ScreenTraceConstants> screenTrace;
     // Packed trace record per pixel (`encodeTraceHit`).
-    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    [Stages(STAGE_COMPUTE)]
     public RWTexture2D<uint> traceHit;
-    // Pixels needing a hardware ray, packed `x | y << 16`, in dispatch order.
-    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    // Pixels the trace left unresolved, packed `x | y << 16`.
+    [Stages(STAGE_COMPUTE)]
     public RWStructuredBuffer<uint> compactedTraceTexels;
-    // `[count, 1, 1]`: a VkTraceRaysIndirectCommandKHR for the gather.
-    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    // `[count, 1, 1]`: a VkTraceRaysIndirectCommandKHR.
+    [Stages(STAGE_COMPUTE)]
     public RWStructuredBuffer<uint> compactedTraceArgs;
 
 
@@ -486,11 +465,7 @@ public struct PbrPipelineParams {
 // Force the ParameterBlock to descriptor set 0. Without this, Slang reserves
 // its own set for ParameterBlock contents as soon as any shader declares
 // other explicit `[vk::binding(_, 0)]` globals — which would land `params` at
-// set 1 and the SHARC working buffers at set 0, requiring a multi-set pipeline
-// layout (only one set per layout can be a push-descriptor set, so that path
-// fails validation). Pinning it here keeps a single push-descriptor layout.
+// set 1, requiring a multi-set pipeline layout (only one set per layout can be
+// a push-descriptor set, so that path fails validation). Pinning it here keeps
+// a single push-descriptor layout.
 [vk::binding(0, 0)] public ParameterBlock<PbrPipelineParams> params;
-
-public struct [raypayload] SharcRayPayload {
-    public uint cacheSlot : read(closesthit, miss) : write(caller);
-}

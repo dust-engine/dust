@@ -7,8 +7,7 @@ struct [raypayload] ShadowPayload {
 }
 
 // Per-frame sampling seed for the sun-disk jitter. Uses the RayGen (0, 4)
-// push-constant range that pbr.playout.ron declares (shared with the
-// final-gather pass, which pushes its own frame index into the same range).
+// push-constant range that pbr.playout.ron declares.
 struct ShadowPush {
     uint frameIndex;
 }

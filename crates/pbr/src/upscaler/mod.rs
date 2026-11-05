@@ -8,6 +8,8 @@
 //!    upscales.
 //! 3. A linear-filtered `vkCmdBlitImage`: everywhere else. Upscales only, so the
 //!    output keeps the path tracer's noise.
+//!
+//! [`DENOISING_BACKENDS_ENABLED`] currently turns 1 and 2 off.
 
 #[cfg(feature = "dlss")]
 mod dlss;
@@ -28,6 +30,12 @@ use pumicite::tracking::Access;
 use crate::camera::Camera;
 use crate::{HdrRenderTarget, HdrRenderTargetViewsExt};
 
+/// Whether DLSS Ray Reconstruction and MetalFX may be picked. Off for the
+/// radiance cascade experiment, so the lighting reaches the screen as traced:
+/// every platform takes the blit, at native resolution. Their code stays
+/// compiled; set this to `true` to bring them back.
+const DENOISING_BACKENDS_ENABLED: bool = false;
+
 /// Enables the Vulkan instance and device extensions the upscaler backends
 /// need.
 ///
@@ -38,17 +46,21 @@ pub struct UpscalerSetupPlugin;
 impl Plugin for UpscalerSetupPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "dlss")]
-        dlss::add_vulkan_extensions(app);
+        if DENOISING_BACKENDS_ENABLED {
+            dlss::add_vulkan_extensions(app);
+        }
         #[cfg(target_vendor = "apple")]
-        app.add_systems(
-            Startup,
-            (|mut device_builder: ResMut<pumicite::device::DeviceBuilder>| {
-                device_builder
-                    .enable_extension::<pumicite::ash::ext::metal_objects::Meta>()
-                    .expect("MetalFX needs VK_EXT_metal_objects");
-            })
-            .before(CreateDevice),
-        );
+        if DENOISING_BACKENDS_ENABLED {
+            app.add_systems(
+                Startup,
+                (|mut device_builder: ResMut<pumicite::device::DeviceBuilder>| {
+                    device_builder
+                        .enable_extension::<pumicite::ash::ext::metal_objects::Meta>()
+                        .expect("MetalFX needs VK_EXT_metal_objects");
+                })
+                .before(CreateDevice),
+            );
+        }
         #[cfg(not(any(feature = "dlss", target_vendor = "apple")))]
         let _ = app;
     }
@@ -88,6 +100,9 @@ pub(crate) fn setup_upscaler(
 }
 
 fn select_upscaler(device: &Device, settings: &ApplicationSettings) -> Upscaler {
+    if !DENOISING_BACKENDS_ENABLED {
+        return Upscaler::Blit;
+    }
     #[cfg(feature = "dlss")]
     match dlss::Ngx::new(device, settings) {
         Ok(ngx) => return Upscaler::Dlss(ngx),
