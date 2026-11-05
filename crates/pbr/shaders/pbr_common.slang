@@ -389,6 +389,156 @@ public TraceHit decodeTraceHit(uint encoded) {
     return t;
 }
 
+// ── Split Radiance Cascades ─────────────────────────────────────────────
+//
+// Types of the radiance cache (rc_common.slang explains how it works). Every
+// buffer is reached through a device address in RcConstants; layouts MUST match
+// crates/pbr/src/radiance_cascades.rs.
+
+// One probe of one cascade. The probe list is rebuilt every frame.
+public struct RcProbe {
+    public uint key;
+    // This probe's index in last frame's list, or RC_INVALID.
+    public uint prevIndex;
+    // In cascade n + 1. Holds its hash slot until `rcLink` resolves it.
+    public uint parent;
+    // Rays leaving this cell this frame.
+    public uint rayCount;
+    // The next index into the R2 sequence (Algorithm 3 of the paper).
+    public uint rayCursor;
+    // Frames since a ray left this cell.
+    public uint age;
+}
+
+// What this frame's rays deposited into one direction of one probe.
+public struct RcAccum {
+    public float r;
+    public float g;
+    public float b;
+    // Low 16 bits: rays. High 16 bits: rays that passed through the interval.
+    public uint counts;
+}
+
+// The point a primary cache ray hit, from which the secondary cache spawns a ray
+// next frame.
+public struct RcHit {
+    public float3 position;
+    public uint normal;
+}
+
+// One cascade's place in the cache's buffers.
+public struct RcCascade {
+    // Into `keys` and `slots`.
+    public uint tableOffset;
+    public uint tableMask;
+    // Into `probes`.
+    public uint probeOffset;
+    public uint probeCapacity;
+    // Into `accum` and `history`, in directions.
+    public uint dataOffset;
+    // Into `merged`.
+    public uint mergedOffset;
+    // Into `neighbors`, in probes.
+    public uint neighborOffset;
+    uint _pad;
+}
+
+// A cache's cascade 0, as much as sampling its irradiance needs.
+public struct RcIrradianceSource {
+    public uint* keys;
+    public uint* slots;
+    public uint tableMask;
+    public uint lodOffset;
+    public uint tilesPerRow;
+    uint _pad;
+}
+
+public struct RcConstants {
+    public RcIrradianceSource own;
+    // The secondary cache, sampled where rays hit.
+    public RcIrradianceSource bounce;
+    public RcCascade cascades[4];
+    public float3 cameraPosition;
+    // World units between the probes of cascade 0, LOD 0.
+    public float spacing;
+    // Per-frame offset of the R2 sequence.
+    public float2 jitter;
+    // Length of cascade 0's interval at LOD 0.
+    public float baseRayLength;
+    // Chebyshev distance from the camera at which LOD 0 ends.
+    public float lodDistance;
+    public uint2 renderExtent;
+    // Added to the distance-derived LOD of this cache's probes.
+    public uint lodOffset;
+    // Weight of one ray against the history.
+    public float temporalAlpha;
+    public uint flags;
+    // Frames a probe outlives the last ray that left its cell.
+    public uint maxAge;
+    // Rays a cascade 0 probe gets per frame, when it has that many pixels.
+    public float raysPerProbe;
+    // Projected size of one world unit, one unit away.
+    public float pixelsPerRadian;
+    public uint frameIndex;
+    // Fraction of ray hits that spawn a secondary cache ray.
+    public float bounceRayFraction;
+    public uint hitCapacity;
+    public uint debugMode;
+    public float debugScale;
+    uint _pad;
+    public uint* keys;
+    // Per hash slot: rays and age while the table fills, then the probe's index.
+    public uint* slots;
+    public RcProbe* probes;
+    // Per direction: J in .rgb, transmittance in .a (negative: never sampled).
+    public float16_t4* history;
+    // See the RC_COUNTER_* offsets.
+    public uint* counters;
+    public uint* prevKeys;
+    public uint* prevSlots;
+    public RcProbe* prevProbes;
+    public float16_t4* prevHistory;
+    public uint* prevCounters;
+    public RcAccum* accum;
+    // Per direction of cascade n - 1, the pre-averaged I_n (per direction of
+    // cascade 0 for cascade 0); .a is 0 where no ray gave it a value.
+    public float16_t4* merged;
+    // 8 per probe: the probes of the next cascade around it, the parent first.
+    public uint* neighbors;
+    public RcHit* hits;
+    // See the RC_HIT_* offsets.
+    public uint* hitCounters;
+}
+
+// This cache's sources are last frame's ray hits, not the pixels.
+public static const uint RC_FLAG_SECONDARY = 1u << 0;
+// Ray hits add the secondary cache's irradiance.
+public static const uint RC_FLAG_BOUNCE = 1u << 1;
+// Ray hits are kept for next frame's secondary cache.
+public static const uint RC_FLAG_RECORD_HITS = 1u << 2;
+
+// `RcConstants::counters`, in uints. Each cascade has a probe count and two sets
+// of indirect dispatch arguments: 64 threads per group over the probes, and 32
+// over the directions `rcMerge` outputs.
+public static const uint RC_COUNTER_PROBES = 0;
+public static const uint RC_COUNTER_PROBE_ARGS = 4;
+public static const uint RC_COUNTER_MERGE_ARGS = 16;
+public static const uint RC_COUNTER_RAYS = 28;
+
+// `RcConstants::hitCounters`, in uints.
+public static const uint RC_HIT_COUNT = 0;
+public static const uint RC_HIT_BUILD_ARGS = 1;
+public static const uint RC_HIT_TRACE_ARGS = 4;
+
+// What a cache ray returns; shadow rays only use `t`.
+public struct RcPayload {
+    public float3 albedo;
+    // Hit distance; negative when the ray missed.
+    public float t;
+    public float3 emission;
+    public float3 normal;
+}
+
 public struct PbrPipelineParams {
     [Stages(STAGE_RAYGEN)]
     public RaytracingAccelerationStructure sceneBVH;
@@ -429,6 +579,18 @@ public struct PbrPipelineParams {
     // `[count, 1, 1]`: a VkTraceRaysIndirectCommandKHR.
     [Stages(STAGE_COMPUTE)]
     public RWStructuredBuffer<uint> compactedTraceArgs;
+
+    // Radiance cascades (bindings 23..26): the cache's parameters, its irradiance
+    // atlas as `rcIrradiance` writes and as `rcShade` samples it, and the
+    // secondary cache's atlas, sampled where rays hit.
+    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    public ConstantBuffer<RcConstants> rc;
+    [Stages(STAGE_COMPUTE)]
+    public RWTexture2D<float4> rcIrradianceOutput;
+    [Stages(STAGE_COMPUTE)]
+    public Texture2D<float4> rcIrradianceAtlas;
+    [Stages(STAGE_RAYGEN | STAGE_COMPUTE)]
+    public Texture2D<float4> rcBounceAtlas;
 
 
     // Ray-length `t` from the camera origin to the surface stored at `position`.

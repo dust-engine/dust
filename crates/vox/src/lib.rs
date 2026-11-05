@@ -286,8 +286,10 @@ impl Plugin for VoxPlugin {
 pub struct VoxRenderState {
     primary_pipeline: Handle<RayTracingPipelineLibrary>,
     shadow_pipeline: Handle<RayTracingPipelineLibrary>,
+    radiance_cascades_pipeline: Handle<RayTracingPipelineLibrary>,
     primary_library_index: u16,
     shadow_library_index: u16,
+    radiance_cascades_library_index: u16,
 }
 
 fn setup(
@@ -306,11 +308,20 @@ fn setup(
     let shadow_library_index = pipeline_manager
         .add_library_for_pipeline(&pbr_render_state.shadow_pipeline, shadow_pipeline.clone());
 
+    let radiance_cascades_pipeline: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://dust/crates/vox/shaders/vox_rc.rtx.pipeline.bin");
+    let radiance_cascades_library_index = pipeline_manager.add_library_for_pipeline(
+        &pbr_render_state.radiance_cascades_pipeline,
+        radiance_cascades_pipeline.clone(),
+    );
+
     commands.insert_resource(VoxRenderState {
         primary_pipeline,
         primary_library_index,
         shadow_pipeline,
         shadow_library_index,
+        radiance_cascades_pipeline,
+        radiance_cascades_library_index,
     });
 }
 
@@ -335,8 +346,11 @@ fn write_sbt_entries(
     palette_assets: Res<Assets<VoxPalette>>,
 ) {
     let pbr_state = &mut *pbr_state;
-    let (Some(sbt), Some(shadow_sbt)) = (pbr_state.sbt.as_mut(), pbr_state.shadow_sbt.as_mut())
-    else {
+    let (Some(sbt), Some(shadow_sbt), Some(radiance_cascades_sbt)) = (
+        pbr_state.sbt.as_mut(),
+        pbr_state.shadow_sbt.as_mut(),
+        pbr_state.radiance_cascades_sbt.as_mut(),
+    ) else {
         for mut model in models.iter_mut() {
             model.sbt_index = u32::MAX;
         }
@@ -379,6 +393,14 @@ fn write_sbt_entries(
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
+        let radiance_cascades_sbt_index = radiance_cascades_sbt.push_hitgroup(
+            vox_render_state.radiance_cascades_library_index,
+            0,
+            |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            },
+        );
+        assert_eq!(radiance_cascades_sbt_index, model.sbt_index);
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;

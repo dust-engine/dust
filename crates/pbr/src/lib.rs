@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod hzb;
+pub mod radiance_cascades;
 pub mod screen_trace;
 pub mod sky;
 pub mod tonemap;
@@ -199,6 +200,7 @@ impl Plugin for PbrRenderPlugin {
                     .after(ensure_hdr_target),
                 hzb::hzb_build_pass
                     .in_set(DefaultRenderSet)
+                    .run_if(screen_trace::hzb_needed)
                     .after(render)
                     .after(hzb::ensure_hzb_resources),
                 shadow_pass
@@ -227,6 +229,7 @@ impl Plugin for PbrRenderPlugin {
 
         app.add_plugins(sky::SkyPlugin);
         app.add_plugins(screen_trace::ScreenTracePlugin);
+        app.add_plugins(radiance_cascades::RadianceCascadesPlugin);
         app.configure_sets(
             PostUpdate,
             SkyAtmosphereLUTRenderSet
@@ -250,6 +253,15 @@ impl Plugin for PbrRenderPlugin {
                         &mut feature.null_descriptor
                     })
                     .ok();
+                // Radiance cascades deposit radiance as floats (rc_trace.slang).
+                device_builder
+                    .enable_extension::<pumicite::ash::ext::shader_atomic_float::Meta>()
+                    .unwrap();
+                device_builder
+                    .enable_feature::<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>(|feature| {
+                        &mut feature.shader_buffer_float32_atomic_add
+                    })
+                    .unwrap();
             })
             .before(CreateDevice),
         );
@@ -644,10 +656,12 @@ pub struct RenderQualitySettings {
 pub struct PbrRenderState {
     pub pipeline: Handle<RayTracingPipeline>,
     pub shadow_pipeline: Handle<RayTracingPipeline>,
+    pub radiance_cascades_pipeline: Handle<RayTracingPipeline>,
     pub tonemap_pipeline: Handle<ComputePipeline>,
     pub autoexposure_pipeline: Handle<ComputePipeline>,
     pub sbt: Option<ShaderBindingTable>,
     pub shadow_sbt: Option<ShaderBindingTable>,
+    pub radiance_cascades_sbt: Option<ShaderBindingTable>,
 }
 
 #[derive(Default)]
@@ -688,6 +702,8 @@ pub fn setup(
         asset_server.load("bazel://dust/crates/pbr/shaders/pbr.rtx.pipeline.bin");
     let shadow_base_library: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/pbr/shaders/shadow.rtx.pipeline.bin");
+    let radiance_cascades_base_library: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://dust/crates/pbr/shaders/rc_trace.rtx.pipeline.bin");
 
     let tonemap_pipeline: Handle<ComputePipeline> =
         asset_server.load("bazel://dust/crates/pbr/shaders/tonemap.comp.pipeline.bin");
@@ -697,13 +713,19 @@ pub fn setup(
     let res = PbrRenderState {
         pipeline: pipeline_manager.add_pipeline(),
         shadow_pipeline: pipeline_manager.add_pipeline(),
+        radiance_cascades_pipeline: pipeline_manager.add_pipeline(),
         tonemap_pipeline,
         autoexposure_pipeline,
         sbt: None,
         shadow_sbt: None,
+        radiance_cascades_sbt: None,
     };
     pipeline_manager.add_library_for_pipeline(&res.pipeline, base_library);
     pipeline_manager.add_library_for_pipeline(&res.shadow_pipeline, shadow_base_library);
+    pipeline_manager.add_library_for_pipeline(
+        &res.radiance_cascades_pipeline,
+        radiance_cascades_base_library,
+    );
 
     commands.insert_resource(res);
 }
@@ -718,6 +740,11 @@ pub fn create_sbt(mut state: ResMut<PbrRenderState>, pipelines: Res<Assets<RayTr
         state.shadow_sbt = Some(pipeline.create_sbt(state.shadow_sbt.take()));
     } else {
         state.shadow_sbt = None;
+    }
+    if let Some(pipeline) = pipelines.get(&state.radiance_cascades_pipeline) {
+        state.radiance_cascades_sbt = Some(pipeline.create_sbt(state.radiance_cascades_sbt.take()));
+    } else {
+        state.radiance_cascades_sbt = None;
     }
 }
 

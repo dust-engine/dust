@@ -1,0 +1,23 @@
+// Traces the radiance cascades' rays (rc_trace.slang). The voxel hit group
+// (vox_rc.rtx.pipeline.ron) links into it.
+RayTracingPipeline(
+    stages: [
+        RayGen (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/rc_trace.spv",
+                entry_point: "rcRayGen"
+            )
+        ),
+        Miss (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/rc_trace.spv",
+                entry_point: "rcMiss",
+            )
+        ),
+    ],
+    // RcPayload. MUST match vox_rc.rtx.pipeline.ron.
+    max_ray_payload_size: 48,
+    max_hit_attribute_size: 4,
+
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+)

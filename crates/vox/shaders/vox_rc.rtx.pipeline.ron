@@ -1,0 +1,23 @@
+// Voxel hit group of the radiance cascades' ray tracing pipeline.
+RayTracingPipeline (
+    stages: [
+        HitGroup (
+            ty: Aabbs,
+            intersection: (
+                path: "bazel://dust/crates/vox/shaders/vox_rc.spv",
+                entry_point: "intersectionShader",
+            ),
+            closest_hit: (
+                path: "bazel://dust/crates/vox/shaders/vox_rc.spv",
+                entry_point: "closestHitShader",
+            ),
+            param_size: 32
+        ),
+    ],
+
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+    // RcPayload. MUST match rc_trace.rtx.pipeline.ron: a mismatch between linked
+    // ray tracing pipeline libraries is invalid.
+    max_ray_payload_size: 48,
+    max_hit_attribute_size: 4,
+)
