@@ -6,6 +6,7 @@ import rc_common;
 import random;
 
 static const float kPi = 3.14159265358979;
+static const float RC_MAX_RADIANCE = 30000.0;
 
 // Radiance leaving a point a ray hit, toward the ray: emission, the sun, and if
 // there's a secondary cache, the light it holds for that point.
@@ -53,7 +54,6 @@ void deposit(uint probe, uint lod, uint direction, float t, float3 radiance) {
         uint index = c.dataOffset + probe * rcDirectionCount(n)
             + (direction >> (2u * (RC_CASCADES - 1u - n)));
         if (n == hitCascade) {
-            // Greater than 0, not different from it, to keep NaN out of the sum.
             if (radiance.r > 0.0) {
                 InterlockedAdd(params.rc.accum[index].r, radiance.r);
             }
@@ -149,6 +149,10 @@ void rcRayGen() {
         t = params.uniforms.far;
         radiance = params.sky.atmosphereParams.solar_illuminance * params.sky.sampleScatteredTransfer(direction);
     }
+
+    // A value the 16-bit history can't hold would stay in it, and spread to every
+    // probe merging from it. Comparing with 0 also catches NaN.
+    radiance = select(radiance > 0.0, min(radiance, RC_MAX_RADIANCE), 0.0);
 
     uint directionIndex = rcDirectionIndex(uv);
     deposit(probe, level, directionIndex, t, radiance);
