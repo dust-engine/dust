@@ -1,5 +1,6 @@
 #![feature(generic_const_exprs)]
 #![feature(f16)]
+#![feature(get_mut_unchecked)]
 
 use bevy::ecs::entity::Entity;
 use bevy::ecs::reflect::ReflectComponent;
@@ -15,17 +16,20 @@ use bevy::{
     transform::components::Transform,
 };
 use bevy_pumicite::rtx::RtxPipelineManager;
+use bevy_pumicite::rtx::blas::BLASBuildPending;
 use bevy_pumicite::rtx::tlas::TLASInstance;
 use bevy_pumicite::shader::RayTracingPipelineLibrary;
-use bevy_pumicite::{CreateDevice, DefaultTransferSet, SubmissionState};
+use bevy_pumicite::{CreateDevice, DefaultRenderSet, DefaultTransferSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dust_pbr::PbrRenderState;
 use dust_vdb::hierarchy;
+use dust_vdb::pool::FrozenStorage;
 use pumicite::Allocator;
 use pumicite::ash::{VkResult, vk};
 use pumicite::buffer::ManagedBuffer;
 use pumicite::command::GPURefMut;
 use pumicite::device::DeviceBuilder;
+use std::sync::Arc;
 
 mod geometry;
 mod loader;
@@ -86,7 +90,7 @@ impl Default for VoxGpuMaterial {
 /// in a single GPU storage buffer, addressed by the 0-based palette index.
 /// Built once per `.vox` file and shared by every model in it.
 #[derive(Asset, TypePath)]
-pub struct VoxPalette(ManagedBuffer);
+pub struct VoxPalette(Arc<ManagedBuffer>);
 
 impl VoxPalette {
     /// Build a palette from 256 entries, uploading them to one GPU buffer.
@@ -102,7 +106,7 @@ impl VoxPalette {
         buffer
             .as_slice_mut()
             .copy_from_slice(bytemuck::cast_slice(entries));
-        Ok(Self(buffer))
+        Ok(Self(Arc::new(buffer)))
     }
 
     pub fn colorful(allocator: pumicite::Allocator) -> VkResult<Self> {
@@ -160,7 +164,7 @@ impl FromTemplate for VoxInstance {
 }
 
 #[derive(Component, Reflect, Clone, FromTemplate)]
-#[require(VoxModelBLASRebuild)]
+#[require(VoxModelBLASRebuild, VoxModelCurrentBLAS)]
 #[reflect(Component)]
 pub struct VoxModel {
     pub geometry: Handle<VoxGeometry>,
@@ -182,6 +186,13 @@ impl Default for VoxModel {
         }
     }
 }
+
+/// What the entity's current BLAS was built from, `None` until its first BLAS is
+/// built. The model's SBT records point at these assets, not the `VoxModel`'s, which
+/// can be newer: the TLAS uses the old BLAS until a BLAS of the new assets is built,
+/// and the old BLAS's hits can index past the end of the new geometry's leaves.
+#[derive(Component, Default)]
+struct VoxModelCurrentBLAS(Option<geometry::VoxModelBuilt>);
 
 /// A marker trait for requesting BLAS rebuilds.
 #[derive(Component, Default, Reflect, Clone)]
@@ -279,7 +290,28 @@ impl Plugin for VoxPlugin {
                 bevy_pumicite::rtx::tlas::TLASBuilderSet::<dust_pbr::PbrInstanceData>::default(),
             ),
         );
+        app.init_resource::<SbtBuffers>();
+        app.add_systems(
+            PostUpdate,
+            retain_sbt_buffers
+                .in_set(DefaultRenderSet)
+                .after(write_sbt_entries),
+        );
     }
+}
+
+/// The buffers that this frame's SBT records point at, for the frame's command buffer
+/// to keep alive. All the frame's ray tracing is in that one command buffer.
+#[derive(Resource, Default)]
+struct SbtBuffers {
+    leaves: Vec<FrozenStorage>,
+    materials: Vec<Arc<ManagedBuffer>>,
+}
+
+fn retain_sbt_buffers(mut ctx: SubmissionState, mut buffers: ResMut<SbtBuffers>) {
+    ctx.record(|encoder| {
+        encoder.retain(std::mem::take(&mut *buffers));
+    });
 }
 
 #[derive(Resource)]
@@ -336,22 +368,32 @@ struct VoxModelParams {
 }
 
 fn write_sbt_entries(
-    mut models: Query<&mut VoxModel>,
+    mut models: Query<(&mut VoxModel, &mut VoxModelCurrentBLAS)>,
     mut instances: Query<(Entity, &mut TLASInstance<dust_pbr::PbrInstanceData>), With<VoxInstance>>,
     mut pbr_state: ResMut<PbrRenderState>,
     vox_render_state: Res<VoxRenderState>,
+    mut finished_builds: RemovedComponents<BLASBuildPending>,
+    mut blas_builder: ResMut<geometry::BlasBuilder>,
+    mut sbt_buffers: ResMut<SbtBuffers>,
 
     geometry_assets: Res<Assets<VoxGeometry>>,
     material_assets: Res<Assets<VoxMaterial>>,
     palette_assets: Res<Assets<VoxPalette>>,
 ) {
     let pbr_state = &mut *pbr_state;
+    for entity in finished_builds.read() {
+        if let Some(built) = blas_builder.finish_build(entity)
+            && let Ok((_, mut current)) = models.get_mut(entity)
+        {
+            current.0 = Some(built);
+        }
+    }
     let (Some(sbt), Some(shadow_sbt), Some(radiance_cascades_sbt)) = (
         pbr_state.sbt.as_mut(),
         pbr_state.shadow_sbt.as_mut(),
         pbr_state.radiance_cascades_sbt.as_mut(),
     ) else {
-        for mut model in models.iter_mut() {
+        for (mut model, _) in models.iter_mut() {
             model.sbt_index = u32::MAX;
         }
         for (_, mut instance) in instances.iter_mut() {
@@ -362,13 +404,16 @@ fn write_sbt_entries(
     };
     let miss_index = shadow_sbt.push_miss(vox_render_state.shadow_library_index, 1, |_| {});
     assert_eq!(miss_index, 0); // Miss SBT index assumed to be 0 in the shader. If this assumption no longer holds true, update the shader.
-    for mut model in models.iter_mut() {
+    for (mut model, current) in models.iter_mut() {
         model.sbt_index = u32::MAX;
-        let Some(geometry) = geometry_assets.get(&model.geometry) else {
+        let Some(built) = &current.0 else {
+            continue;
+        };
+        let Some(geometry) = geometry_assets.get(&built.geometry) else {
             println!("no geometry");
             continue;
         };
-        let Some(material) = material_assets.get(&model.material) else {
+        let Some(material) = material_assets.get(&built.material) else {
             println!("no material");
             continue;
         };
@@ -383,6 +428,11 @@ fn write_sbt_entries(
             unit_size: geometry.unit_size,
             _pad: 0,
         };
+        sbt_buffers
+            .leaves
+            .push(geometry.tree.pools()[0].storage().capture());
+        sbt_buffers.materials.push(material.buffer.clone());
+        sbt_buffers.materials.push(palette.0.clone());
         model.sbt_index =
             sbt.push_hitgroup(vox_render_state.primary_library_index, 0, |param_dst| {
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
@@ -404,7 +454,7 @@ fn write_sbt_entries(
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;
-        let Ok(model) = models.get(instance.blas) else {
+        let Ok((model, _)) = models.get(instance.blas) else {
             tracing::warn!(
                 "Missing model {:?} for instance {:?}",
                 instance.blas,
@@ -434,7 +484,7 @@ fn sync_buffers_system(
                 AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                     let material = materials.get(*id).unwrap();
                     unsafe {
-                        GPURefMut::new_unchecked(&material.buffer).flush(encoder);
+                        GPURefMut::new_unchecked(&*material.buffer).flush(encoder);
                     }
                 }
                 _ => (),
@@ -445,7 +495,7 @@ fn sync_buffers_system(
                 AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                     let palette = palettes.get(*id).unwrap();
                     unsafe {
-                        GPURefMut::new_unchecked(&palette.0).flush(encoder);
+                        GPURefMut::new_unchecked(&*palette.0).flush(encoder);
                     }
                 }
                 _ => (),

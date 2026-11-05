@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bevy::{asset::Asset, math::UVec3, reflect::TypePath};
 use dust_vdb::AttributeAllocator;
 use pumicite::{Allocator, ash::vk, buffer::ManagedBuffer};
@@ -40,7 +42,9 @@ impl dust_vdb::AttributePtr<VoxLeafNode> for VoxLeafNode {
 #[derive(Asset, TypePath)]
 pub struct VoxMaterial {
     pub attribute_allocator: AttributeAllocator,
-    pub buffer: ManagedBuffer, // Wait so this actually do need to be a managedbuffer.
+    /// Frames on the GPU hold the other `Arc`s, which keep the buffer alive after
+    /// [`Self::reserve`] replaces it or the asset is dropped. They never read through it.
+    pub buffer: Arc<ManagedBuffer>, // Wait so this actually do need to be a managedbuffer.
 }
 impl VoxMaterial {
     pub fn new(allocator: Allocator) -> Self {
@@ -53,8 +57,13 @@ impl VoxMaterial {
         .unwrap();
         Self {
             attribute_allocator: AttributeAllocator::new_with_capacity(16, 512),
-            buffer,
+            buffer: Arc::new(buffer),
         }
+    }
+
+    fn buffer_mut(&mut self) -> &mut ManagedBuffer {
+        // SAFETY: no other `Arc` to the buffer is dereferenced; see `Self::buffer`.
+        unsafe { Arc::get_mut_unchecked(&mut self.buffer) }
     }
 
     fn reserve(&mut self, size: u64) {
@@ -68,7 +77,7 @@ impl VoxMaterial {
             .unwrap();
             new_buffer.as_slice_mut()[0..self.buffer.size() as usize]
                 .copy_from_slice(self.buffer.as_slice());
-            self.buffer = new_buffer;
+            self.buffer = Arc::new(new_buffer);
         }
     }
 }
@@ -110,7 +119,7 @@ impl dust_vdb::Attributes for VoxMaterial {
         let mut new_ptr_cur = new_ptr;
         let mut old_ptr_cur = ptr.material_ptr;
 
-        let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
+        let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer_mut().as_slice_mut());
         for (_, in_original, in_new) in dust_vdb::iter_mask_union(original_mask, new_mask) {
             if in_new && in_original {
                 // copy it over
@@ -147,7 +156,7 @@ impl dust_vdb::Attributes for VoxMaterial {
         _inflated_offset: u32,
         value: Self::Value,
     ) {
-        let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer.as_slice_mut());
+        let slice: &mut [Self::Value] = bytemuck::cast_slice_mut(self.buffer_mut().as_slice_mut());
         slice[ptr.material_ptr as usize + fitted_offset as usize] = value - 1;
     }
 }

@@ -1,8 +1,11 @@
-use std::{any::Any, sync::Arc};
+use std::{any::Any, collections::VecDeque, sync::Arc};
 
-use crate::{Tree, VoxModel, VoxModelBLASRebuild};
+use crate::{Tree, VoxMaterial, VoxModel, VoxModelBLASRebuild};
 use bevy::{
-    ecs::system::lifetimeless::{SRes, SResMut},
+    ecs::{
+        entity::EntityHashMap,
+        system::lifetimeless::{SRes, SResMut},
+    },
     prelude::*,
 };
 use bevy_pumicite::{
@@ -25,6 +28,13 @@ pub struct VoxGeometry {
 
     /// Model space size of each voxel
     pub unit_size: f32,
+}
+
+/// The assets that a BLAS was built from. A hit on the BLAS gives the index of a
+/// leaf of this geometry, and the leaf gives an offset into this material.
+pub(crate) struct VoxModelBuilt {
+    pub(crate) geometry: Handle<VoxGeometry>,
+    pub(crate) material: Handle<VoxMaterial>,
 }
 
 pub struct VoxGeometryLeafStorage {
@@ -105,6 +115,21 @@ impl VoxGeometry {
 pub struct BlasBuilder {
     copy_coords_pipeline: Handle<ComputePipeline>,
     coords_buffer_alignment: u64,
+    /// What each entity's builds on the GPU are building from, oldest first. A
+    /// build can start as soon as the previous one finishes, before
+    /// [`Self::finish_build`] hears of that.
+    builds: EntityHashMap<VecDeque<VoxModelBuilt>>,
+}
+impl BlasBuilder {
+    /// What the oldest of `entity`'s builds was built from, now that it's finished.
+    pub(crate) fn finish_build(&mut self, entity: Entity) -> Option<VoxModelBuilt> {
+        let builds = self.builds.get_mut(&entity)?;
+        let built = builds.pop_front();
+        if builds.is_empty() {
+            self.builds.remove(&entity);
+        }
+        built
+    }
 }
 impl FromWorld for BlasBuilder {
     fn from_world(world: &mut World) -> Self {
@@ -118,12 +143,13 @@ impl FromWorld for BlasBuilder {
                 .limits
                 .min_storage_buffer_offset_alignment
                 .max(8), // VUID-vkCmdBuildAccelerationStructuresKHR-pInfos-03714
+            builds: EntityHashMap::default(),
         }
     }
 }
 
 impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
-    type QueryData = &'static VoxModel;
+    type QueryData = (Entity, &'static VoxModel);
 
     type QueryFilter = Or<(Without<BLAS>, Changed<VoxModelBLASRebuild>)>;
 
@@ -141,10 +167,10 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
         model: &bevy::ecs::query::QueryItem<Self::QueryData>,
     ) -> vk::BuildAccelerationStructureFlagsKHR {
         let mut flags = vk::BuildAccelerationStructureFlagsKHR::empty();
-        if model.enable_compaction {
+        if model.1.enable_compaction {
             flags |= vk::BuildAccelerationStructureFlagsKHR::ALLOW_COMPACTION;
         }
-        if model.prefer_fast_build {
+        if model.1.prefer_fast_build {
             flags |= vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD;
         }
         flags
@@ -160,7 +186,7 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
     fn geometries<'w, 's, 't, 't2, 'b, 'bb>(
         &mut self,
         (geometries, device_local_ring_buffer, compute_pipelines): &mut bevy::ecs::system::SystemParamItem<'w, 's, Self::Params>,
-        model: &VoxModel,
+        (entity, model): (Entity, &VoxModel),
         recorder: &'bb mut CommandEncoder<'b>,
     ) -> impl Future<
         Output = SmallVec<
@@ -181,6 +207,13 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
 
         // TODO: This buffer may not be device-local. Test perf when everything was pre-copied to device.
         let device_buffer = leaf_storage.buffer.as_ref().map(Arc::clone);
+        self.builds
+            .entry(entity)
+            .or_default()
+            .push_back(VoxModelBuilt {
+                geometry: model.geometry.clone(),
+                material: model.material.clone(),
+            });
         let coords_buffer = if device_buffer.is_some() {
             Some(device_local_ring_buffer.allocate_buffer(
                 primitive_count as u64 * size_of::<vk::AabbPositionsKHR>() as u64,
