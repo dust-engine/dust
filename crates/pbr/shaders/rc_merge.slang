@@ -59,11 +59,9 @@ float4 resolve(uint cascade, RcCascade c, uint probe, uint prevIndex, uint direc
         params.rc.accum[index] = empty;
         J = float3(deposited.r, deposited.g, deposited.b) / float(rays);
         transmittance = float(deposited.counts >> 16) / float(rays);
-        // Every ray counts as much as `temporalAlpha` says, however many there are.
         if (previous.a >= 0.0) {
-            float weight = 1.0 - pow(1.0 - params.rc.temporalAlpha, float(rays));
-            J = lerp(previous.rgb, J, weight);
-            transmittance = lerp(previous.a, transmittance, weight);
+            J = lerp(previous.rgb, J, params.rc.temporalAlpha);
+            transmittance = lerp(previous.a, transmittance, params.rc.temporalAlpha);
         }
     } else if (previous.a < 0.0) {
         params.rc.history[index] = float16_t4(previous);

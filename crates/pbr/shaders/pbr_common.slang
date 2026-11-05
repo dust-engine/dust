@@ -470,7 +470,7 @@ public struct RcConstants {
     public uint2 renderExtent;
     // Added to the distance-derived LOD of this cache's probes.
     public uint lodOffset;
-    // Weight of one ray against the history.
+    // Weight of a frame's rays against the history.
     public float temporalAlpha;
     public uint flags;
     // Frames a probe outlives the last ray that left its cell.
