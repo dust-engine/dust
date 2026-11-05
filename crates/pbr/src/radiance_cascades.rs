@@ -144,7 +144,8 @@ impl Default for RadianceCascadesConfig {
     /// The paper's parameters and these defaults, with `DUST_RC=0|1`,
     /// `DUST_RC_BOUNCE=0|1`, `DUST_RC_DEBUG=0..5` (the
     /// `RadianceCascadesDebugMode` order), `DUST_RC_ALPHA`, `DUST_RC_RAYS`,
-    /// `DUST_RC_SPACING` and `DUST_RC_LOD_DISTANCE` honored for headless captures.
+    /// `DUST_RC_MAX_AGE`, `DUST_RC_SPACING` and `DUST_RC_LOD_DISTANCE` honored for
+    /// headless captures.
     fn default() -> Self {
         let env_u32 = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u32>().ok());
         let env_f32 = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f32>().ok());
@@ -155,7 +156,7 @@ impl Default for RadianceCascadesConfig {
             lod_distance: env_f32("DUST_RC_LOD_DISTANCE").unwrap_or(16.0),
             rays_per_probe: env_f32("DUST_RC_RAYS").unwrap_or(128.0),
             temporal_alpha: env_f32("DUST_RC_ALPHA").unwrap_or(0.1),
-            max_probe_age: 8,
+            max_probe_age: env_u32("DUST_RC_MAX_AGE").unwrap_or(8),
             multibounce: env_u32("DUST_RC_BOUNCE").is_none_or(|v| v != 0),
             bounce_ray_fraction: 0.25,
             secondary_lod_offset: 2,
@@ -488,6 +489,12 @@ impl Cache {
             stats.probes[cascade] = counters[cascade];
             stats.capacity[cascade] = self.layout.cascades[cascade].probe_capacity;
         }
+        tracing::debug!(
+            probes = ?stats.probes,
+            capacity = ?stats.capacity,
+            rays = stats.rays,
+            "Radiance cache"
+        );
         self.stats = Some(stats);
     }
 }
