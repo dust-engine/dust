@@ -438,7 +438,7 @@ public struct RcCascade {
     public uint dataOffset;
     // Into `merged`.
     public uint mergedOffset;
-    // Into `neighbors`, in probes.
+    // Into `neighbors`.
     public uint neighborOffset;
     uint _pad;
 }

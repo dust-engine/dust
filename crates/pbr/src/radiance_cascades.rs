@@ -279,7 +279,7 @@ impl CacheLayout {
                 probe_capacity,
                 data_offset: layout.directions as u32,
                 merged_offset: layout.merged as u32,
-                neighbor_offset: layout.neighbors as u32,
+                neighbor_offset: (layout.neighbors * 8) as u32,
                 _pad: 0,
             };
             layout.table_size += table_size as u64;
