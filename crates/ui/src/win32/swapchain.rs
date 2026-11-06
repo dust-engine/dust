@@ -11,7 +11,6 @@
 //! that fence is signaled.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
@@ -30,7 +29,7 @@ use bevy_pumicite::{
     queue::{Queue, RenderQueue},
 };
 use windows::Win32::Foundation::{
-    CloseHandle, GENERIC_ALL, HANDLE, HMODULE, LUID, PRESENTATION_ERROR_LOST, RECT, WAIT_OBJECT_0,
+    GENERIC_ALL, HANDLE, HMODULE, LUID, PRESENTATION_ERROR_LOST, RECT, WAIT_OBJECT_0,
 };
 use windows::Win32::Graphics::CompositionSwapchain::{
     CreatePresentationFactory, ICompositionFramePresentStatistics, IPresentationBuffer,
@@ -60,7 +59,7 @@ use windows::Win32::Graphics::Dxgi::{
     IDXGIFactory4, IDXGIResource1,
 };
 use windows::Win32::System::Threading::{WaitForMultipleObjects, WaitForSingleObject};
-use windows::core::{Interface, PCWSTR};
+use windows::core::{Interface, Owned, PCWSTR};
 
 use crate::win32::layer::GameLayerSharedState;
 
@@ -68,11 +67,6 @@ use crate::win32::layer::GameLayerSharedState;
 /// for the compositor, and one on screen.
 const BUFFER_COUNT: usize = 3;
 
-/// How long [`acquire`] waits for the compositor to be done with a buffer before
-/// giving up on the frame. The compositor is done with a buffer within a frame or
-/// two, unless nothing is being shown, as while the window is minimized. In that
-/// case the app keeps updating without rendering.
-const AVAILABLE_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Where systems using the [`Swapchain`]'s current image run: in a submission of
 /// their own on the render queue, after the submission of `DefaultRenderSet`, and
@@ -226,22 +220,15 @@ struct Buffer {
     presentation: IPresentationBuffer,
     /// Set while the compositor is done with the buffer: from when the buffer's last
     /// present retires until the buffer is presented again.
-    available: HANDLE,
+    available: Owned<HANDLE>,
     /// The texture that `image`'s memory is imported from, kept alive as long as
     /// the image.
     _texture: ID3D11Texture2D,
-    size: UVec2,
 }
 
 impl Buffer {
     fn is_available(&self) -> bool {
-        (unsafe { WaitForSingleObject(self.available, 0) }) == WAIT_OBJECT_0
-    }
-}
-
-impl Drop for Buffer {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.available) }.ok();
+        (unsafe { WaitForSingleObject(*self.available, 0) }) == WAIT_OBJECT_0
     }
 }
 
@@ -257,33 +244,27 @@ struct PresentationManager {
     manager: IPresentationManager,
     surface: IPresentationSurface,
     /// Set once the presentation manager is lost.
-    lost: HANDLE,
+    lost: Owned<HANDLE>,
     /// Signaled by the submission of [`SwapchainSet`] once it's done writing a
     /// buffer; the buffer's present waits for it.
     render_done: ID3D11Fence,
     /// `render_done`, imported into Vulkan.
     render_done_semaphore: vk::Semaphore,
     render_done_value: u64,
-    /// The render queue's family, which [`release`] transfers the buffers from.
-    queue_family: u32,
-    /// The color space that `surface` shows its buffer in. [`Presenter::present`]
+    /// The color space that `surface` shows its buffer in. [`PresentationManager::present`]
     /// changes it to the color space of the buffer it presents.
     color_space: vk::ColorSpaceKHR,
     /// Set while the presentation manager has statistics for
-    /// [`Presenter::preferred_color_space`] to read.
-    statistics_available: HANDLE,
-    /// The color space that [`Presenter::preferred_color_space`] last found. It
+    /// [`PresentationManager::preferred_color_space`] to read.
+    statistics_available: Owned<HANDLE>,
+    /// The color space that [`PresentationManager::preferred_color_space`] last found. It
     /// starts as sRGB, until the first statistics arrive.
     preferred_color_space: vk::ColorSpaceKHR,
 }
 
 impl PresentationManager {
     /// Creates a presentation manager on Vulkan's GPU, presenting to `surface`.
-    fn new(
-        device: &Device,
-        queue_family: u32,
-        surface: SurfaceHandle,
-    ) -> windows::core::Result<Self> {
+    fn new(device: &Device, surface: SurfaceHandle) -> windows::core::Result<Self> {
         let id = device
             .physical_device()
             .properties()
@@ -342,15 +323,17 @@ impl PresentationManager {
         // Each present's composition-frame statistics name the outputs that
         // showed the present, and the color space of each output.
         unsafe { manager.EnablePresentStatisticsKind(PresentStatisticsKind_CompositionFrame, 1) }?;
-        let statistics_available = unsafe { manager.GetPresentStatisticsAvailableEvent() }?;
-        let lost = unsafe { manager.GetLostEvent() }?;
+        let statistics_available =
+            unsafe { Owned::new(manager.GetPresentStatisticsAvailableEvent()?) };
+        let lost = unsafe { Owned::new(manager.GetLostEvent()?) };
 
         let d3d: ID3D11Device5 = d3d.cast()?;
         let mut render_done: Option<ID3D11Fence> = None;
         unsafe { d3d.CreateFence(0, D3D11_FENCE_FLAG_SHARED, &mut render_done) }?;
         let render_done = render_done.unwrap();
-        let shared =
-            unsafe { render_done.CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null()) }?;
+        let shared = unsafe {
+            Owned::new(render_done.CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null())?)
+        };
         let mut timeline = vk::SemaphoreTypeCreateInfo::default()
             .semaphore_type(vk::SemaphoreType::TIMELINE)
             .initial_value(0);
@@ -361,7 +344,7 @@ impl PresentationManager {
             )
         }
         .unwrap();
-        // Importing an NT handle doesn't take ownership of it, so it's closed here.
+        // Importing an NT handle doesn't take ownership of it, so `shared` still closes it.
         unsafe {
             device
                 .extension::<khr::external_semaphore_win32::Meta>()
@@ -372,7 +355,6 @@ impl PresentationManager {
                         .handle(shared.0 as vk::HANDLE),
                 )
                 .unwrap();
-            CloseHandle(shared).ok();
         }
 
         Ok(PresentationManager {
@@ -386,7 +368,6 @@ impl PresentationManager {
             render_done,
             render_done_semaphore,
             render_done_value: 0,
-            queue_family,
             color_space,
             statistics_available,
             preferred_color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
@@ -400,7 +381,7 @@ impl PresentationManager {
     /// off.
     fn preferred_color_space(&mut self) -> vk::ColorSpaceKHR {
         // Reading every statistic also keeps the queue from overflowing.
-        while (unsafe { WaitForSingleObject(self.statistics_available, 0) }) == WAIT_OBJECT_0 {
+        while (unsafe { WaitForSingleObject(*self.statistics_available, 0) }) == WAIT_OBJECT_0 {
             let Ok(statistics) = (unsafe { self.manager.GetNextPresentStatistics() }) else {
                 break;
             };
@@ -439,7 +420,7 @@ impl PresentationManager {
     }
 
     fn is_lost(&self) -> bool {
-        (unsafe { WaitForSingleObject(self.lost, 0) }) == WAIT_OBJECT_0
+        (unsafe { WaitForSingleObject(*self.lost, 0) }) == WAIT_OBJECT_0
     }
 
     /// Waits until the compositor is done with `buffer`, for up to `timeout`. Only
@@ -447,12 +428,12 @@ impl PresentationManager {
     /// on a buffer that's still in use, but not Vulkan work. Returns whether the
     /// buffer is available. It returns false if the wait timed out or the
     /// presentation manager was lost.
-    fn wait_available(&self, buffer: &Buffer, timeout: Duration) -> bool {
+    fn wait_available(&self, buffer: &Buffer, timeout_ms: u32) -> bool {
         let result = unsafe {
             WaitForMultipleObjects(
-                &[self.lost, buffer.available],
+                &[*self.lost, *buffer.available],
                 false,
-                timeout.as_millis() as u32,
+                timeout_ms,
             )
         };
         result.0 == WAIT_OBJECT_0.0 + 1
@@ -494,23 +475,21 @@ impl PresentationManager {
         unsafe { self.d3d.CreateTexture2D(&desc, None, Some(&mut texture)) }?;
         let texture: ID3D11Texture2D = texture.unwrap();
         let presentation = unsafe { self.manager.AddBufferFromResource(&texture) }?;
-        let available = unsafe { presentation.GetAvailableEvent() }?;
+        let available = unsafe { Owned::new(presentation.GetAvailableEvent()?) };
         let shared = unsafe {
-            texture.cast::<IDXGIResource1>()?.CreateSharedHandle(
+            Owned::new(texture.cast::<IDXGIResource1>()?.CreateSharedHandle(
                 None,
                 GENERIC_ALL.0,
                 PCWSTR::null(),
-            )
-        }?;
-        let image = PresentationImage::import(self.device.clone(), shared, size, color_space);
-        // Importing an NT handle doesn't take ownership of it, so it's closed here.
-        unsafe { CloseHandle(shared) }.ok();
+            )?)
+        };
+        // Importing an NT handle doesn't take ownership of it, so `shared` still closes it.
+        let image = PresentationImage::import(self.device.clone(), *shared, size, color_space);
         Ok(Buffer {
             image: GPUMutex::new(image),
             presentation,
             available,
             _texture: texture,
-            size,
         })
     }
 
@@ -534,12 +513,13 @@ impl PresentationManager {
             }
             // The source rect starts out empty, and nothing shows until it's set.
             // Buffers can differ in size, so it's set with each one.
+            let extent = buffer.image.extent();
             self.surface
                 .SetSourceRect(&RECT {
                     left: 0,
                     top: 0,
-                    right: buffer.size.x as i32,
-                    bottom: buffer.size.y as i32,
+                    right: extent.x as i32,
+                    bottom: extent.y as i32,
                 })
                 .unwrap();
             match self.manager.Present() {
@@ -556,13 +536,11 @@ impl Drop for PresentationManager {
     fn drop(&mut self) {
         unsafe {
             // Submissions may still signal the semaphore, so this waits for the
-            // device to be idle. A `Presenter` is dropped only at exit, or when its
+            // device to be idle. A `PresentationManager` is dropped only at exit, or when its
             // presentation manager is lost.
             self.device.device_wait_idle().ok();
             self.device
                 .destroy_semaphore(self.render_done_semaphore, None);
-            CloseHandle(self.lost).ok();
-            CloseHandle(self.statistics_available).ok();
         }
     }
 }
@@ -583,10 +561,9 @@ fn create_presenter(
     _bevy_thread: NonSendMarker,
     mut commands: Commands,
     device: Res<Device>,
-    queue: Queue<RenderQueue>,
     mut swapchain: ResMut<Swapchain>,
 ) {
-    match PresentationManager::new(&device, queue.family_index(), swapchain.surface) {
+    match PresentationManager::new(&device, swapchain.surface) {
         Ok(presenter) => swapchain.presenter = Some(presenter),
         Err(error) => {
             tracing::error!("The game can't present: {error}");
@@ -617,9 +594,9 @@ fn acquire(
         // The lost presentation manager has to let go of the surface before
         // another can present to it.
         let lost = swapchain.presenter.take().unwrap();
-        let (device, queue_family) = (lost.device.clone(), lost.queue_family);
+        let device = lost.device.clone();
         drop(lost);
-        match PresentationManager::new(&device, queue_family, swapchain.surface) {
+        match PresentationManager::new(&device, swapchain.surface) {
             Ok(presenter) => swapchain.presenter = Some(presenter),
             Err(error) => {
                 tracing::error!("The game can't present: {error}");
@@ -645,10 +622,9 @@ fn acquire(
 
     let size = game_layer_state.size();
     let color_space = presenter.preferred_color_space();
-    if buffers
-        .first()
-        .is_none_or(|buffer| buffer.size != size || buffer.image.color_space() != color_space)
-    {
+    if buffers.first().is_none_or(|buffer| {
+        buffer.image.extent().truncate() != size || buffer.image.color_space() != color_space
+    }) {
         // Buffers can differ in size and color space, so the old buffers stay on
         // screen until the new ones are presented. They're dropped once the
         // compositor is done with them.
@@ -662,7 +638,7 @@ fn acquire(
         *next = 0;
     }
     let index = *next;
-    if !presenter.wait_available(&buffers[index], AVAILABLE_TIMEOUT) {
+    if !presenter.wait_available(&buffers[index], 100) {
         return;
     }
     *next = (index + 1) % buffers.len();
@@ -687,15 +663,12 @@ fn acquire(
 }
 
 /// Hands the current image over to D3D11, after [`SwapchainSet`] is done with it.
-fn release(mut submission: SubmissionState, If(swapchain): If<ResMut<Swapchain>>) {
+fn release(
+    mut submission: SubmissionState,
+    queue: Queue<RenderQueue>,
+    If(swapchain): If<ResMut<Swapchain>>,
+) {
     let swapchain = swapchain.into_inner();
-    let Some(queue_family) = swapchain
-        .presenter
-        .as_ref()
-        .map(|presenter| presenter.queue_family)
-    else {
-        return;
-    };
     submission.record(|encoder| {
         let Some(image) = swapchain.current_image() else {
             return;
@@ -711,7 +684,7 @@ fn release(mut submission: SubmissionState, If(swapchain): If<ResMut<Swapchain>>
             Access::NONE,
             state.layout,
             vk::ImageLayout::GENERAL,
-            queue_family,
+            queue.family_index(),
             vk::QUEUE_FAMILY_EXTERNAL,
             0..1,
             0..1,

@@ -12,7 +12,8 @@ use gpui::{Bounds, Pixels, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{CloseHandle, HWND, POINT, RECT};
 use windows::Win32::Graphics::DirectComposition::{
-    DCompositionCreateDevice2, DCompositionCreateSurfaceHandle, DCompositionWaitForCompositorClock,
+    COMPOSITIONOBJECT_READ, COMPOSITIONOBJECT_WRITE, DCompositionCreateDevice2,
+    DCompositionCreateSurfaceHandle, DCompositionWaitForCompositorClock,
     IDCompositionDesktopDevice, IDCompositionTarget, IDCompositionVisual2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -21,10 +22,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::IUnknown;
 
 use super::swapchain::{CompositionSwapchainPlugin, SurfaceHandle};
-
-/// `COMPOSITIONOBJECT_READ | COMPOSITIONOBJECT_WRITE`, which the `windows` crate
-/// doesn't define.
-const COMPOSITIONOBJECT_ALL_ACCESS: u32 = 0x3;
 
 /// The game's visual, in the window's non-topmost DirectComposition target. GPUI's
 /// target is the topmost one, so the game shows under GPUI's UI. The visual's
@@ -118,9 +115,13 @@ impl GameLayer {
         let target = unsafe { device.CreateTargetForHwnd(hwnd, false) }
             .expect("failed to create the game's DirectComposition target");
         let visual = unsafe { device.CreateVisual() }.unwrap();
-        let surface =
-            unsafe { DCompositionCreateSurfaceHandle(COMPOSITIONOBJECT_ALL_ACCESS, None) }
-                .expect("failed to create a composition surface handle");
+        let surface = unsafe {
+            DCompositionCreateSurfaceHandle(
+                (COMPOSITIONOBJECT_READ | COMPOSITIONOBJECT_WRITE) as u32,
+                None,
+            )
+        }
+        .expect("failed to create a composition surface handle");
         unsafe {
             visual
                 .SetContent(&device.CreateSurfaceFromHandle(surface).unwrap())
