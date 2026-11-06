@@ -59,9 +59,7 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_ERROR_UNSUPPORTED, IDXGIAdapter1,
     IDXGIFactory4, IDXGIResource1,
 };
-use windows::Win32::System::Threading::{
-    CreateEventW, ResetEvent, WaitForMultipleObjects, WaitForSingleObject,
-};
+use windows::Win32::System::Threading::{WaitForMultipleObjects, WaitForSingleObject};
 use windows::core::{Interface, PCWSTR};
 
 use crate::win32::layer::GameLayerSharedState;
@@ -74,7 +72,7 @@ const BUFFER_COUNT: usize = 3;
 /// giving up on the frame. The compositor is done with a buffer within a frame or
 /// two, unless nothing is being shown, as while the window is minimized. In that
 /// case the app keeps updating without rendering.
-const RETIRE_TIMEOUT: Duration = Duration::from_millis(100);
+const AVAILABLE_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Where systems using the [`Swapchain`]'s current image run: in a submission of
 /// their own on the render queue, after the submission of `DefaultRenderSet`, and
@@ -169,7 +167,7 @@ pub struct Swapchain {
     /// [`create_presenter`] creates it, and while [`acquire`] replaces it: the
     /// lost presentation manager has to let go of the surface before another can
     /// present to it, so it's dropped first.
-    presenter: Option<Presenter>,
+    presenter: Option<PresentationManager>,
     /// The buffers of the current size, used in turn.
     buffers: Vec<Buffer>,
     /// Buffers of an earlier size, kept until their last present has retired.
@@ -226,17 +224,30 @@ impl Swapchain {
 struct Buffer {
     image: GPUMutex<PresentationImage>,
     presentation: IPresentationBuffer,
+    /// Set while the compositor is done with the buffer: from when the buffer's last
+    /// present retires until the buffer is presented again.
+    available: HANDLE,
     /// The texture that `image`'s memory is imported from, kept alive as long as
     /// the image.
     _texture: ID3D11Texture2D,
     size: UVec2,
-    /// The id of the last present that showed it, or 0.
-    last_present: u64,
 }
 
-/// The presentation manager, the D3D11 device it presents on, and the fences
-/// that order work between D3D11 and Vulkan.
-struct Presenter {
+impl Buffer {
+    fn is_available(&self) -> bool {
+        (unsafe { WaitForSingleObject(self.available, 0) }) == WAIT_OBJECT_0
+    }
+}
+
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.available) }.ok();
+    }
+}
+
+/// The presentation manager, the D3D11 device it presents on, and the fence that
+/// orders work between D3D11 and Vulkan.
+struct PresentationManager {
     device: Device,
     d3d: ID3D11Device5,
     context: ID3D11DeviceContext4,
@@ -245,11 +256,6 @@ struct Presenter {
     displayable: bool,
     manager: IPresentationManager,
     surface: IPresentationSurface,
-    /// Reaches a present's id once the present begins retiring.
-    retiring: ID3D11Fence,
-    /// The event that [`Presenter::wait_retired`] asks `retiring` to set, and then
-    /// waits on.
-    retired: HANDLE,
     /// Set once the presentation manager is lost.
     lost: HANDLE,
     /// Signaled by the submission of [`SwapchainSet`] once it's done writing a
@@ -271,15 +277,7 @@ struct Presenter {
     preferred_color_space: vk::ColorSpaceKHR,
 }
 
-/// The flags the composition swapchain API requires of the D3D11 device: without
-/// `PREVENT_INTERNAL_THREADING_OPTIMIZATIONS`, `CreatePresentationFactory` fails.
-const DEVICE_FLAGS: D3D11_CREATE_DEVICE_FLAG = D3D11_CREATE_DEVICE_FLAG(
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT.0
-        | D3D11_CREATE_DEVICE_SINGLETHREADED.0
-        | D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS.0,
-);
-
-impl Presenter {
+impl PresentationManager {
     /// Creates a presentation manager on Vulkan's GPU, presenting to `surface`.
     fn new(
         device: &Device,
@@ -304,7 +302,11 @@ impl Presenter {
                 &adapter,
                 D3D_DRIVER_TYPE_UNKNOWN,
                 HMODULE::default(),
-                DEVICE_FLAGS,
+                D3D11_CREATE_DEVICE_FLAG(
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT.0
+                        | D3D11_CREATE_DEVICE_SINGLETHREADED.0
+                        | D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS.0,
+                ),
                 Some(&[D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0]),
                 D3D11_SDK_VERSION,
                 Some(&mut d3d),
@@ -341,9 +343,7 @@ impl Presenter {
         // showed the present, and the color space of each output.
         unsafe { manager.EnablePresentStatisticsKind(PresentStatisticsKind_CompositionFrame, 1) }?;
         let statistics_available = unsafe { manager.GetPresentStatisticsAvailableEvent() }?;
-        let retiring: ID3D11Fence = unsafe { manager.GetPresentRetiringFence() }?;
         let lost = unsafe { manager.GetLostEvent() }?;
-        let retired = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }?;
 
         let d3d: ID3D11Device5 = d3d.cast()?;
         let mut render_done: Option<ID3D11Fence> = None;
@@ -375,15 +375,13 @@ impl Presenter {
             CloseHandle(shared).ok();
         }
 
-        Ok(Presenter {
+        Ok(PresentationManager {
             device: device.clone(),
             d3d,
             context: context.unwrap().cast()?,
             displayable,
             manager,
             surface,
-            retiring,
-            retired,
             lost,
             render_done,
             render_done_semaphore,
@@ -444,34 +442,20 @@ impl Presenter {
         (unsafe { WaitForSingleObject(self.lost, 0) }) == WAIT_OBJECT_0
     }
 
-    /// Whether `buffer`'s last present has retired: a later present has been shown,
-    /// so the compositor is done with the buffer.
-    fn retired(&self, buffer: &Buffer) -> bool {
-        buffer.last_present == 0
-            || unsafe { self.retiring.GetCompletedValue() } > buffer.last_present
-    }
-
-    /// Waits until `buffer`'s last present has retired, for up to `timeout`. Only
+    /// Waits until the compositor is done with `buffer`, for up to `timeout`. Only
     /// then can Vulkan write the buffer: the presentation API holds back D3D work
     /// on a buffer that's still in use, but not Vulkan work. Returns whether the
-    /// present has retired. It returns false if the wait timed out or the
+    /// buffer is available. It returns false if the wait timed out or the
     /// presentation manager was lost.
-    fn wait_retired(&self, buffer: &Buffer, timeout: Duration) -> bool {
-        if self.retired(buffer) {
-            return true;
-        }
-        unsafe {
-            ResetEvent(self.retired).unwrap();
-            self.retiring
-                .SetEventOnCompletion(buffer.last_present + 1, self.retired)
-                .unwrap();
-            let result = WaitForMultipleObjects(
-                &[self.lost, self.retired],
+    fn wait_available(&self, buffer: &Buffer, timeout: Duration) -> bool {
+        let result = unsafe {
+            WaitForMultipleObjects(
+                &[self.lost, buffer.available],
                 false,
                 timeout.as_millis() as u32,
-            );
-            result.0 == WAIT_OBJECT_0.0 + 1
-        }
+            )
+        };
+        result.0 == WAIT_OBJECT_0.0 + 1
     }
 
     /// Creates a buffer of `size` for an image in `color_space`, registered with
@@ -510,6 +494,7 @@ impl Presenter {
         unsafe { self.d3d.CreateTexture2D(&desc, None, Some(&mut texture)) }?;
         let texture: ID3D11Texture2D = texture.unwrap();
         let presentation = unsafe { self.manager.AddBufferFromResource(&texture) }?;
+        let available = unsafe { presentation.GetAvailableEvent() }?;
         let shared = unsafe {
             texture.cast::<IDXGIResource1>()?.CreateSharedHandle(
                 None,
@@ -523,14 +508,14 @@ impl Presenter {
         Ok(Buffer {
             image: GPUMutex::new(image),
             presentation,
+            available,
             _texture: texture,
             size,
-            last_present: 0,
         })
     }
 
     /// Presents `buffer` once `render_done` reaches `value`.
-    fn present(&mut self, buffer: &mut Buffer, value: u64) {
+    fn present(&mut self, buffer: &Buffer, value: u64) {
         unsafe {
             // A present is shown only once the work issued to the context before
             // the present is done: here, the wait for Vulkan's writes into the
@@ -557,7 +542,6 @@ impl Presenter {
                     bottom: buffer.size.y as i32,
                 })
                 .unwrap();
-            buffer.last_present = self.manager.GetNextPresentId();
             match self.manager.Present() {
                 Ok(()) => {}
                 // The next `acquire` creates another presentation manager.
@@ -568,7 +552,7 @@ impl Presenter {
     }
 }
 
-impl Drop for Presenter {
+impl Drop for PresentationManager {
     fn drop(&mut self) {
         unsafe {
             // Submissions may still signal the semaphore, so this waits for the
@@ -577,7 +561,6 @@ impl Drop for Presenter {
             self.device.device_wait_idle().ok();
             self.device
                 .destroy_semaphore(self.render_done_semaphore, None);
-            CloseHandle(self.retired).ok();
             CloseHandle(self.lost).ok();
             CloseHandle(self.statistics_available).ok();
         }
@@ -603,7 +586,7 @@ fn create_presenter(
     queue: Queue<RenderQueue>,
     mut swapchain: ResMut<Swapchain>,
 ) {
-    match Presenter::new(&device, queue.family_index(), swapchain.surface) {
+    match PresentationManager::new(&device, queue.family_index(), swapchain.surface) {
         Ok(presenter) => swapchain.presenter = Some(presenter),
         Err(error) => {
             tracing::error!("The game can't present: {error}");
@@ -622,7 +605,11 @@ fn acquire(
     If(swapchain): If<ResMut<Swapchain>>,
 ) {
     let swapchain = swapchain.into_inner();
-    if swapchain.presenter.as_ref().is_some_and(Presenter::is_lost) {
+    if swapchain
+        .presenter
+        .as_ref()
+        .is_some_and(PresentationManager::is_lost)
+    {
         tracing::warn!("The presentation manager was lost; creating another");
         // The buffers are registered with the lost presentation manager.
         swapchain.buffers.clear();
@@ -632,7 +619,7 @@ fn acquire(
         let lost = swapchain.presenter.take().unwrap();
         let (device, queue_family) = (lost.device.clone(), lost.queue_family);
         drop(lost);
-        match Presenter::new(&device, queue_family, swapchain.surface) {
+        match PresentationManager::new(&device, queue_family, swapchain.surface) {
             Ok(presenter) => swapchain.presenter = Some(presenter),
             Err(error) => {
                 tracing::error!("The game can't present: {error}");
@@ -654,7 +641,7 @@ fn acquire(
     else {
         return;
     };
-    retiring.retain(|buffer| !presenter.retired(buffer));
+    retiring.retain(|buffer| !buffer.is_available());
 
     let size = game_layer_state.size();
     let color_space = presenter.preferred_color_space();
@@ -675,7 +662,7 @@ fn acquire(
         *next = 0;
     }
     let index = *next;
-    if !presenter.wait_retired(&buffers[index], RETIRE_TIMEOUT) {
+    if !presenter.wait_available(&buffers[index], AVAILABLE_TIMEOUT) {
         return;
     }
     *next = (index + 1) % buffers.len();
@@ -742,7 +729,7 @@ fn present(_bevy_thread: NonSendMarker, If(swapchain): If<ResMut<Swapchain>>) {
         return;
     };
     if let Some(presenter) = &mut swapchain.presenter {
-        presenter.present(&mut swapchain.buffers[index], value);
+        presenter.present(&swapchain.buffers[index], value);
     }
 }
 
