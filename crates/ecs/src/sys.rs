@@ -76,6 +76,12 @@ pub struct ecs_component_desc_t {
 }
 
 unsafe extern "C" {
+    pub safe static EcsCanToggle: ecs_entity_t;
+    pub safe static EcsSparse: ecs_entity_t;
+    pub safe static EcsDontFragment: ecs_entity_t;
+    pub safe static EcsSingleton: ecs_entity_t;
+    pub safe static EcsWith: ecs_entity_t;
+
     pub fn ecs_get_build_info() -> *const ecs_build_info_t;
     pub fn ecs_init() -> *mut ecs_world_t;
     pub fn ecs_fini(world: *mut ecs_world_t) -> c_int;
@@ -100,6 +106,19 @@ unsafe extern "C" {
         is_new: *mut bool,
     ) -> *mut c_void;
     pub fn ecs_modified_id(world: *mut ecs_world_t, entity: ecs_entity_t, component: ecs_id_t);
+    pub fn ecs_make_pair(relationship: ecs_entity_t, target: ecs_entity_t) -> ecs_id_t;
+    pub fn ecs_enable(world: *mut ecs_world_t, entity: ecs_entity_t, enabled: bool);
+    pub fn ecs_enable_id(
+        world: *mut ecs_world_t,
+        entity: ecs_entity_t,
+        component: ecs_id_t,
+        enable: bool,
+    );
+    pub fn ecs_is_enabled_id(
+        world: *const ecs_world_t,
+        entity: ecs_entity_t,
+        component: ecs_id_t,
+    ) -> bool;
     pub fn ecs_add_id(world: *mut ecs_world_t, entity: ecs_entity_t, component: ecs_id_t);
     pub fn ecs_remove_id(world: *mut ecs_world_t, entity: ecs_entity_t, component: ecs_id_t);
     pub fn ecs_has_id(

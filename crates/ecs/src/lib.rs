@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicI32;
 pub use dust_ecs_macros::Component;
 
 pub mod sys;
+pub mod traits;
 pub mod world;
 
 extern crate self as dust_ecs;
@@ -34,6 +35,7 @@ impl Entity {
 ///
 /// The derive only works on the type's own definition and rejects generic types. Wrap
 /// a type from another crate, or a concrete instantiation of a generic one, in a newtype.
+/// Its flecs [`traits`] are listed by path in `#[component(...)]`.
 ///
 /// Storing one fails to compile if it's aligned above 16 bytes, which flecs's storage
 /// can't hold, or if it's zero-sized and has `Drop`, as flecs has no value to drop.
@@ -58,4 +60,8 @@ pub unsafe trait Component: Send + Sync + 'static {
     /// another type's values.
     #[doc(hidden)]
     unsafe fn slot() -> &'static AtomicI32;
+
+    /// The traits listed in `#[component(...)]`, which registering this type applies.
+    #[doc(hidden)]
+    const TRAITS: &'static [traits::Declaration] = &[];
 }

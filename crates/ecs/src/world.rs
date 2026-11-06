@@ -7,7 +7,8 @@ use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering::Relaxed;
 
-use crate::sys::{ecs_component_desc_t, ecs_type_info_t, ecs_world_t};
+use crate::sys::{ecs_component_desc_t, ecs_id_t, ecs_type_info_t, ecs_world_t};
+use crate::traits::{CanToggle, Singleton};
 use crate::{Component, Entity};
 
 /// Held across `ecs_init` and `ecs_fini`, which write process-wide state (the OS
@@ -89,12 +90,31 @@ impl World {
     }
 
     /// Stores `value` on `entity`, dropping any `T` it already has. If `entity` is dead,
-    /// this just drops `value`.
+    /// this just drops `value`. Fails to compile for a [`Singleton`], which goes through
+    /// [`set_singleton`](Self::set_singleton).
     pub fn set<T: Component>(&mut self, entity: Entity, value: T) {
+        const {
+            assert!(
+                !crate::traits::has_singleton(T::TRAITS),
+                "a `Singleton` is stored with `World::set_singleton`"
+            );
+        }
         if !self.is_alive(entity) {
             return;
         }
-        let component = self.register::<T>().id();
+        let component = self.register::<T>();
+        self.store(entity, component, value);
+    }
+
+    /// Stores the world's `T`, dropping any it already has.
+    pub fn set_singleton<T: Singleton>(&mut self, value: T) {
+        let component = self.register::<T>();
+        self.store(component, component, value);
+    }
+
+    /// Stores `value` on `entity`, which must be live. `component` must be `T`'s.
+    fn store<T: Component>(&mut self, entity: Entity, component: Entity, value: T) {
+        let component = component.id();
         if size_of::<T>() == 0 {
             // SAFETY: the entity is live and `component` is registered. `T` is a tag
             // with nothing to store, and `register` rejects one that has `Drop`.
@@ -180,12 +200,93 @@ impl World {
         }
     }
 
+    /// The world's `T`, or `None` if it has none.
+    pub fn singleton<T: Singleton>(&self) -> Option<&T> {
+        self.get::<T>(self.registered_id::<T>()?)
+    }
+
+    /// The world's `T`, or `None` if it has none. As with [`get_mut`](Self::get_mut), this
+    /// fails to compile for a zero-sized `T`.
+    pub fn singleton_mut<T: Singleton>(&mut self) -> Option<Mut<'_, T>> {
+        let component = self.registered_id::<T>()?;
+        self.get_mut::<T>(component)
+    }
+
+    /// Removes the world's `T` and drops it, if it has one.
+    pub fn remove_singleton<T: Singleton>(&mut self) {
+        if let Some(component) = self.registered_id::<T>() {
+            self.remove::<T>(component);
+        }
+    }
+
+    /// Enables `entity`, undoing [`disable`](Self::disable). Does nothing if it's dead.
+    pub fn enable(&mut self, entity: Entity) {
+        self.set_enabled(entity, true);
+    }
+
+    /// Disables `entity`, so that queries skip it, though its components stay readable. Does
+    /// nothing if it's dead.
+    pub fn disable(&mut self, entity: Entity) {
+        self.set_enabled(entity, false);
+    }
+
+    fn set_enabled(&mut self, entity: Entity, enabled: bool) {
+        if self.is_alive(entity) {
+            // SAFETY: `ecs_enable` needs a live entity, which was just checked.
+            unsafe { crate::sys::ecs_enable(self.ptr.as_ptr(), entity.id(), enabled) };
+        }
+    }
+
+    /// Enables `T` on `entity`, undoing [`disable_component`](Self::disable_component). Does
+    /// nothing if `entity` is dead.
+    pub fn enable_component<T: CanToggle>(&mut self, entity: Entity) {
+        self.set_component_enabled::<T>(entity, true);
+    }
+
+    /// Disables `T` on `entity`, so that queries treat it as missing, though [`get`](Self::get)
+    /// and [`has`](Self::has) still find it. It stays disabled through [`set`](Self::set) and
+    /// [`remove`](Self::remove) until it's enabled, and `entity` needn't have a `T` yet. Does
+    /// nothing if `entity` is dead.
+    pub fn disable_component<T: CanToggle>(&mut self, entity: Entity) {
+        self.set_component_enabled::<T>(entity, false);
+    }
+
+    fn set_component_enabled<T: CanToggle>(&mut self, entity: Entity, enabled: bool) {
+        if !self.is_alive(entity) {
+            return;
+        }
+        let component = self.register::<T>();
+        // SAFETY: the entity is live, and `T: CanToggle` means `register` gave the component
+        // that trait, which flecs only checks in debug builds.
+        unsafe {
+            crate::sys::ecs_enable_id(self.ptr.as_ptr(), entity.id(), component.id(), enabled);
+        }
+    }
+
+    /// Whether `entity` has a `T` that isn't disabled.
+    pub fn is_component_enabled<T: Component>(&self, entity: Entity) -> bool {
+        self.component_id::<T>(entity).is_some_and(|component| {
+            let world = self.ptr.as_ptr();
+            // SAFETY: `component_id` checked that the entity is live. This checks for the
+            // component too, as `ecs_is_enabled_id` also says yes if it was only enabled.
+            unsafe {
+                crate::sys::ecs_has_id(world, entity.id(), component.id())
+                    && crate::sys::ecs_is_enabled_id(world, entity.id(), component.id())
+            }
+        })
+    }
+
     /// flecs's id for `T`, if `entity` is live and `T` has been stored in this world.
     /// flecs's own checks for these are compiled out in `-c opt`.
     fn component_id<T: Component>(&self, entity: Entity) -> Option<Entity> {
         if !self.is_alive(entity) {
             return None;
         }
+        self.registered_id::<T>()
+    }
+
+    /// flecs's id for `T`, if `T` has been stored in this world.
+    fn registered_id<T: Component>(&self) -> Option<Entity> {
         // Once a world runs out of low ids, its components take the same ids as
         // `new_entity`, so a handle from another world can delete one. Using a dead id
         // would crash flecs, so this treats `T` as unregistered, as flecs's C++ API does.
@@ -199,7 +300,7 @@ impl World {
 
     /// flecs's id for `T`, registering `T` the first time it's stored in this world, and
     /// again if its component was deleted (see `component_id`).
-    fn register<T: Component>(&mut self) -> Entity {
+    pub(crate) fn register<T: Component>(&mut self) -> Entity {
         const {
             // flecs allocates columns with plain `malloc` and ignores `alignment`.
             assert!(align_of::<T>() <= 16, "flecs only aligns component storage to 16 bytes");
@@ -249,11 +350,21 @@ impl World {
             }
         }
         // SAFETY: the world is valid and `&mut self` makes this access exclusive.
-        unsafe {
+        let component = unsafe {
             let id = crate::sys::ecs_component_init(world, &desc);
             crate::sys::flecs_component_ids_set(world, index, id);
             Entity(NonZeroU64::new(id).expect("ecs_component_init returned 0"))
+        };
+        for declaration in T::TRAITS {
+            (declaration.apply)(self, component);
         }
+        component
+    }
+
+    /// Adds a trait to a component that `register` just made.
+    pub(crate) fn add_trait(&mut self, component: Entity, flecs_trait: ecs_id_t) {
+        // SAFETY: the component is live, and nothing has used it yet, as flecs requires.
+        unsafe { crate::sys::ecs_add_id(self.ptr.as_ptr(), component.id(), flecs_trait) };
     }
 
     /// `T`'s process-wide index, assigning one the first time any world stores a `T`.
@@ -333,6 +444,7 @@ mod tests {
     use std::sync::atomic::{AtomicI32, AtomicUsize};
 
     use super::*;
+    use crate::traits::{DontFragment, Sparse, With};
 
     /// Counts its drops. The `Box` makes a double drop or a zeroed value a crash.
     #[derive(Component)]
@@ -635,6 +747,510 @@ mod tests {
 
         drop(world);
         assert_eq!(drops.load(Relaxed), 2);
+    }
+
+    #[derive(Component, Debug, PartialEq)]
+    #[component(CanToggle)]
+    struct Toggled(u32);
+
+    #[derive(Component, Debug, PartialEq)]
+    #[component(Singleton)]
+    struct Clock(u32);
+
+    #[test]
+    fn declared_traits_reach_flecs() {
+        #[derive(Component)]
+        #[component(CanToggle, Sparse)]
+        struct Both;
+        #[derive(Component)]
+        #[component(DontFragment, Singleton)]
+        struct Others;
+
+        let has = |world: &World, component: Entity, flecs_trait| unsafe {
+            crate::sys::ecs_has_id(world.ptr.as_ptr(), component.id(), flecs_trait)
+        };
+        let mut world = World::new();
+
+        let both = world.register::<Both>();
+        assert!(has(&world, both, crate::sys::EcsCanToggle));
+        assert!(has(&world, both, crate::sys::EcsSparse));
+        assert!(!has(&world, both, crate::sys::EcsSingleton));
+
+        let others = world.register::<Others>();
+        assert!(has(&world, others, crate::sys::EcsDontFragment));
+        assert!(has(&world, others, crate::sys::EcsSingleton));
+        assert!(!has(&world, others, crate::sys::EcsCanToggle));
+
+        let plain = world.register::<Count>();
+        assert!(!has(&world, plain, crate::sys::EcsCanToggle));
+    }
+
+    #[test]
+    fn toggles_a_component() {
+        let mut world = World::new();
+        let entity = world.new_entity();
+        let other = world.new_entity();
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+
+        world.set(entity, Toggled(1));
+        world.set(other, Toggled(2));
+        assert!(world.is_component_enabled::<Toggled>(entity));
+
+        world.disable_component::<Toggled>(entity);
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+        assert!(world.is_component_enabled::<Toggled>(other));
+        assert!(world.has::<Toggled>(entity));
+        assert_eq!(world.get::<Toggled>(entity), Some(&Toggled(1)));
+
+        // It stays disabled through writes and table moves.
+        world.set(entity, Toggled(3));
+        world.set(entity, Count(4));
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+        assert_eq!(world.get::<Toggled>(entity), Some(&Toggled(3)));
+
+        world.enable_component::<Toggled>(entity);
+        assert!(world.is_component_enabled::<Toggled>(entity));
+    }
+
+    #[test]
+    fn toggles_a_tag() {
+        #[derive(Component, Debug, PartialEq)]
+        #[component(CanToggle)]
+        struct ToggledTag;
+
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.set(entity, ToggledTag);
+        world.disable_component::<ToggledTag>(entity);
+        assert!(!world.is_component_enabled::<ToggledTag>(entity));
+        assert_eq!(world.get::<ToggledTag>(entity), Some(&ToggledTag));
+        world.enable_component::<ToggledTag>(entity);
+        assert!(world.is_component_enabled::<ToggledTag>(entity));
+    }
+
+    #[test]
+    fn disabling_outlasts_the_component() {
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.set(entity, Toggled(1));
+        world.disable_component::<Toggled>(entity);
+
+        world.remove::<Toggled>(entity);
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+        world.set(entity, Toggled(2));
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+
+        // Disabling can also come first.
+        let early = world.new_entity();
+        world.disable_component::<Toggled>(early);
+        assert!(!world.has::<Toggled>(early));
+        world.set(early, Toggled(3));
+        assert!(world.has::<Toggled>(early));
+        assert!(!world.is_component_enabled::<Toggled>(early));
+    }
+
+    #[test]
+    fn only_a_component_the_entity_has_is_enabled() {
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.enable_component::<Toggled>(entity);
+        assert!(!world.has::<Toggled>(entity));
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+
+        // This doesn't need `CanToggle`, as a component that can't toggle is always enabled.
+        assert!(!world.is_component_enabled::<Count>(entity));
+        world.set(entity, Count(1));
+        assert!(world.is_component_enabled::<Count>(entity));
+    }
+
+    #[test]
+    fn toggling_a_dead_entity_does_nothing() {
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.set(entity, Toggled(1));
+        world.delete(entity);
+
+        world.disable_component::<Toggled>(entity);
+        world.enable_component::<Toggled>(entity);
+        world.disable(entity);
+        world.enable(entity);
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+        assert!(!world.is_alive(entity));
+    }
+
+    #[test]
+    fn toggling_values_survives_many_table_moves() {
+        let drops = Arc::new(AtomicUsize::new(0));
+
+        #[derive(Component)]
+        #[component(CanToggle)]
+        struct Value(Tracked);
+
+        let mut world = World::new();
+        let entities: Vec<_> = (0..1000)
+            .map(|value| {
+                let entity = world.new_entity();
+                world.set(entity, Value(Tracked::new(value, &drops)));
+                if value % 3 == 0 {
+                    world.disable_component::<Value>(entity);
+                }
+                if value % 2 == 0 {
+                    world.set(entity, Count(value));
+                }
+                entity
+            })
+            .collect();
+        for (value, &entity) in entities.iter().enumerate() {
+            if value % 5 == 0 {
+                world.delete(entity);
+            }
+        }
+        assert_eq!(drops.load(Relaxed), 200);
+        for (value, &entity) in entities.iter().enumerate() {
+            if value % 5 != 0 {
+                assert_eq!(*world.get::<Value>(entity).unwrap().0.value, value as u32);
+                assert_eq!(world.is_component_enabled::<Value>(entity), value % 3 != 0);
+            }
+        }
+        drop(world);
+        assert_eq!(drops.load(Relaxed), 1000);
+    }
+
+    #[test]
+    fn a_deleted_toggled_component_keeps_its_trait() {
+        let mut world = World::new();
+        use_up_low_ids(&mut world);
+        let entity = world.new_entity();
+        world.set(entity, Toggled(1));
+        world.disable_component::<Toggled>(entity);
+
+        let handle = handle_naming(world.register::<Toggled>());
+        world.delete(handle);
+        assert!(!world.has::<Toggled>(entity));
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+
+        // It's a new component, so nothing has disabled it. Debug builds would abort on
+        // disabling it if registering it again had left the trait off.
+        world.set(entity, Toggled(2));
+        assert!(world.is_component_enabled::<Toggled>(entity));
+        world.disable_component::<Toggled>(entity);
+        assert!(!world.is_component_enabled::<Toggled>(entity));
+    }
+
+    #[test]
+    fn enables_and_disables_entities() {
+        // flecs's `EcsDisabled`, which nothing else here needs.
+        const DISABLED: ecs_id_t = 256 + 10;
+        let disabled = |world: &World, entity: Entity| unsafe {
+            crate::sys::ecs_has_id(world.ptr.as_ptr(), entity.id(), DISABLED)
+        };
+
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.set(entity, Count(1));
+        assert!(!disabled(&world, entity));
+
+        world.disable(entity);
+        world.disable(entity);
+        assert!(disabled(&world, entity));
+        assert_eq!(world.get::<Count>(entity), Some(&Count(1)));
+        world.set(entity, Count(2));
+        assert_eq!(world.get::<Count>(entity), Some(&Count(2)));
+
+        world.enable(entity);
+        world.enable(entity);
+        assert!(!disabled(&world, entity));
+        assert_eq!(world.get::<Count>(entity), Some(&Count(2)));
+
+        world.disable(entity);
+        world.delete(entity);
+        assert!(!world.is_alive(entity));
+    }
+
+    #[test]
+    fn disabling_a_component_through_another_worlds_handle_keeps_it_working() {
+        let mut world = World::new();
+        use_up_low_ids(&mut world);
+        let entity = world.new_entity();
+        world.set(entity, Count(1));
+
+        let handle = handle_naming(world.register::<Count>());
+        world.disable(handle);
+        assert_eq!(world.get::<Count>(entity), Some(&Count(1)));
+        let other = world.new_entity();
+        world.set(other, Count(2));
+        assert_eq!(world.get::<Count>(other), Some(&Count(2)));
+        world.enable(handle);
+        assert_eq!(world.get::<Count>(other), Some(&Count(2)));
+    }
+
+    #[test]
+    fn stored_outside_tables_keeps_its_address() {
+        #[derive(Component)]
+        #[component(Sparse)]
+        struct InSparse(Tracked);
+        #[derive(Component)]
+        #[component(DontFragment)]
+        struct Unfragmented(Tracked);
+
+        fn check<T: Component>(new: fn(Tracked) -> T, value: fn(&T) -> u32) {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut world = World::new();
+            let entity = world.new_entity();
+            world.set(entity, new(Tracked::new(1, &drops)));
+            let address = std::ptr::from_ref(world.get::<T>(entity).unwrap());
+
+            // These would move a value stored in a table.
+            world.set(entity, Count(1));
+            for number in 0..2000 {
+                let other = world.new_entity();
+                world.set(other, new(Tracked::new(number, &drops)));
+            }
+            assert_eq!(std::ptr::from_ref(world.get::<T>(entity).unwrap()), address);
+            assert_eq!(value(world.get::<T>(entity).unwrap()), 1);
+
+            world.set(entity, new(Tracked::new(2, &drops)));
+            assert_eq!(drops.load(Relaxed), 1);
+            assert_eq!(std::ptr::from_ref(world.get::<T>(entity).unwrap()), address);
+            assert_eq!(value(&world.get_mut::<T>(entity).unwrap()), 2);
+
+            *world.get_mut::<T>(entity).unwrap() = new(Tracked::new(3, &drops));
+            assert_eq!(drops.load(Relaxed), 2);
+            assert_eq!(value(world.get::<T>(entity).unwrap()), 3);
+
+            world.remove::<T>(entity);
+            assert_eq!(drops.load(Relaxed), 3);
+            assert!(!world.has::<T>(entity));
+            assert!(world.get::<T>(entity).is_none());
+            assert!(world.get_mut::<T>(entity).is_none());
+
+            world.set(entity, new(Tracked::new(4, &drops)));
+            world.delete(entity);
+            assert_eq!(drops.load(Relaxed), 4);
+
+            drop(world);
+            assert_eq!(drops.load(Relaxed), 2004);
+        }
+
+        check(InSparse, |stored| *stored.0.value);
+        check(Unfragmented, |stored| *stored.0.value);
+    }
+
+    #[test]
+    fn toggles_components_stored_outside_tables() {
+        #[derive(Component, Debug, PartialEq)]
+        #[component(CanToggle, Sparse)]
+        struct ToggledSparse(u32);
+        #[derive(Component, Debug, PartialEq)]
+        #[component(CanToggle, DontFragment)]
+        struct ToggledUnfragmented(u32);
+
+        fn check<T: CanToggle + std::fmt::Debug + PartialEq>(new: fn(u32) -> T) {
+            let mut world = World::new();
+            let entity = world.new_entity();
+            world.set(entity, new(1));
+            world.disable_component::<T>(entity);
+            assert!(!world.is_component_enabled::<T>(entity));
+            assert_eq!(world.get::<T>(entity), Some(&new(1)));
+
+            world.set(entity, Count(1));
+            assert!(!world.is_component_enabled::<T>(entity));
+            assert_eq!(world.get::<T>(entity), Some(&new(1)));
+
+            world.enable_component::<T>(entity);
+            assert!(world.is_component_enabled::<T>(entity));
+
+            let early = world.new_entity();
+            world.disable_component::<T>(early);
+            world.set(early, new(2));
+            assert!(!world.is_component_enabled::<T>(early));
+            assert_eq!(world.get::<T>(early), Some(&new(2)));
+        }
+
+        check(ToggledSparse);
+        check(ToggledUnfragmented);
+    }
+
+    #[test]
+    fn a_deleted_component_stored_outside_tables_registers_again() {
+        #[derive(Component)]
+        #[component(Sparse)]
+        struct InSparse(Tracked);
+        #[derive(Component)]
+        #[component(DontFragment)]
+        struct Unfragmented(Tracked);
+
+        fn check<T: Component>(new: fn(Tracked) -> T, value: fn(&T) -> u32) {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut world = World::new();
+            use_up_low_ids(&mut world);
+            let entity = world.new_entity();
+            world.set(entity, new(Tracked::new(1, &drops)));
+
+            let handle = handle_naming(world.register::<T>());
+            world.delete(handle);
+            assert_eq!(drops.load(Relaxed), 1);
+            assert!(!world.has::<T>(entity));
+
+            world.set(entity, new(Tracked::new(2, &drops)));
+            assert_eq!(value(world.get::<T>(entity).unwrap()), 2);
+            drop(world);
+            assert_eq!(drops.load(Relaxed), 2);
+        }
+
+        check(InSparse, |stored| *stored.0.value);
+        check(Unfragmented, |stored| *stored.0.value);
+    }
+
+    #[test]
+    fn stores_one_singleton_per_world() {
+        let mut world = World::new();
+        let mut other = World::new();
+        assert_eq!(world.singleton::<Clock>(), None);
+        assert!(world.singleton_mut::<Clock>().is_none());
+        world.remove_singleton::<Clock>();
+
+        world.set_singleton(Clock(1));
+        assert_eq!(world.singleton::<Clock>(), Some(&Clock(1)));
+        assert_eq!(other.singleton::<Clock>(), None);
+
+        world.set_singleton(Clock(2));
+        assert_eq!(world.singleton::<Clock>(), Some(&Clock(2)));
+        world.singleton_mut::<Clock>().unwrap().0 = 3;
+        assert_eq!(world.singleton::<Clock>(), Some(&Clock(3)));
+
+        other.set_singleton(Clock(4));
+        assert_eq!(world.singleton::<Clock>(), Some(&Clock(3)));
+        assert_eq!(other.singleton::<Clock>(), Some(&Clock(4)));
+
+        world.remove_singleton::<Clock>();
+        assert_eq!(world.singleton::<Clock>(), None);
+        world.set_singleton(Clock(5));
+        assert_eq!(world.singleton::<Clock>(), Some(&Clock(5)));
+    }
+
+    #[test]
+    fn drops_a_singleton_once() {
+        #[derive(Component)]
+        #[component(Singleton)]
+        struct Owned(Tracked);
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        world.set_singleton(Owned(Tracked::new(1, &drops)));
+        world.set_singleton(Owned(Tracked::new(2, &drops)));
+        assert_eq!(drops.load(Relaxed), 1);
+        assert_eq!(*world.singleton::<Owned>().unwrap().0.value, 2);
+
+        world.remove_singleton::<Owned>();
+        assert_eq!(drops.load(Relaxed), 2);
+
+        world.set_singleton(Owned(Tracked::new(3, &drops)));
+        drop(world);
+        assert_eq!(drops.load(Relaxed), 3);
+    }
+
+    #[test]
+    fn stores_a_singleton_tag() {
+        #[derive(Component, Debug, PartialEq)]
+        #[component(Singleton)]
+        struct Paused;
+
+        let mut world = World::new();
+        assert_eq!(world.singleton::<Paused>(), None);
+        world.set_singleton(Paused);
+        assert_eq!(world.singleton::<Paused>(), Some(&Paused));
+        world.remove_singleton::<Paused>();
+        assert_eq!(world.singleton::<Paused>(), None);
+    }
+
+    #[test]
+    fn a_deleted_singleton_registers_again() {
+        let mut world = World::new();
+        use_up_low_ids(&mut world);
+        world.set_singleton(Clock(1));
+
+        let handle = handle_naming(world.register::<Clock>());
+        world.delete(handle);
+        assert_eq!(world.singleton::<Clock>(), None);
+
+        // Debug builds would abort on this if it went to the deleted component's entity.
+        world.set_singleton(Clock(2));
+        assert_eq!(world.singleton::<Clock>(), Some(&Clock(2)));
+    }
+
+    #[test]
+    fn with_adds_its_targets() {
+        #[derive(Component, Debug, PartialEq)]
+        struct First;
+        #[derive(Component, Debug, PartialEq)]
+        #[component(With<First>)]
+        struct Second;
+        #[derive(Component, Debug, PartialEq)]
+        #[component(With<Second>, With<Tag>)]
+        struct Holder(u32);
+
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.set(entity, Holder(1));
+        assert_eq!(world.get::<Holder>(entity), Some(&Holder(1)));
+        assert!(world.has::<Second>(entity));
+        assert!(world.has::<First>(entity));
+        assert!(world.has::<Tag>(entity));
+
+        world.set(entity, Holder(2));
+        assert_eq!(world.get::<Holder>(entity), Some(&Holder(2)));
+
+        world.remove::<Holder>(entity);
+        assert!(!world.has::<Holder>(entity));
+        assert!(world.has::<Second>(entity));
+
+        let plain = world.new_entity();
+        world.set(plain, Second);
+        assert!(world.has::<First>(plain));
+        assert!(!world.has::<Holder>(plain));
+    }
+
+    #[test]
+    fn with_targets_can_have_traits_of_their_own() {
+        #[derive(Component, Debug, PartialEq)]
+        #[component(Sparse)]
+        struct SparseTag;
+        #[derive(Component, Debug, PartialEq)]
+        #[component(With<SparseTag>, Sparse, CanToggle)]
+        struct Holder(u32);
+
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.set(entity, Holder(1));
+        world.disable_component::<Holder>(entity);
+        assert_eq!(world.get::<Holder>(entity), Some(&Holder(1)));
+        assert!(world.has::<SparseTag>(entity));
+    }
+
+    #[test]
+    fn deleting_a_with_target_leaves_the_component_working() {
+        #[derive(Component, Debug, PartialEq)]
+        struct Target;
+        #[derive(Component, Debug, PartialEq)]
+        #[component(With<Target>)]
+        struct Holder(u32);
+
+        let mut world = World::new();
+        use_up_low_ids(&mut world);
+        let entity = world.new_entity();
+        world.set(entity, Holder(1));
+        assert!(world.has::<Target>(entity));
+
+        let handle = handle_naming(world.register::<Target>());
+        world.delete(handle);
+        assert!(!world.has::<Target>(entity));
+        assert_eq!(world.get::<Holder>(entity), Some(&Holder(1)));
+
+        world.set(entity, Holder(2));
+        let other = world.new_entity();
+        world.set(other, Holder(3));
+        assert_eq!(world.get::<Holder>(other), Some(&Holder(3)));
     }
 
     #[test]
