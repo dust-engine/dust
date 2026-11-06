@@ -2596,6 +2596,17 @@ dependencies = [
 [[package]]
 name = "dust_ecs"
 version = "0.1.0"
+dependencies = [
+ "dust_ecs_macros",
+]
+
+[[package]]
+name = "dust_ecs_macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "dust_input"

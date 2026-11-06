@@ -18,6 +18,7 @@ rust_library(
     compile_data = ["Cargo.toml"],
     aliases = aliases(),
     deps = all_crate_deps(normal = True),
+    proc_macro_deps = ["//crates/ecs_macros:dust_ecs_macros"],
     link_deps = ["@flecs//:flecs"],
     rustc_env_files = [":cargo_toml_env_vars"],
 )
