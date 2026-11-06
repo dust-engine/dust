@@ -10,7 +10,7 @@ Hybrid Bazel + Cargo build. Bazel is the primary build system.
 - **Run:** `bazel run -c opt //:dust`
 - **Cargo build:** `cargo build` (alternative, but Bazel handles shader compilation and asset bundling)
   - Build rust dependencies with bazel first
-    `bazel build //third_party/ffx:ffx_lpm_cpu //crates/pbr/shaders:pbr_module_layout_macro //:runtime_assets`
+    `bazel build //third_party/ffx:ffx_lpm_cpu @flecs//:flecs //crates/pbr/shaders:pbr_module_layout_macro //:runtime_assets`
 - **Run tests:** `cargo test` (vdb crate has dev-dependency on rand for tests)
 
 ### pumicite
@@ -42,6 +42,8 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 
 - **`crates/devtools/`** (`dust_devtools`) — DevTools dock and overlays as GPUI views. A view shows the world with `watch` (a system run every Bevy frame while the view is drawn), `read` (once, when it is shown) or `fetch` (once, each time it's called, as when the user picks something), and edits it through `dust_ui`'s `BevyChannel` (see `devtools.rs`).
 
+- **`crates/ecs/`** (`dust_ecs`) — Safe `World` and `Entity` wrappers over flecs, with hand-written C bindings in `sys` that cover only what has been called so far. flecs's precondition checks compile out under `NDEBUG` (so in `-c opt`), so a safe wrapper must uphold them itself, and misuse that aborts in fastbuild can corrupt memory in opt. `World` is `Send + Sync`, so every `&self` method must only read the world: check a new one by reading the flecs code and running it under ThreadSanitizer in both build modes. Nothing depends on it yet. Under Cargo, `build.rs` links the `libflecs.a` that Bazel built.
+
 - **`src/main.rs`** — Application entry point.
 
 ### Rendering Pipeline
@@ -66,5 +68,6 @@ Shaders are written in Slang (`.slang` files) and compiled to SPIR-V via custom 
 
 `third_party/` contains custom BUILD files for external C/C++ dependencies:
 - `vma.BUILD.bazel` — VulkanMemoryAllocator
+- `flecs.BUILD.bazel` — flecs ECS, built from its amalgamated `distr/flecs.c`
 - `slang_rs.BUILD.bazel` — shader-slang Rust bindings
 - `pumicite_cli.bzl` — Bazel macros for shader compilation rules

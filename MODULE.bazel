@@ -162,6 +162,17 @@ new_git_repository(
 )
 
 # -----------------------------------------------------------------------------
+# flecs ECS (see crates/ecs). Not on the BCR, and its own BUILD passes -std=c++17
+# to C sources, which clang rejects, so this overlays a BUILD file.
+# -----------------------------------------------------------------------------
+new_git_repository(
+    name = "flecs",
+    remote = "https://github.com/SanderMertens/flecs.git",
+    commit = "6566d4b7bdc597d0b74d5e0a4104d4ae6ac49402",  # v4.2.0
+    build_file = "//third_party:flecs.BUILD.bazel",
+)
+
+# -----------------------------------------------------------------------------
 # NVIDIA SHARC
 # -----------------------------------------------------------------------------
 new_git_repository(

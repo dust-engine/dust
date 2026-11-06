@@ -2594,6 +2594,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dust_ecs"
+version = "0.1.0"
+
+[[package]]
 name = "dust_input"
 version = "0.1.0"
 dependencies = [

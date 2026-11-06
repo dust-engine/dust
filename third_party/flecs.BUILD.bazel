@@ -1,0 +1,25 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# The amalgamated distribution: all of flecs, addons included, in one file.
+cc_library(
+    name = "flecs",
+    srcs = ["distr/flecs.c"],
+    hdrs = ["distr/flecs.h"],
+    includes = ["distr"],
+    # flecs's stats counters are plain process-wide integers, so threads using
+    # separate worlds race on them. This also stops the explorer's stats pages
+    # from working.
+    defines = ["FLECS_DISABLE_COUNTERS"],
+    # Same system libraries as flecs's CMakeLists.txt.
+    linkopts = select({
+        "@platforms//os:windows": [
+            "-DEFAULTLIB:wsock32.lib",
+            "-DEFAULTLIB:ws2_32.lib",
+            "-DEFAULTLIB:dbghelp.lib",
+        ],
+        "@platforms//os:linux": ["-lpthread"],
+        "//conditions:default": [],
+    }),
+)
