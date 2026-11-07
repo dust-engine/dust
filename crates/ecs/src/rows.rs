@@ -1,11 +1,10 @@
 //! Reading a query's rows, one at a time.
 
-use std::any::type_name;
 use std::marker::PhantomData;
 
 use crate::state::QuerySingleError;
 use crate::sys::{ecs_iter_fini, ecs_iter_t, ecs_query_iter, ecs_query_next, ecs_query_t};
-use crate::terms::{QueryData, assert_entities_are_matched, assert_rows_can_coexist};
+use crate::terms::{QueryData, assert_rows_can_coexist};
 use crate::world::World;
 
 /// A query's rows. [`fetch_next`](Self::fetch_next) reads them for any terms. As an [`Iterator`]
@@ -32,11 +31,10 @@ pub struct QueryIter<'w, D: QueryData> {
 impl<'w, D: QueryData> QueryIter<'w, D> {
     /// # Safety
     ///
-    /// `query` must be in `world`, with `D::describe`'s terms as its first terms. It must stay
-    /// live until this is dropped.
+    /// `query` must be in `world`, with `D::describe`'s terms as its first terms, and
+    /// `QueryState::new`'s checks must have compiled for it. It must stay live until this is
+    /// dropped.
     pub(crate) unsafe fn new(world: &'w mut World, query: *const ecs_query_t) -> Self {
-        let () = D::CHECK;
-        const { assert_entities_are_matched(&D::ACCESS) };
         Self {
             // SAFETY: the caller upholds this for the query, and the world is borrowed exclusively.
             it: unsafe { ecs_query_iter(world.ptr.as_ptr(), query) },
@@ -52,16 +50,15 @@ impl<'w, D: QueryData> QueryIter<'w, D> {
     pub fn fetch_next(&mut self) -> Option<D::Item<'_>> {
         let row = self.advance()?;
         let fetch = self.fetch.as_ref().expect("this row is in a result");
-        // SAFETY: `advance` stopped on a result, whose fetch this is, with `row` below its rows.
-        // `new` compiled, so its checks hold. The row borrows `self`, so it's gone before this can
-        // be called again, and the world stays borrowed that long.
+        // SAFETY: `advance` stopped on a result, whose fetch this is, with `row` below its rows,
+        // and `new`'s caller compiled the query's checks. The row borrows `self`, so it's gone
+        // before this can be called again, and the world stays borrowed that long.
         unsafe { Some(D::fetch(fetch, &self.it, row)) }
     }
 
     /// The only row, or why there isn't exactly one.
     pub(crate) fn single(mut self) -> Result<D::Item<'w>, QuerySingleError> {
-        let query = type_name::<D>();
-        let row = self.advance().ok_or(QuerySingleError::NoEntities(query))?;
+        let row = self.advance().ok_or(QuerySingleError::NoEntities)?;
         let fetch = self.fetch.as_ref().expect("this row is in a result");
         // SAFETY: as in `fetch_next`, and no other row is read, as `advance` doesn't read one. The
         // row points into the world, not into `self`, and `'w` keeps the world borrowed for as
@@ -69,7 +66,7 @@ impl<'w, D: QueryData> QueryIter<'w, D> {
         let item = unsafe { D::fetch(fetch, &self.it, row) };
         match self.advance() {
             None => Ok(item),
-            Some(_) => Err(QuerySingleError::MultipleEntities(query)),
+            Some(_) => Err(QuerySingleError::MultipleEntities),
         }
     }
 

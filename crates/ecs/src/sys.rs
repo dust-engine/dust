@@ -80,11 +80,13 @@ pub struct ecs_component_desc_t {
 pub const FLECS_TERM_COUNT_MAX: usize = 32;
 
 // `ecs_inout_kind_t`, which `ecs_term_t` stores as an `i16`.
+pub const EcsInOutNone: i16 = 1;
 pub const EcsInOut: i16 = 3;
 pub const EcsIn: i16 = 4;
 
 // `ecs_oper_kind_t`, which `ecs_term_t` stores as an `i16`.
 pub const EcsAnd: i16 = 0;
+pub const EcsNot: i16 = 2;
 pub const EcsOptional: i16 = 3;
 
 pub type ecs_query_cache_kind_t = c_int;

@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicI32;
 
 pub use dust_ecs_macros::Component;
 
+mod filter;
 mod rows;
 mod state;
 pub mod sys;
@@ -15,6 +16,7 @@ pub mod world;
 
 /// Queries over a [`world::World`], shaped like Bevy's. See [`world::World::query`].
 pub mod query {
+    pub use crate::filter::{QueryFilter, With, Without};
     pub use crate::rows::QueryIter;
     pub use crate::state::{QueryEntityError, QuerySingleError, QueryState};
     pub use crate::terms::QueryData;

@@ -7,6 +7,7 @@ use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 
 use crate::Entity;
+use crate::filter::QueryFilter;
 use crate::rows::QueryIter;
 use crate::sys::{
     EcsQueryCacheAuto, EcsQueryMatchThis, ecs_iter_fini, ecs_iter_t, ecs_query_desc_t,
@@ -25,29 +26,31 @@ use crate::world::World;
 ///
 /// Its methods panic if given a world other than the one that made it.
 #[must_use = "give this back with `World::return_query`"]
-pub struct QueryState<D: QueryData> {
+pub struct QueryState<D: QueryData, F: QueryFilter = ()> {
     /// Valid until this is returned or its world is dropped, as [`World::delete`] refuses a
     /// query's entity.
     query: NonNull<ecs_query_t>,
     /// [`World::id`] of the world this is in.
     world: u64,
-    _data: PhantomData<fn() -> D>,
+    _data: PhantomData<fn() -> (D, F)>,
 }
 
 // SAFETY: this only uses `query` with `&mut self` and the `&mut World` that holds it, on whichever
 // thread has those, and flecs only ties a world to a thread in a mode that nothing here turns on.
-unsafe impl<D: QueryData> Send for QueryState<D> {}
+unsafe impl<D: QueryData, F: QueryFilter> Send for QueryState<D, F> {}
 
 // SAFETY: as above, and `&self` gives no access to `query`.
-unsafe impl<D: QueryData> Sync for QueryState<D> {}
+unsafe impl<D: QueryData, F: QueryFilter> Sync for QueryState<D, F> {}
 
-impl<D: QueryData> QueryState<D> {
+impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     fn new(world: &mut World) -> Self {
         let () = D::CHECK;
-        const { assert_entities_are_matched(&D::ACCESS) };
+        const { assert_entities_are_matched(&D::ACCESS.with(F::ACCESS)) };
         // SAFETY: flecs documents all zeroes as the default, and it's valid here.
         let mut desc: ecs_query_desc_t = unsafe { std::mem::zeroed() };
-        D::describe(world, &mut desc, &mut 0);
+        let mut index = 0;
+        D::describe(world, &mut desc, &mut index);
+        F::describe(world, &mut desc, &mut index);
         // flecs caches what it can, and leaves the query uncached if that's nothing.
         desc.cache_kind = EcsQueryCacheAuto;
         // SAFETY: the world is valid, `&mut` makes this access exclusive, and `describe`
@@ -63,9 +66,9 @@ impl<D: QueryData> QueryState<D> {
     /// The query's rows.
     pub fn iter_mut<'w>(&mut self, world: &'w mut World) -> QueryIter<'w, D> {
         self.assert_in(world);
-        // SAFETY: the query is in this world, as just checked, so it's alive, with the terms that
-        // `D::describe` gives. `'w` keeps the world borrowed, so nothing can free the query until
-        // this is dropped, even if `self` is dropped first.
+        // SAFETY: the query is in this world, as just checked, so it's alive, with `D::describe`'s
+        // terms first, and `new` compiled its checks. `'w` keeps the world borrowed, so nothing can
+        // free the query until this is dropped, even if `self` is dropped first.
         unsafe { QueryIter::new(world, self.query.as_ptr()) }
     }
 
@@ -77,7 +80,7 @@ impl<D: QueryData> QueryState<D> {
     ) -> Result<D::Item<'w>, QueryEntityError> {
         let mut it = self.match_entity(world, entity)?;
         // SAFETY: `it` is on a result of this query that holds just `entity`'s row, and `new`
-        // compiled, so `D`'s checks hold. The row points into the world, not into `it`, and `'w`
+        // compiled the query's checks. The row points into the world, not into `it`, and `'w`
         // keeps the world borrowed for as long as it exists.
         let row = unsafe { D::fetch(&D::init_fetch(&it, &mut 0), &it, 0) };
         // SAFETY: flecs hasn't finished `it`, as it's on a result.
@@ -148,7 +151,7 @@ impl<D: QueryData> QueryState<D> {
     }
 }
 
-impl<D: QueryData> Drop for QueryState<D> {
+impl<D: QueryData, F: QueryFilter> Drop for QueryState<D, F> {
     fn drop(&mut self) {
         tracing::error!(
             "`{}` was dropped instead of given to `World::return_query`, so its world keeps the \
@@ -178,19 +181,18 @@ impl fmt::Display for QueryEntityError {
 
 impl std::error::Error for QueryEntityError {}
 
-/// Why [`QueryState::single_mut`] doesn't have exactly one row. Each holds the query's
-/// [`QueryData`] type, by name.
+/// Why [`QueryState::single_mut`] doesn't have exactly one row.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum QuerySingleError {
-    NoEntities(&'static str),
-    MultipleEntities(&'static str),
+    NoEntities,
+    MultipleEntities,
 }
 
 impl fmt::Display for QuerySingleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoEntities(query) => write!(f, "no entities fit the query {query}"),
-            Self::MultipleEntities(query) => write!(f, "multiple entities fit the query {query}"),
+            Self::NoEntities => write!(f, "no entities fit the query"),
+            Self::MultipleEntities => write!(f, "multiple entities fit the query"),
         }
     }
 }
@@ -227,12 +229,18 @@ impl World {
         QueryState::new(self)
     }
 
-    /// Frees a query that [`Self::query`] made.
+    /// Makes a query as [`Self::query`] does, whose rows also have to pass the filter `F`, such as
+    /// `With<T>`.
+    pub fn query_filtered<D: QueryData, F: QueryFilter>(&mut self) -> QueryState<D, F> {
+        QueryState::new(self)
+    }
+
+    /// Frees a query that [`Self::query`] or [`Self::query_filtered`] made.
     ///
     /// # Panics
     ///
     /// If this world didn't make it.
-    pub fn return_query<D: QueryData>(&mut self, state: QueryState<D>) {
+    pub fn return_query<D: QueryData, F: QueryFilter>(&mut self, state: QueryState<D, F>) {
         state.assert_in(self);
         // SAFETY: the query is in this world, as just checked, so it's alive, and `&mut self` means
         // nothing is iterating it. This takes the state, so nothing can use it again.
@@ -541,10 +549,10 @@ mod tests {
         let mut world = World::new();
         world.set_singleton(One(0));
         let mut query = world.query::<(&Count, &mut One)>();
-        assert!(matches!(
-            query.single_mut(&mut world),
-            Err(QuerySingleError::NoEntities(_))
-        ));
+        assert_eq!(
+            query.single_mut(&mut world).err(),
+            Some(QuerySingleError::NoEntities)
+        );
 
         let first = world.new_entity();
         world.set(first, Count(5));
@@ -554,10 +562,10 @@ mod tests {
 
         let second = world.new_entity();
         world.set(second, Count(6));
-        assert!(matches!(
-            query.single_mut(&mut world),
-            Err(QuerySingleError::MultipleEntities(_))
-        ));
+        assert_eq!(
+            query.single_mut(&mut world).err(),
+            Some(QuerySingleError::MultipleEntities)
+        );
         world.return_query(query);
     }
 

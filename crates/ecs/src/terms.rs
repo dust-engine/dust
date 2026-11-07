@@ -107,9 +107,10 @@ impl<T: Component> Field<T> {
 /// What a query reads from each row: `&T`, `&mut T`, `Option<&T>`, `Option<&mut T>`, [`Entity`], or
 /// a tuple of these, which can nest, up to the 32 terms that flecs allows.
 ///
-/// Reading [`Entity`] fails to compile unless another term is `&T` or `&mut T` for a `T` that isn't
-/// a singleton. Without one the query would also visit flecs's own entities, which an [`Entity`]
-/// must never name, or would have no entities to read.
+/// Reading [`Entity`] fails to compile unless the query also has `&T`, `&mut T` or a
+/// [`With<T>`](crate::query::With) filter for a `T` that isn't a singleton. Without one the query
+/// would also visit flecs's own entities, which an [`Entity`] must never name, or would have no
+/// entities to read.
 ///
 /// # Safety
 ///
@@ -290,8 +291,8 @@ struct Access {
     singleton: bool,
 }
 
-/// What some [`QueryData`] reads. This has a fixed size so that consts can add these up through
-/// nested tuples, as the length of an array can't depend on a generic type.
+/// The terms of some [`QueryData`] or filter. This has a fixed size so that consts can add these up
+/// through nested tuples, as the length of an array can't depend on a generic type.
 #[derive(Clone, Copy)]
 pub struct Accesses {
     /// Only those below `len` mean anything.
@@ -302,7 +303,7 @@ pub struct Accesses {
 }
 
 impl Accesses {
-    const NONE: Self = Self {
+    pub(crate) const NONE: Self = Self {
         terms: [Access {
             component: TypeId::of::<()>(),
             writes: false,
@@ -313,7 +314,7 @@ impl Accesses {
         entity: false,
     };
 
-    const fn of<T: Component>(inout: i16, oper: i16) -> Self {
+    pub(crate) const fn of<T: Component>(inout: i16, oper: i16) -> Self {
         let mut accesses = Self::NONE;
         accesses.terms[0] = Access {
             component: TypeId::of::<T>(),
@@ -325,7 +326,7 @@ impl Accesses {
         accesses
     }
 
-    const fn with(mut self, other: Self) -> Self {
+    pub(crate) const fn with(mut self, other: Self) -> Self {
         assert!(
             self.len + other.len <= FLECS_TERM_COUNT_MAX,
             "flecs allows a query at most 32 terms"
@@ -381,7 +382,7 @@ pub(crate) const fn assert_rows_can_coexist(accesses: &Accesses) {
 /// a query has no entities to read.
 ///
 /// This can't be part of [`QueryData::CHECK`], which a tuple runs on each element, as another
-/// element can be the required term.
+/// element, or the query's filter, can be the required term.
 pub(crate) const fn assert_entities_are_matched(accesses: &Accesses) {
     if !accesses.entity {
         return;
@@ -394,10 +395,12 @@ pub(crate) const fn assert_entities_are_matched(accesses: &Accesses) {
         }
         i += 1;
     }
-    panic!("reading `Entity` needs a required term, such as `&T`, that isn't a singleton");
+    panic!(
+        "reading `Entity` needs a required term, such as `&T` or `With<T>`, that isn't a singleton"
+    );
 }
 
-fn describe_term<T: Component>(
+pub(crate) fn describe_term<T: Component>(
     world: &mut World,
     desc: &mut ecs_query_desc_t,
     index: &mut usize,
