@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicI32;
 
 pub use dust_ecs_macros::Component;
 
+mod commands;
 mod filter;
 mod rows;
 mod state;

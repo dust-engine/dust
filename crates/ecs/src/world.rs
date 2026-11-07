@@ -68,19 +68,8 @@ impl World {
         if !self.is_alive(entity) {
             return;
         }
-        let world = self.ptr.as_ptr();
         // SAFETY: the world is valid, and the entity is alive, as just checked.
-        let (is_component, is_system, is_query) = unsafe {
-            (
-                crate::sys::ecs_has_id(world, entity.id(), crate::sys::FLECS_IDEcsComponentID_),
-                !crate::sys::ecs_system_get(world, entity.id()).is_null(),
-                !crate::sys::ecs_query_get(world, entity.id()).is_null(),
-            )
-        };
-        assert!(!is_component, "a component can't be deleted");
-        // Checked before `is_query`, as a system's query is on the system's entity.
-        assert!(!is_system, "a system is removed by `World::unregister_system`");
-        assert!(!is_query, "a query is freed by `World::return_query`");
+        unsafe { assert_can_delete(self.ptr.as_ptr(), entity) };
         // SAFETY: `ecs_delete` would corrupt the world if given a built-in, but an
         // `Entity` never names one.
         unsafe { crate::sys::ecs_delete(self.ptr.as_ptr(), entity.id()) }
@@ -404,6 +393,40 @@ impl World {
             Err(winner) => winner,
         }
     }
+}
+
+/// flecs's id for `T` in `world`, if `T` has been stored there.
+///
+/// # Safety
+///
+/// `world` must be valid.
+pub(crate) unsafe fn registered_id_in<T: Component>(world: *const ecs_world_t) -> Option<Entity> {
+    // SAFETY: the caller upholds this, and this crate may read the slot. flecs returns 0 for an
+    // index this world hasn't set, which includes a slot's initial 0, as its indexes start at 1.
+    let id = unsafe { crate::sys::flecs_component_ids_get_alive(world, T::slot().load(Relaxed)) };
+    NonZeroU64::new(id).map(Entity)
+}
+
+/// Panics if `entity` is a component's, a query's or a system's own, which an [`Entity`] from
+/// another world can name, and which [`World::delete`] and
+/// [`Commands::delete`](crate::system::Commands::delete) refuse.
+///
+/// # Safety
+///
+/// `world` must be valid, and `entity` alive in it.
+pub(crate) unsafe fn assert_can_delete(world: *const ecs_world_t, entity: Entity) {
+    // SAFETY: the caller upholds this.
+    let (is_component, is_system, is_query) = unsafe {
+        (
+            crate::sys::ecs_has_id(world, entity.id(), crate::sys::FLECS_IDEcsComponentID_),
+            !crate::sys::ecs_system_get(world, entity.id()).is_null(),
+            !crate::sys::ecs_query_get(world, entity.id()).is_null(),
+        )
+    };
+    assert!(!is_component, "a component can't be deleted");
+    // Checked before `is_query`, as a system's query is on the system's entity.
+    assert!(!is_system, "a system is removed by `World::unregister_system`");
+    assert!(!is_query, "a query is freed by `World::return_query`");
 }
 
 impl Drop for World {

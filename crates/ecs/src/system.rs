@@ -9,6 +9,7 @@ use std::num::NonZeroU64;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use crate::Entity;
+pub use crate::commands::Commands;
 use crate::query::{QueryData, QueryFilter, QueryIter};
 use crate::state::describe;
 use crate::sys::{
@@ -80,12 +81,15 @@ thread_local! {
 /// What a system gets each time it runs: the rows of a query of `D` whose rows also pass the
 /// filter `F`, such as `With<T>`. A system's parameter type states its query, so a closure
 /// annotates it, as in `|Run { iter, .. }: Run<&mut Position>|`. The world is deferred while a
-/// system runs, so a system gets this rather than the world.
+/// system runs, so a system gets this rather than the world, and changes the world's entities
+/// through its [`Commands`].
 ///
 /// It has a private field, and more fields may be added, so take it apart with `..`.
 pub struct Run<'w, D: QueryData, F: QueryFilter = ()> {
     /// The rows of the system's query.
     pub iter: QueryIter<'w, D>,
+    /// Changes to the world that flecs applies once the system has run.
+    pub commands: Commands<'w>,
     /// The seconds since the last frame, as [`World::progress`] was given or measured them. 0
     /// when [`World::run_system`] runs the system.
     pub delta_time: f32,
@@ -194,7 +198,8 @@ impl World {
     }
 
     /// Runs a frame: each system that [`Self::add_system`] stored, phase by phase. Within a phase,
-    /// the order is unspecified, as in Bevy, so order systems by their phases.
+    /// the order is unspecified, as in Bevy, so order systems by their phases. flecs applies the
+    /// [`Commands`] they queue once they've all run.
     ///
     /// `delta_time` is the seconds since the last frame, which systems get in [`Run::delta_time`].
     /// Pass 0 to have flecs measure it.
@@ -211,8 +216,8 @@ impl World {
         }
     }
 
-    /// Runs a system that this world registered. If it was unregistered, this logs an error and
-    /// does nothing else.
+    /// Runs a system that this world registered, and then flecs applies the [`Commands`] it
+    /// queued. If it was unregistered, this logs an error and does nothing else.
     ///
     /// # Panics
     ///
@@ -274,6 +279,8 @@ where
     let it = unsafe { it.read() };
     let system = it.run_ctx.cast::<S>();
     let delta_time = it.delta_time;
+    let stage = it.stage;
+    let world = it.world;
     // SAFETY: `store_system` gave flecs this callback with a query from `describe::<D, F>`, and
     // nothing has advanced the iterator. Once this returns, flecs only reads its own copy's
     // `interrupted_by`, which is still 0, as the system can't interrupt the run. It doesn't finish
@@ -289,6 +296,9 @@ where
     }
     let run = Run {
         iter: rows,
+        // SAFETY: as above, the system runs on this stage of the world, which flecs defers for the
+        // run and only this thread uses until it's over.
+        commands: unsafe { Commands::new(stage, world) },
         delta_time,
         _filter: PhantomData,
     };
