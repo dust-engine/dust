@@ -58,6 +58,11 @@ pub struct Or<T>(PhantomData<T>);
 /// table, whether or not it writes there. A singleton such a query writes only changes once the
 /// query runs to its end, and a [`DontFragment`](crate::traits::DontFragment) component it writes
 /// doesn't change.
+///
+/// flecs only detects changes in a query it caches, so this fails to compile unless the query has
+/// a term that flecs caches. That's any term except one for a singleton, a
+/// [`Sparse`](crate::traits::Sparse) or `DontFragment` component, or an [`Or`] that holds a
+/// `Sparse` component.
 pub struct DetectChanges;
 
 // SAFETY: `ACCESS` lists the term, which reads nothing.
@@ -123,7 +128,7 @@ macro_rules! impl_query_filter {
         // SAFETY: `ACCESS` lists the chain's terms, which read nothing. It marks each as required,
         // as every row has at least one of them, which `CHECK` keeps on the row's entity.
         unsafe impl<$($filter: Component),+> QueryFilter for Or<($(With<$filter>,)+)> {
-            const ACCESS: Accesses = Accesses::NONE$(.with(With::<$filter>::ACCESS))+;
+            const ACCESS: Accesses = Accesses::NONE$(.with(With::<$filter>::ACCESS))+.or_chain();
             const CHECK: () = {
                 $(assert_can_be_in_or::<$filter>();)+
             };

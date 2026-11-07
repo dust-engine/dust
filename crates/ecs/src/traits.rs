@@ -29,6 +29,7 @@ use crate::{Component, Entity, sys};
 pub struct Declaration {
     pub(crate) apply: fn(&mut World, Entity),
     pub(crate) singleton: bool,
+    pub(crate) sparse: bool,
     pub(crate) dont_fragment: bool,
 }
 
@@ -62,6 +63,17 @@ pub(crate) const fn has_singleton(traits: &[Declaration]) -> bool {
     false
 }
 
+pub(crate) const fn has_sparse(traits: &[Declaration]) -> bool {
+    let mut i = 0;
+    while i < traits.len() {
+        if traits[i].sparse {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 pub(crate) const fn has_dont_fragment(traits: &[Declaration]) -> bool {
     let mut i = 0;
     while i < traits.len() {
@@ -88,6 +100,7 @@ pub unsafe trait CanToggle: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsCanToggle),
         singleton: false,
+        sparse: false,
         dont_fragment: false,
     };
 }
@@ -103,6 +116,7 @@ pub unsafe trait Sparse: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsSparse),
         singleton: false,
+        sparse: true,
         dont_fragment: false,
     };
 }
@@ -118,6 +132,8 @@ pub unsafe trait DontFragment: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsDontFragment),
         singleton: false,
+        // flecs makes a `DontFragment` component `Sparse` too.
+        sparse: true,
         dont_fragment: true,
     };
 }
@@ -135,6 +151,7 @@ pub unsafe trait Singleton: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsSingleton),
         singleton: true,
+        sparse: false,
         dont_fragment: false,
     };
 }
@@ -162,6 +179,7 @@ pub unsafe trait With<U: Component>: Component {
                 world.add_trait(component, pair);
             },
             singleton: false,
+            sparse: false,
             dont_fragment: false,
         }
     };

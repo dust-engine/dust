@@ -92,7 +92,6 @@ pub const EcsOptional: i16 = 3;
 
 pub type ecs_query_cache_kind_t = c_int;
 pub const EcsQueryCacheAuto: ecs_query_cache_kind_t = 1;
-pub const EcsQueryCacheNone: ecs_query_cache_kind_t = 3;
 
 /// In `ecs_query_desc_t::flags`, asks for what change detection needs.
 pub const EcsQueryDetectChanges: u32 = 1 << 8;

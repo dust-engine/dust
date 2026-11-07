@@ -19,7 +19,7 @@ use crate::sys::{
     ecs_base_field_w_size, ecs_field_at_w_size, ecs_field_is_set, ecs_field_stride,
     ecs_field_w_size, ecs_iter_t, ecs_query_desc_t,
 };
-use crate::traits::{has_dont_fragment, has_singleton};
+use crate::traits::{has_dont_fragment, has_singleton, has_sparse};
 use crate::world::World;
 use crate::{Component, Entity};
 
@@ -289,6 +289,9 @@ struct Access {
     /// A row has to have this, or another term in its `Or` chain, rather than it being optional.
     required: bool,
     singleton: bool,
+    /// flecs can cache this term, as it's on the row's entity and stored in tables, as are the
+    /// other terms in its `Or` chain.
+    cacheable: bool,
 }
 
 /// The terms of some [`QueryData`] or filter. This has a fixed size so that consts can add these up
@@ -311,6 +314,7 @@ impl Accesses {
             writes: false,
             required: false,
             singleton: false,
+            cacheable: false,
         }; FLECS_TERM_COUNT_MAX],
         len: 0,
         entity: false,
@@ -330,9 +334,26 @@ impl Accesses {
             writes: inout == EcsInOut,
             required: oper == EcsAnd,
             singleton: has_singleton(T::TRAITS),
+            cacheable: !has_singleton(T::TRAITS) && !has_sparse(T::TRAITS),
         };
         accesses.len = 1;
         accesses
+    }
+
+    /// These terms as one `Or` chain, which flecs only caches if it can cache all of its terms.
+    pub(crate) const fn or_chain(mut self) -> Self {
+        let mut cacheable = true;
+        let mut i = 0;
+        while i < self.len {
+            cacheable &= self.terms[i].cacheable;
+            i += 1;
+        }
+        let mut i = 0;
+        while i < self.len {
+            self.terms[i].cacheable = cacheable;
+            i += 1;
+        }
+        self
     }
 
     pub(crate) const fn with(mut self, other: Self) -> Self {
@@ -407,6 +428,26 @@ pub(crate) const fn assert_entities_are_matched(accesses: &Accesses) {
     }
     panic!(
         "reading `Entity` needs a required term, such as `&T` or `With<T>`, that isn't a singleton"
+    );
+}
+
+/// flecs only detects changes in a query it caches, and it leaves a query uncached if it can't
+/// cache any of its terms. It only checks this in debug builds.
+pub(crate) const fn assert_changes_are_detected(accesses: &Accesses) {
+    if !accesses.detects_changes {
+        return;
+    }
+    let terms = accesses.as_slice();
+    let mut i = 0;
+    while i < terms.len() {
+        if terms[i].cacheable {
+            return;
+        }
+        i += 1;
+    }
+    panic!(
+        "`DetectChanges` needs a term that flecs caches, which is one that isn't a singleton, \
+         `Sparse` or `DontFragment`, or in an `Or` with a `Sparse` component"
     );
 }
 
