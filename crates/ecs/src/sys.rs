@@ -310,6 +310,15 @@ unsafe extern "C" {
     pub safe static EcsDontFragment: ecs_entity_t;
     pub safe static EcsSingleton: ecs_entity_t;
     pub safe static EcsWith: ecs_entity_t;
+    pub safe static EcsOnStart: ecs_entity_t;
+    pub safe static EcsOnLoad: ecs_entity_t;
+    pub safe static EcsPostLoad: ecs_entity_t;
+    pub safe static EcsPreUpdate: ecs_entity_t;
+    pub safe static EcsOnUpdate: ecs_entity_t;
+    pub safe static EcsOnValidate: ecs_entity_t;
+    pub safe static EcsPostUpdate: ecs_entity_t;
+    pub safe static EcsPreStore: ecs_entity_t;
+    pub safe static EcsOnStore: ecs_entity_t;
 
     pub fn ecs_get_build_info() -> *const ecs_build_info_t;
     pub fn ecs_init() -> *mut ecs_world_t;
@@ -388,6 +397,7 @@ unsafe extern "C" {
         delta_time: f32,
         param: *mut c_void,
     ) -> ecs_entity_t;
+    pub fn ecs_progress(world: *mut ecs_world_t, delta_time: f32) -> bool;
     pub fn ecs_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
     pub fn ecs_base_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
     pub fn ecs_field_stride(it: *const ecs_iter_t, index: i8) -> usize;

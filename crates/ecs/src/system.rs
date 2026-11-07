@@ -1,7 +1,8 @@
-//! Systems: functions that flecs runs over the rows of a query, like Bevy's one-shot systems.
+//! Systems: functions that flecs runs over the rows of a query, by hand like Bevy's one-shot
+//! systems, or each frame in a [`Phase`].
 
 use std::any::Any;
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
@@ -11,11 +12,13 @@ use crate::Entity;
 use crate::query::{QueryData, QueryFilter, QueryIter};
 use crate::state::describe;
 use crate::sys::{
-    ecs_delete, ecs_iter_t, ecs_run, ecs_system_desc_t, ecs_system_get, ecs_system_init,
+    EcsOnLoad, EcsOnStart, EcsOnStore, EcsOnUpdate, EcsOnValidate, EcsPostLoad, EcsPostUpdate,
+    EcsPreStore, EcsPreUpdate, ecs_delete, ecs_entity_t, ecs_iter_t, ecs_progress, ecs_run,
+    ecs_system_desc_t, ecs_system_get, ecs_system_init,
 };
 use crate::world::World;
 
-/// A system that [`World::register_system`] stored, to run with [`World::run_system`].
+/// A system that [`World::register_system`] or [`World::add_system`] stored.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SystemId {
     entity: Entity,
@@ -23,10 +26,55 @@ pub struct SystemId {
     world: u64,
 }
 
+/// When [`World::progress`] runs a system that [`World::add_system`] stored. A frame runs the
+/// phases in this order, each phase's systems after all of the phase before.
+///
+/// These are flecs's phases. What each is for is flecs's convention, which nothing enforces.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Phase {
+    /// Only in the first frame, before the other phases. A system added after the first frame
+    /// never runs in this phase.
+    OnStart,
+    /// Loads data into the world, such as input.
+    OnLoad,
+    /// Processes what was loaded, such as turning key presses into actions.
+    PostLoad,
+    /// Prepares the frame for the game logic.
+    PreUpdate,
+    /// The game logic.
+    OnUpdate,
+    /// Checks what the game logic did, such as for collisions.
+    OnValidate,
+    /// Corrects what the checks found, such as by moving entities apart.
+    PostUpdate,
+    /// Prepares the frame for rendering, such as by computing transforms.
+    PreStore,
+    /// Renders the frame.
+    OnStore,
+}
+
+impl Phase {
+    /// flecs's id for the phase.
+    fn id(self) -> ecs_entity_t {
+        match self {
+            Self::OnStart => EcsOnStart,
+            Self::OnLoad => EcsOnLoad,
+            Self::PostLoad => EcsPostLoad,
+            Self::PreUpdate => EcsPreUpdate,
+            Self::OnUpdate => EcsOnUpdate,
+            Self::OnValidate => EcsOnValidate,
+            Self::PostUpdate => EcsPostUpdate,
+            Self::PreStore => EcsPreStore,
+            Self::OnStore => EcsOnStore,
+        }
+    }
+}
+
 thread_local! {
-    /// A panic from a system that this thread is running, kept while flecs finishes the run, as
-    /// unwinding through flecs would abort, and returning early would leave the world deferred.
-    static PANIC: Cell<Option<Box<dyn Any + Send>>> = const { Cell::new(None) };
+    /// A panic from a system that this thread is running, kept while flecs finishes the run or the
+    /// frame, as unwinding through flecs would abort, and returning early would leave the world
+    /// deferred. While it's kept, systems don't run.
+    static PANIC: RefCell<Option<Box<dyn Any + Send>>> = const { RefCell::new(None) };
 }
 
 /// What a system gets each time it runs: the rows of a query of `D` whose rows also pass the
@@ -38,6 +86,9 @@ thread_local! {
 pub struct Run<'w, D: QueryData, F: QueryFilter = ()> {
     /// The rows of the system's query.
     pub iter: QueryIter<'w, D>,
+    /// The seconds since the last frame, as [`World::progress`] was given or measured them. 0
+    /// when [`World::run_system`] runs the system.
+    pub delta_time: f32,
     _filter: PhantomData<fn() -> F>,
 }
 
@@ -98,6 +149,27 @@ impl World {
         F: QueryFilter,
         S: for<'w> FnMut(Run<'w, D, F>) + Send + 'static,
     {
+        self.store_system(None, system)
+    }
+
+    /// Stores `system` as [`Self::register_system`] does, to also run in `phase` each time
+    /// [`Self::progress`] runs a frame. As flecs does, `progress` skips it until a table first
+    /// matches its query, and then runs it every frame, even when it has no rows.
+    pub fn add_system<D, F, S>(&mut self, phase: Phase, system: S) -> SystemId
+    where
+        D: QueryData,
+        F: QueryFilter,
+        S: for<'w> FnMut(Run<'w, D, F>) + Send + 'static,
+    {
+        self.store_system(Some(phase), system)
+    }
+
+    fn store_system<D, F, S>(&mut self, phase: Option<Phase>, system: S) -> SystemId
+    where
+        D: QueryData,
+        F: QueryFilter,
+        S: for<'w> FnMut(Run<'w, D, F>) + Send + 'static,
+    {
         const {
             assert!(
                 !F::ACCESS.detects_changes,
@@ -107,15 +179,35 @@ impl World {
         // SAFETY: flecs documents all zeroes as the default, and it's valid here.
         let mut desc: ecs_system_desc_t = unsafe { std::mem::zeroed() };
         desc.query = describe::<D, F>(self);
+        desc.phase = phase.map_or(0, Phase::id);
         desc.run = Some(run::<D, F, S>);
         desc.run_ctx = Box::into_raw(Box::new(system)).cast();
         desc.run_ctx_free = Some(drop_system::<S>);
+        let world = self.ptr.as_ptr();
         // SAFETY: the world is valid, `&mut self` makes this access exclusive, and `describe`
         // registered the query's components. flecs keeps the box, and frees it with `run_ctx_free`.
-        let entity = unsafe { ecs_system_init(self.ptr.as_ptr(), &desc) };
+        let entity = unsafe { ecs_system_init(world, &desc) };
         SystemId {
             entity: Entity(NonZeroU64::new(entity).unwrap()),
             world: self.id,
+        }
+    }
+
+    /// Runs a frame: each system that [`Self::add_system`] stored, phase by phase. Within a phase,
+    /// the order is unspecified, as in Bevy, so order systems by their phases.
+    ///
+    /// `delta_time` is the seconds since the last frame, which systems get in [`Run::delta_time`].
+    /// Pass 0 to have flecs measure it.
+    ///
+    /// # Panics
+    ///
+    /// If a system panics, once flecs has finished the frame. The frame's later systems don't run.
+    pub fn progress(&mut self, delta_time: f32) {
+        // SAFETY: the world is valid, and `&mut self` makes this access exclusive, so the world
+        // isn't deferred, nor in a frame, nor being iterated.
+        unsafe { ecs_progress(self.ptr.as_ptr(), delta_time) };
+        if let Some(payload) = PANIC.take() {
+            resume_unwind(payload);
         }
     }
 
@@ -149,8 +241,8 @@ impl World {
             tracing::error!("{id:?} can't be unregistered, as it already was");
             return;
         }
-        // SAFETY: the entity is alive, as just checked, so it's still the one `register_system`
-        // made, not a built-in. Deleting it frees the system's query and calls `drop_system`, and
+        // SAFETY: the entity is alive, as just checked, so it's still the one `store_system` made,
+        // not a built-in. Deleting it frees the system's query and calls `drop_system`, and
         // `&mut self` means the system isn't running.
         unsafe { ecs_delete(self.ptr.as_ptr(), id.entity.id()) };
     }
@@ -181,22 +273,30 @@ where
 {
     let it = unsafe { it.read() };
     let system = it.run_ctx.cast::<S>();
-    // SAFETY: `register_system` gave flecs this callback with a query from `describe::<D, F>`, and
+    let delta_time = it.delta_time;
+    // SAFETY: `store_system` gave flecs this callback with a query from `describe::<D, F>`, and
     // nothing has advanced the iterator. Once this returns, flecs only reads its own copy's
     // `interrupted_by`, which is still 0, as the system can't interrupt the run. It doesn't finish
     // its copy, as it only does that for a query whose terms all have no source, and this query's
-    // terms all have one, the row's entity or a singleton's. Only `run_system` runs a system, which
-    // borrows the world exclusively until this returns.
+    // terms all have one, the row's entity or a singleton's. Only `run_system` and `progress` run a
+    // system, on the thread that called them, as nothing gives flecs worker threads. Each borrows
+    // the world exclusively until the run is over.
     let rows = unsafe { QueryIter::from_iter(it) };
+    if PANIC.with_borrow(Option::is_some) {
+        // A system panicked earlier in this frame, so as in Bevy, the frame's later systems don't
+        // run. Dropping the rows finishes the iterator.
+        return;
+    }
     let run = Run {
         iter: rows,
+        delta_time,
         _filter: PhantomData,
     };
     // The system stays registered after a panic, with its captures as the panic left them, as a
     // value does when a panic is caught anywhere else.
-    // SAFETY: `register_system` put an `S` here, which only `drop_system` drops. Nothing else uses it
-    // while this runs, as `run_system` borrows the world exclusively, and the system can't reach
-    // the world to run itself again.
+    // SAFETY: `store_system` put an `S` here, which only `drop_system` drops. Nothing else uses it
+    // while this runs, as whatever runs it borrows the world exclusively, and the system can't
+    // reach the world to run itself again.
     let result = catch_unwind(AssertUnwindSafe(|| unsafe { (*system)(run) }));
     if let Err(payload) = result {
         // Unwinding dropped the rows, which finished the iterator, so flecs can end the run.
@@ -206,8 +306,7 @@ where
 
 /// flecs's callback to free a system `S`.
 unsafe extern "C" fn drop_system<S>(system: *mut c_void) {
-    // SAFETY: flecs calls this once, when it deletes the system, with the box `register_system`
-    // made.
+    // SAFETY: flecs calls this once, when it deletes the system, with the box `store_system` made.
     drop(unsafe { Box::from_raw(system.cast::<S>()) });
 }
 
@@ -591,5 +690,186 @@ mod tests {
         world.run_system(system);
         assert_eq!(values(&world, &entities), [2]);
         std::thread::spawn(move || drop(world)).join().unwrap();
+    }
+
+    const PHASES: [Phase; 9] = [
+        Phase::OnStart,
+        Phase::OnLoad,
+        Phase::PostLoad,
+        Phase::PreUpdate,
+        Phase::OnUpdate,
+        Phase::OnValidate,
+        Phase::PostUpdate,
+        Phase::PreStore,
+        Phase::OnStore,
+    ];
+
+    #[test]
+    fn progress_runs_each_phase_in_order() {
+        let ran = Arc::new(Mutex::new(Vec::new()));
+        let mut world = World::new();
+        counts(&mut world, [0]);
+        let add = |world: &mut World, phase| {
+            let ran = ran.clone();
+            world.add_system(phase, move |_: Run<&Count>| ran.lock().unwrap().push(phase));
+        };
+        // Added last to first, so the order can't come from the order they were added.
+        for phase in PHASES.into_iter().rev() {
+            add(&mut world, phase);
+        }
+        world.progress(1.0);
+        assert_eq!(*ran.lock().unwrap(), PHASES);
+
+        // `OnStart` only runs in the first frame, even for a system added after it.
+        add(&mut world, Phase::OnStart);
+        ran.lock().unwrap().clear();
+        world.progress(1.0);
+        assert_eq!(*ran.lock().unwrap(), PHASES[1..]);
+    }
+
+    /// flecs marks a system empty when no table matches its query yet, and stops when one does.
+    #[test]
+    fn progress_skips_a_system_until_a_table_matches_its_query() {
+        let frames = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        world.add_system(Phase::OnUpdate, {
+            let frames = frames.clone();
+            move |_: Run<&Count>| {
+                frames.fetch_add(1, Relaxed);
+            }
+        });
+        world.progress(1.0);
+        assert_eq!(frames.load(Relaxed), 0);
+
+        let entities = counts(&mut world, [0]);
+        world.progress(1.0);
+        assert_eq!(frames.load(Relaxed), 1);
+
+        // flecs doesn't mark it empty again once it has matched, even with no rows left.
+        world.delete(entities[0]);
+        world.progress(1.0);
+        assert_eq!(frames.load(Relaxed), 2);
+    }
+
+    #[test]
+    fn progress_only_runs_added_systems_and_run_system_runs_both() {
+        let mut world = World::new();
+        let entities = counts(&mut world, [0]);
+        let by_hand = world.register_system(|Run { iter, .. }: Run<&mut Count>| {
+            for count in iter {
+                count.0 += 1;
+            }
+        });
+        let each_frame = world.add_system(Phase::OnUpdate, |Run { iter, .. }: Run<&mut Count>| {
+            for count in iter {
+                count.0 += 10;
+            }
+        });
+        world.progress(1.0);
+        assert_eq!(values(&world, &entities), [10]);
+        world.run_system(by_hand);
+        world.run_system(each_frame);
+        assert_eq!(values(&world, &entities), [21]);
+    }
+
+    #[test]
+    fn adding_and_unregistering_between_frames_changes_what_runs() {
+        let mut world = World::new();
+        let entities = counts(&mut world, [0]);
+        let adds_one = world.add_system(Phase::OnUpdate, |Run { iter, .. }: Run<&mut Count>| {
+            for count in iter {
+                count.0 += 1;
+            }
+        });
+        world.progress(1.0);
+        world.add_system(Phase::OnUpdate, |Run { iter, .. }: Run<&mut Count>| {
+            for count in iter {
+                count.0 += 10;
+            }
+        });
+        world.progress(1.0);
+        world.unregister_system(adds_one);
+        world.progress(1.0);
+        assert_eq!(values(&world, &entities), [22]);
+    }
+
+    #[test]
+    fn a_later_phase_sees_what_an_earlier_one_wrote() {
+        let mut world = World::new();
+        counts(&mut world, [1]);
+        let seen = Arc::new(AtomicUsize::new(0));
+        world.add_system(Phase::PostUpdate, {
+            let seen = seen.clone();
+            move |Run { iter, .. }: Run<&Count>| {
+                for count in iter {
+                    seen.store(count.0 as usize, Relaxed);
+                }
+            }
+        });
+        world.add_system(Phase::OnUpdate, |Run { iter, .. }: Run<&mut Count>| {
+            for count in iter {
+                count.0 *= 10;
+            }
+        });
+        world.progress(1.0);
+        assert_eq!(seen.load(Relaxed), 10);
+    }
+
+    #[test]
+    fn systems_get_the_frames_delta_time() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut world = World::new();
+        counts(&mut world, [0]);
+        let system = world.add_system(Phase::OnUpdate, {
+            let seen = seen.clone();
+            move |Run { delta_time, .. }: Run<&Count>| seen.lock().unwrap().push(delta_time)
+        });
+        world.progress(0.25);
+        world.progress(0.5);
+        world.run_system(system);
+        // flecs measures it when given 0.
+        world.progress(0.0);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[..3], [0.25, 0.5, 0.0]);
+        assert!(seen[3] > 0.0);
+    }
+
+    #[test]
+    fn a_panic_in_a_frame_skips_its_later_systems_and_reaches_progress() {
+        let ran = Arc::new(Mutex::new(Vec::new()));
+        let mut world = World::new();
+        let entities = counts(&mut world, [0]);
+        let mut frames = 0;
+        world.add_system(Phase::OnUpdate, {
+            let ran = ran.clone();
+            move |Run { iter, .. }: Run<&Count>| {
+                frames += 1;
+                ran.lock().unwrap().push("panics");
+                for _count in iter {
+                    // Panicking with a row in hand leaves the iterator in the middle of a result.
+                    if frames == 1 {
+                        panic!("the system panicked");
+                    }
+                }
+            }
+        });
+        world.add_system(Phase::PostUpdate, {
+            let ran = ran.clone();
+            move |_: Run<&Count>| ran.lock().unwrap().push("runs after")
+        });
+
+        let payload = catch_unwind(AssertUnwindSafe(|| world.progress(1.0))).unwrap_err();
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"the system panicked"));
+        assert_eq!(*ran.lock().unwrap(), ["panics"]);
+
+        // flecs finished the frame, so the world isn't deferred and this applies at once.
+        world.set(entities[0], Tag);
+        assert!(world.has::<Tag>(entities[0]));
+
+        world.progress(1.0);
+        assert_eq!(*ran.lock().unwrap(), ["panics", "panics", "runs after"]);
+        // A debug build of flecs aborts when the world is dropped if an iterator was left
+        // unfinished.
+        drop(world);
     }
 }
