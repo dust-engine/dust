@@ -1,13 +1,18 @@
 //! Systems: functions that flecs runs over the rows of a query, like Bevy's one-shot systems.
 
+use std::any::Any;
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use crate::Entity;
 use crate::query::{QueryData, QueryFilter, QueryIter};
 use crate::state::describe;
-use crate::sys::{ecs_iter_t, ecs_run, ecs_system_desc_t, ecs_system_init};
+use crate::sys::{
+    ecs_delete, ecs_iter_t, ecs_run, ecs_system_desc_t, ecs_system_get, ecs_system_init,
+};
 use crate::world::World;
 
 /// A system that [`World::register_system`] stored, to run with [`World::run_system`].
@@ -18,9 +23,15 @@ pub struct SystemId {
     world: u64,
 }
 
+thread_local! {
+    /// A panic from a system that this thread is running, kept while flecs finishes the run, as
+    /// unwinding through flecs would abort, and returning early would leave the world deferred.
+    static PANIC: Cell<Option<Box<dyn Any + Send>>> = const { Cell::new(None) };
+}
+
 /// What a system gets each time it runs: the rows of a query of `D` whose rows also pass the
 /// filter `F`, such as `With<T>`. A system's parameter type states its query, so a closure
-/// annotates it, as in `|Run { rows, .. }: Run<&mut Position>|`. The world is deferred while a
+/// annotates it, as in `|Run { iter, .. }: Run<&mut Position>|`. The world is deferred while a
 /// system runs, so a system gets this rather than the world.
 ///
 /// It has a private field, and more fields may be added, so take it apart with `..`.
@@ -36,9 +47,11 @@ impl World {
     /// to compile if the query's filter has [`DetectChanges`](crate::query::DetectChanges), as a
     /// system can't ask whether its query changed.
     ///
-    /// It runs inside flecs, so a panic in it aborts the process. It's dropped with the world,
-    /// under the same lock as a component's `Drop`, so its captures mustn't create or drop a
-    /// world when dropped, and a panic there aborts too.
+    /// If it panics, the panic reaches whoever ran it once flecs has finished the run, and it stays
+    /// registered, with its captures as the panic left them. It's dropped by
+    /// [`Self::unregister_system`] or with the world. A panic in its captures' `Drop` aborts the
+    /// process, as it runs inside flecs. The world drops it under the same lock as a component's
+    /// `Drop`, so its captures mustn't create or drop a world when dropped.
     ///
     /// ```
     /// use dust_ecs::Component;
@@ -55,8 +68,8 @@ impl World {
     /// #[derive(Component)]
     /// struct Moving;
     ///
-    /// fn movement(Run { rows, .. }: Run<(&mut Position, &Velocity), With<Moving>>) {
-    ///     for (position, velocity) in rows {
+    /// fn movement(Run { iter, .. }: Run<(&mut Position, &Velocity), With<Moving>>) {
+    ///     for (position, velocity) in iter {
     ///         position.0 += velocity.0;
     ///     }
     /// }
@@ -76,6 +89,8 @@ impl World {
     ///
     /// assert_eq!(world.get::<Position>(moving).unwrap().0, 5.0);
     /// assert_eq!(world.get::<Position>(still).unwrap().0, 1.0);
+    ///
+    /// world.unregister_system(system);
     /// ```
     pub fn register_system<D, F, S>(&mut self, system: S) -> SystemId
     where
@@ -104,19 +119,56 @@ impl World {
         }
     }
 
-    /// Runs a system that this world registered.
+    /// Runs a system that this world registered. If it was unregistered, this logs an error and
+    /// does nothing else.
+    ///
+    /// # Panics
+    ///
+    /// If another world registered it, or if it panics.
+    pub fn run_system(&mut self, id: SystemId) {
+        if !self.is_registered(id) {
+            tracing::error!("{id:?} can't be run, as it was unregistered");
+            return;
+        }
+        // SAFETY: the system is registered in this world, as just checked, and `&mut self` makes
+        // this access exclusive.
+        unsafe { ecs_run(self.ptr.as_ptr(), id.entity.id(), 0.0, std::ptr::null_mut()) };
+        if let Some(payload) = PANIC.take() {
+            resume_unwind(payload);
+        }
+    }
+
+    /// Removes a system that this world registered, and drops it. If it was already unregistered,
+    /// this logs an error and does nothing else.
     ///
     /// # Panics
     ///
     /// If another world registered it.
-    pub fn run_system(&mut self, id: SystemId) {
+    pub fn unregister_system(&mut self, id: SystemId) {
+        if !self.is_registered(id) {
+            tracing::error!("{id:?} can't be unregistered, as it already was");
+            return;
+        }
+        // SAFETY: the entity is alive, as just checked, so it's still the one `register_system`
+        // made, not a built-in. Deleting it frees the system's query and calls `drop_system`, and
+        // `&mut self` means the system isn't running.
+        unsafe { ecs_delete(self.ptr.as_ptr(), id.entity.id()) };
+    }
+
+    /// Whether `id`'s system is still registered.
+    ///
+    /// # Panics
+    ///
+    /// If another world registered it.
+    fn is_registered(&self, id: SystemId) -> bool {
         assert_eq!(
             id.world, self.id,
-            "a system can only be run by the world that registered it"
+            "a system can only be used with the world that registered it"
         );
-        // SAFETY: this world registered the system, as just checked, and `delete` refuses its
-        // entity, so it's alive. `&mut self` makes this access exclusive.
-        unsafe { ecs_run(self.ptr.as_ptr(), id.entity.id(), 0.0, std::ptr::null_mut()) };
+        // A stale id stays dead when its entity is recycled, as the new entity's generation differs.
+        // SAFETY: `ecs_system_get` needs a live entity, which `is_alive` checks first.
+        self.is_alive(id.entity)
+            && !unsafe { ecs_system_get(self.ptr.as_ptr(), id.entity.id()) }.is_null()
     }
 }
 
@@ -136,15 +188,20 @@ where
     // terms all have one, the row's entity or a singleton's. Only `run_system` runs a system, which
     // borrows the world exclusively until this returns.
     let rows = unsafe { QueryIter::from_iter(it) };
+    let run = Run {
+        iter: rows,
+        _filter: PhantomData,
+    };
+    // The system stays registered after a panic, with its captures as the panic left them, as a
+    // value does when a panic is caught anywhere else.
     // SAFETY: `register_system` put an `S` here, which only `drop_system` drops. Nothing else uses it
     // while this runs, as `run_system` borrows the world exclusively, and the system can't reach
     // the world to run itself again.
-    unsafe {
-        (*system)(Run {
-            iter: rows,
-            _filter: PhantomData,
-        })
-    };
+    let result = catch_unwind(AssertUnwindSafe(|| unsafe { (*system)(run) }));
+    if let Err(payload) = result {
+        // Unwinding dropped the rows, which finished the iterator, so flecs can end the run.
+        PANIC.set(Some(payload));
+    }
 }
 
 /// flecs's callback to free a system `S`.
@@ -164,6 +221,7 @@ mod tests {
     use super::*;
     use crate::Component;
     use crate::query::With;
+    use crate::state::tests::errors_logged_by;
     use crate::traits::{CanToggle, DontFragment, Singleton, Sparse};
 
     #[derive(Component, Debug, PartialEq)]
@@ -356,16 +414,16 @@ mod tests {
         );
     }
 
+    struct CountsDrops(Arc<AtomicUsize>);
+
+    impl Drop for CountsDrops {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Relaxed);
+        }
+    }
+
     #[test]
     fn drops_each_system_with_the_world() {
-        struct CountsDrops(Arc<AtomicUsize>);
-
-        impl Drop for CountsDrops {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Relaxed);
-            }
-        }
-
         let drops = Arc::new(AtomicUsize::new(0));
         let mut world = World::new();
         counts(&mut world, 0..2);
@@ -385,7 +443,106 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "only be run by the world that registered it"]
+    fn unregistering_drops_the_system() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut world = World::new();
+        let entities = counts(&mut world, [0]);
+        let captured = CountsDrops(drops.clone());
+        let system = world.register_system(move |Run { iter, .. }: Run<&mut Count>| {
+            let _captured = &captured;
+            for count in iter {
+                count.0 += 1;
+            }
+        });
+        world.run_system(system);
+        assert_eq!(errors_logged_by(|| world.unregister_system(system)), 0);
+        assert_eq!(drops.load(Relaxed), 1);
+        assert!(!world.is_alive(system.entity));
+
+        assert_eq!(errors_logged_by(|| world.run_system(system)), 1);
+        assert_eq!(errors_logged_by(|| world.unregister_system(system)), 1);
+        assert_eq!(values(&world, &entities), [1]);
+        drop(world);
+        assert_eq!(drops.load(Relaxed), 1);
+    }
+
+    #[test]
+    fn a_stale_id_stays_unregistered_when_its_entity_is_recycled() {
+        let mut world = World::new();
+        let stale = world.register_system(|_: Run<&Count>| {});
+        world.unregister_system(stale);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let fresh = world.register_system({
+            let runs = runs.clone();
+            move |_: Run<&Count>| {
+                runs.fetch_add(1, Relaxed);
+            }
+        });
+        assert_eq!(stale.entity.id() as u32, fresh.entity.id() as u32);
+
+        assert_eq!(errors_logged_by(|| world.run_system(stale)), 1);
+        assert_eq!(errors_logged_by(|| world.unregister_system(stale)), 1);
+        assert_eq!(runs.load(Relaxed), 0);
+        assert_eq!(errors_logged_by(|| world.run_system(fresh)), 0);
+        assert_eq!(runs.load(Relaxed), 1);
+    }
+
+    #[test]
+    fn a_panic_reaches_run_system_once_flecs_has_finished_the_run() {
+        let mut world = World::new();
+        let entities = counts(&mut world, 0..3);
+        let mut runs = 0;
+        let system = world.register_system(move |Run { iter, .. }: Run<&mut Count>| {
+            runs += 1;
+            for count in iter {
+                // Panicking with a row in hand leaves the iterator in the middle of a result.
+                if runs == 1 {
+                    panic!("the system panicked");
+                }
+                count.0 += 10;
+            }
+        });
+        let payload = catch_unwind(AssertUnwindSafe(|| world.run_system(system))).unwrap_err();
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"the system panicked"));
+
+        // flecs ended the run, so the world isn't deferred and this applies at once.
+        world.set(entities[0], Tag);
+        assert!(world.has::<Tag>(entities[0]));
+
+        // The system is still registered, with its captures as the panic left them.
+        world.run_system(system);
+        assert_eq!(values(&world, &entities), [10, 11, 12]);
+        // A debug build of flecs aborts when the world is dropped if an iterator was left
+        // unfinished.
+        drop(world);
+    }
+
+    /// Each `run_system` takes the panic of the run it made, so a panic can pass through systems of
+    /// several worlds.
+    #[test]
+    fn a_panic_passes_through_a_system_that_runs_another_worlds_system() {
+        let mut inner = World::new();
+        let panics = inner.register_system(|_: Run<&Count>| panic!("the inner system panicked"));
+        let mut outer = World::new();
+        counts(&mut outer, [0]);
+        let runs_inner = outer.register_system(move |_: Run<&Count>| {
+            inner.run_system(panics);
+        });
+
+        let payload = catch_unwind(AssertUnwindSafe(|| outer.run_system(runs_inner))).unwrap_err();
+        assert_eq!(
+            payload.downcast_ref::<&str>(),
+            Some(&"the inner system panicked")
+        );
+        let entity = outer.new_entity();
+        outer.set(entity, Tag);
+        assert!(outer.has::<Tag>(entity));
+        // Dropping `outer` would drop `inner` inside `ecs_fini`, which deadlocks.
+        outer.unregister_system(runs_inner);
+    }
+
+    #[test]
+    #[should_panic = "only be used with the world that registered it"]
     fn running_another_worlds_system_panics() {
         let mut first = World::new();
         let system = first.register_system(|_: Run<&Count>| {});
@@ -394,7 +551,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "a system can't be deleted"]
+    #[should_panic = "only be used with the world that registered it"]
+    fn unregistering_another_worlds_system_panics() {
+        let mut first = World::new();
+        let system = first.register_system(|_: Run<&Count>| {});
+        let mut second = World::new();
+        second.unregister_system(system);
+    }
+
+    #[test]
+    #[should_panic = "a system is removed by `World::unregister_system`"]
     fn deleting_a_system_panics() {
         let mut world = World::new();
         let system = world.register_system(|_: Run<&Count>| {});

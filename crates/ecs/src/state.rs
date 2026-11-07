@@ -291,7 +291,7 @@ impl World {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::num::NonZeroU64;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
@@ -358,7 +358,7 @@ mod tests {
     }
 
     /// How many errors `f` logs on this thread.
-    fn errors_logged_by(f: impl FnOnce()) -> usize {
+    pub(crate) fn errors_logged_by(f: impl FnOnce()) -> usize {
         let errors = Arc::new(AtomicUsize::new(0));
         tracing::subscriber::with_default(CountErrors(errors.clone()), f);
         errors.load(Relaxed)

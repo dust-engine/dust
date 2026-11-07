@@ -62,8 +62,8 @@ impl World {
     /// # Panics
     ///
     /// If `entity` is a component's, a query's or a system's own, which takes an [`Entity`] from
-    /// another world. A component or a system can't be deleted, and a query is freed by
-    /// [`Self::return_query`].
+    /// another world. A component can't be deleted, a query is freed by [`Self::return_query`], and
+    /// a system is removed by [`Self::unregister_system`].
     pub fn delete(&mut self, entity: Entity) {
         if !self.is_alive(entity) {
             return;
@@ -79,7 +79,7 @@ impl World {
         };
         assert!(!is_component, "a component can't be deleted");
         // Checked before `is_query`, as a system's query is on the system's entity.
-        assert!(!is_system, "a system can't be deleted");
+        assert!(!is_system, "a system is removed by `World::unregister_system`");
         assert!(!is_query, "a query is freed by `World::return_query`");
         // SAFETY: `ecs_delete` would corrupt the world if given a built-in, but an
         // `Entity` never names one.
