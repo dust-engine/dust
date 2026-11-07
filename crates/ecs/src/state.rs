@@ -1,12 +1,16 @@
 //! What a query keeps between runs.
 
 use std::any::type_name;
+use std::fmt;
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 
+use crate::Entity;
 use crate::rows::QueryIter;
 use crate::sys::{
-    EcsQueryCacheAuto, ecs_query_desc_t, ecs_query_fini, ecs_query_init, ecs_query_t,
+    EcsQueryCacheAuto, EcsQueryMatchThis, ecs_iter_fini, ecs_iter_t, ecs_query_desc_t,
+    ecs_query_fini, ecs_query_has, ecs_query_init, ecs_query_is_true, ecs_query_t,
 };
 use crate::terms::{QueryData, assert_entities_are_matched};
 use crate::world::World;
@@ -18,6 +22,8 @@ use crate::world::World;
 /// this back with [`World::return_query`]. Dropping this instead logs an error and leaves the
 /// query in the world until the world is dropped. That's safe on any thread, even if the world
 /// has gone.
+///
+/// Its methods panic if given a world other than the one that made it.
 #[must_use = "give this back with `World::return_query`"]
 pub struct QueryState<D: QueryData> {
     /// Valid until this is returned or its world is dropped, as [`World::delete`] refuses a
@@ -55,16 +61,83 @@ impl<D: QueryData> QueryState<D> {
     }
 
     /// The query's rows.
-    ///
-    /// # Panics
-    ///
-    /// If `world` didn't make this.
     pub fn iter_mut<'w>(&mut self, world: &'w mut World) -> QueryIter<'w, D> {
         self.assert_in(world);
         // SAFETY: the query is in this world, as just checked, so it's alive, with the terms that
         // `D::describe` gives. `'w` keeps the world borrowed, so nothing can free the query until
         // this is dropped, even if `self` is dropped first.
         unsafe { QueryIter::new(world, self.query.as_ptr()) }
+    }
+
+    /// `entity`'s row, or why it has none.
+    pub fn get_mut<'w>(
+        &mut self,
+        world: &'w mut World,
+        entity: Entity,
+    ) -> Result<D::Item<'w>, QueryEntityError> {
+        let mut it = self.match_entity(world, entity)?;
+        // SAFETY: `it` is on a result of this query that holds just `entity`'s row, and `new`
+        // compiled, so `D`'s checks hold. The row points into the world, not into `it`, and `'w`
+        // keeps the world borrowed for as long as it exists.
+        let row = unsafe { D::fetch(&D::init_fetch(&it, &mut 0), &it, 0) };
+        // SAFETY: flecs hasn't finished `it`, as it's on a result.
+        unsafe { ecs_iter_fini(&mut it) };
+        Ok(row)
+    }
+
+    /// Whether `entity` has a row.
+    pub fn contains(&mut self, world: &mut World, entity: Entity) -> bool {
+        let Ok(mut it) = self.match_entity(world, entity) else {
+            return false;
+        };
+        // SAFETY: flecs hasn't finished `it`, as it's on a result.
+        unsafe { ecs_iter_fini(&mut it) };
+        true
+    }
+
+    /// The only row, or why there isn't exactly one.
+    pub fn single_mut<'w>(
+        &mut self,
+        world: &'w mut World,
+    ) -> Result<D::Item<'w>, QuerySingleError> {
+        self.iter_mut(world).single()
+    }
+
+    /// Whether the query has no rows.
+    pub fn is_empty(&mut self, world: &mut World) -> bool {
+        self.assert_in(world);
+        // SAFETY: the query is in this world, as just checked, so it's alive, and `&mut World`
+        // makes this access exclusive.
+        !unsafe { ecs_query_is_true(self.query.as_ptr()) }
+    }
+
+    /// As C++'s `query::has` does, an iterator on the result that holds just `entity`'s row. It
+    /// has to be finished.
+    fn match_entity(
+        &mut self,
+        world: &mut World,
+        entity: Entity,
+    ) -> Result<ecs_iter_t, QueryEntityError> {
+        self.assert_in(world);
+        if !world.is_alive(entity) {
+            return Err(QueryEntityError::EntityDoesNotExist(entity));
+        }
+        let query = self.query.as_ptr();
+        // flecs only checks this in debug builds. A query with no terms on `$this`, such as one
+        // of only singletons, has no entity's row.
+        // SAFETY: the query is in this world, as just checked, so it's alive.
+        if unsafe { (*query).flags } & EcsQueryMatchThis == 0 {
+            return Err(QueryEntityError::QueryDoesNotMatch(entity));
+        }
+        let mut it = MaybeUninit::uninit();
+        // SAFETY: the query is alive and has terms on `$this`, the entity is alive, and
+        // `&mut World` makes this access exclusive.
+        if unsafe { ecs_query_has(query, entity.id(), it.as_mut_ptr()) } {
+            // SAFETY: flecs sets the iterator when it returns true.
+            Ok(unsafe { it.assume_init() })
+        } else {
+            Err(QueryEntityError::QueryDoesNotMatch(entity))
+        }
     }
 
     fn assert_in(&self, world: &World) {
@@ -84,6 +157,45 @@ impl<D: QueryData> Drop for QueryState<D> {
         );
     }
 }
+
+/// Why [`QueryState::get_mut`] has no row for an entity.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum QueryEntityError {
+    /// The entity has been deleted.
+    EntityDoesNotExist(Entity),
+    /// The entity isn't one of the query's rows.
+    QueryDoesNotMatch(Entity),
+}
+
+impl fmt::Display for QueryEntityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EntityDoesNotExist(entity) => write!(f, "{entity:?} does not exist"),
+            Self::QueryDoesNotMatch(entity) => write!(f, "the query does not match {entity:?}"),
+        }
+    }
+}
+
+impl std::error::Error for QueryEntityError {}
+
+/// Why [`QueryState::single_mut`] doesn't have exactly one row. Each holds the query's
+/// [`QueryData`] type, by name.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum QuerySingleError {
+    NoEntities(&'static str),
+    MultipleEntities(&'static str),
+}
+
+impl fmt::Display for QuerySingleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoEntities(query) => write!(f, "no entities fit the query {query}"),
+            Self::MultipleEntities(query) => write!(f, "multiple entities fit the query {query}"),
+        }
+    }
+}
+
+impl std::error::Error for QuerySingleError {}
 
 impl World {
     /// Makes a query, which runs on this world alone. Give it back with [`Self::return_query`].
@@ -141,8 +253,8 @@ mod tests {
     use tracing::{Event, Level, Metadata, Subscriber};
 
     use super::*;
-    use crate::traits::Sparse;
-    use crate::{Component, Entity};
+    use crate::Component;
+    use crate::traits::{CanToggle, DontFragment, Singleton, Sparse};
 
     #[derive(Component, Debug, PartialEq)]
     struct Count(u32);
@@ -154,6 +266,18 @@ mod tests {
     #[derive(Component, Debug, PartialEq)]
     #[component(Sparse)]
     struct OutsideTables(u32);
+
+    #[derive(Component, Debug, PartialEq)]
+    #[component(CanToggle)]
+    struct Toggled(u32);
+
+    #[derive(Component, Debug, PartialEq)]
+    #[component(DontFragment)]
+    struct Unfragmented(u32);
+
+    #[derive(Component, Debug, PartialEq)]
+    #[component(Singleton)]
+    struct One(u32);
 
     /// The entity flecs gave the query, which it only does if it caches the query.
     fn query_entity<D: QueryData>(state: &QueryState<D>) -> Option<Entity> {
@@ -315,5 +439,153 @@ mod tests {
 
         let state = world.query::<&Count>();
         std::thread::spawn(move || drop(state)).join().unwrap();
+    }
+
+    #[test]
+    fn get_mut_reads_and_writes_one_entity() {
+        let mut world = World::new();
+        let entities: Vec<_> = (0..3)
+            .map(|value| {
+                let entity = world.new_entity();
+                world.set(entity, Count(value));
+                entity
+            })
+            .collect();
+        world.set(entities[2], Tag);
+        let bare = world.new_entity();
+        let deleted = world.new_entity();
+        world.delete(deleted);
+
+        let mut query = world.query::<(&mut Count, Option<&Tag>)>();
+        let (count, tag) = query.get_mut(&mut world, entities[1]).unwrap();
+        assert_eq!(tag, None);
+        count.0 += 10;
+        let counts: Vec<_> = entities
+            .iter()
+            .map(|&entity| world.get::<Count>(entity).unwrap().0)
+            .collect();
+        assert_eq!(counts, [0, 11, 2]);
+        assert_eq!(
+            query.get_mut(&mut world, entities[2]).unwrap().1,
+            Some(&Tag)
+        );
+
+        assert_eq!(
+            query.get_mut(&mut world, bare).err(),
+            Some(QueryEntityError::QueryDoesNotMatch(bare))
+        );
+        assert_eq!(
+            query.get_mut(&mut world, deleted).err(),
+            Some(QueryEntityError::EntityDoesNotExist(deleted))
+        );
+        world.return_query(query);
+    }
+
+    #[test]
+    fn get_mut_finds_values_however_they_are_stored() {
+        let mut world = World::new();
+        let entities: Vec<_> = (0..3)
+            .map(|value| {
+                let entity = world.new_entity();
+                world.set(entity, Toggled(value));
+                world.enable_component::<Toggled>(entity);
+                world.set(entity, Unfragmented(value));
+                entity
+            })
+            .collect();
+        world.disable_component::<Toggled>(entities[1]);
+
+        let mut toggled = world.query::<(Entity, &Toggled)>();
+        assert_eq!(
+            toggled.get_mut(&mut world, entities[2]).unwrap(),
+            (entities[2], &Toggled(2))
+        );
+        assert_eq!(
+            toggled.get_mut(&mut world, entities[1]).err(),
+            Some(QueryEntityError::QueryDoesNotMatch(entities[1]))
+        );
+        world.return_query(toggled);
+
+        // With nothing else to match on, a result has rows but no table.
+        let mut unfragmented = world.query::<(Entity, &mut Unfragmented)>();
+        let (entity, value) = unfragmented.get_mut(&mut world, entities[2]).unwrap();
+        assert_eq!(entity, entities[2]);
+        value.0 += 10;
+        assert_eq!(
+            world.get::<Unfragmented>(entities[2]),
+            Some(&Unfragmented(12))
+        );
+        world.return_query(unfragmented);
+    }
+
+    #[test]
+    fn contains_says_whether_an_entity_has_a_row() {
+        let mut world = World::new();
+        let tagged = world.new_entity();
+        world.set(tagged, Count(1));
+        world.set(tagged, Tag);
+        let untagged = world.new_entity();
+        world.set(untagged, Count(2));
+        let deleted = world.new_entity();
+        world.delete(deleted);
+
+        let mut query = world.query::<(&Count, &Tag)>();
+        assert!(query.contains(&mut world, tagged));
+        assert!(!query.contains(&mut world, untagged));
+        assert!(!query.contains(&mut world, deleted));
+        world.return_query(query);
+    }
+
+    #[test]
+    fn single_mut_needs_exactly_one_row() {
+        let mut world = World::new();
+        world.set_singleton(One(0));
+        let mut query = world.query::<(&Count, &mut One)>();
+        assert!(matches!(
+            query.single_mut(&mut world),
+            Err(QuerySingleError::NoEntities(_))
+        ));
+
+        let first = world.new_entity();
+        world.set(first, Count(5));
+        let (count, one) = query.single_mut(&mut world).unwrap();
+        one.0 += count.0;
+        assert_eq!(world.singleton::<One>(), Some(&One(5)));
+
+        let second = world.new_entity();
+        world.set(second, Count(6));
+        assert!(matches!(
+            query.single_mut(&mut world),
+            Err(QuerySingleError::MultipleEntities(_))
+        ));
+        world.return_query(query);
+    }
+
+    #[test]
+    fn is_empty_says_whether_there_are_rows() {
+        let mut world = World::new();
+        let mut query = world.query::<&Count>();
+        assert!(query.is_empty(&mut world));
+        let entity = world.new_entity();
+        world.set(entity, Count(1));
+        assert!(!query.is_empty(&mut world));
+        world.return_query(query);
+    }
+
+    #[test]
+    fn a_query_of_only_singletons_has_no_entitys_row() {
+        let mut world = World::new();
+        world.set_singleton(One(1));
+        let entity = world.new_entity();
+
+        let mut query = world.query::<&One>();
+        assert!(!query.is_empty(&mut world));
+        assert_eq!(query.single_mut(&mut world).ok(), Some(&One(1)));
+        assert!(!query.contains(&mut world, entity));
+        assert_eq!(
+            query.get_mut(&mut world, entity).err(),
+            Some(QueryEntityError::QueryDoesNotMatch(entity))
+        );
+        world.return_query(query);
     }
 }

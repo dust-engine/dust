@@ -1,7 +1,9 @@
 //! Reading a query's rows, one at a time.
 
+use std::any::type_name;
 use std::marker::PhantomData;
 
+use crate::state::QuerySingleError;
 use crate::sys::{ecs_iter_fini, ecs_iter_t, ecs_query_iter, ecs_query_next, ecs_query_t};
 use crate::terms::{QueryData, assert_entities_are_matched, assert_rows_can_coexist};
 use crate::world::World;
@@ -48,6 +50,31 @@ impl<'w, D: QueryData> QueryIter<'w, D> {
 
     /// The next row, which borrows this, so it's gone before the one after it is read.
     pub fn fetch_next(&mut self) -> Option<D::Item<'_>> {
+        let row = self.advance()?;
+        let fetch = self.fetch.as_ref().expect("this row is in a result");
+        // SAFETY: `advance` stopped on a result, whose fetch this is, with `row` below its rows.
+        // `new` compiled, so its checks hold. The row borrows `self`, so it's gone before this can
+        // be called again, and the world stays borrowed that long.
+        unsafe { Some(D::fetch(fetch, &self.it, row)) }
+    }
+
+    /// The only row, or why there isn't exactly one.
+    pub(crate) fn single(mut self) -> Result<D::Item<'w>, QuerySingleError> {
+        let query = type_name::<D>();
+        let row = self.advance().ok_or(QuerySingleError::NoEntities(query))?;
+        let fetch = self.fetch.as_ref().expect("this row is in a result");
+        // SAFETY: as in `fetch_next`, and no other row is read, as `advance` doesn't read one. The
+        // row points into the world, not into `self`, and `'w` keeps the world borrowed for as
+        // long as it exists.
+        let item = unsafe { D::fetch(fetch, &self.it, row) };
+        match self.advance() {
+            None => Ok(item),
+            Some(_) => Err(QuerySingleError::MultipleEntities(query)),
+        }
+    }
+
+    /// Moves to the next row without reading it, and gives its index in the current result.
+    fn advance(&mut self) -> Option<usize> {
         while self.next_row == self.rows {
             if self.finished {
                 return None;
@@ -64,11 +91,7 @@ impl<'w, D: QueryData> QueryIter<'w, D> {
         }
         let row = self.next_row;
         self.next_row += 1;
-        let fetch = self.fetch.as_ref().expect("this row is in a result");
-        // SAFETY: the loop stopped on a result, whose fetch this is, with `row` below its rows.
-        // `new` compiled, so its checks hold. The row borrows `self`, so it's gone before this can
-        // be called again, and the world stays borrowed that long.
-        unsafe { Some(D::fetch(fetch, &self.it, row)) }
+        Some(row)
     }
 }
 

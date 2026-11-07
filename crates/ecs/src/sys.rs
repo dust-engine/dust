@@ -229,6 +229,9 @@ pub struct ecs_iter_t {
 /// In `ecs_iter_t::flags`, set if a query matches through component inheritance.
 pub const EcsIterComponentInheritance: u32 = 1 << 10;
 
+/// In `ecs_query_t::flags`, set if a query has terms on `$this`, the entity of each row.
+pub const EcsQueryMatchThis: u32 = 1 << 11;
+
 impl ecs_iter_t {
     /// How many rows to visit in the current result. A result with no rows and no table is still
     /// worth one visit, as it's what a query gets when all its values come from fixed sources,
@@ -326,6 +329,12 @@ unsafe extern "C" {
     pub fn ecs_query_get(world: *const ecs_world_t, query: ecs_entity_t) -> *const ecs_query_t;
     pub fn ecs_query_iter(world: *const ecs_world_t, query: *const ecs_query_t) -> ecs_iter_t;
     pub fn ecs_query_next(it: *mut ecs_iter_t) -> bool;
+    pub fn ecs_query_has(
+        query: *const ecs_query_t,
+        entity: ecs_entity_t,
+        it: *mut ecs_iter_t,
+    ) -> bool;
+    pub fn ecs_query_is_true(query: *const ecs_query_t) -> bool;
     pub fn ecs_iter_fini(it: *mut ecs_iter_t);
     pub fn ecs_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
     pub fn ecs_base_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
