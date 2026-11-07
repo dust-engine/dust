@@ -21,18 +21,19 @@ static INIT_LOCK: Mutex<()> = Mutex::new(());
 pub struct World {
     pub(crate) ptr: NonNull<ecs_world_t>,
     /// Unique in this process, unlike `ptr`, which a later world can reuse. This is how a
-    /// [`QueryState`](crate::query::QueryState) knows which world it's in.
+    /// [`QueryState`](crate::query::QueryState) or a [`SystemId`](crate::system::SystemId) knows
+    /// which world it's in.
     pub(crate) id: u64,
 }
 
 // SAFETY: flecs has no thread-local state and only ties a world to a thread in
 // exclusive-access mode, which nothing here turns on. `INIT_LOCK` covers the
-// process-wide state, and `Component` makes every stored value `Send`.
+// process-wide state, and `Component` and `register_system` make every stored value `Send`.
 unsafe impl Send for World {}
 
 // SAFETY: the `&self` methods only read the world, and `Component` makes every stored
-// value `Sync`. A `const` world parameter doesn't prove a new one reads only, as flecs
-// casts it away in places.
+// component `Sync`. A system needn't be, as no `&self` method reaches it. A `const` world
+// parameter doesn't prove a new one reads only, as flecs casts it away in places.
 unsafe impl Sync for World {}
 
 
@@ -60,21 +61,25 @@ impl World {
     ///
     /// # Panics
     ///
-    /// If `entity` is a component's or a query's own, which takes an [`Entity`] from another
-    /// world. A component can't be deleted, and a query is freed by [`Self::return_query`].
+    /// If `entity` is a component's, a query's or a system's own, which takes an [`Entity`] from
+    /// another world. A component or a system can't be deleted, and a query is freed by
+    /// [`Self::return_query`].
     pub fn delete(&mut self, entity: Entity) {
         if !self.is_alive(entity) {
             return;
         }
         let world = self.ptr.as_ptr();
         // SAFETY: the world is valid, and the entity is alive, as just checked.
-        let (is_component, is_query) = unsafe {
+        let (is_component, is_system, is_query) = unsafe {
             (
                 crate::sys::ecs_has_id(world, entity.id(), crate::sys::FLECS_IDEcsComponentID_),
+                !crate::sys::ecs_system_get(world, entity.id()).is_null(),
                 !crate::sys::ecs_query_get(world, entity.id()).is_null(),
             )
         };
         assert!(!is_component, "a component can't be deleted");
+        // Checked before `is_query`, as a system's query is on the system's entity.
+        assert!(!is_system, "a system can't be deleted");
         assert!(!is_query, "a query is freed by `World::return_query`");
         // SAFETY: `ecs_delete` would corrupt the world if given a built-in, but an
         // `Entity` never names one.

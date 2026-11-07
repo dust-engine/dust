@@ -43,22 +43,29 @@ unsafe impl<D: QueryData, F: QueryFilter> Send for QueryState<D, F> {}
 // SAFETY: as above, and `&self` gives no access to `query`.
 unsafe impl<D: QueryData, F: QueryFilter> Sync for QueryState<D, F> {}
 
+/// A query of `D` filtered by `F`, with `D`'s terms first, registering their components. This
+/// compiles the checks that reading its rows relies on.
+pub(crate) fn describe<D: QueryData, F: QueryFilter>(world: &mut World) -> ecs_query_desc_t {
+    let () = D::CHECK;
+    let () = F::CHECK;
+    const {
+        let accesses = D::ACCESS.with(F::ACCESS);
+        assert_entities_are_matched(&accesses);
+        assert_changes_are_detected(&accesses);
+    };
+    // SAFETY: flecs documents all zeroes as the default, and it's valid here.
+    let mut desc: ecs_query_desc_t = unsafe { std::mem::zeroed() };
+    let mut index = 0;
+    D::describe(world, &mut desc, &mut index);
+    F::describe(world, &mut desc, &mut index);
+    // flecs caches what it can, and leaves the query uncached if that's nothing.
+    desc.cache_kind = EcsQueryCacheAuto;
+    desc
+}
+
 impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     fn new(world: &mut World) -> Self {
-        let () = D::CHECK;
-        let () = F::CHECK;
-        const {
-            let accesses = D::ACCESS.with(F::ACCESS);
-            assert_entities_are_matched(&accesses);
-            assert_changes_are_detected(&accesses);
-        };
-        // SAFETY: flecs documents all zeroes as the default, and it's valid here.
-        let mut desc: ecs_query_desc_t = unsafe { std::mem::zeroed() };
-        let mut index = 0;
-        D::describe(world, &mut desc, &mut index);
-        F::describe(world, &mut desc, &mut index);
-        // flecs caches what it can, and leaves the query uncached if that's nothing.
-        desc.cache_kind = EcsQueryCacheAuto;
+        let desc = describe::<D, F>(world);
         // SAFETY: the world is valid, `&mut` makes this access exclusive, and `describe`
         // registered the terms' components in it.
         let query = unsafe { NonNull::new(ecs_query_init(world.ptr.as_ptr(), &desc)).unwrap_unchecked() };
@@ -79,9 +86,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// The query's rows.
     pub fn iter_mut<'w>(&mut self, world: &'w mut World) -> QueryIter<'w, D> {
         self.assert_in(world);
-        // SAFETY: the query is in this world, as just checked, so it's alive, with `D::describe`'s
-        // terms first, and `new` compiled its checks. `'w` keeps the world borrowed, so nothing can
-        // free the query until this is dropped, even if `self` is dropped first.
+        // SAFETY: the query is in this world, as just checked, so it's alive. `new` made it with
+        // `describe`, so `D::describe`'s terms are first and its checks compiled. `'w` keeps the
+        // world borrowed, so nothing can free the query until this is dropped, even if `self` is
+        // dropped first.
         unsafe { QueryIter::new(world, self.query.as_ptr()) }
     }
 

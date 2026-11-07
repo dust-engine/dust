@@ -232,6 +232,34 @@ pub struct ecs_iter_t {
     pub chain_it: *mut ecs_iter_t,
 }
 
+pub type ecs_run_action_t = unsafe extern "C" fn(it: *mut ecs_iter_t);
+pub type ecs_ctx_free_t = unsafe extern "C" fn(ctx: *mut c_void);
+
+/// Only the query, `run` and its context are ever set, so the other callbacks are left untyped.
+#[repr(C)]
+pub struct ecs_system_desc_t {
+    pub _canary: i32,
+    pub entity: ecs_entity_t,
+    pub query: ecs_query_desc_t,
+    pub phase: ecs_entity_t,
+    pub callback: *const c_void,
+    pub run: Option<ecs_run_action_t>,
+    pub ctx: *mut c_void,
+    pub ctx_free: *const c_void,
+    pub callback_ctx: *mut c_void,
+    pub callback_ctx_free: *const c_void,
+    pub run_ctx: *mut c_void,
+    pub run_ctx_free: Option<ecs_ctx_free_t>,
+    pub interval: f32,
+    pub rate: i32,
+    pub tick_source: ecs_entity_t,
+    pub multi_threaded: bool,
+    pub immediate: bool,
+}
+
+#[repr(C)]
+pub struct ecs_system_t(());
+
 /// In `ecs_iter_t::flags`, set if a query matches through component inheritance.
 pub const EcsIterComponentInheritance: u32 = 1 << 10;
 
@@ -266,6 +294,13 @@ const _: () = {
     assert!(offset_of!(ecs_query_t, world) == 136);
     assert!(offset_of!(ecs_iter_t, stage) == 0);
     assert!(offset_of!(ecs_iter_t, world) == 8);
+    assert!(offset_of!(ecs_iter_t, run_ctx) == 192);
+    assert!(size_of::<ecs_system_desc_t>() == 2552);
+    assert!(offset_of!(ecs_system_desc_t, query) == 16);
+    assert!(offset_of!(ecs_system_desc_t, run) == 2472);
+    assert!(offset_of!(ecs_system_desc_t, run_ctx) == 2512);
+    assert!(offset_of!(ecs_system_desc_t, run_ctx_free) == 2520);
+    assert!(offset_of!(ecs_system_desc_t, multi_threaded) == 2544);
 };
 
 unsafe extern "C" {
@@ -342,7 +377,17 @@ unsafe extern "C" {
     ) -> bool;
     pub fn ecs_query_is_true(query: *const ecs_query_t) -> bool;
     pub fn ecs_query_changed(query: *mut ecs_query_t) -> bool;
+    pub fn ecs_iter_next(it: *mut ecs_iter_t) -> bool;
     pub fn ecs_iter_fini(it: *mut ecs_iter_t);
+    pub fn ecs_system_init(world: *mut ecs_world_t, desc: *const ecs_system_desc_t)
+    -> ecs_entity_t;
+    pub fn ecs_system_get(world: *const ecs_world_t, system: ecs_entity_t) -> *const ecs_system_t;
+    pub fn ecs_run(
+        world: *mut ecs_world_t,
+        system: ecs_entity_t,
+        delta_time: f32,
+        param: *mut c_void,
+    ) -> ecs_entity_t;
     pub fn ecs_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
     pub fn ecs_base_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
     pub fn ecs_field_stride(it: *const ecs_iter_t, index: i8) -> usize;

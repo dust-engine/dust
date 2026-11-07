@@ -3,13 +3,13 @@
 use std::marker::PhantomData;
 
 use crate::state::QuerySingleError;
-use crate::sys::{ecs_iter_fini, ecs_iter_t, ecs_query_iter, ecs_query_next, ecs_query_t};
+use crate::sys::{ecs_iter_fini, ecs_iter_next, ecs_iter_t, ecs_query_iter, ecs_query_t};
 use crate::terms::{QueryData, assert_rows_can_coexist};
 use crate::world::World;
 
-/// A query's rows. [`fetch_next`](Self::fetch_next) reads them for any terms. As an [`Iterator`]
-/// they can all exist at once, so its `next` fails to compile for terms where two rows could
-/// hold a `&mut` to the same value, which is what a `&mut` to a singleton does.
+/// A query's or a system's rows. [`fetch_next`](Self::fetch_next) reads them for any terms. As an
+/// [`Iterator`] they can all exist at once, so its `next` fails to compile for terms where two
+/// rows could hold a `&mut` to the same value, which is what a `&mut` to a singleton does.
 ///
 /// This borrows the world exclusively because iterating writes to the world's stage and to the
 /// query, even if the query only reads components.
@@ -18,7 +18,7 @@ use crate::world::World;
 /// then aborts when the world is dropped.
 pub struct QueryIter<'w, D: QueryData> {
     it: ecs_iter_t,
-    /// flecs finishes the iterator itself when `ecs_query_next` returns false, and crashes if
+    /// flecs finishes the iterator itself when `ecs_iter_next` returns false, and crashes if
     /// it's then advanced or finished again.
     finished: bool,
     /// For the iterator's current result, so `None` until it has one.
@@ -31,13 +31,23 @@ pub struct QueryIter<'w, D: QueryData> {
 impl<'w, D: QueryData> QueryIter<'w, D> {
     /// # Safety
     ///
-    /// `query` must be in `world`, with `D::describe`'s terms as its first terms, and
-    /// `QueryState::new`'s checks must have compiled for it. It must stay live until this is
-    /// dropped.
+    /// `query` must be in `world` and made by `state::describe` for `D`. It must stay live until
+    /// this is dropped.
     pub(crate) unsafe fn new(world: &'w mut World, query: *const ecs_query_t) -> Self {
+        // SAFETY: the caller upholds this for the query, and the world is borrowed exclusively.
+        let it = unsafe { ecs_query_iter(world.ptr.as_ptr(), query) };
+        // SAFETY: the iterator is new and only this has it, and the caller upholds the rest.
+        unsafe { Self::from_iter(it) }
+    }
+
+    /// # Safety
+    ///
+    /// `it` must be an iterator that nothing has advanced, over a query made by `state::describe`
+    /// for `D`, and nothing else may advance or finish it. The query must stay live, and the world
+    /// borrowed exclusively, for `'w`.
+    pub(crate) unsafe fn from_iter(it: ecs_iter_t) -> Self {
         Self {
-            // SAFETY: the caller upholds this for the query, and the world is borrowed exclusively.
-            it: unsafe { ecs_query_iter(world.ptr.as_ptr(), query) },
+            it,
             finished: false,
             fetch: None,
             next_row: 0,
@@ -51,8 +61,8 @@ impl<'w, D: QueryData> QueryIter<'w, D> {
         let row = self.advance()?;
         let fetch = self.fetch.as_ref().expect("this row is in a result");
         // SAFETY: `advance` stopped on a result, whose fetch this is, with `row` below its rows,
-        // and `new`'s caller compiled the query's checks. The row borrows `self`, so it's gone
-        // before this can be called again, and the world stays borrowed that long.
+        // and `from_iter`'s caller compiled the query's checks. The row borrows `self`, so it's
+        // gone before this can be called again, and the world stays borrowed that long.
         unsafe { Some(D::fetch(fetch, &self.it, row)) }
     }
 
@@ -76,14 +86,15 @@ impl<'w, D: QueryData> QueryIter<'w, D> {
             if self.finished {
                 return None;
             }
-            // SAFETY: flecs hasn't finished the iterator, and `new`'s caller keeps the query live.
-            if !unsafe { ecs_query_next(&mut self.it) } {
+            // SAFETY: flecs hasn't finished the iterator, and `from_iter`'s caller keeps the query
+            // live.
+            if !unsafe { ecs_iter_next(&mut self.it) } {
                 self.finished = true;
                 return None;
             }
             self.next_row = 0;
             self.rows = self.it.num_rows();
-            // SAFETY: the iterator is on a result, and `new`'s caller upholds the rest.
+            // SAFETY: the iterator is on a result, and `from_iter`'s caller upholds the rest.
             self.fetch = Some(unsafe { D::init_fetch(&self.it, &mut 0) });
         }
         let row = self.next_row;
@@ -95,7 +106,8 @@ impl<'w, D: QueryData> QueryIter<'w, D> {
 impl<D: QueryData> Drop for QueryIter<'_, D> {
     fn drop(&mut self) {
         if !self.finished {
-            // SAFETY: flecs hasn't finished the iterator, and `new`'s caller keeps the query live.
+            // SAFETY: flecs hasn't finished the iterator, nothing else will, and `from_iter`'s
+            // caller keeps the query live.
             unsafe { ecs_iter_fini(&mut self.it) };
         }
     }
