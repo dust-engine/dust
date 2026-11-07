@@ -300,6 +300,8 @@ pub struct Accesses {
     len: usize,
     /// Reads the row's [`Entity`], which isn't a term.
     entity: bool,
+    /// Has [`DetectChanges`](crate::query::DetectChanges), which isn't a term either.
+    pub(crate) detects_changes: bool,
 }
 
 impl Accesses {
@@ -312,6 +314,13 @@ impl Accesses {
         }; FLECS_TERM_COUNT_MAX],
         len: 0,
         entity: false,
+        detects_changes: false,
+    };
+
+    /// What [`DetectChanges`](crate::query::DetectChanges) adds.
+    pub(crate) const DETECT_CHANGES: Self = Self {
+        detects_changes: true,
+        ..Self::NONE
     };
 
     pub(crate) const fn of<T: Component>(inout: i16, oper: i16) -> Self {
@@ -338,6 +347,7 @@ impl Accesses {
             i += 1;
         }
         self.entity |= other.entity;
+        self.detects_changes |= other.detects_changes;
         self
     }
 

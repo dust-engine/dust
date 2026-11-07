@@ -3,18 +3,21 @@
 use std::marker::PhantomData;
 
 use crate::Component;
-use crate::sys::{EcsAnd, EcsInOutNone, EcsNot, EcsOr, ecs_query_desc_t};
+use crate::sys::{EcsAnd, EcsInOutNone, EcsNot, EcsOr, EcsQueryDetectChanges, ecs_query_desc_t};
 use crate::terms::{Accesses, describe_term};
 use crate::traits::{has_dont_fragment, has_singleton};
 use crate::world::World;
 
 /// What a query's rows must have or lack, beyond its [`QueryData`](crate::query::QueryData):
-/// [`With`], [`Without`], [`Or`], or a tuple of these, which can nest. `()` keeps every row.
+/// [`With`], [`Without`], [`Or`], [`DetectChanges`], or a tuple of these, which can nest. `()`
+/// keeps every row.
 ///
 /// # Safety
 ///
 /// Only `dust_ecs` implements this. `describe` must add the terms that `ACCESS` lists, none of
-/// which read or write, as `assert_entities_are_matched` relies on which of them are required.
+/// which read or write, as `assert_entities_are_matched` relies on which of them are required. It
+/// must also ask flecs to detect changes if `ACCESS` says so, as `QueryState::changed` relies on
+/// that.
 pub unsafe trait QueryFilter {
     #[doc(hidden)]
     const ACCESS: Accesses;
@@ -46,6 +49,17 @@ pub struct Without<T>(PhantomData<T>);
 /// [`DontFragment`](crate::traits::DontFragment) component, which flecs doesn't support here.
 pub struct Or<T>(PhantomData<T>);
 
+/// Keeps every row, and lets [`QueryState::changed`](crate::query::QueryState::changed) tell
+/// whether what the query reads has changed.
+///
+/// As in flecs's C++ API, changes are tracked by table and component, not by entity. A change is
+/// setting a value with [`World::set`], writing through [`World::get_mut`], adding or removing a
+/// component, deleting an entity, or running a query that writes, such as with `&mut T`, over a
+/// table, whether or not it writes there. A singleton such a query writes only changes once the
+/// query runs to its end, and a [`DontFragment`](crate::traits::DontFragment) component it writes
+/// doesn't change.
+pub struct DetectChanges;
+
 // SAFETY: `ACCESS` lists the term, which reads nothing.
 unsafe impl<T: Component> QueryFilter for With<T> {
     const ACCESS: Accesses = Accesses::of::<T>(EcsInOutNone, EcsAnd);
@@ -61,6 +75,16 @@ unsafe impl<T: Component> QueryFilter for Without<T> {
 
     fn describe(world: &mut World, desc: &mut ecs_query_desc_t, index: &mut usize) {
         describe_term::<T>(world, desc, index, EcsInOutNone, EcsNot);
+    }
+}
+
+// SAFETY: this has no terms, and asks flecs to detect changes, as `ACCESS` says.
+unsafe impl QueryFilter for DetectChanges {
+    const ACCESS: Accesses = Accesses::DETECT_CHANGES;
+
+    fn describe(_: &mut World, desc: &mut ecs_query_desc_t, _: &mut usize) {
+        // Without this, flecs keeps a smaller cache, which its change detection can't read.
+        desc.flags |= EcsQueryDetectChanges;
     }
 }
 

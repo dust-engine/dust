@@ -10,8 +10,9 @@ use crate::Entity;
 use crate::filter::QueryFilter;
 use crate::rows::QueryIter;
 use crate::sys::{
-    EcsQueryCacheAuto, EcsQueryMatchThis, ecs_iter_fini, ecs_iter_t, ecs_query_desc_t,
-    ecs_query_fini, ecs_query_has, ecs_query_init, ecs_query_is_true, ecs_query_t,
+    EcsQueryCacheAuto, EcsQueryCacheNone, EcsQueryDetectChanges, EcsQueryMatchThis, ecs_iter_fini,
+    ecs_iter_t, ecs_query_changed, ecs_query_desc_t, ecs_query_fini, ecs_query_has, ecs_query_init,
+    ecs_query_is_true, ecs_query_t,
 };
 use crate::terms::{QueryData, assert_entities_are_matched};
 use crate::world::World;
@@ -54,11 +55,27 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         F::describe(world, &mut desc, &mut index);
         // flecs caches what it can, and leaves the query uncached if that's nothing.
         desc.cache_kind = EcsQueryCacheAuto;
+        let detects_changes = desc.flags & EcsQueryDetectChanges != 0;
         // SAFETY: the world is valid, `&mut` makes this access exclusive, and `describe`
         // registered the terms' components in it.
-        let query = unsafe { ecs_query_init(world.ptr.as_ptr(), &desc) };
+        let query = unsafe { NonNull::new(ecs_query_init(world.ptr.as_ptr(), &desc)).unwrap_unchecked() };
+        // SAFETY: flecs just made the query.
+        if detects_changes && unsafe { query.as_ref() }.cache_kind == EcsQueryCacheNone {
+            // SAFETY: the query is live, and nothing else has it.
+            unsafe { ecs_query_fini(query.as_ptr()) };
+            panic!(
+                "flecs only detects changes in a query it caches, and it caches none of a query of \
+                 only `Sparse`, `DontFragment` or singleton terms"
+            );
+        }
+        if detects_changes {
+            // flecs only starts tracking what a query reads the first time it's asked whether
+            // that changed, so runs before then wouldn't count.
+            // SAFETY: the query is live and cached, and `&mut World` makes this access exclusive.
+            unsafe { ecs_query_changed(query.as_ptr()) };
+        }
         Self {
-            query: NonNull::new(query).expect("flecs refused the query"),
+            query,
             world: world.id,
             _data: PhantomData,
         }
@@ -105,6 +122,25 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         world: &'w mut World,
     ) -> Result<D::Item<'w>, QuerySingleError> {
         self.iter_mut(world).single()
+    }
+
+    /// Whether anything the query reads has changed since the query last ran over it, such as with
+    /// [`Self::iter_mut`], which resets this for each table it reaches. [`DetectChanges`] says
+    /// what counts, and this fails to compile without that filter.
+    ///
+    /// [`DetectChanges`]: crate::query::DetectChanges
+    pub fn changed(&mut self, world: &mut World) -> bool {
+        const {
+            assert!(
+                F::ACCESS.detects_changes,
+                "`changed` needs the query to have the `DetectChanges` filter"
+            );
+        }
+        self.assert_in(world);
+        // SAFETY: the query is in this world, as just checked, so it's alive, and `&mut World`
+        // makes this access exclusive. `new` asked flecs to detect changes in it, and refused it
+        // if flecs didn't cache it, which flecs only checks in debug builds.
+        unsafe { ecs_query_changed(self.query.as_ptr()) }
     }
 
     /// Whether the query has no rows.
@@ -232,6 +268,10 @@ impl World {
 
     /// Makes a query as [`Self::query`] does, whose rows also have to pass the filter `F`, such as
     /// `With<T>`.
+    ///
+    /// # Panics
+    ///
+    /// If `F` has [`DetectChanges`](crate::query::DetectChanges) and flecs doesn't cache the query.
     pub fn query_filtered<D: QueryData, F: QueryFilter>(&mut self) -> QueryState<D, F> {
         QueryState::new(self)
     }
@@ -263,6 +303,7 @@ mod tests {
 
     use super::*;
     use crate::Component;
+    use crate::query::{DetectChanges, With};
     use crate::traits::{CanToggle, DontFragment, Singleton, Sparse};
 
     #[derive(Component, Debug, PartialEq)]
@@ -270,6 +311,9 @@ mod tests {
 
     #[derive(Component, Debug, PartialEq)]
     struct Tag;
+
+    #[derive(Component, Debug, PartialEq)]
+    struct Unread(u32);
 
     /// flecs doesn't cache a query that only reads this.
     #[derive(Component, Debug, PartialEq)]
@@ -596,5 +640,90 @@ mod tests {
             Some(QueryEntityError::QueryDoesNotMatch(entity))
         );
         world.return_query(query);
+    }
+
+    /// Runs `query` over every table it matches.
+    fn run<D: QueryData, F: QueryFilter>(query: &mut QueryState<D, F>, world: &mut World) {
+        let mut rows = query.iter_mut(world);
+        while rows.fetch_next().is_some() {}
+    }
+
+    #[test]
+    fn changed_reports_what_a_query_reads_changing() {
+        let mut world = World::new();
+        let first = world.new_entity();
+        world.set(first, Count(1));
+        let second = world.new_entity();
+        world.set(second, Count(2));
+        world.set(second, Unread(0));
+
+        let mut fresh = world.query_filtered::<&Count, DetectChanges>();
+        assert!(fresh.changed(&mut world));
+        world.return_query(fresh);
+
+        let mut query = world.query_filtered::<&Count, DetectChanges>();
+        // Running counts even before `changed` is first asked.
+        run(&mut query, &mut world);
+        assert!(!query.changed(&mut world));
+
+        world.set(first, Count(3));
+        assert!(query.changed(&mut world));
+        run(&mut query, &mut world);
+
+        world.get_mut::<Count>(second).unwrap().0 += 1;
+        assert!(query.changed(&mut world));
+        run(&mut query, &mut world);
+
+        // Reading through `get_mut`, or changing a component the query doesn't read, isn't a
+        // change for it.
+        assert_eq!(world.get_mut::<Count>(second).unwrap().0, 3);
+        world.set(second, Unread(1));
+        assert!(!query.changed(&mut world));
+
+        // These move an entity to another table.
+        world.set(first, Tag);
+        assert!(query.changed(&mut world));
+        run(&mut query, &mut world);
+        world.delete(second);
+        assert!(query.changed(&mut world));
+        run(&mut query, &mut world);
+        assert!(!query.changed(&mut world));
+        world.return_query(query);
+    }
+
+    #[test]
+    fn a_query_that_writes_changes_each_table_it_runs_over() {
+        let mut world = World::new();
+        let entity = world.new_entity();
+        world.set(entity, Count(1));
+        let mut reader = world.query_filtered::<&Count, (With<Count>, DetectChanges)>();
+        run(&mut reader, &mut world);
+
+        let mut writer = world.query::<&mut Count>();
+        run(&mut writer, &mut world);
+        assert!(reader.changed(&mut world));
+        world.return_query(writer);
+        world.return_query(reader);
+    }
+
+    #[test]
+    fn changed_sees_a_singleton_change() {
+        let mut world = World::new();
+        world.set_singleton(One(0));
+        let entity = world.new_entity();
+        world.set(entity, Count(1));
+        let mut query = world.query_filtered::<(&Count, &One), DetectChanges>();
+        run(&mut query, &mut world);
+
+        world.singleton_mut::<One>().unwrap().0 = 1;
+        assert!(query.changed(&mut world));
+        world.return_query(query);
+    }
+
+    #[test]
+    #[should_panic = "flecs only detects changes in a query it caches"]
+    fn detecting_changes_in_a_query_flecs_doesnt_cache_panics() {
+        let mut world = World::new();
+        let _ = world.query_filtered::<&OutsideTables, DetectChanges>();
     }
 }

@@ -92,6 +92,10 @@ pub const EcsOptional: i16 = 3;
 
 pub type ecs_query_cache_kind_t = c_int;
 pub const EcsQueryCacheAuto: ecs_query_cache_kind_t = 1;
+pub const EcsQueryCacheNone: ecs_query_cache_kind_t = 3;
+
+/// In `ecs_query_desc_t::flags`, asks for what change detection needs.
+pub const EcsQueryDetectChanges: u32 = 1 << 8;
 
 #[repr(C)]
 pub struct ecs_term_ref_t {
@@ -338,6 +342,7 @@ unsafe extern "C" {
         it: *mut ecs_iter_t,
     ) -> bool;
     pub fn ecs_query_is_true(query: *const ecs_query_t) -> bool;
+    pub fn ecs_query_changed(query: *mut ecs_query_t) -> bool;
     pub fn ecs_iter_fini(it: *mut ecs_iter_t);
     pub fn ecs_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
     pub fn ecs_base_field_w_size(it: *const ecs_iter_t, size: usize, index: i8) -> *mut c_void;
