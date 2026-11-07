@@ -13,8 +13,7 @@
 //! ```
 //!
 //! They belong to the type, so they're the same in every world, because flecs needs them
-//! before a component's first use. Added any later, debug builds abort, and in `-c opt`
-//! `Sparse` and `DontFragment` lose the stored value.
+//! before a component's first use.
 //!
 //! # Safety
 //!
@@ -26,16 +25,47 @@ use crate::{Component, Entity, sys};
 
 /// What listing a trait does to a component's entity, which `World::register` runs.
 #[doc(hidden)]
+#[derive(Clone, Copy)]
 pub struct Declaration {
     pub(crate) apply: fn(&mut World, Entity),
     pub(crate) singleton: bool,
+    pub(crate) dont_fragment: bool,
 }
 
-/// Whether `traits` includes [`Singleton`].
+/// `declarations` with any [`Singleton`] moved to the end, which the derive applies to its list.
+/// A debug build of flecs enforces that trait with an observer on the component, and then
+/// rejects other traits as coming after a query.
+#[doc(hidden)]
+pub const fn singleton_last<const N: usize>(
+    mut declarations: [Declaration; N],
+) -> [Declaration; N] {
+    let mut i = 0;
+    while i + 1 < N {
+        if declarations[i].singleton {
+            let singleton = declarations[i];
+            declarations[i] = declarations[i + 1];
+            declarations[i + 1] = singleton;
+        }
+        i += 1;
+    }
+    declarations
+}
+
 pub(crate) const fn has_singleton(traits: &[Declaration]) -> bool {
     let mut i = 0;
     while i < traits.len() {
         if traits[i].singleton {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+pub(crate) const fn has_dont_fragment(traits: &[Declaration]) -> bool {
+    let mut i = 0;
+    while i < traits.len() {
+        if traits[i].dont_fragment {
             return true;
         }
         i += 1;
@@ -58,6 +88,7 @@ pub unsafe trait CanToggle: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsCanToggle),
         singleton: false,
+        dont_fragment: false,
     };
 }
 
@@ -72,6 +103,7 @@ pub unsafe trait Sparse: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsSparse),
         singleton: false,
+        dont_fragment: false,
     };
 }
 
@@ -86,6 +118,7 @@ pub unsafe trait DontFragment: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsDontFragment),
         singleton: false,
+        dont_fragment: true,
     };
 }
 
@@ -102,6 +135,7 @@ pub unsafe trait Singleton: Component {
     const DECLARATION: Declaration = Declaration {
         apply: |world, component| world.add_trait(component, sys::EcsSingleton),
         singleton: true,
+        dont_fragment: false,
     };
 }
 
@@ -128,6 +162,7 @@ pub unsafe trait With<U: Component>: Component {
                 world.add_trait(component, pair);
             },
             singleton: false,
+            dont_fragment: false,
         }
     };
 }

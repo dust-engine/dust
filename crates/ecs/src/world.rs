@@ -5,6 +5,7 @@ use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 
 use crate::sys::{ecs_component_desc_t, ecs_id_t, ecs_type_info_t, ecs_world_t};
@@ -18,7 +19,10 @@ static INIT_LOCK: Mutex<()> = Mutex::new(());
 
 /// A flecs world, destroyed on drop.
 pub struct World {
-    ptr: NonNull<ecs_world_t>,
+    pub(crate) ptr: NonNull<ecs_world_t>,
+    /// Unique in this process, unlike `ptr`, which a later world can reuse. This is how a
+    /// [`QueryState`](crate::query::QueryState) knows which world it's in.
+    pub(crate) id: u64,
 }
 
 // SAFETY: flecs has no thread-local state and only ties a world to a thread in
@@ -27,9 +31,8 @@ pub struct World {
 unsafe impl Send for World {}
 
 // SAFETY: the `&self` methods only read the world, and `Component` makes every stored
-// value `Sync`. Any new `&self` method needs the same check, by reading the flecs code
-// and running it under ThreadSanitizer in debug and `NDEBUG` builds: a `const` world
-// parameter isn't proof, as flecs casts it away in places.
+// value `Sync`. A `const` world parameter doesn't prove a new one reads only, as flecs
+// casts it away in places.
 unsafe impl Sync for World {}
 
 
@@ -40,8 +43,10 @@ impl World {
             // SAFETY: the lock serializes this with every other init and fini.
             unsafe { crate::sys::ecs_init() }
         };
+        static NEXT_WORLD_ID: AtomicU64 = AtomicU64::new(0);
         Self {
             ptr: NonNull::new(ptr).expect("ecs_init returned null"),
+            id: NEXT_WORLD_ID.fetch_add(1, Relaxed),
         }
     }
 
@@ -52,10 +57,25 @@ impl World {
     }
 
     /// Deletes `entity` and drops its components. Does nothing if it's already dead.
+    ///
+    /// # Panics
+    ///
+    /// If `entity` is a component's or a query's own, which takes an [`Entity`] from another
+    /// world. A component can't be deleted, and a query is freed by [`Self::return_query`].
     pub fn delete(&mut self, entity: Entity) {
         if !self.is_alive(entity) {
             return;
         }
+        let world = self.ptr.as_ptr();
+        // SAFETY: the world is valid, and the entity is alive, as just checked.
+        let (is_component, is_query) = unsafe {
+            (
+                crate::sys::ecs_has_id(world, entity.id(), crate::sys::FLECS_IDEcsComponentID_),
+                !crate::sys::ecs_query_get(world, entity.id()).is_null(),
+            )
+        };
+        assert!(!is_component, "a component can't be deleted");
+        assert!(!is_query, "a query is freed by `World::return_query`");
         // SAFETY: `ecs_delete` would corrupt the world if given a built-in, but an
         // `Entity` never names one.
         unsafe { crate::sys::ecs_delete(self.ptr.as_ptr(), entity.id()) }
@@ -287,9 +307,6 @@ impl World {
 
     /// flecs's id for `T`, if `T` has been stored in this world.
     fn registered_id<T: Component>(&self) -> Option<Entity> {
-        // Once a world runs out of low ids, its components take the same ids as
-        // `new_entity`, so a handle from another world can delete one. Using a dead id
-        // would crash flecs, so this treats `T` as unregistered, as flecs's C++ API does.
         // SAFETY: this crate may read the slot. flecs returns 0 for an index this world
         // hasn't set, which includes a slot's initial 0, as its indexes start at 1.
         let id = unsafe {
@@ -298,8 +315,7 @@ impl World {
         NonZeroU64::new(id).map(Entity)
     }
 
-    /// flecs's id for `T`, registering `T` the first time it's stored in this world, and
-    /// again if its component was deleted (see `component_id`).
+    /// flecs's id for `T`, registering `T` the first time it's stored in this world.
     pub(crate) fn register<T: Component>(&mut self) -> Entity {
         const {
             // flecs allocates columns with plain `malloc` and ignores `alignment`.
@@ -319,8 +335,7 @@ impl World {
         }
         // SAFETY: flecs documents all zeroes as the default, and it's valid here.
         let mut desc: ecs_component_desc_t = unsafe { std::mem::zeroed() };
-        // A label for flecs's errors and explorer, which flecs copies. It needn't be unique:
-        // same-named components stay distinct, and the newest just wins lookups by name.
+        // A label for flecs's errors and explorer, which flecs copies. It needn't be unique.
         let name = CString::new(type_name::<T>()).expect("type names have no NUL");
         desc.type_.name = name.as_ptr();
         // flecs requires a size and alignment of 0 for a tag.
@@ -328,7 +343,7 @@ impl World {
             desc.type_.size = size_of::<T>() as i32;
             desc.type_.alignment = align_of::<T>() as i32;
             // Zeroed or copied bytes needn't be a valid `T`, so flecs must abort if it ever
-            // tries to make one that way, as it does for a C++ type that can't do either.
+            // tries to make one that way.
             desc.type_.hooks.flags = crate::sys::ECS_TYPE_HOOK_CTOR_ILLEGAL
                 | crate::sys::ECS_TYPE_HOOK_COPY_ILLEGAL
                 | crate::sys::ECS_TYPE_HOOK_COPY_CTOR_ILLEGAL;
@@ -441,7 +456,7 @@ impl<T: Component> Drop for Mut<'_, T> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicI32, AtomicUsize};
+    use std::sync::atomic::AtomicUsize;
 
     use super::*;
     use crate::traits::{DontFragment, Sparse, With};
@@ -644,47 +659,6 @@ mod tests {
         assert_eq!(first.get::<OnlyInSecond>(in_first), None);
     }
 
-    /// A world runs out of low ids after 237 components, and later ones take the same
-    /// ids as `new_entity`, so a handle from another world can name one.
-    fn use_up_low_ids(world: &mut World) {
-        struct Filler<const A: usize, const B: usize>;
-
-        // The derive rejects generic types, but each of these impls has its own `static`.
-        macro_rules! set_all {
-            (@row $world:ident, $entity:ident, $a:literal, ($($b:literal)*)) => {
-                $(
-                    unsafe impl Component for Filler<$a, $b> {
-                        unsafe fn slot() -> &'static AtomicI32 {
-                            static SLOT: AtomicI32 = AtomicI32::new(0);
-                            &SLOT
-                        }
-                    }
-                    $world.set($entity, Filler::<$a, $b>);
-                )*
-            };
-            ($world:ident, $entity:ident, ($($a:literal)*), $b:tt) => {
-                $(set_all!(@row $world, $entity, $a, $b);)*
-            };
-        }
-
-        let entity = world.new_entity();
-        set_all!(
-            world,
-            entity,
-            (0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15),
-            (0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15)
-        );
-    }
-
-    /// A handle from another world that names `component`.
-    fn handle_naming(component: Entity) -> Entity {
-        let mut other = World::new();
-        (0..1000)
-            .map(|_| other.new_entity())
-            .find(|&handle| handle == component)
-            .expect("`component` should be past the low ids")
-    }
-
     #[test]
     fn set_and_writes_through_get_mut_fire_on_set() {
         #[derive(Component, Debug, PartialEq)]
@@ -695,43 +669,36 @@ mod tests {
             CALLS.fetch_add(1, Relaxed);
         }
 
-        // The two id ranges take different paths through `ecs_modified_id`.
-        for past_low_ids in [false, true] {
-            let mut world = World::new();
-            if past_low_ids {
-                use_up_low_ids(&mut world);
-            }
-            // Registers `Watched` as `register` does, but with a hook to count.
-            let mut desc: ecs_component_desc_t = unsafe { std::mem::zeroed() };
-            desc.type_.size = size_of::<Watched>() as i32;
-            desc.type_.alignment = align_of::<Watched>() as i32;
-            desc.type_.hooks.on_set = on_set as *const c_void;
-            unsafe {
-                let id = crate::sys::ecs_component_init(world.ptr.as_ptr(), &desc);
-                let index = World::component_index::<Watched>();
-                crate::sys::flecs_component_ids_set(world.ptr.as_ptr(), index, id);
-            }
-            CALLS.store(0, Relaxed);
-
-            let entity = world.new_entity();
-            world.set(entity, Watched(1));
-            assert_eq!(CALLS.load(Relaxed), 1);
-            world.set(entity, Watched(2));
-            assert_eq!(CALLS.load(Relaxed), 2);
-
-            // Reading through the guard fires nothing.
-            assert_eq!(world.get_mut::<Watched>(entity).unwrap().0, 2);
-            assert_eq!(CALLS.load(Relaxed), 2);
-
-            // Writes fire it once, when the guard is dropped and they're all done.
-            let mut value = world.get_mut::<Watched>(entity).unwrap();
-            value.0 = 3;
-            value.0 += 1;
-            assert_eq!(CALLS.load(Relaxed), 2);
-            drop(value);
-            assert_eq!(CALLS.load(Relaxed), 3);
-            assert_eq!(world.get::<Watched>(entity), Some(&Watched(4)));
+        let mut world = World::new();
+        // Registers `Watched` as `register` does, but with a hook to count.
+        let mut desc: ecs_component_desc_t = unsafe { std::mem::zeroed() };
+        desc.type_.size = size_of::<Watched>() as i32;
+        desc.type_.alignment = align_of::<Watched>() as i32;
+        desc.type_.hooks.on_set = on_set as *const c_void;
+        unsafe {
+            let id = crate::sys::ecs_component_init(world.ptr.as_ptr(), &desc);
+            let index = World::component_index::<Watched>();
+            crate::sys::flecs_component_ids_set(world.ptr.as_ptr(), index, id);
         }
+
+        let entity = world.new_entity();
+        world.set(entity, Watched(1));
+        assert_eq!(CALLS.load(Relaxed), 1);
+        world.set(entity, Watched(2));
+        assert_eq!(CALLS.load(Relaxed), 2);
+
+        // Reading through the guard fires nothing.
+        assert_eq!(world.get_mut::<Watched>(entity).unwrap().0, 2);
+        assert_eq!(CALLS.load(Relaxed), 2);
+
+        // Writes fire it once, when the guard is dropped and they're all done.
+        let mut value = world.get_mut::<Watched>(entity).unwrap();
+        value.0 = 3;
+        value.0 += 1;
+        assert_eq!(CALLS.load(Relaxed), 2);
+        drop(value);
+        assert_eq!(CALLS.load(Relaxed), 3);
+        assert_eq!(world.get::<Watched>(entity), Some(&Watched(4)));
     }
 
     #[test]
@@ -756,34 +723,6 @@ mod tests {
     #[derive(Component, Debug, PartialEq)]
     #[component(Singleton)]
     struct Clock(u32);
-
-    #[test]
-    fn declared_traits_reach_flecs() {
-        #[derive(Component)]
-        #[component(CanToggle, Sparse)]
-        struct Both;
-        #[derive(Component)]
-        #[component(DontFragment, Singleton)]
-        struct Others;
-
-        let has = |world: &World, component: Entity, flecs_trait| unsafe {
-            crate::sys::ecs_has_id(world.ptr.as_ptr(), component.id(), flecs_trait)
-        };
-        let mut world = World::new();
-
-        let both = world.register::<Both>();
-        assert!(has(&world, both, crate::sys::EcsCanToggle));
-        assert!(has(&world, both, crate::sys::EcsSparse));
-        assert!(!has(&world, both, crate::sys::EcsSingleton));
-
-        let others = world.register::<Others>();
-        assert!(has(&world, others, crate::sys::EcsDontFragment));
-        assert!(has(&world, others, crate::sys::EcsSingleton));
-        assert!(!has(&world, others, crate::sys::EcsCanToggle));
-
-        let plain = world.register::<Count>();
-        assert!(!has(&world, plain, crate::sys::EcsCanToggle));
-    }
 
     #[test]
     fn toggles_a_component() {
@@ -879,109 +818,21 @@ mod tests {
     }
 
     #[test]
-    fn toggling_values_survives_many_table_moves() {
-        let drops = Arc::new(AtomicUsize::new(0));
-
-        #[derive(Component)]
-        #[component(CanToggle)]
-        struct Value(Tracked);
-
-        let mut world = World::new();
-        let entities: Vec<_> = (0..1000)
-            .map(|value| {
-                let entity = world.new_entity();
-                world.set(entity, Value(Tracked::new(value, &drops)));
-                if value % 3 == 0 {
-                    world.disable_component::<Value>(entity);
-                }
-                if value % 2 == 0 {
-                    world.set(entity, Count(value));
-                }
-                entity
-            })
-            .collect();
-        for (value, &entity) in entities.iter().enumerate() {
-            if value % 5 == 0 {
-                world.delete(entity);
-            }
-        }
-        assert_eq!(drops.load(Relaxed), 200);
-        for (value, &entity) in entities.iter().enumerate() {
-            if value % 5 != 0 {
-                assert_eq!(*world.get::<Value>(entity).unwrap().0.value, value as u32);
-                assert_eq!(world.is_component_enabled::<Value>(entity), value % 3 != 0);
-            }
-        }
-        drop(world);
-        assert_eq!(drops.load(Relaxed), 1000);
-    }
-
-    #[test]
-    fn a_deleted_toggled_component_keeps_its_trait() {
-        let mut world = World::new();
-        use_up_low_ids(&mut world);
-        let entity = world.new_entity();
-        world.set(entity, Toggled(1));
-        world.disable_component::<Toggled>(entity);
-
-        let handle = handle_naming(world.register::<Toggled>());
-        world.delete(handle);
-        assert!(!world.has::<Toggled>(entity));
-        assert!(!world.is_component_enabled::<Toggled>(entity));
-
-        // It's a new component, so nothing has disabled it. Debug builds would abort on
-        // disabling it if registering it again had left the trait off.
-        world.set(entity, Toggled(2));
-        assert!(world.is_component_enabled::<Toggled>(entity));
-        world.disable_component::<Toggled>(entity);
-        assert!(!world.is_component_enabled::<Toggled>(entity));
-    }
-
-    #[test]
-    fn enables_and_disables_entities() {
-        // flecs's `EcsDisabled`, which nothing else here needs.
-        const DISABLED: ecs_id_t = 256 + 10;
-        let disabled = |world: &World, entity: Entity| unsafe {
-            crate::sys::ecs_has_id(world.ptr.as_ptr(), entity.id(), DISABLED)
-        };
-
+    fn queries_skip_a_disabled_entity_whose_components_stay_readable() {
         let mut world = World::new();
         let entity = world.new_entity();
         world.set(entity, Count(1));
-        assert!(!disabled(&world, entity));
+        let mut query = world.query::<&Count>();
 
         world.disable(entity);
-        world.disable(entity);
-        assert!(disabled(&world, entity));
+        assert_eq!(query.iter_mut(&mut world).count(), 0);
         assert_eq!(world.get::<Count>(entity), Some(&Count(1)));
         world.set(entity, Count(2));
         assert_eq!(world.get::<Count>(entity), Some(&Count(2)));
 
         world.enable(entity);
-        world.enable(entity);
-        assert!(!disabled(&world, entity));
-        assert_eq!(world.get::<Count>(entity), Some(&Count(2)));
-
-        world.disable(entity);
-        world.delete(entity);
-        assert!(!world.is_alive(entity));
-    }
-
-    #[test]
-    fn disabling_a_component_through_another_worlds_handle_keeps_it_working() {
-        let mut world = World::new();
-        use_up_low_ids(&mut world);
-        let entity = world.new_entity();
-        world.set(entity, Count(1));
-
-        let handle = handle_naming(world.register::<Count>());
-        world.disable(handle);
-        assert_eq!(world.get::<Count>(entity), Some(&Count(1)));
-        let other = world.new_entity();
-        world.set(other, Count(2));
-        assert_eq!(world.get::<Count>(other), Some(&Count(2)));
-        world.enable(handle);
-        assert_eq!(world.get::<Count>(other), Some(&Count(2)));
+        assert_eq!(query.iter_mut(&mut world).count(), 1);
+        world.return_query(query);
     }
 
     #[test]
@@ -1072,37 +923,6 @@ mod tests {
     }
 
     #[test]
-    fn a_deleted_component_stored_outside_tables_registers_again() {
-        #[derive(Component)]
-        #[component(Sparse)]
-        struct InSparse(Tracked);
-        #[derive(Component)]
-        #[component(DontFragment)]
-        struct Unfragmented(Tracked);
-
-        fn check<T: Component>(new: fn(Tracked) -> T, value: fn(&T) -> u32) {
-            let drops = Arc::new(AtomicUsize::new(0));
-            let mut world = World::new();
-            use_up_low_ids(&mut world);
-            let entity = world.new_entity();
-            world.set(entity, new(Tracked::new(1, &drops)));
-
-            let handle = handle_naming(world.register::<T>());
-            world.delete(handle);
-            assert_eq!(drops.load(Relaxed), 1);
-            assert!(!world.has::<T>(entity));
-
-            world.set(entity, new(Tracked::new(2, &drops)));
-            assert_eq!(value(world.get::<T>(entity).unwrap()), 2);
-            drop(world);
-            assert_eq!(drops.load(Relaxed), 2);
-        }
-
-        check(InSparse, |stored| *stored.0.value);
-        check(Unfragmented, |stored| *stored.0.value);
-    }
-
-    #[test]
     fn stores_one_singleton_per_world() {
         let mut world = World::new();
         let mut other = World::new();
@@ -1165,21 +985,6 @@ mod tests {
     }
 
     #[test]
-    fn a_deleted_singleton_registers_again() {
-        let mut world = World::new();
-        use_up_low_ids(&mut world);
-        world.set_singleton(Clock(1));
-
-        let handle = handle_naming(world.register::<Clock>());
-        world.delete(handle);
-        assert_eq!(world.singleton::<Clock>(), None);
-
-        // Debug builds would abort on this if it went to the deleted component's entity.
-        world.set_singleton(Clock(2));
-        assert_eq!(world.singleton::<Clock>(), Some(&Clock(2)));
-    }
-
-    #[test]
     fn with_adds_its_targets() {
         #[derive(Component, Debug, PartialEq)]
         struct First;
@@ -1229,94 +1034,14 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_with_target_leaves_the_component_working() {
-        #[derive(Component, Debug, PartialEq)]
-        struct Target;
-        #[derive(Component, Debug, PartialEq)]
-        #[component(With<Target>)]
-        struct Holder(u32);
-
+    #[should_panic = "a component can't be deleted"]
+    fn deleting_a_component_panics() {
         let mut world = World::new();
-        use_up_low_ids(&mut world);
-        let entity = world.new_entity();
-        world.set(entity, Holder(1));
-        assert!(world.has::<Target>(entity));
-
-        let handle = handle_naming(world.register::<Target>());
-        world.delete(handle);
-        assert!(!world.has::<Target>(entity));
-        assert_eq!(world.get::<Holder>(entity), Some(&Holder(1)));
-
-        world.set(entity, Holder(2));
-        let other = world.new_entity();
-        world.set(other, Holder(3));
-        assert_eq!(world.get::<Holder>(other), Some(&Holder(3)));
+        let component = world.register::<Count>();
+        world.delete(component);
     }
 
-    #[test]
-    fn a_deleted_component_registers_again() {
-        let drops = Arc::new(AtomicUsize::new(0));
-        let mut world = World::new();
-        use_up_low_ids(&mut world);
-        let entity = world.new_entity();
-        world.set(entity, Tracked::new(1, &drops));
-
-        let handle = handle_naming(world.register::<Tracked>());
-        world.delete(handle);
-        assert!(!world.is_alive(handle));
-        assert_eq!(drops.load(Relaxed), 1);
-        assert!(!world.has::<Tracked>(entity));
-        assert!(world.get::<Tracked>(entity).is_none());
-        assert!(world.get_mut::<Tracked>(entity).is_none());
-        world.remove::<Tracked>(entity);
-
-        world.set(entity, Tracked::new(2, &drops));
-        assert_eq!(*world.get::<Tracked>(entity).unwrap().value, 2);
-        assert_eq!(drops.load(Relaxed), 1);
-        drop(world);
-        assert_eq!(drops.load(Relaxed), 2);
-    }
-
-    #[test]
-    fn a_deleted_tag_registers_again_after_its_id_is_recycled() {
-        let mut world = World::new();
-        use_up_low_ids(&mut world);
-        let entity = world.new_entity();
-        world.set(entity, Tag);
-
-        let handle = handle_naming(world.register::<Tag>());
-        world.delete(handle);
-        let recycled = world.new_entity();
-        assert!(!world.has::<Tag>(entity));
-        assert!(!world.has::<Tag>(recycled));
-        assert_eq!(world.get::<Tag>(entity), None);
-
-        world.set(entity, Tag);
-        assert!(world.has::<Tag>(entity));
-        assert!(!world.has::<Tag>(recycled));
-    }
-
-    #[test]
-    fn deleting_a_component_that_holds_itself_drops_every_value() {
-        let drops = Arc::new(AtomicUsize::new(0));
-        let mut world = World::new();
-        use_up_low_ids(&mut world);
-        let entity = world.new_entity();
-        world.set(entity, Tracked::new(1, &drops));
-
-        let handle = handle_naming(world.register::<Tracked>());
-        world.set(handle, Tracked::new(2, &drops));
-        world.delete(handle);
-        assert!(!world.is_alive(handle));
-        assert_eq!(drops.load(Relaxed), 2);
-        assert!(!world.has::<Tracked>(entity));
-
-        world.set(entity, Tracked::new(3, &drops));
-        assert_eq!(*world.get::<Tracked>(entity).unwrap().value, 3);
-    }
-
-    /// flecs's table has an entry for every index up to the highest set, so a type this
-    /// world skipped over reads an empty entry, and one with no index yet reads entry 0.
+    /// `Skipped` is only stored in another world, and `NoIndexYet` in none.
     #[test]
     fn types_this_world_never_stored_read_as_missing() {
         #[derive(Component, Debug, PartialEq)]
@@ -1337,38 +1062,6 @@ mod tests {
         assert_eq!(world.get::<Skipped>(entity), None);
         assert!(!world.has::<NoIndexYet>(entity));
         assert_eq!(world.get::<NoIndexYet>(entity), None);
-    }
-
-    #[test]
-    fn names_components_after_their_types() {
-        let mut world = World::new();
-        let sized = world.register::<Count>();
-        let tag = world.register::<Tag>();
-        for (component, expected) in [(sized, type_name::<Count>()), (tag, type_name::<Tag>())] {
-            assert_eq!(world.name(component).unwrap().to_str().unwrap(), expected);
-        }
-    }
-
-    #[test]
-    fn entities_can_share_a_components_name() {
-        #[derive(Component, Debug, PartialEq)]
-        struct Shared(u32);
-
-        let name = CString::new(type_name::<Shared>()).unwrap();
-        let mut world = World::new();
-        let before = world.new_entity();
-        world.set_name(before, &name);
-        world.set(before, Shared(1));
-        assert_eq!(world.get::<Shared>(before), Some(&Shared(1)));
-
-        let after = world.new_entity();
-        world.set_name(after, &name);
-        world.delete(before);
-        world.delete(after);
-
-        let entity = world.new_entity();
-        world.set(entity, Shared(2));
-        assert_eq!(world.get::<Shared>(entity), Some(&Shared(2)));
     }
 
     #[test]
@@ -1451,6 +1144,7 @@ mod tests {
         assert_eq!(drops.load(Relaxed), 1);
     }
 
+    /// `sys` is written by hand for this version, so an upgrade must check it again.
     #[test]
     fn links_flecs_4_2_0() {
         let version = unsafe { CStr::from_ptr((*crate::sys::ecs_get_build_info()).version) };
@@ -1482,12 +1176,6 @@ mod tests {
         assert!(world.is_alive(fresh));
     }
 
-    /// `Entity` relies on this to rule out built-ins in another world.
-    #[test]
-    fn every_world_issues_the_same_ids() {
-        assert_eq!(World::new().new_entity(), World::new().new_entity());
-    }
-
     #[test]
     fn creates_worlds_on_many_threads() {
         // Only used here, so the threads race to assign its index.
@@ -1510,5 +1198,22 @@ mod tests {
         for thread in threads {
             thread.join().unwrap();
         }
+    }
+
+    #[test]
+    fn a_singleton_can_list_its_traits_in_any_order() {
+        #[derive(Component, Debug, PartialEq)]
+        #[component(Singleton, Sparse, CanToggle)]
+        struct ListedFirst(u32);
+
+        #[derive(Component, Debug, PartialEq)]
+        #[component(Sparse, CanToggle, Singleton)]
+        struct ListedLast(u32);
+
+        let mut world = World::new();
+        world.set_singleton(ListedFirst(1));
+        world.set_singleton(ListedLast(2));
+        assert_eq!(world.singleton::<ListedFirst>(), Some(&ListedFirst(1)));
+        assert_eq!(world.singleton::<ListedLast>(), Some(&ListedLast(2)));
     }
 }

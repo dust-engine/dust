@@ -1,25 +1,33 @@
 //! A safe wrapper over the flecs ECS. [`sys`] holds the raw C bindings.
+#![feature(const_cmp, const_trait_impl)]
 
 use std::num::NonZeroU64;
 use std::sync::atomic::AtomicI32;
 
 pub use dust_ecs_macros::Component;
 
+mod rows;
+mod state;
 pub mod sys;
+mod terms;
 pub mod traits;
 pub mod world;
+
+/// Queries over a [`world::World`], shaped like Bevy's. See [`world::World::query`].
+pub mod query {
+    pub use crate::rows::QueryIter;
+    pub use crate::state::QueryState;
+    pub use crate::terms::QueryData;
+}
 
 extern crate self as dust_ecs;
 
 /// A handle to an entity, which stays safe to use after the entity is deleted:
 /// ids carry a generation, so a stale handle is dead even once its id is recycled.
 ///
-/// [`world::World::new_entity`] is the only public way to get one, and `World` otherwise
-/// only makes one privately for a component's own entity. So it's never 0 and never names
-/// a flecs built-in. That holds even if it's passed to another world, because built-ins
-/// have the same ids in every world. It then means whichever entity has that id in that
-/// world, which can be a component's own entity, so doing this is a logic error,
-/// though a memory-safe one.
+/// It's never 0 and never names a flecs built-in, which [`world::World::delete`] relies on. A
+/// handle only means something in the world that made it: in another world it names whichever
+/// entity has that id there.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Entity(NonZeroU64);
 

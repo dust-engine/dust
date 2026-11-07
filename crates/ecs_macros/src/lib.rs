@@ -34,7 +34,7 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
     quote! {
         unsafe impl ::dust_ecs::Component for #name {
             const TRAITS: &'static [::dust_ecs::traits::Declaration] =
-                &[#(<Self as #traits>::DECLARATION),*];
+                &::dust_ecs::traits::singleton_last([#(<Self as #traits>::DECLARATION),*]);
 
             unsafe fn slot() -> &'static ::std::sync::atomic::AtomicI32 {
                 static SLOT: ::std::sync::atomic::AtomicI32 =
