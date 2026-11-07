@@ -107,10 +107,10 @@ impl<T: Component> Field<T> {
 /// What a query reads from each row: `&T`, `&mut T`, `Option<&T>`, `Option<&mut T>`, [`Entity`], or
 /// a tuple of these, which can nest, up to the 32 terms that flecs allows.
 ///
-/// Reading [`Entity`] fails to compile unless the query also has `&T`, `&mut T` or a
-/// [`With<T>`](crate::query::With) filter for a `T` that isn't a singleton. Without one the query
-/// would also visit flecs's own entities, which an [`Entity`] must never name, or would have no
-/// entities to read.
+/// Reading [`Entity`] fails to compile unless the query also has `&T`, `&mut T`, a
+/// [`With<T>`](crate::query::With) filter for a `T` that isn't a singleton, or an
+/// [`Or`](crate::query::Or). Without one the query would also visit flecs's own entities, which an
+/// [`Entity`] must never name, or would have no entities to read.
 ///
 /// # Safety
 ///
@@ -286,7 +286,7 @@ unsafe impl QueryData for Entity {
 struct Access {
     component: TypeId,
     writes: bool,
-    /// A row has to have this, rather than it being optional.
+    /// A row has to have this, or another term in its `Or` chain, rather than it being optional.
     required: bool,
     singleton: bool,
 }

@@ -86,6 +86,7 @@ pub const EcsIn: i16 = 4;
 
 // `ecs_oper_kind_t`, which `ecs_term_t` stores as an `i16`.
 pub const EcsAnd: i16 = 0;
+pub const EcsOr: i16 = 1;
 pub const EcsNot: i16 = 2;
 pub const EcsOptional: i16 = 3;
 

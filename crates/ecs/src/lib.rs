@@ -16,7 +16,7 @@ pub mod world;
 
 /// Queries over a [`world::World`], shaped like Bevy's. See [`world::World::query`].
 pub mod query {
-    pub use crate::filter::{QueryFilter, With, Without};
+    pub use crate::filter::{Or, QueryFilter, With, Without};
     pub use crate::rows::QueryIter;
     pub use crate::state::{QueryEntityError, QuerySingleError, QueryState};
     pub use crate::terms::QueryData;

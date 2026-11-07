@@ -45,6 +45,7 @@ unsafe impl<D: QueryData, F: QueryFilter> Sync for QueryState<D, F> {}
 impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     fn new(world: &mut World) -> Self {
         let () = D::CHECK;
+        let () = F::CHECK;
         const { assert_entities_are_matched(&D::ACCESS.with(F::ACCESS)) };
         // SAFETY: flecs documents all zeroes as the default, and it's valid here.
         let mut desc: ecs_query_desc_t = unsafe { std::mem::zeroed() };
