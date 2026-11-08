@@ -3,3 +3,7 @@
 # cargo and crate_universe write LF. A CRLF checkout (core.autocrlf) makes
 # crate_universe rewrite the file, so Bazel re-runs the extension once more.
 Cargo.lock text eol=lf
+# MODULE.bazel.lock records a hash of each Cargo.toml the crate extension
+# reads. A CRLF checkout changes those hashes, so Bazel re-runs the extension
+# and rewrites the lock on every build.
+Cargo.toml text eol=lf
