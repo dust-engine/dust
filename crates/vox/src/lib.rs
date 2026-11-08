@@ -325,7 +325,7 @@ struct VoxModelParams {
 }
 
 fn write_sbt_entries(
-    mut models: Query<&mut VoxModel>,
+    mut models: Query<(&mut VoxModel, Option<&geometry::VoxModelBLASSource>)>,
     mut instances: Query<(Entity, &mut TLASInstance<dust_pbr::PbrInstanceData>), With<VoxInstance>>,
     mut pbr_state: ResMut<PbrRenderState>,
     vox_render_state: Res<VoxRenderState>,
@@ -337,7 +337,7 @@ fn write_sbt_entries(
     let pbr_state = &mut *pbr_state;
     let (Some(sbt), Some(shadow_sbt)) = (pbr_state.sbt.as_mut(), pbr_state.shadow_sbt.as_mut())
     else {
-        for mut model in models.iter_mut() {
+        for (mut model, _) in models.iter_mut() {
             model.sbt_index = u32::MAX;
         }
         for (_, mut instance) in instances.iter_mut() {
@@ -348,13 +348,19 @@ fn write_sbt_entries(
     };
     let miss_index = shadow_sbt.push_miss(vox_render_state.shadow_library_index, 1, |_| {});
     assert_eq!(miss_index, 0); // Miss SBT index assumed to be 0 in the shader. If this assumption no longer holds true, update the shader.
-    for mut model in models.iter_mut() {
+    for (mut model, source) in models.iter_mut() {
         model.sbt_index = u32::MAX;
-        let Some(geometry) = geometry_assets.get(&model.geometry) else {
+        // The TLAS traces the entity's BLAS, which lags the `VoxModel` while a rebuild is
+        // on the GPU. Its hits index the leaves of the geometry it was built from, so the
+        // records point at the assets in its source. There's none until the first build.
+        let Some(source) = source else {
+            continue;
+        };
+        let Some(geometry) = geometry_assets.get(&source.geometry) else {
             println!("no geometry");
             continue;
         };
-        let Some(material) = material_assets.get(&model.material) else {
+        let Some(material) = material_assets.get(&source.material) else {
             println!("no material");
             continue;
         };
@@ -382,7 +388,7 @@ fn write_sbt_entries(
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;
-        let Ok(model) = models.get(instance.blas) else {
+        let Ok((model, _)) = models.get(instance.blas) else {
             tracing::warn!(
                 "Missing model {:?} for instance {:?}",
                 instance.blas,

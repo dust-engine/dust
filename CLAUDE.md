@@ -68,3 +68,9 @@ Shaders are written in Slang (`.slang` files) and compiled to SPIR-V via custom 
 - `vma.BUILD.bazel` — VulkanMemoryAllocator
 - `slang_rs.BUILD.bazel` — shader-slang Rust bindings
 - `pumicite_cli.bzl` — Bazel macros for shader compilation rules
+
+## Known Issues
+
+### Retaining a `Handle` doesn't retain the asset
+
+`Assets::insert` and `Assets::remove` replace or drop an asset while handles to it exist, and code with `Assets::get_mut` replaces the buffers inside it (`VoxMaterial::reserve`, `VoxGeometryLeafStorage::resize`). A frame's SBT records point at those buffers by device address, so changing or dropping a `VoxGeometry`, `VoxMaterial` or `VoxPalette` while a frame that reads it is on the GPU frees memory the GPU is still reading. Holding a `Handle` until the frame finishes doesn't prevent it. Not fixed yet; the rainbow demo grows its material in place and drops its old assets on every pass. This is one reason to drop `bevy_asset`.

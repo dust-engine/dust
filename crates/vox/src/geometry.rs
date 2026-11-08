@@ -1,8 +1,11 @@
 use std::{any::Any, sync::Arc};
 
-use crate::{Tree, VoxModel, VoxModelBLASRebuild};
+use crate::{Tree, VoxMaterial, VoxModel, VoxModelBLASRebuild};
 use bevy::{
-    ecs::system::lifetimeless::{SRes, SResMut},
+    ecs::system::{
+        EntityCommands,
+        lifetimeless::{SRes, SResMut},
+    },
     prelude::*,
 };
 use bevy_pumicite::{
@@ -101,6 +104,16 @@ impl VoxGeometry {
     }
 }
 
+/// The assets an entity's current [`BLAS`] was built from, inserted with each new BLAS.
+/// A hit on the BLAS gives the index of a leaf of this geometry, and the leaf gives an
+/// offset into this material. The model's SBT records have to point at these, not at
+/// its [`VoxModel`]'s assets, which are newer while a rebuild is on the GPU.
+#[derive(Component)]
+pub(crate) struct VoxModelBLASSource {
+    pub(crate) geometry: Handle<VoxGeometry>,
+    pub(crate) material: Handle<VoxMaterial>,
+}
+
 #[derive(Resource)]
 pub struct BlasBuilder {
     copy_coords_pipeline: Handle<ComputePipeline>,
@@ -148,6 +161,20 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
             flags |= vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD;
         }
         flags
+    }
+
+    fn on_built(
+        &mut self,
+        _params: &mut bevy::ecs::system::SystemParamItem<Self::Params>,
+        model: &bevy::ecs::query::QueryItem<Self::QueryData>,
+    ) -> Box<dyn FnOnce(&mut EntityCommands) + Send + Sync> {
+        let source = VoxModelBLASSource {
+            geometry: model.geometry.clone(),
+            material: model.material.clone(),
+        };
+        Box::new(move |entity| {
+            entity.insert(source);
+        })
     }
 
     fn is_ready(
