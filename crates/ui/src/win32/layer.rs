@@ -4,16 +4,13 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
-
-use bevy::app::AppExit;
 use bevy::math::UVec2;
 use gpui::{Bounds, Pixels, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{CloseHandle, HWND, POINT, RECT};
 use windows::Win32::Graphics::DirectComposition::{
     COMPOSITIONOBJECT_READ, COMPOSITIONOBJECT_WRITE, DCompositionCreateDevice2,
-    DCompositionCreateSurfaceHandle, DCompositionWaitForCompositorClock,
+    DCompositionCreateSurfaceHandle,
     IDCompositionDesktopDevice, IDCompositionTarget, IDCompositionVisual2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -185,28 +182,15 @@ impl GameLayer {
                 surface,
                 game_layer_state,
             });
-            let exit = compositor_clock_runner(app);
-            // The app, and with it the presentation surface, is gone.
-            unsafe { CloseHandle(surface.0) }.ok();
-            exit
-        }
-    }
-}
-
-/// Runs `app` until it exits or the UI quits, one update per compositor frame.
-fn compositor_clock_runner(mut app: bevy::app::App) -> AppExit {
-    crate::finish_plugins(&mut app);
-    loop {
-        let start = Instant::now();
-        unsafe { DCompositionWaitForCompositorClock(None, 100) };
-        // It returns at once while the display is off; wait about a frame then
-        // instead, as GPUI's `VSyncProvider` does.
-        if start.elapsed() < Duration::from_millis(1) {
-            std::thread::sleep(Duration::from_millis(16));
-        }
-        app.update();
-        if let Some(exit) = app.should_exit() {
-            return exit;
+            crate::finish_plugins(&mut app);
+            loop {
+                app.update();
+                if let Some(exit) = app.should_exit() {
+                    // The app, and with it the presentation surface, is gone.
+                    unsafe { CloseHandle(surface.0) }.ok();
+                    return exit;
+                }
+            }
         }
     }
 }

@@ -5,7 +5,8 @@
 //! The buffers are D3D11 textures on Vulkan's GPU, imported into Vulkan
 //! (`VK_KHR_external_memory_win32`) and registered with a presentation manager.
 //! Each frame, [`acquire`] picks the next of three, waiting until the compositor is
-//! done with it, and has the submission of [`SwapchainSet`] signal a fence shared
+//! done with it and making it again if the game's size or color space has
+//! changed, and has the submission of [`SwapchainSet`] signal a fence shared
 //! with D3D11 (`VK_KHR_external_semaphore_win32`); [`release`] hands the buffer
 //! over to D3D11 (`VK_QUEUE_FAMILY_EXTERNAL`); and [`present`] presents it, once
 //! that fence is signaled.
@@ -32,9 +33,10 @@ use windows::Win32::Foundation::{
     GENERIC_ALL, HANDLE, HMODULE, LUID, PRESENTATION_ERROR_LOST, RECT, WAIT_OBJECT_0,
 };
 use windows::Win32::Graphics::CompositionSwapchain::{
-    CreatePresentationFactory, ICompositionFramePresentStatistics, IPresentationBuffer,
-    IPresentationFactory, IPresentationManager, IPresentationSurface,
-    PresentStatisticsKind_CompositionFrame,
+    CreatePresentationFactory, ICompositionFramePresentStatistics, IPresentStatusPresentStatistics,
+    IPresentationBuffer, IPresentationFactory, IPresentationManager, IPresentationSurface,
+    PresentStatisticsKind_CompositionFrame, PresentStatisticsKind_PresentStatus,
+    PresentStatus_Skipped,
 };
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
@@ -58,7 +60,7 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_ERROR_UNSUPPORTED, IDXGIAdapter1,
     IDXGIFactory4, IDXGIResource1,
 };
-use windows::Win32::System::Threading::{WaitForMultipleObjects, WaitForSingleObject};
+use windows::Win32::System::Threading::WaitForSingleObject;
 use windows::core::{Interface, Owned, PCWSTR};
 
 use crate::win32::layer::GameLayerSharedState;
@@ -156,21 +158,21 @@ pub struct Swapchain {
     surface: SurfaceHandle,
     /// The game's size in physical pixels, which the `GameLayer` sets.
     game_layer_state: Arc<GameLayerSharedState>,
-    /// The presentation manager and what goes with it. [`acquire`] replaces it
+    /// The presentation manager and what goes with it. [`present`] replaces it
     /// whenever the presentation manager is lost. It's `None` until
-    /// [`create_presenter`] creates it, and while [`acquire`] replaces it: the
+    /// [`create_presenter`] creates it, and while [`present`] replaces it: the
     /// lost presentation manager has to let go of the surface before another can
     /// present to it, so it's dropped first.
     presenter: Option<PresentationManager>,
-    /// The buffers of the current size, used in turn.
-    buffers: Vec<Buffer>,
-    /// Buffers of an earlier size, kept until their last present has retired.
-    retiring: Vec<Buffer>,
-    /// The index in `buffers` of the next frame's buffer.
-    next: usize,
-    /// The current frame's buffer, from [`acquire`] until [`present`], and the
-    /// value of `render_done` its present waits for.
-    current: Option<(usize, u64)>,
+    /// The buffers, used in turn. Each is made when it's first used, and made again
+    /// when it's next used after the game's size or color space changes.
+    buffers: [Option<Buffer>; BUFFER_COUNT],
+    /// The index in `buffers` of the current frame's buffer, or of the last
+    /// frame's between frames.
+    index: usize,
+    /// Set from [`acquire`] until [`present`], while `buffers[index]` is the
+    /// current frame's buffer: the value of `render_done` its present waits for.
+    current: Option<u64>,
     /// The current image's resource state.
     state: ResourceState,
 }
@@ -187,9 +189,8 @@ impl Swapchain {
             surface,
             game_layer_state,
             presenter: None,
-            buffers: Vec::new(),
-            retiring: Vec::new(),
-            next: 0,
+            buffers: Default::default(),
+            index: 0,
             current: None,
             state: ResourceState::default(),
         }
@@ -204,32 +205,45 @@ impl Swapchain {
     /// The image the current frame renders into, from its acquisition until it's
     /// presented: in [`SwapchainSet`].
     pub fn current_image(&self) -> Option<&GPUMutex<PresentationImage>> {
-        self.current.map(|(index, _)| &self.buffers[index].image)
+        self.current
+            .and(self.buffers[self.index].as_ref())
+            .map(|buffer| &buffer.image)
     }
 
     /// The current image's resource state, for the barriers of the work using it.
     pub fn state_mut(&mut self) -> &mut ResourceState {
         &mut self.state
     }
+
+    /// Replaces the lost presentation manager with another, and drops the buffers
+    /// registered with it. If another can't be created, the swapchain is left
+    /// without one.
+    fn replace_lost_presenter(&mut self) -> windows::core::Result<()> {
+        tracing::warn!("The presentation manager was lost; creating another");
+        self.buffers = Default::default();
+        // The lost presentation manager has to let go of the surface before
+        // another can present to it.
+        let lost = self.presenter.take().unwrap();
+        let device = lost.device.clone();
+        drop(lost);
+        self.presenter = Some(PresentationManager::new(&device, self.surface)?);
+        Ok(())
+    }
 }
 
 /// A buffer the game renders into: a D3D11 texture registered with the
 /// presentation manager, and imported into Vulkan.
+///
+/// It can be dropped at any time. Only `image` is used by Vulkan commands, and
+/// the `GPUMutex` keeps it until the GPU is done with them. The presentation
+/// manager keeps its own reference to the texture while the buffer is on
+/// screen, and the imported memory keeps one too.
 struct Buffer {
     image: GPUMutex<PresentationImage>,
     presentation: IPresentationBuffer,
     /// Set while the compositor is done with the buffer: from when the buffer's last
     /// present retires until the buffer is presented again.
     available: Owned<HANDLE>,
-    /// The texture that `image`'s memory is imported from, kept alive as long as
-    /// the image.
-    _texture: ID3D11Texture2D,
-}
-
-impl Buffer {
-    fn is_available(&self) -> bool {
-        (unsafe { WaitForSingleObject(*self.available, 0) }) == WAIT_OBJECT_0
-    }
 }
 
 /// The presentation manager, the D3D11 device it presents on, and the fence that
@@ -243,8 +257,6 @@ struct PresentationManager {
     displayable: bool,
     manager: IPresentationManager,
     surface: IPresentationSurface,
-    /// Set once the presentation manager is lost.
-    lost: Owned<HANDLE>,
     /// Signaled by the submission of [`SwapchainSet`] once it's done writing a
     /// buffer; the buffer's present waits for it.
     render_done: ID3D11Fence,
@@ -255,11 +267,15 @@ struct PresentationManager {
     /// changes it to the color space of the buffer it presents.
     color_space: vk::ColorSpaceKHR,
     /// Set while the presentation manager has statistics for
-    /// [`PresentationManager::preferred_color_space`] to read.
+    /// [`PresentationManager::read_statistics`] to read.
     statistics_available: Owned<HANDLE>,
-    /// The color space that [`PresentationManager::preferred_color_space`] last found. It
-    /// starts as sRGB, until the first statistics arrive.
+    /// The color space that the game should present in: HDR10 while a display in
+    /// HDR mode shows the game, and sRGB otherwise. It starts as sRGB, until
+    /// [`PresentationManager::read_statistics`] finds otherwise.
     preferred_color_space: vk::ColorSpaceKHR,
+    /// Signaled with the ID of each present as it starts retiring, which is when
+    /// the present after it is queued for display.
+    retiring: ID3D11Fence,
 }
 
 impl PresentationManager {
@@ -323,9 +339,11 @@ impl PresentationManager {
         // Each present's composition-frame statistics name the outputs that
         // showed the present, and the color space of each output.
         unsafe { manager.EnablePresentStatisticsKind(PresentStatisticsKind_CompositionFrame, 1) }?;
+        // Each present's status statistics say whether it was shown or skipped.
+        unsafe { manager.EnablePresentStatisticsKind(PresentStatisticsKind_PresentStatus, 1) }?;
         let statistics_available =
             unsafe { Owned::new(manager.GetPresentStatisticsAvailableEvent()?) };
-        let lost = unsafe { Owned::new(manager.GetLostEvent()?) };
+        let retiring = unsafe { manager.GetPresentRetiringFence::<ID3D11Fence>() }?;
 
         let d3d: ID3D11Device5 = d3d.cast()?;
         let mut render_done: Option<ID3D11Fence> = None;
@@ -364,27 +382,35 @@ impl PresentationManager {
             displayable,
             manager,
             surface,
-            lost,
             render_done,
             render_done_semaphore,
             render_done_value: 0,
             color_space,
             statistics_available,
             preferred_color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+            retiring,
         })
     }
 
-    /// The color space that the game should present in: HDR10 while a display in
-    /// HDR mode shows the game, and sRGB otherwise. The statistics come from the
-    /// composition frame that first showed each present, so they follow the
-    /// window from one display to another, and they follow HDR being turned on or
-    /// off.
-    fn preferred_color_space(&mut self) -> vk::ColorSpaceKHR {
+    /// Reads the statistics of the presents since the last call: logs the presents
+    /// that were skipped, and updates `preferred_color_space`. The color space
+    /// comes from the composition frame that first showed each present, so it
+    /// follows the window from one display to another, and it follows HDR being
+    /// turned on or off.
+    fn read_statistics(&mut self) {
         // Reading every statistic also keeps the queue from overflowing.
         while (unsafe { WaitForSingleObject(*self.statistics_available, 0) }) == WAIT_OBJECT_0 {
             let Ok(statistics) = (unsafe { self.manager.GetNextPresentStatistics() }) else {
                 break;
             };
+            if let Ok(status) = statistics.cast::<IPresentStatusPresentStatistics>() {
+                if unsafe { status.GetPresentStatus() } == PresentStatus_Skipped {
+                    tracing::debug!("Present {} was skipped", unsafe {
+                        statistics.GetPresentId()
+                    });
+                }
+                continue;
+            }
             let Ok(frame) = statistics.cast::<ICompositionFramePresentStatistics>() else {
                 continue;
             };
@@ -416,27 +442,14 @@ impl PresentationManager {
             }
             self.preferred_color_space = color_space;
         }
-        self.preferred_color_space
-    }
-
-    fn is_lost(&self) -> bool {
-        (unsafe { WaitForSingleObject(*self.lost, 0) }) == WAIT_OBJECT_0
     }
 
     /// Waits until the compositor is done with `buffer`, for up to `timeout`. Only
     /// then can Vulkan write the buffer: the presentation API holds back D3D work
     /// on a buffer that's still in use, but not Vulkan work. Returns whether the
-    /// buffer is available. It returns false if the wait timed out or the
-    /// presentation manager was lost.
+    /// buffer is available.
     fn wait_available(&self, buffer: &Buffer, timeout_ms: u32) -> bool {
-        let result = unsafe {
-            WaitForMultipleObjects(
-                &[*self.lost, *buffer.available],
-                false,
-                timeout_ms,
-            )
-        };
-        result.0 == WAIT_OBJECT_0.0 + 1
+        (unsafe { WaitForSingleObject(*buffer.available, timeout_ms) }) == WAIT_OBJECT_0
     }
 
     /// Creates a buffer of `size` for an image in `color_space`, registered with
@@ -489,17 +502,29 @@ impl PresentationManager {
             image: GPUMutex::new(image),
             presentation,
             available,
-            _texture: texture,
         })
     }
 
-    /// Presents `buffer` once `render_done` reaches `value`.
-    fn present(&mut self, buffer: &Buffer, value: u64) {
+    /// Presents `buffer` once `render_done` reaches `value`, and once the last
+    /// present is queued for display. Returns false if the presentation manager is
+    /// lost, and has to be replaced.
+    ///
+    /// Presents are FIFO: each is shown, in order. When several presents are ready
+    /// at a compositor frame, the compositor shows the last and skips the others,
+    /// so a present is ready only once the one before it is queued; it is then the
+    /// only one ready. The wait is on the GPU, so the CPU goes on with the next
+    /// frame.
+    fn present(&mut self, buffer: &Buffer, value: u64) -> bool {
         unsafe {
-            // A present is shown only once the work issued to the context before
-            // the present is done: here, the wait for Vulkan's writes into the
-            // buffer.
+            // A present is ready only once the work issued to the context before
+            // the present is done: here, the waits for Vulkan's writes into the
+            // buffer, and for the last present to be queued. The last present is
+            // queued when the one before it starts retiring, which the retiring
+            // fence counts. Present IDs start at 1, and the fence at 0.
             self.context.Wait(&self.render_done, value).unwrap();
+            if let Some(before_last) = self.manager.GetNextPresentId().checked_sub(2) {
+                self.context.Wait(&self.retiring, before_last).unwrap();
+            }
             self.context.Flush();
             self.surface.SetBuffer(&buffer.presentation).unwrap();
             // Like the buffer, the color space changes with this present, so the
@@ -523,9 +548,9 @@ impl PresentationManager {
                 })
                 .unwrap();
             match self.manager.Present() {
-                Ok(()) => {}
-                // The next `acquire` creates another presentation manager.
-                Err(error) if error.code() == PRESENTATION_ERROR_LOST => {}
+                Ok(()) => true,
+                // Only presents report a lost presentation manager.
+                Err(error) if error.code() == PRESENTATION_ERROR_LOST => false,
                 Err(error) => panic!("failed to present: {error}"),
             }
         }
@@ -572,45 +597,21 @@ fn create_presenter(
     }
 }
 
-/// Picks the next buffer once the compositor is done with it, and makes it the
-/// current image. The submission that this system and [`SwapchainSet`] are in
-/// signals `render_done` once it has written the buffer.
+/// Picks the next buffer once the compositor is done with it, makes it again if
+/// the game's size or color space has changed, and makes it the current image.
+/// The submission that this system and [`SwapchainSet`] are in signals
+/// `render_done` once it has written the buffer.
 fn acquire(
     _bevy_thread: NonSendMarker,
-    mut commands: Commands,
     mut submission: SubmissionState,
     If(swapchain): If<ResMut<Swapchain>>,
 ) {
     let swapchain = swapchain.into_inner();
-    if swapchain
-        .presenter
-        .as_ref()
-        .is_some_and(PresentationManager::is_lost)
-    {
-        tracing::warn!("The presentation manager was lost; creating another");
-        // The buffers are registered with the lost presentation manager.
-        swapchain.buffers.clear();
-        swapchain.retiring.clear();
-        // The lost presentation manager has to let go of the surface before
-        // another can present to it.
-        let lost = swapchain.presenter.take().unwrap();
-        let device = lost.device.clone();
-        drop(lost);
-        match PresentationManager::new(&device, swapchain.surface) {
-            Ok(presenter) => swapchain.presenter = Some(presenter),
-            Err(error) => {
-                tracing::error!("The game can't present: {error}");
-                commands.remove_resource::<Swapchain>();
-                return;
-            }
-        }
-    }
     let Swapchain {
         presenter: Some(presenter),
         buffers,
         game_layer_state,
-        retiring,
-        next,
+        index,
         current,
         state,
         ..
@@ -618,30 +619,30 @@ fn acquire(
     else {
         return;
     };
-    retiring.retain(|buffer| !buffer.is_available());
-
-    let size = game_layer_state.size();
-    let color_space = presenter.preferred_color_space();
-    if buffers.first().is_none_or(|buffer| {
-        buffer.image.extent().truncate() != size || buffer.image.color_space() != color_space
-    }) {
-        // Buffers can differ in size and color space, so the old buffers stay on
-        // screen until the new ones are presented. They're dropped once the
-        // compositor is done with them.
-        retiring.append(buffers);
-        for _ in 0..BUFFER_COUNT {
-            match presenter.create_buffer(size, color_space) {
-                Ok(buffer) => buffers.push(buffer),
-                Err(error) => panic!("failed to create a presentation buffer: {error}"),
-            }
-        }
-        *next = 0;
-    }
-    let index = *next;
-    if !presenter.wait_available(&buffers[index], 100) {
+    // Once the wait times out, the next frame tries the same buffer again.
+    let next = (*index + 1) % BUFFER_COUNT;
+    if let Some(buffer) = &buffers[next]
+        && !presenter.wait_available(buffer, 100)
+    {
         return;
     }
-    *next = (index + 1) % buffers.len();
+    *index = next;
+
+    // Buffers can differ in size and color space, so the others stay on screen
+    // until this one is presented, and a change reaches all of them in
+    // `BUFFER_COUNT` frames.
+    let size = game_layer_state.size();
+    presenter.read_statistics();
+    let color_space = presenter.preferred_color_space;
+    let buffer = &mut buffers[next];
+    if buffer.as_ref().is_none_or(|buffer| {
+        buffer.image.extent().truncate() != size || buffer.image.color_space() != color_space
+    }) {
+        match presenter.create_buffer(size, color_space) {
+            Ok(new) => *buffer = Some(new),
+            Err(error) => panic!("failed to create a presentation buffer: {error}"),
+        }
+    }
 
     presenter.render_done_value += 1;
     let value = presenter.render_done_value;
@@ -654,7 +655,7 @@ fn acquire(
             vk::PipelineStageFlags2::ALL_COMMANDS,
         );
     }
-    *current = Some((index, value));
+    *current = Some(value);
     // The buffer's earlier contents are discarded, so it needn't be acquired from
     // D3D11 (`VK_QUEUE_FAMILY_EXTERNAL`) first. Its first barrier waits for all the
     // commands before it in the submission, as on macOS.
@@ -696,13 +697,26 @@ fn release(
 
 /// Presents the current image once the submission of [`SwapchainSet`] is done
 /// writing it.
-fn present(_bevy_thread: NonSendMarker, If(swapchain): If<ResMut<Swapchain>>) {
+fn present(
+    _bevy_thread: NonSendMarker,
+    mut commands: Commands,
+    If(swapchain): If<ResMut<Swapchain>>,
+) {
     let swapchain = swapchain.into_inner();
-    let Some((index, value)) = swapchain.current.take() else {
+    let Some(value) = swapchain.current.take() else {
         return;
     };
-    if let Some(presenter) = &mut swapchain.presenter {
-        presenter.present(&swapchain.buffers[index], value);
+    let (Some(presenter), Some(buffer)) = (
+        &mut swapchain.presenter,
+        &swapchain.buffers[swapchain.index],
+    ) else {
+        return;
+    };
+    if !presenter.present(buffer, value)
+        && let Err(error) = swapchain.replace_lost_presenter()
+    {
+        tracing::error!("The game can't present: {error}");
+        commands.remove_resource::<Swapchain>();
     }
 }
 
