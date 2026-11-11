@@ -8,13 +8,13 @@
 
 use bevy::prelude::*;
 use bevy_pumicite::prelude::ComputePipeline;
-use bevy_pumicite::staging::UniformRingBuffer;
+use bevy_pumicite::staging::{ReadbackRingBuffer, UniformRingBuffer};
 use bevy_pumicite::{CreateDevice, DefaultRenderSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dust_profiler::{GpuProfiler, GpuTimerCommands};
 use pumicite::ash::vk;
-use pumicite::buffer::{Buffer, BufferLike};
-use pumicite::command::{CommandEncoder, GPURef};
+use pumicite::buffer::{Buffer, BufferLike, RingBufferSuballocation};
+use pumicite::command::{CommandEncoder, GPURef, GPURefMut};
 use pumicite::pipeline::Pipeline;
 use pumicite::sync::GPUMutex;
 use pumicite::tracking::Access;
@@ -79,7 +79,8 @@ impl RadianceCascadesDebugMode {
     }
 }
 
-/// Settings of the radiance cascades.
+/// Settings of the radiance cascades, which the DevTools "Radiance cascades"
+/// page edits.
 #[derive(Resource, Clone)]
 pub struct RadianceCascadesConfig {
     /// Builds the probes every frame. Off by default, since nothing lights the
@@ -199,12 +200,23 @@ pumicite::project_fields! {
     }
 }
 
+/// What the DevTools show of the cache, from a recent frame's counters.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct CacheStats {
+    /// How many probes each cascade has. A cascade that ran out of room shows
+    /// its capacity.
+    pub probes: [u32; CASCADES],
+    /// How many probes each cascade has room for.
+    pub capacity: [u32; CASCADES],
+}
+
 /// The probes of every cascade, for the surfaces the camera sees.
 struct Cache {
     /// Where each cascade is in `buffers`. Fixed when they're created; every
     /// frame copies it into [`RcConstantsRaw::cascades`] for the shaders.
     cascades: [RcCascadeRaw; CASCADES],
     buffers: GPUMutex<CacheBuffers>,
+    stats: Option<CacheStats>,
 }
 
 /// `new_device` for what the shaders access by device address.
@@ -251,10 +263,30 @@ impl Cache {
                 counters: create_buffer(
                     allocator,
                     COUNTERS as u64 * 4,
-                    vk::BufferUsageFlags::INDIRECT_BUFFER,
+                    vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC,
                 ),
             }),
+            stats: None,
         }
+    }
+
+    /// Updates the statistics from a host copy of the counters that the GPU has
+    /// written.
+    fn read_stats(&mut self, copy: &RingBufferSuballocation) {
+        let Some(bytes) = copy.as_slice() else {
+            return;
+        };
+        let counters: &[u32] = bytemuck::cast_slice(&bytes[..COUNTERS * 4]);
+        let stats = CacheStats {
+            probes: std::array::from_fn(|cascade| counters[COUNTER_PROBES + cascade]),
+            capacity: self.cascades.map(|cascade| cascade.probe_capacity),
+        };
+        tracing::debug!(
+            probes = ?stats.probes,
+            capacity = ?stats.capacity,
+            "Radiance cache"
+        );
+        self.stats = Some(stats);
     }
 }
 
@@ -292,6 +324,15 @@ pub struct RadianceCascadesState {
     compute_pipelines: [Handle<ComputePipeline>; COMPUTE_PASSES.len()],
     /// `None` while the cascades are disabled.
     resources: Option<Resources>,
+}
+
+impl RadianceCascadesState {
+    /// The cache's latest statistics.
+    pub fn stats(&self) -> Option<CacheStats> {
+        self.resources
+            .as_ref()
+            .and_then(|resources| resources.primary.stats)
+    }
 }
 
 /// Builds the probes every frame while [`RadianceCascadesConfig::enabled`].
@@ -423,21 +464,22 @@ impl<'a> Passes<'a> {
 }
 
 /// Records steps 1 and 2 of `rc_common.slang`: the probes of every cascade for
-/// the surfaces in `extent`, once their descriptors are bound.
+/// the surfaces in `extent`, once their descriptors are bound. Returns the
+/// buffers they're in.
 fn record_build<'a>(
     encoder: &mut CommandEncoder<'a>,
     passes: &Passes<'a>,
     cache: &Cache,
     extent: UVec2,
     profiler: &mut Option<ResMut<GpuProfiler>>,
-) {
+) -> GPURefMut<'a, CacheBuffers> {
     let stages = storage_read_write().stage | vk::PipelineStageFlags2::CLEAR;
     let buffers = encoder.lock(&cache.buffers, stages);
 
-    // Once last frame's passes are done with them, the tables and counts start
-    // from zero. `slots` needs no clear: it's read only where `keys` has a key,
-    // and `rcAllocate` writes it for every key.
-    encoder.memory_barrier(storage_read_write(), Access::CLEAR);
+    // Once last frame's passes and copy are done with them, the tables and
+    // counts start from zero. `slots` needs no clear: it's read only where
+    // `keys` has a key, and `rcAllocate` writes it for every key.
+    encoder.memory_barrier(storage_read_write() | Access::COPY_READ, Access::CLEAR);
     encoder.emit_barriers();
     fill_with_zeros(encoder, buffers.keys().vk_handle());
     fill_with_zeros(encoder, buffers.counters().vk_handle());
@@ -462,15 +504,29 @@ fn record_build<'a>(
             });
         }
     });
+    buffers
 }
 
-/// Builds the probes and paints the debug view.
+/// Copies the counters into `copy`, for [`Cache::read_stats`].
+fn record_stats<'a>(
+    encoder: &mut CommandEncoder<'a>,
+    buffers: GPURefMut<'a, CacheBuffers>,
+    copy: GPURefMut<'a, RingBufferSuballocation>,
+) {
+    encoder.memory_barrier(storage_read_write(), Access::COPY_READ);
+    encoder.emit_barriers();
+    ReadbackRingBuffer::read_back(encoder, buffers.counters(), copy);
+}
+
+/// Builds the probes, copies their counts for the statistics and paints the
+/// debug view. The frame state is the host copy of the counts.
 fn radiance_cascades_pass(
-    mut ctx: SubmissionState,
+    mut ctx: SubmissionState<RingBufferSuballocation>,
     config: Res<RadianceCascadesConfig>,
     mut state: ResMut<RadianceCascadesState>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
+    mut readback_ring_buffer: ResMut<ReadbackRingBuffer>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     allocator: Res<Allocator>,
@@ -503,6 +559,13 @@ fn radiance_cascades_pass(
         slot => slot.insert(create_resources(&allocator, config.max_probes)),
     };
     let primary = &mut resources.primary;
+    // `set_frame_state` returns the copy from `FRAMES_IN_FLIGHT` runs ago: for
+    // that many runs after a new cache is made, it holds an earlier cache's
+    // counts.
+    let copy = readback_ring_buffer.allocate_buffer(COUNTERS as u64 * 4, 16);
+    if let Some(copy) = ctx.set_frame_state(copy) {
+        primary.read_stats(&copy);
+    }
 
     // Same jitter as the primary pass: positions are rebuilt from its depth.
     let camera_uniform = build_camera_uniform(camera, transform, None, jitter.offset);
@@ -525,7 +588,7 @@ fn radiance_cascades_pass(
         }
     };
 
-    ctx.record(|encoder, _| {
+    ctx.record(|encoder, copy| {
         let hdr = &mut **hdr;
         let passes = Passes {
             pipelines: std::array::from_fn(|i| encoder.retain(pipelines[i].clone()).deref_inner()),
@@ -563,7 +626,8 @@ fn radiance_cascades_pass(
             .gbuffer_depth_texture(views.depth().full_view())
             .rc(constants_buffer);
         passes.push_descriptors(encoder, &mut descriptors);
-        record_build(encoder, &passes, primary, render_extent, &mut profiler);
+        let buffers = record_build(encoder, &passes, primary, render_extent, &mut profiler);
+        record_stats(encoder, buffers, copy);
 
         if config.debug_mode != RadianceCascadesDebugMode::Off {
             encoder.use_image_resource(
