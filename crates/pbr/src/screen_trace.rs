@@ -9,12 +9,12 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_pumicite::prelude::ComputePipeline;
-use bevy_pumicite::staging::UniformRingBuffer;
+use bevy_pumicite::staging::{ReadbackRingBuffer, UniformRingBuffer};
 use bevy_pumicite::{CreateDevice, DefaultRenderSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dust_profiler::{GpuProfiler, GpuTimerCommands};
 use pumicite::ash::vk;
-use pumicite::buffer::{Buffer, BufferLike};
+use pumicite::buffer::{Buffer, BufferLike, RingBufferSuballocation};
 use pumicite::debug::DebugObject;
 use pumicite::image::{FullImageView, Image, ImageExt};
 use pumicite::sync::GPUMutex;
@@ -139,8 +139,6 @@ pub(crate) struct ScreenTraceConstantsRaw {
 const FLAG_ENABLED: u32 = 1 << 0;
 const FLAG_HISTORY_VALID: u32 = 1 << 1;
 const FLAG_SCREEN_ONLY: u32 = 1 << 2;
-/// Number of host-visible copies of the compaction count kept in flight.
-const READBACK_SLOTS: usize = 3;
 
 pub struct ScreenTraceResources {
     /// R32_UINT, render resolution: the packed trace record per pixel.
@@ -152,9 +150,6 @@ pub struct ScreenTraceResources {
     /// `[count, 1, 1]`, a VkTraceRaysIndirectCommandKHR.
     pub compacted_args: GPUMutex<Buffer>,
     pub compacted_args_state: ResourceState,
-    /// Host copies of `compacted_args`, for the hit-rate statistic.
-    readback: [GPUMutex<Buffer>; READBACK_SLOTS],
-    readback_state: [ResourceState; READBACK_SLOTS],
     /// `[1] = [2] = 1` not written yet.
     args_initialized: bool,
     render_extent: UVec2,
@@ -298,17 +293,6 @@ fn create_screen_trace_resources(
             | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
     )
     .unwrap();
-    let readback = [(); READBACK_SLOTS].map(|_| {
-        GPUMutex::new(
-            Buffer::new_dynamic(
-                allocator.clone(),
-                12,
-                16,
-                vk::BufferUsageFlags::TRANSFER_DST,
-            )
-            .unwrap(),
-        )
-    });
     ScreenTraceResources {
         trace_hit: GPUMutex::new(trace_hit),
         trace_hit_state: ResourceState::default(),
@@ -316,8 +300,6 @@ fn create_screen_trace_resources(
         compacted_texels_state: ResourceState::default(),
         compacted_args: GPUMutex::new(compacted_args),
         compacted_args_state: ResourceState::default(),
-        readback,
-        readback_state: Default::default(),
         args_initialized: false,
         render_extent,
     }
@@ -460,7 +442,7 @@ fn screen_trace_pass(
     let hzb = params.hzb.resources.as_mut().unwrap();
     let res = params.state.resources.as_mut().unwrap();
 
-    ctx.record(|encoder| {
+    ctx.record(|encoder, _| {
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
         let cam_buffer =
@@ -618,13 +600,15 @@ fn screen_trace_pass(
 }
 
 /// Builds the list of pixels whose trace missed and its indirect arguments;
-/// also reads back an earlier frame's count.
+/// also reads back an earlier frame's count. The frame state is the host copy
+/// of the count.
 fn compact_traces_pass(
-    mut ctx: SubmissionState,
+    mut ctx: SubmissionState<RingBufferSuballocation>,
     mut params: ScreenTraceSystemParams,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     hdr_target: Option<Res<HdrRenderTarget>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
+    mut readback_ring_buffer: ResMut<ReadbackRingBuffer>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     if !params.state.traced_this_frame {
@@ -655,19 +639,17 @@ fn compact_traces_pass(
     let render_extent = res.render_extent;
     let init_args = !std::mem::replace(&mut res.args_initialized, true);
 
-    // The slot recorded READBACK_SLOTS frames ago is normally complete; if
-    // the GPU still holds it, skip this frame's statistic rather than stall.
-    let slot = frame_index as usize % READBACK_SLOTS;
-    if let Some(buffer) = res.readback[slot].try_deref_mut() {
-        if let Some(bytes) = buffer.as_slice() {
-            let count = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
-            if count <= render_extent.x * render_extent.y {
-                state.hardware_rays = Some(count);
-            }
-        }
+    // Room for the count alone: a copy stops at the end of the smaller buffer.
+    let copy = readback_ring_buffer.allocate_buffer(4, 16);
+    if let Some(bytes) = ctx
+        .set_frame_state(copy)
+        .as_ref()
+        .and_then(|copy| copy.as_slice())
+    {
+        state.hardware_rays = Some(u32::from_le_bytes(bytes[0..4].try_into().unwrap()));
     }
 
-    ctx.record(|encoder| {
+    ctx.record(|encoder, copy| {
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
         let trace_hit = encoder.lock(&res.trace_hit, vk::PipelineStageFlags2::COMPUTE_SHADER);
@@ -676,7 +658,6 @@ fn compact_traces_pass(
             vk::PipelineStageFlags2::COMPUTE_SHADER,
         );
         let args = encoder.lock(&res.compacted_args, vk::PipelineStageFlags2::COMPUTE_SHADER);
-        let readback = encoder.lock(&res.readback[slot], vk::PipelineStageFlags2::COPY);
 
         // Zero the count (and write the constant height / depth once).
         encoder.use_buffer_resource(args, &mut res.compacted_args_state, Access::CLEAR);
@@ -730,9 +711,8 @@ fn compact_traces_pass(
 
         // Snapshot the count for the statistic.
         encoder.use_buffer_resource(args, &mut res.compacted_args_state, Access::COPY_READ);
-        encoder.use_buffer_resource(readback, &mut res.readback_state[slot], Access::COPY_WRITE);
         encoder.emit_barriers();
-        encoder.copy_buffer(args, readback);
+        ReadbackRingBuffer::read_back(encoder, args, copy);
     });
 }
 
@@ -769,7 +749,7 @@ fn screen_trace_debug_pass(
     let hzb = params.hzb.resources.as_mut().unwrap();
     let res = params.state.resources.as_mut().unwrap();
 
-    ctx.record(|encoder| {
+    ctx.record(|encoder, _| {
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
         let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);

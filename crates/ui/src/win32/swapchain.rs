@@ -670,7 +670,7 @@ fn release(
     If(swapchain): If<ResMut<Swapchain>>,
 ) {
     let swapchain = swapchain.into_inner();
-    submission.record(|encoder| {
+    submission.record(|encoder, _| {
         let Some(image) = swapchain.current_image() else {
             return;
         };

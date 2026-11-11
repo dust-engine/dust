@@ -335,7 +335,7 @@ pub(crate) fn autoexposure_pass(
         _pad: [0; 2],
     };
 
-    ctx.record(move |encoder| {
+    ctx.record(move |encoder, _| {
         let ctl_buffer = uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&uniforms));
         let hdr = &mut *hdr_target;
         let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
@@ -449,7 +449,7 @@ pub(crate) fn tonemap_pass(
         };
     let sdr_transform_matrix = lpm_ctl.sdr_transform_matrix();
 
-    ctx.record(move |encoder| {
+    ctx.record(move |encoder, _| {
         let lpm_ctl_buffer = uniform_ring_buffer.create_uniform(
             encoder,
             bytemuck::bytes_of(&TonemapPassUniforms {

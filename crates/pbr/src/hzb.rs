@@ -206,7 +206,7 @@ pub(crate) fn hzb_build_pass(
     let num_mips = res.num_mips;
     let clear_counter = std::mem::take(&mut res.counter_needs_clear);
 
-    ctx.record(|encoder| {
+    ctx.record(|encoder, _| {
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
         let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);

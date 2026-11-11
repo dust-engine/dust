@@ -308,7 +308,7 @@ fn render(
     // Everything below records unconditionally, so next frame's `depth_prev`
     // holds a complete depth buffer.
     hdr.depth_written = true;
-    ctx.record(move |encoder| {
+    ctx.record(move |encoder, _| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
                 sbt.write_buffer(slice);
@@ -1055,7 +1055,7 @@ fn shadow_pass(
     // upscaler/jitter state.
     let shadow_frame_index: u32 = *frame_index;
     *frame_index = frame_index.wrapping_add(1);
-    ctx.record(move |encoder| {
+    ctx.record(move |encoder, _| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, shadow_sbt.layout(), |slice| {
                 shadow_sbt.write_buffer(slice);
@@ -1239,7 +1239,7 @@ fn clear_debug_overlay(mut ctx: SubmissionState, mut hdr_target: Option<ResMut<H
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
-    ctx.record(|encoder| {
+    ctx.record(|encoder, _| {
         let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::CLEAR);
         encoder.use_image_resource(
             render_target_views.debug_overlay(),

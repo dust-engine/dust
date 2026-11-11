@@ -9,7 +9,7 @@
 //! ## Usage
 //!
 //! ```ignore
-//! ctx.record(move |encoder| {
+//! ctx.record(move |encoder, _| {
 //!     // … bind pipeline, set up descriptors …
 //!     encoder.timing_scope(profiler.as_deref_mut(), "primary ray", |encoder| {
 //!         encoder.trace_rays(/* … */);

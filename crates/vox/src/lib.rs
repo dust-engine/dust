@@ -412,7 +412,7 @@ fn sync_buffers_system(
     materials: Res<Assets<VoxMaterial>>,
     palettes: Res<Assets<VoxPalette>>,
 ) {
-    ctx.record(|encoder| {
+    ctx.record(|encoder, _| {
         for event in material_events.read() {
             match event {
                 AssetEvent::Added { id } | AssetEvent::Modified { id } => {

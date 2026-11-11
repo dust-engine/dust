@@ -172,7 +172,7 @@ pub(crate) fn ensure_upscaler_session(
         #[cfg(feature = "dlss")]
         Upscaler::Dlss(ngx) => {
             let mut created = None;
-            ctx.record(|encoder| {
+            ctx.record(|encoder, _| {
                 created =
                     Some(ngx.create_ray_reconstruction(encoder, render_extent, display_extent));
             });
@@ -338,7 +338,7 @@ pub(crate) fn upscaler_evaluate(
     // holds a complete frame for next frame's screen trace.
     hdr_target.denoised_written = true;
 
-    ctx.record(move |encoder| {
+    ctx.record(move |encoder, _| {
         let hdr = &mut *hdr_target;
         let views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
 

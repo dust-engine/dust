@@ -432,7 +432,7 @@ fn compute_luts(
     tracing::info!("Recomputing sky atmosphere LUTs");
     atmosphere_luts.luts_initialized = true;
 
-    state.record(|encoder| {
+    state.record(|encoder, _| {
         let buffer = encoder
             .retain(atmosphere_param_uniform_buffer)
             .deref_inner();
