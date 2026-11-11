@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod hzb;
+pub mod radiance_cascades;
 pub mod screen_trace;
 pub mod sky;
 pub mod tonemap;
@@ -227,6 +228,7 @@ impl Plugin for PbrRenderPlugin {
 
         app.add_plugins(sky::SkyPlugin);
         app.add_plugins(screen_trace::ScreenTracePlugin);
+        app.add_plugins(radiance_cascades::RadianceCascadesPlugin);
         app.configure_sets(
             PostUpdate,
             SkyAtmosphereLUTRenderSet

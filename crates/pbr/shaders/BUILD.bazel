@@ -141,6 +141,66 @@ ron2bin(
     type = "compute-pipeline",
 )
 
+# Radiance cascades (rc_common.slang explains them): the shared module and the
+# compute passes grouped by what they do, all on the RT pipeline layout.
+slang_shader(
+    name = "rc_module",
+    srcs = ["rc_common.slang"],
+    out = "rc_common.slang-module",
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        ":pbr_module",
+    ],
+    opts = ["-emit-ir"],
+)
+
+_RC_HDRS = [
+    "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+    ":pbr_module",
+    ":rc_module",
+]
+
+[slang_shader(
+    name = name,
+    srcs = [name + ".slang"],
+    hdrs = _RC_HDRS,
+    out = name + ".spv",
+    profile = "sm_6_6",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+        "-fvk-use-entrypoint-name",
+    ] + [
+        opt
+        for entry in entries
+        for opt in ["-entry", entry, "-stage", "compute"]
+    ],
+) for name, entries in [
+    ("rc_build", [
+        "rcInsertPixels",
+        "rcAllocate",
+        "rcWriteArgs",
+        "rcInsertParents",
+    ]),
+    ("rc_debug", ["rcDebugOverlay"]),
+]]
+
+_RC_COMPUTE_PIPELINES = [
+    "rc_insert_pixels",
+    "rc_allocate",
+    "rc_write_args",
+    "rc_insert_parents",
+    "rc_debug",
+]
+
+[ron2bin(
+    name = name + "_comp_pipeline",
+    src = name + ".comp.pipeline.ron",
+    out = name + ".comp.pipeline.bin",
+    type = "compute-pipeline",
+) for name in _RC_COMPUTE_PIPELINES]
+
 # Closest-depth HZB build: one compute dispatch for the whole mip chain
 # (hzb_build.slang). Own layout, auto-derived from the shader's bindings.
 slang_shader(
@@ -229,11 +289,13 @@ filegroup(
         ":screen_trace_comp_pipeline",
         ":screen_trace_compact_comp_pipeline",
         ":screen_trace_debug_comp_pipeline",
+        ":rc_build",
+        ":rc_debug",
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",
         ":autoexposure",
         ":autoexposure_comp_pipeline",
         ":autoexposure_playout",
-    ],
+    ] + [name + "_comp_pipeline" for name in _RC_COMPUTE_PIPELINES],
 )

@@ -234,13 +234,6 @@ float3 applyScreenSpaceRayBias(float3 worldPos, float3 N, uint2 pixel, float dev
     return worldPos + normalBias * N;
 }
 
-// Whether the G-buffer holds a surface at `pixel`: sky stores depth 0 and
-// UI stores 1 (the same pixels albedoUint.a marks with 0xFF).
-bool isSurfacePixel(uint2 pixel) {
-    float z = params.gbuffer.depthTexture[pixel];
-    return z > 0.0 && z < 1.0;
-}
-
 // ── Screen trace: one thread per pixel ───────────────────────────────────
 
 [shader("compute")]
@@ -254,7 +247,7 @@ void main(uint3 threadId: SV_DispatchThreadID) {
     }
     // Sky / UI pixels have no surface to gather for: mark them "done" so the
     // compaction skips them.
-    if (!isSurfacePixel(pixel)) {
+    if (!params.gbuffer.hasSurface(pixel)) {
         params.traceHit[pixel] = encodeTraceHit(0.0, true, false, false, false);
         return;
     }
@@ -398,7 +391,7 @@ void debugOverlay(uint3 threadId: SV_DispatchThreadID) {
 
     float3 color = float3(0, 0, 0);
     if (st.debugMode == DEBUG_TRACE_TYPES) {
-        if (!isSurfacePixel(pixel)) {
+        if (!params.gbuffer.hasSurface(pixel)) {
             return; // sky / UI: nothing traced
         }
         TraceHit t = decodeTraceHit(params.traceHit[pixel]);

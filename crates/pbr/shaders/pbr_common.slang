@@ -292,6 +292,13 @@ public struct PbrPipelineGbuffer {
         float3 encoded = select(color <= 0.0031308, color * 12.92, 1.055 * pow(color, 1.0 / 2.4) - 0.055);
         debugOverlayTexture[pixel] = float4(encoded, 1.0);
     }
+
+    // Whether a surface is at `pixel`: the sky stores depth 0 and the UI 1 (the
+    // same pixels albedoUint.a marks with 0xFF).
+    public bool hasSurface(uint2 pixel) {
+        float z = depthTexture[pixel];
+        return z > 0.0 && z < 1.0;
+    }
 }
 
 // ── Screen-space (HZB) gather trace ─────────────────────────────────────
@@ -389,6 +396,62 @@ public TraceHit decodeTraceHit(uint encoded) {
     return t;
 }
 
+// ── Radiance cascades ───────────────────────────────────────────────────
+//
+// What the radiance cascades passes share (rc_common.slang explains how they
+// work). They reach their buffers by the device addresses in RcConstants.
+// Layouts MUST match crates/pbr/src/radiance_cascades.rs.
+
+public static const uint RC_CASCADES = 4;
+
+// What the cache keeps of a probe.
+public struct RcProbe {
+    // The key of the cell the probe is for (rcKey).
+    public uint key;
+}
+
+// Where one cascade's hash table and probes are in the cache's buffers, which
+// hold the cascades one after another.
+public struct RcCascade {
+    // The table's first slot in `keys` and `slots`.
+    public uint tableOffset;
+    // The table's slot count, a power of two, minus one: a hash masked by it is
+    // a slot of the table.
+    public uint tableMask;
+    // The cascade's first probe in `probes`.
+    public uint probeOffset;
+    // How many probes the cascade has room for.
+    public uint probeCapacity;
+}
+
+// The parameters of the radiance cascades passes, uploaded every frame.
+public struct RcConstants {
+    public RcCascade cascades[RC_CASCADES];
+    // The LODs are centered on it.
+    public float3 cameraPosition;
+    // World units between the probes of cascade 0 at LOD 0.
+    public float spacing;
+    // The Chebyshev distance from the camera at which LOD 0 ends.
+    public float lodDistance;
+    // Which debug view rcDebugOverlay paints (RC_DEBUG_* in rc_debug.slang).
+    public uint debugMode;
+    // Of the G-buffer.
+    public uint2 renderExtent;
+    // Per table slot: the key of the cell there, or 0 if the slot is empty.
+    public uint* keys;
+    // Per table slot with a key: the index of the cell's probe, counted from
+    // the cascade's probeOffset, or RC_INVALID if the cascade had no room left.
+    public uint* slots;
+    public RcProbe* probes;
+    // Counts and indirect dispatch arguments, at the RC_COUNTER_* offsets.
+    public uint* counters;
+}
+
+// Offsets into RcConstants::counters, in uints. Per cascade: how many probes it
+// has, then the arguments of an indirect dispatch of 64-thread groups over them.
+public static const uint RC_COUNTER_PROBES = 0;
+public static const uint RC_COUNTER_PROBE_ARGS = RC_COUNTER_PROBES + RC_CASCADES;
+
 public struct PbrPipelineParams {
     [Stages(STAGE_RAYGEN)]
     public RaytracingAccelerationStructure sceneBVH;
@@ -429,6 +492,10 @@ public struct PbrPipelineParams {
     // `[count, 1, 1]`: a VkTraceRaysIndirectCommandKHR.
     [Stages(STAGE_COMPUTE)]
     public RWStructuredBuffer<uint> compactedTraceArgs;
+
+    // Radiance cascades (binding 23).
+    [Stages(STAGE_COMPUTE)]
+    public ConstantBuffer<RcConstants> rc;
 
 
     // Ray-length `t` from the camera origin to the surface stored at `position`.

@@ -35,14 +35,21 @@ PipelineLayout(
                     Binding(binding: 20, ty: StorageImage,          stages: [Compute]),                            // trace hit records
                     Binding(binding: 21, ty: StorageBuffer,         stages: [Compute]),                            // compacted trace texels
                     Binding(binding: 22, ty: StorageBuffer,         stages: [Compute]),                            // compacted trace args (indirect)
+                    // Radiance cascades (pbr_common.slang).
+                    Binding(binding: 23, ty: UniformBuffer,         stages: [Compute]),                            // RcConstants
                 ]
             )
         ),
     ],
+    // Start and end of each stage's range, kept apart: a push must name every stage
+    // whose range overlaps it, and each of those must cover all of it.
     push_constants: {
         // A per-frame frameIndex sampling seed. Pushed by the shadow pass
         // (ShadowPush, shadow.slang); the primary pipeline shares this layout
         // but declares no push constants of its own.
         RayGen: (0, 4),
+        // The cascade a radiance cascades compute pass works on (RcPush,
+        // rc_common.slang).
+        Compute: (4, 8),
     }
 )
