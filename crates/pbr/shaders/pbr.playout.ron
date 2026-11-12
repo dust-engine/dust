@@ -49,7 +49,7 @@ PipelineLayout(
         // but declares no push constants of its own.
         RayGen: (0, 4),
         // The cascade a radiance cascades compute pass works on (RcPush,
-        // rc_common.slang).
+        // radiance_cascades.slang).
         Compute: (4, 8),
     }
 )

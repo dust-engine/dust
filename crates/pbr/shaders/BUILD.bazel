@@ -141,65 +141,75 @@ ron2bin(
     type = "compute-pipeline",
 )
 
-# Radiance cascades (rc_common.slang explains them): the shared module and the
-# compute passes grouped by what they do, all on the RT pipeline layout.
+# Radiance cascades: the probe build's four compute passes and the debug
+# overlay, in one module (radiance_cascades.slang), all on the RT pipeline
+# layout.
 slang_shader(
-    name = "rc_module",
-    srcs = ["rc_common.slang"],
-    out = "rc_common.slang-module",
+    name = "radiance_cascades",
+    srcs = ["radiance_cascades.slang"],
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
     ],
-    opts = ["-emit-ir"],
-)
-
-_RC_HDRS = [
-    "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-    ":pbr_module",
-    ":rc_module",
-]
-
-[slang_shader(
-    name = name,
-    srcs = [name + ".slang"],
-    hdrs = _RC_HDRS,
-    out = name + ".spv",
+    out = "radiance_cascades.spv",
     profile = "sm_6_6",
     target = "spirv",
     opts = [
         "-O3",
         "-matrix-layout-row-major",
         "-fvk-use-entrypoint-name",
-    ] + [
-        opt
-        for entry in entries
-        for opt in ["-entry", entry, "-stage", "compute"]
-    ],
-) for name, entries in [
-    ("rc_build", [
+        "-entry",
         "rcInsertPixels",
+        "-stage",
+        "compute",
+        "-entry",
         "rcAllocate",
+        "-stage",
+        "compute",
+        "-entry",
         "rcWriteArgs",
+        "-stage",
+        "compute",
+        "-entry",
         "rcInsertParents",
-    ]),
-    ("rc_debug", ["rcDebugOverlay"]),
-]]
-
-_RC_COMPUTE_PIPELINES = [
-    "rc_insert_pixels",
-    "rc_allocate",
-    "rc_write_args",
-    "rc_insert_parents",
-    "rc_debug",
-]
-
-[ron2bin(
-    name = name + "_comp_pipeline",
-    src = name + ".comp.pipeline.ron",
-    out = name + ".comp.pipeline.bin",
+        "-stage",
+        "compute",
+        "-entry",
+        "rcDebugOverlay",
+        "-stage",
+        "compute",
+    ],
+)
+ron2bin(
+    name = "rc_insert_pixels_comp_pipeline",
+    src = "rc_insert_pixels.comp.pipeline.ron",
+    out = "rc_insert_pixels.comp.pipeline.bin",
     type = "compute-pipeline",
-) for name in _RC_COMPUTE_PIPELINES]
+)
+ron2bin(
+    name = "rc_allocate_comp_pipeline",
+    src = "rc_allocate.comp.pipeline.ron",
+    out = "rc_allocate.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+ron2bin(
+    name = "rc_write_args_comp_pipeline",
+    src = "rc_write_args.comp.pipeline.ron",
+    out = "rc_write_args.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+ron2bin(
+    name = "rc_insert_parents_comp_pipeline",
+    src = "rc_insert_parents.comp.pipeline.ron",
+    out = "rc_insert_parents.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+ron2bin(
+    name = "rc_debug_comp_pipeline",
+    src = "rc_debug.comp.pipeline.ron",
+    out = "rc_debug.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
 
 # Closest-depth HZB build: one compute dispatch for the whole mip chain
 # (hzb_build.slang). Own layout, auto-derived from the shader's bindings.
@@ -289,13 +299,17 @@ filegroup(
         ":screen_trace_comp_pipeline",
         ":screen_trace_compact_comp_pipeline",
         ":screen_trace_debug_comp_pipeline",
-        ":rc_build",
-        ":rc_debug",
+        ":radiance_cascades",
+        ":rc_insert_pixels_comp_pipeline",
+        ":rc_allocate_comp_pipeline",
+        ":rc_write_args_comp_pipeline",
+        ":rc_insert_parents_comp_pipeline",
+        ":rc_debug_comp_pipeline",
         ":tonemap",
         ":tonemap_comp_pipeline",
         ":tonemap_playout",
         ":autoexposure",
         ":autoexposure_comp_pipeline",
         ":autoexposure_playout",
-    ] + [name + "_comp_pipeline" for name in _RC_COMPUTE_PIPELINES],
+    ],
 )

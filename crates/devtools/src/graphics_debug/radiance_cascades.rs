@@ -77,21 +77,16 @@ fn config(
 
 impl RadianceCascadesPage {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Logarithmic: both settings span orders of magnitude.
         let mut slider = |label: &'static str,
                           range: std::ops::RangeInclusive<f32>,
                           step: f32,
-                          logarithmic: bool,
                           get: fn(&RadianceCascadesConfig) -> f32,
                           set: fn(&mut RadianceCascadesConfig, f32)| {
-            let slider = NumberSlider::new(
-                label,
-                range,
-                step,
-                logarithmic,
-                window,
-                cx,
-                move |this, v, cx| config(this, cx, move |c| set(c, v)),
-            );
+            let slider =
+                NumberSlider::new(label, range, step, true, window, cx, move |this, v, cx| {
+                    config(this, cx, move |c| set(c, v))
+                });
             (slider, get)
         };
         let sliders = vec![
@@ -99,7 +94,6 @@ impl RadianceCascadesPage {
                 "Probe spacing (world)",
                 0.03..=2.0,
                 0.001,
-                true,
                 |c| c.probe_spacing,
                 |c, v| c.probe_spacing = v,
             ),
@@ -107,7 +101,6 @@ impl RadianceCascadesPage {
                 "LOD 0 distance (world)",
                 1.0..=256.0,
                 0.1,
-                true,
                 |c| c.lod_distance,
                 |c, v| c.lod_distance = v,
             ),

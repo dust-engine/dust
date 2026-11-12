@@ -717,7 +717,7 @@ fn compact_traces_pass(
 }
 
 /// Paints the selected debug view into the overlay layer.
-fn screen_trace_debug_pass(
+pub(crate) fn screen_trace_debug_pass(
     mut ctx: SubmissionState,
     mut params: ScreenTraceSystemParams,
     compute_pipelines: Res<Assets<ComputePipeline>>,

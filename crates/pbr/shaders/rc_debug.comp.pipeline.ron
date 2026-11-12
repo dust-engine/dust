@@ -1,8 +1,8 @@
-// Radiance cascades compute pass (rc_debug.slang, entry `rcDebugOverlay`). Shares the ray
-// tracing pipeline layout (pbr.playout.bin).
+// Radiance cascades compute pass (radiance_cascades.slang, entry
+// `rcDebugOverlay`). Shares the ray tracing pipeline layout (pbr.playout.bin).
 ComputePipeline(
     shader: (
-        path: "bazel://dust/crates/pbr/shaders/rc_debug.spv",
+        path: "bazel://dust/crates/pbr/shaders/radiance_cascades.spv",
         entry_point: "rcDebugOverlay",
     ),
     layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),

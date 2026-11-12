@@ -398,17 +398,11 @@ public TraceHit decodeTraceHit(uint encoded) {
 
 // ── Radiance cascades ───────────────────────────────────────────────────
 //
-// What the radiance cascades passes share (rc_common.slang explains how they
-// work). They reach their buffers by the device addresses in RcConstants.
+// What the radiance cascades passes share (radiance_cascades.slang explains how
+// they work). They reach their buffers by the device addresses in RcConstants.
 // Layouts MUST match crates/pbr/src/radiance_cascades.rs.
 
 public static const uint RC_CASCADES = 4;
-
-// What the cache keeps of a probe.
-public struct RcProbe {
-    // The key of the cell the probe is for (rcKey).
-    public uint key;
-}
 
 // Where one cascade's hash table and probes are in the cache's buffers, which
 // hold the cascades one after another.
@@ -427,13 +421,11 @@ public struct RcCascade {
 // The parameters of the radiance cascades passes, uploaded every frame.
 public struct RcConstants {
     public RcCascade cascades[RC_CASCADES];
-    // The LODs are centered on it.
-    public float3 cameraPosition;
     // World units between the probes of cascade 0 at LOD 0.
     public float spacing;
     // The Chebyshev distance from the camera at which LOD 0 ends.
     public float lodDistance;
-    // Which debug view rcDebugOverlay paints (RC_DEBUG_* in rc_debug.slang).
+    // Which debug view rcDebugOverlay paints (RC_DEBUG_* in radiance_cascades.slang).
     public uint debugMode;
     // Of the G-buffer.
     public uint2 renderExtent;
@@ -442,7 +434,8 @@ public struct RcConstants {
     // Per table slot with a key: the index of the cell's probe, counted from
     // the cascade's probeOffset, or RC_INVALID if the cascade had no room left.
     public uint* slots;
-    public RcProbe* probes;
+    // Per probe: the key of the cell it's for (rcKey).
+    public uint* probes;
     // Counts and indirect dispatch arguments, at the RC_COUNTER_* offsets.
     public uint* counters;
 }
