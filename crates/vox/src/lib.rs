@@ -20,6 +20,7 @@ use bevy_pumicite::shader::RayTracingPipelineLibrary;
 use bevy_pumicite::{CreateDevice, DefaultTransferSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dust_pbr::PbrRenderState;
+use dust_pbr::sharc::SharcPipelines;
 use dust_vdb::hierarchy;
 use pumicite::Allocator;
 use pumicite::ash::{VkResult, vk};
@@ -251,11 +252,6 @@ impl Plugin for VoxPlugin {
                     .unwrap();
                 device_builder
                     .enable_feature(|features: &mut vk::PhysicalDevice16BitStorageFeatures| {
-                        &mut features.storage_buffer16_bit_access
-                    })
-                    .unwrap();
-                device_builder
-                    .enable_feature(|features: &mut vk::PhysicalDevice16BitStorageFeatures| {
                         &mut features.uniform_and_storage_buffer16_bit_access
                     })
                     .unwrap();
@@ -271,7 +267,12 @@ impl Plugin for VoxPlugin {
             .after(CreateDevice),
         );
 
-        app.add_systems(Startup, setup.after(dust_pbr::setup));
+        app.add_systems(
+            Startup,
+            setup
+                .after(dust_pbr::setup)
+                .after(dust_pbr::sharc::setup_sharc),
+        );
 
         app.add_systems(
             PostUpdate,
@@ -286,8 +287,13 @@ impl Plugin for VoxPlugin {
 pub struct VoxRenderState {
     primary_pipeline: Handle<RayTracingPipelineLibrary>,
     shadow_pipeline: Handle<RayTracingPipelineLibrary>,
+    final_gather_pipeline: Handle<RayTracingPipelineLibrary>,
+    // Shared closest-hit + intersection attached to the SHARC Update pipeline.
+    sharc_update_pipeline: Handle<RayTracingPipelineLibrary>,
     primary_library_index: u16,
     shadow_library_index: u16,
+    final_gather_library_index: u16,
+    sharc_update_library_index: u16,
 }
 
 fn setup(
@@ -295,6 +301,7 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut pipeline_manager: ResMut<RtxPipelineManager>,
     pbr_render_state: Res<PbrRenderState>,
+    sharc_pipelines: Res<SharcPipelines>,
 ) {
     let primary_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_pbr.rtx.pipeline.bin");
@@ -306,11 +313,29 @@ fn setup(
     let shadow_library_index = pipeline_manager
         .add_library_for_pipeline(&pbr_render_state.shadow_pipeline, shadow_pipeline.clone());
 
+    let final_gather_pipeline: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://dust/crates/vox/shaders/vox_final_gather.rtx.pipeline.bin");
+    let final_gather_library_index = pipeline_manager.add_library_for_pipeline(
+        &pbr_render_state.final_gather_pipeline,
+        final_gather_pipeline.clone(),
+    );
+
+    let sharc_update_pipeline: Handle<RayTracingPipelineLibrary> =
+        asset_server.load("bazel://dust/crates/vox/shaders/vox_sharc_update.rtx.pipeline.bin");
+    let sharc_update_library_index = pipeline_manager.add_library_for_pipeline(
+        &sharc_pipelines.update_pipeline,
+        sharc_update_pipeline.clone(),
+    );
+
     commands.insert_resource(VoxRenderState {
         primary_pipeline,
         primary_library_index,
         shadow_pipeline,
         shadow_library_index,
+        final_gather_pipeline,
+        final_gather_library_index,
+        sharc_update_pipeline,
+        sharc_update_library_index,
     });
 }
 
@@ -328,6 +353,7 @@ fn write_sbt_entries(
     mut models: Query<(&mut VoxModel, Option<&geometry::VoxModelBLASSource>)>,
     mut instances: Query<(Entity, &mut TLASInstance<dust_pbr::PbrInstanceData>), With<VoxInstance>>,
     mut pbr_state: ResMut<PbrRenderState>,
+    mut sharc_pipelines: ResMut<SharcPipelines>,
     vox_render_state: Res<VoxRenderState>,
 
     geometry_assets: Res<Assets<VoxGeometry>>,
@@ -335,15 +361,29 @@ fn write_sbt_entries(
     palette_assets: Res<Assets<VoxPalette>>,
 ) {
     let pbr_state = &mut *pbr_state;
-    let (Some(sbt), Some(shadow_sbt)) = (pbr_state.sbt.as_mut(), pbr_state.shadow_sbt.as_mut())
-    else {
-        for (mut model, _) in models.iter_mut() {
-            model.sbt_index = u32::MAX;
+    let sharc_state = &mut *sharc_pipelines;
+    let (Some(sbt), Some(shadow_sbt), Some(final_gather_sbt)) = (
+        pbr_state.sbt.as_mut(),
+        pbr_state.shadow_sbt.as_mut(),
+        pbr_state.final_gather_sbt.as_mut(),
+    ) else {
+        for mut model in models.iter_mut() {
+            model.0.sbt_index = u32::MAX;
         }
         for (_, mut instance) in instances.iter_mut() {
             instance.disabled = true;
         }
         tracing::warn!("Missing SBT");
+        return;
+    };
+    let Some(sharc_update_sbt) = sharc_state.update_sbt.as_mut() else {
+        for mut model in models.iter_mut() {
+            model.0.sbt_index = u32::MAX;
+        }
+        for (_, mut instance) in instances.iter_mut() {
+            instance.disabled = true;
+        }
+        tracing::warn!("Missing SHARC SBT");
         return;
     };
     let miss_index = shadow_sbt.push_miss(vox_render_state.shadow_library_index, 1, |_| {});
@@ -385,6 +425,24 @@ fn write_sbt_entries(
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
+        // Push same geometry to final gather SBT
+        let final_gather_sbt_index = final_gather_sbt.push_hitgroup(
+            vox_render_state.final_gather_library_index,
+            0,
+            |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            },
+        );
+        assert_eq!(final_gather_sbt_index, model.sbt_index);
+
+        let sharc_update_idx = sharc_update_sbt.push_hitgroup(
+            vox_render_state.sharc_update_library_index,
+            0,
+            |param_dst| {
+                param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+            },
+        );
+        assert_eq!(sharc_update_idx, model.sbt_index);
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;

@@ -6,6 +6,7 @@
 
 mod gpu;
 mod screen_trace;
+mod sharc;
 mod sky;
 
 use gpui::{
@@ -50,6 +51,11 @@ impl GraphicsDebugView {
                     cx.new(|cx| screen_trace::ScreenTracePage::new(window, cx))
                         .into(),
                 ),
+            ),
+            page("Final gather", None),
+            page(
+                "SHARC",
+                Some(cx.new(|cx| sharc::SharcPage::new(window, cx)).into()),
             ),
             page("Auto-exposure", None),
             page("Super-resolution", None),
