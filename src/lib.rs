@@ -1,6 +1,9 @@
 // `dust_vdb`'s tree API carries `generic_const_exprs` bounds; the accessor calls in
 // `paint_rainbow_wedge` need the feature here too.
 #![feature(generic_const_exprs)]
+#![feature(f16)]
+
+mod emissive_room;
 
 use std::time::Duration;
 
@@ -234,11 +237,24 @@ fn build_app(app: &mut bevy::app::App, loader: pumicite::ash::Entry) {
         Transform::default(),
     ));
 
-    app.add_systems(
-        Startup,
-        (startup_system, setup_rainbow_demo).after(CreateDevice),
-    )
-    .add_systems(Update, (animate_teapot_system, update_rainbow_demo_system));
+    // `DUST_SCENE` picks the scene: `castle` (the default) or `emissive_room`.
+    match std::env::var("DUST_SCENE").as_deref() {
+        Ok("emissive_room") => {
+            app.add_plugins(emissive_room::EmissiveRoomPlugin);
+        }
+        scene => {
+            if let Ok(scene) = scene
+                && scene != "castle"
+            {
+                warn!("Unknown DUST_SCENE {scene:?}; loading the castle");
+            }
+            app.add_systems(
+                Startup,
+                (startup_system, setup_rainbow_demo).after(CreateDevice),
+            )
+            .add_systems(Update, (animate_teapot_system, update_rainbow_demo_system));
+        }
+    }
 }
 
 /// Marks the character's visible placeholder body, present only in third person.
