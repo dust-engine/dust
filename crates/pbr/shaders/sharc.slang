@@ -1,37 +1,68 @@
 module sharc;
 
-// SHARC SDK plumbing: configures SharcCommon.h so the cache types
-// (HashGridKey, SharcAccumulationData, SharcPackedData, SharcParameters,
-// SharcHitData, …) resolve when this module is compiled. Headers come from
-// @sharc//:sharc_headers — see crates/pbr/shaders/BUILD.bazel.
-#define HASH_GRID_ENABLE_64_BIT_ATOMICS 0
-// Insert-path claim strategy for the no-64-bit-atomics build:
-//   0 = SHARC's stock bounded spinlock (default; drops inserts under heavy
-//       contention but is the faithful, single-source-of-truth path)
-//   1 = wait-free single 32-bit-CAS occupancy claim (no spin; may create a few
-//       duplicate entries under contention, merged at resolve). Requires the
-//       lock buffer to be wired (it is) and the resolve eviction reset (it is).
-#define HASH_GRID_CLAIM_VIA_32BIT_CAS 1
-#define HASH_GRID_COMPACT 0
-#define SHARC_ENABLE_GLSL 0
-#define SHARC_ENABLE_RESPONSIVE_LIGHTING 0
-#define SHARC_ENABLE_SH_ENCODING 0
-#define SHARC_UPDATE 0
-// Our keys are discrete voxel identities, not a spatial grid, so the
-// camera-motion LOD reprojection in SharcResolveEntry (which reinterprets key
-// bits as grid position/level) is meaningless and must be off. `cellKey` does
-// its own discrete distance coarsening instead.
-#define SHARC_BLEND_ADJACENT_LEVELS 0
-#define RW_STRUCTURED_BUFFER(name, type) RWStructuredBuffer<type> name
-#define BUFFER_AT_OFFSET(name, offset) name[offset]
-#include "SharcCommon.h"
+// The radiance cache, after NVIDIA's SHARC: outgoing radiance per voxel face,
+// which the Update pass (sharc/sharc_update.slang) samples, the Resolve pass
+// (sharc/sharc_resolve.slang) averages over frames, and the final gather reads.
+//
+// A `HashMap` maps each cell's key (`SharcParams::cellKey`) to a slot. The cell's
+// radiance is at that slot in two buffers: `SharcAccumulation`, this frame's
+// samples, and `SharcResolved`, their average over recent frames.
+import hash_map;
 
-// Public mirror of `SharcConstantsRaw` in crates/pbr/src/sharc.rs; Resolve's
-// `SharcResolveConstants` (sharc/sharc_resolve.slang) mirrors a prefix of it.
-// It's declared in this module rather than an `#include`d header so
-// PbrPipelineParams can carry a public ConstantBuffer<SharcShaderConstants>
-// field — `#include`d struct types are module-private in Slang and can't
-// appear in public APIs.
+// Bounds on SharcShaderConstants::accumulationFrameNum and ::staleFrameNum.
+public static const uint kSharcAccumulationFrameNumMin = 1;
+public static const uint kSharcAccumulationFrameNumMax = 1024;
+public static const uint kSharcStaleFrameNumMin = 8;
+public static const uint kSharcStaleFrameNumMax = 1024;
+
+// The slot of a cell that couldn't be opened (`openCellForUpdate`).
+public static const uint kSharcInvalidSlot = 0xFFFFFFFFu;
+
+// A cell's samples this frame: their radiance, summed with atomic adds, and how
+// many there are. Resolve folds them into the cell's `SharcResolved` and zeroes
+// this. std430 stride 16 B (`SharcResources::STRIDE_ACCUMULATION`).
+public struct SharcAccumulation {
+    public float3 radiance;
+    public uint sampleNum;
+}
+
+// A cell's radiance averaged over recent frames. std430 stride 16 B
+// (`SharcResources::STRIDE_RESOLVED`).
+public struct SharcResolved {
+    // The average radiance and the (frame-weighted) number of samples in it.
+    float16_t4 radianceAndSampleNum;
+    // Frames accumulated in the low 16 bits; frames since the last sample in the
+    // high 16. Both stay under 2^16: a cell is evicted after at most
+    // kSharcStaleFrameNumMax frames without a sample, and every sample caps the
+    // count at the accumulation window.
+    uint frameNums;
+    uint _pad;
+
+    public __init(float3 radiance, float sampleNum, uint accumulatedFrameNum,
+                  uint staleFrameNum) {
+        const float kFloat16Max = 65504.0;
+        radianceAndSampleNum = float16_t4(min(float4(radiance, sampleNum), kFloat16Max));
+        frameNums = accumulatedFrameNum | (staleFrameNum << 16);
+        _pad = 0;
+    }
+
+    public property float3 radiance {
+        get { return float3(radianceAndSampleNum.xyz); }
+    }
+    public property float sampleNum {
+        get { return float(radianceAndSampleNum.w); }
+    }
+    public property uint accumulatedFrameNum {
+        get { return frameNums & 0xFFFFu; }
+    }
+    public property uint staleFrameNum {
+        get { return frameNums >> 16; }
+    }
+}
+
+// Public mirror of `SharcConstantsRaw` in crates/pbr/src/sharc.rs. It's declared
+// in this module so PbrPipelineParams and the Resolve pass can both carry a
+// ConstantBuffer<SharcShaderConstants>.
 public struct SharcShaderConstants {
     public float3 cameraPosition;
     public float sceneScale;
@@ -87,6 +118,13 @@ uint pcgHash(uint x) {
     return (word >> 22u) ^ word;
 }
 
+// A stable color per 32-bit hash, for debug views.
+float3 colorFromHash(uint hash) {
+    return float3(float((hash >> 0) & 0x3FFu) / 1023.0,
+                  float((hash >> 11) & 0x7FFu) / 2047.0,
+                  float((hash >> 22) & 0x3FFu) / 1023.0);
+}
+
 // Generic pumicite shader-stage flags for the `[Stages(...)]` attribute. The
 // pumicite codegen reads this mask off every ParameterBlock binding and only
 // coalesces consecutive descriptor writes that share it, so each emitted
@@ -104,12 +142,13 @@ public static const int STAGE_INTERSECTION = 0x1000;
 public struct StagesAttribute { int stages; }
 
 public struct SharcParams {
+    // The hash map: each slot's key tag, 0 when empty (`HashMap`).
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
-    RWStructuredBuffer<HashGridKey> g_sharcHashEntries;
+    RWStructuredBuffer<uint> g_sharcHashEntries;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
-    RWStructuredBuffer<SharcAccumulationData> g_sharcAccumulation;
+    RWStructuredBuffer<SharcAccumulation> g_sharcAccumulation;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
-    RWStructuredBuffer<SharcPackedData> g_sharcResolved;
+    RWStructuredBuffer<SharcResolved> g_sharcResolved;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public ConstantBuffer<SharcShaderConstants> g_sharcConstants;
     // Candidate pool — read side feeds Update's primary vertices, write side
@@ -123,41 +162,18 @@ public struct SharcParams {
     RWStructuredBuffer<Candidate> g_sharcCandidatesWrite;
     [Stages(STAGE_RAYGEN | STAGE_CLOSEST_HIT)]
     RWStructuredBuffer<uint> g_sharcKeysWrite;
-    // Per-slot lock/occupancy buffer for the hash-grid insert path on hardware
-    // without 64-bit atomics (HASH_GRID_ENABLE_64_BIT_ATOMICS 0). One uint per
-    // hash entry (sized entriesNum, not poolCapacity). Used by the spinlock and
-    // by the 32-bit-CAS claim (HASH_GRID_CLAIM_VIA_32BIT_CAS); the resolve pass
-    // resets the flag at eviction. Only openCellForUpdate touches it.
-    [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
-    RWStructuredBuffer<uint> g_sharcLock;
 
-    // Private helpers used by the public accessor methods below.
-    SharcParameters buildSharcParameters() {
-        SharcParameters p;
-        p.hashGridParameters.cameraPosition = g_sharcConstants.cameraPosition;
-        p.hashGridParameters.sceneScale = g_sharcConstants.sceneScale;
-        p.hashGridParameters.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
-        p.hashGridParameters.levelBias = SHARC_GRID_LEVEL_BIAS;
-        p.hashGridData.capacity = g_sharcConstants.entriesNum;
-        p.hashGridData.hashEntriesBuffer = g_sharcHashEntries;
-        // Lock/occupancy buffer for the no-64-bit-atomics insert path. The
-        // HashGrid_(Data) struct only declares this field when
-        // HASH_GRID_ENABLE_64_BIT_ATOMICS == 0, so guard the assignment to match.
-#if !HASH_GRID_ENABLE_64_BIT_ATOMICS && !HASH_GRID_COMPACT
-        p.hashGridData.lockBuffer = g_sharcLock;
-#endif
-        p.accumulationBuffer = g_sharcAccumulation;
-        p.resolvedBuffer = g_sharcResolved;
-        return p;
+    property HashMap map {
+        get {
+            return HashMap(g_sharcHashEntries, g_sharcConstants.entriesNum);
+        }
     }
 
-    // ── Key-based SHARC API (voxel-native) ────────────────────────────────
-    // SHARC's spatial hash exists to quantize a *continuous* surface position
-    // into a discrete cell. Voxels are already discrete, so that round-trip
-    // only adds floating-point boundary flicker (a hit on a voxel face sits on
-    // a cell boundary; sub-pixel camera jitter flips `floor()` to a neighbour).
-    // Instead the caller hands us a precomputed cell key built from stable
-    // integer identity and we address the hash map with it directly.
+    // ── Cell keys ─────────────────────────────────────────────────────────
+    // SHARC hashes a *continuous* surface position into a grid cell. Voxels are
+    // already discrete, and a hit on a voxel face sits on a cell boundary, where
+    // sub-pixel camera jitter would flip `floor()` to a neighbour. So the caller
+    // keys the cache by the voxel's integer identity instead.
 
     // Pack a cache-cell key from discrete, jitter-invariant inputs.
     // `voxelCoord` is the integer (object-space) voxel coordinate, `faceId` in
@@ -167,13 +183,11 @@ public struct SharcParams {
     // Distance coarsening (discrete, jitter-free LOD): within `sceneScale`
     // world units of the camera the key is full-resolution (lod 0); every
     // doubling of distance past that right-shifts the coordinate one more bit,
-    // merging 2^lod voxels per axis so the live-entry count stays bounded —
-    // the discrete replacement for SHARC's disabled adjacent-level blend.
+    // merging 2^lod voxels per axis so the live-entry count stays bounded.
     //
-    // 64-bit layout — the top bit is forced to 1 so the key can never equal the
-    // HASH_GRID_INVALID_HASH_KEY sentinel (0):
+    // 64-bit layout:
     //   [0..3) faceId | [3..7) lod | [7..23) x | [23..39) y | [39..55) z
-    //   | [55..63) instanceId | [63] = 1
+    //   | [55..63) instanceId
     public uint64_t cellKey(uint instanceId, int3 voxelCoord, uint faceId,
                             float3 cellCenterWorld) {
         float dist = distance(g_sharcConstants.cameraPosition, cellCenterWorld);
@@ -187,93 +201,95 @@ public struct SharcParams {
         key |= (uint64_t(c.y) & 0xFFFFu) << 23;
         key |= (uint64_t(c.z) & 0xFFFFu) << 39;
         key |= (uint64_t(instanceId) & 0xFFu) << 55;
-        key |= uint64_t(1) << 63;
         return key;
     }
 
+    // ── Queries and updates ───────────────────────────────────────────────
+
     // Cache query by precomputed key. Returns true with the resolved radiance
-    // when the cell has a usable entry; always reports the entry's accumulated
-    // sample count (0 on miss) so callers can weight a re-seed by 1/(1+n).
+    // when the cell has samples; always reports the cell's accumulated sample
+    // count (0 on miss) so callers can weight a re-seed by 1/(1+n).
     public bool getCachedRadianceByKey(uint64_t key, out float3 radiance,
                                        out float sampleNum) {
-        SharcParameters p = buildSharcParameters();
         radiance = float3(0.0, 0.0, 0.0);
         sampleNum = 0.0;
-        uint baseSlot = HashGridGetBaseSlot(key, p.hashGridData.capacity);
-        HashGridIndex idx = HASH_GRID_INVALID_CACHE_INDEX;
-        uint bucketOffset;
-        if (!HashGridFind(p.hashGridData, key, baseSlot,
-                          HASH_GRID_HASH_MAP_BUCKET_SIZE, idx, bucketOffset))
-            return false;
-        SharcVoxelData voxelData = SharcGetVoxelData(p.resolvedBuffer, idx);
-        sampleNum = voxelData.accumulatedSampleNum;
-        if (sampleNum > SHARC_SAMPLE_NUM_THRESHOLD) {
-            // SH encoding is off, so SharcDecodeRadiance ignores the direction.
-            radiance = SharcDecodeRadiance(voxelData.accumulatedRadiance,
-                                           float3(0.0, 0.0, 1.0));
-            return true;
+        if (let slot = map.find(key)) {
+            SharcResolved cell = g_sharcResolved[slot];
+            sampleNum = cell.sampleNum;
+            if (sampleNum > 0.0) {
+                radiance = cell.radiance;
+                return true;
+            }
         }
         return false;
     }
 
-    // Open this candidate's cache cell for the frame.
-    // Returns true if the cache cell was successfully opened;
-    // Returns false if the bucket was full and the cache cell cannot be opened.
+    // Open the cell for this frame — find it or insert it — and count one
+    // sample in it. Returns false, with `kSharcInvalidSlot`, when the cell's
+    // bucket is full.
     public bool openCellForUpdate(uint64_t key, out uint slot) {
-        SharcParameters p = buildSharcParameters();
-        slot = HASH_GRID_INVALID_CACHE_INDEX;
-        uint baseSlot = HashGridGetBaseSlot(key, p.hashGridData.capacity);
-        uint bucketOffset;
-        if (!HashGridInsert(p.hashGridData, key, baseSlot,
-                            HASH_GRID_HASH_MAP_BUCKET_SIZE, slot, bucketOffset))
-            return false;
-        SharcAddVoxelData(p, slot, float3(0.0, 0.0, 0.0), float3(1.0, 1.0, 1.0),
-                          float3(0.0, 0.0, 1.0), 0.0, 1);
-        return true;
+        if (let opened = map.findOrInsert(key)) {
+            slot = opened;
+            InterlockedAdd(g_sharcAccumulation[slot].sampleNum, 1u);
+            return true;
+        }
+        slot = kSharcInvalidSlot;
+        return false;
     }
 
     // Fold a lighting contribution into a cell already opened by
-    // `openCellForUpdate`, scaled by the path throughput. sampleData 0 — the
-    // sample was already counted when the cell was opened, so this only adds
-    // radiance. No hash lookup: `slot` was resolved once in the ray-gen and
-    // carried here via the payload. No-ops on an invalid slot (bucket was full).
+    // `openCellForUpdate`, scaled by the path throughput. The sample was
+    // counted when the cell was opened, so this only adds radiance. No hash
+    // lookup: `slot` was resolved once in the ray-gen and carried here via the
+    // payload. No-ops on `kSharcInvalidSlot`.
     public void addRadianceToSlot(uint slot, float3 radiance, float3 throughput) {
-        if (slot == HASH_GRID_INVALID_CACHE_INDEX) return;
-        SharcParameters p = buildSharcParameters();
-        SharcAddVoxelData(p, slot, radiance, throughput, float3(0.0, 0.0, 1.0),
-                          0.0, 0);
+        if (slot == kSharcInvalidSlot) return;
+        float3 sample = radiance * throughput;
+        // Greater than 0, not different from it, to keep NaN out: in the sum it
+        // would reach the resolved radiance and spread to every cell that
+        // gathers from this one.
+        if (sample.x > 0.0) InterlockedAdd(g_sharcAccumulation[slot].radiance.x, sample.x);
+        if (sample.y > 0.0) InterlockedAdd(g_sharcAccumulation[slot].radiance.y, sample.y);
+        if (sample.z > 0.0) InterlockedAdd(g_sharcAccumulation[slot].radiance.z, sample.z);
     }
 
     // ── Debug overlays ────────────────────────────────────────────────────
-    // Stable per-cell color from the key hash (replaces the spatial
-    // HashGridDebugColoredHash — same color-from-hash, fed our voxel key).
+
+    // Stable per-cell color from the key's hash.
     public float3 debugColoredHashByKey(uint64_t key) {
-        return HashGridGetColorFromHash32(HashGridHash32(key));
+        return colorFromHash(HashMap::hash(key));
     }
 
-    // Linear-probe bucket offset for `key` (blue = no collision … red = heavy
-    // probing). Mirrors HashGridDebugHashCollisions but key-based.
+    // How far into its bucket the cell is stored (blue = at its base slot …
+    // red = 5 or more slots in, or not in the map).
     public float3 debugHashCollisionsByKey(uint64_t key) {
-        SharcParameters p = buildSharcParameters();
-        uint baseSlot = HashGridGetBaseSlot(key, p.hashGridData.capacity);
-        HashGridIndex idx = HASH_GRID_INVALID_CACHE_INDEX;
-        uint bucketOffset = 0;
-        HashGridFind(p.hashGridData, key, baseSlot,
-                     HASH_GRID_HASH_MAP_BUCKET_SIZE, idx, bucketOffset);
-        if (bucketOffset == 0) return float3(0.0, 0.0, 1.0);
-        else if (bucketOffset == 1) return float3(0.0, 0.5, 0.5);
-        else if (bucketOffset == 2) return float3(0.0, 1.0, 0.0);
-        else if (bucketOffset == 3) return float3(1.0, 1.0, 0.0);
-        else if (bucketOffset == 4) return float3(0.75, 0.25, 0.0);
+        uint probe = map.probeLength(key);
+        if (probe == 0) return float3(0.0, 0.0, 1.0);
+        else if (probe == 1) return float3(0.0, 0.5, 0.5);
+        else if (probe == 2) return float3(0.0, 1.0, 0.0);
+        else if (probe == 3) return float3(1.0, 1.0, 0.0);
+        else if (probe == 4) return float3(0.75, 0.25, 0.0);
         else return float3(1.0, 0.0, 0.0);
     }
 
-    // Table-occupancy view — screen-space, key-agnostic, so it stays as-is.
+    // The table itself, one 7×7-pixel block per slot: green when occupied,
+    // black when empty. Columns of kBucketSize slots fill the screen top to
+    // bottom, then left to right.
     public float3 debugOccupancy(uint2 pixel, uint2 screenSize) {
-        HashGridData d;
-        d.capacity = g_sharcConstants.entriesNum;
-        d.hashEntriesBuffer = g_sharcHashEntries;
-        return HashGridDebugOccupancy(pixel, screenSize, d);
+        const uint kElementSize = 7;
+        const uint kBlockSize = kElementSize + 1;
+        const uint kColumns = HashMap::kBucketSize;
+
+        uint rowNum = screenSize.y / kBlockSize;
+        uint2 block = pixel / kBlockSize;
+        uint slot = (block.x / kColumns) * (rowNum * kColumns) + block.y * kColumns
+            + (block.x % kColumns);
+        bool inElement = all(pixel % kBlockSize < kElementSize);
+        HashMap m = map;
+        if (inElement && slot < m.capacity && m.isOccupied(slot)) {
+            return float3(0.0, 1.0, 0.0);
+        }
+        return float3(0.0, 0.0, 0.0);
     }
 
     // ── Candidate-pool API ────────────────────────────────────────────────

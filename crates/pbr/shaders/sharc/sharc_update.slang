@@ -1,4 +1,4 @@
-// SHARC path tracer — sparse cache-population pass ("Update" in SDK terms).
+// SHARC path tracer — sparse cache-population pass ("Update").
 //
 // Writes ONLY into the SHARC buffers; the visible indirect bounce is still
 // served by final_gather. Update keeps the cache fresh across frames so the
@@ -7,7 +7,7 @@
 // Minimal-payload design (Intel RTRT best practice — keep payloads as small as
 // possible, recompute what you can): the only thing on the ray is the source
 // candidate's resolved cache slot (4 B). The ray-gen opens the cell once (a
-// hash-grid find-or-insert) and counts the candidate's single per-frame sample,
+// hash-map find-or-insert) and counts the candidate's single per-frame sample,
 // then hands the slot down so each deposit stage folds its contribution in with
 // a direct indexed atomic add instead of repeating the bucket walk:
 //

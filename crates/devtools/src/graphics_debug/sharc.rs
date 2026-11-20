@@ -74,9 +74,9 @@ impl SharcPage {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         SharcPage {
             snapshot: None,
-            // There is exactly one scene scale: the Update/Resolve passes and
-            // the colored-hash overlay both key off it. The logarithm base and
-            // level bias are compile-time constants (SHARC_GRID_*).
+            // There is exactly one scene scale: the distance past which cell
+            // keys start to coarsen (`SharcParams::cellKey`), which every pass
+            // and the colored-hash overlay share.
             scene_scale: NumberSlider::new(
                 "Scene scale",
                 1.0..=200.0,

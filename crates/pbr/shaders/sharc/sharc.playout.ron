@@ -27,7 +27,7 @@ PipelineLayout(
                     Binding(binding: 13, ty: SampledImage,          stages: [RayGen, Miss, Compute]),              // sky-view LUT
                     Binding(binding: 14, ty: Sampler,               stages: [RayGen, Miss, Compute]),              // linear sampler
                     Binding(binding: 15, ty: StorageBuffer,         stages: [ClosestHit]),                         // per-instance transforms
-                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC hashEntries
+                    Binding(binding: 16, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC hash entries (key tags)
                     Binding(binding: 17, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit]),           // SHARC accumulation
                     Binding(binding: 18, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC resolved
                     Binding(binding: 19, ty: UniformBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC constants
@@ -35,16 +35,15 @@ PipelineLayout(
                     Binding(binding: 21, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // keys_read
                     Binding(binding: 22, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // candidates_write
                     Binding(binding: 23, ty: StorageBuffer,         stages: [RayGen, ClosestHit]),                 // keys_write
-                    Binding(binding: 24, ty: StorageBuffer,         stages: [RayGen, Miss, ClosestHit, Compute]),  // SHARC lock/occupancy (no-64-bit-atomics insert path)
                     // Screen-space gather trace (pbr_common.slang, screen_trace.slang).
-                    // 32 bindings in all: the push-descriptor limit of the Apple driver.
-                    Binding(binding: 25, ty: SampledImage,          stages: [RayGen, Compute]),                    // HZB
-                    Binding(binding: 26, ty: SampledImage,          stages: [RayGen, Compute]),                    // previous scene color
-                    Binding(binding: 27, ty: SampledImage,          stages: [RayGen, Compute]),                    // previous depth
-                    Binding(binding: 28, ty: UniformBuffer,         stages: [RayGen, Compute]),                    // ScreenTraceConstants
-                    Binding(binding: 29, ty: StorageImage,          stages: [RayGen, Compute]),                    // trace hit records
-                    Binding(binding: 30, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // compacted trace texels
-                    Binding(binding: 31, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // compacted trace args (indirect)
+                    // 31 bindings in all, under the Apple driver's push-descriptor limit of 32.
+                    Binding(binding: 24, ty: SampledImage,          stages: [RayGen, Compute]),                    // HZB
+                    Binding(binding: 25, ty: SampledImage,          stages: [RayGen, Compute]),                    // previous scene color
+                    Binding(binding: 26, ty: SampledImage,          stages: [RayGen, Compute]),                    // previous depth
+                    Binding(binding: 27, ty: UniformBuffer,         stages: [RayGen, Compute]),                    // ScreenTraceConstants
+                    Binding(binding: 28, ty: StorageImage,          stages: [RayGen, Compute]),                    // trace hit records
+                    Binding(binding: 29, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // compacted trace texels
+                    Binding(binding: 30, ty: StorageBuffer,         stages: [RayGen, Compute]),                    // compacted trace args (indirect)
                 ]
             )
         ),

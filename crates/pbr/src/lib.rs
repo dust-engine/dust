@@ -265,11 +265,8 @@ impl Plugin for PbrRenderPlugin {
                     })
                     .ok();
 
-                // SHARC requirements (SDK v1.8):
-                //   * shaderFloat16 + 16-bit storage for the SharcPackedData
-                //     resolved buffer (float16x4 per entry).
-                //   * shaderBufferInt64Atomics for the 64-bit hash-key CAS used
-                //     by HashGridInsert when HASH_GRID_ENABLE_64_BIT_ATOMICS = 1.
+                // SHARC requirements: shaderFloat16 + 16-bit storage for the
+                // resolved buffer (`SharcResolved`, float16x4 per entry).
                 device_builder
                     .enable_feature::<vk::PhysicalDeviceFloat16Int8FeaturesKHR>(|feature| {
                         &mut feature.shader_float16
@@ -280,7 +277,7 @@ impl Plugin for PbrRenderPlugin {
                         &mut feature.storage_buffer16_bit_access
                     })
                     .ok();
-                // Slang lowers `RWStructuredBuffer<SharcPackedData>` (which
+                // Slang lowers `RWStructuredBuffer<SharcResolved>` (which
                 // contains `float16_t4`) through the older Uniform-Block
                 // SPIR-V form, so storageBuffer16BitAccess alone is not
                 // enough — the validator demands
@@ -292,15 +289,8 @@ impl Plugin for PbrRenderPlugin {
                         &mut feature.uniform_and_storage_buffer16_bit_access
                     })
                     .ok();
-                device_builder
-                    .enable_extension::<pumicite::ash::khr::shader_atomic_int64::Meta>()
-                    .ok();
-                device_builder
-                    .enable_feature::<vk::PhysicalDeviceShaderAtomicInt64Features>(|feature| {
-                        &mut feature.shader_buffer_int64_atomics
-                    })
-                    .ok();
-                // Radiance accumulates as floats (third_party/sharc_float_atomics.patch).
+                // SHARC accumulates radiance with atomic float adds
+                // (`SharcParams::addRadianceToSlot`).
                 device_builder
                     .enable_extension::<pumicite::ash::ext::shader_atomic_float::Meta>()
                     .unwrap();
@@ -1580,13 +1570,10 @@ pub(crate) fn final_gather_pass(
             0..1,
             false,
         );
-        // SHARC working storage. Bindings 14..17 are declared in
-        // pbr.playout.ron but only used when the final-gather shader actually
-        // calls into the SHARC cache; this plumbing makes them available so
-        // the shader-side query can land later. Access flags are RT-stage
-        // storage reads — Update/Resolve declare R/W on these buffers, so the
-        // Bevy tracker inserts the necessary barriers between Resolve and the
-        // final-gather query.
+        // SHARC working storage, which the final-gather closest-hit queries.
+        // Access flags are RT-stage storage reads — Update/Resolve declare R/W
+        // on these buffers, so the Bevy tracker inserts the necessary barriers
+        // between Resolve and the final-gather query.
         let sharc_hash_buf = encoder.lock(
             &sharc_resources.hash_entries,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,

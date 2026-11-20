@@ -425,7 +425,7 @@ public struct PbrPipelineParams {
     public StructuredBuffer<PbrInstanceData> perInstanceData;
     public SharcParams sharc;
 
-    // Screen-space gather trace (bindings 25..31). Read by the screen-trace,
+    // Screen-space gather trace (bindings 24..30). Read by the screen-trace,
     // compaction and debug compute passes and by the final-gather ray-gen.
     // The set is a push-descriptor set, which this device caps at 32
     // descriptors, so the trace fetches texels (no point sampler) and the
