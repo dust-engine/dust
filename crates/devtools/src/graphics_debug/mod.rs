@@ -7,6 +7,7 @@
 mod gpu;
 mod screen_trace;
 mod sky;
+mod upscaler;
 
 use gpui::{
     AnyView, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -52,7 +53,10 @@ impl GraphicsDebugView {
                 ),
             ),
             page("Auto-exposure", None),
-            page("Super-resolution", None),
+            page(
+                "Super-resolution",
+                Some(cx.new(|cx| upscaler::UpscalerPage::new(window, cx)).into()),
+            ),
             page("Tonemap", None),
         ];
         GraphicsDebugView {

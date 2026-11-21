@@ -22,8 +22,15 @@ use pumicite::{Device, HasDevice};
 
 use super::{UpscalerImage, UpscalerInputs};
 
-/// Whether this GPU supports the Metal 4 temporal denoised scaler.
+/// Whether this GPU supports the Metal 4 temporal denoised scaler, and the
+/// device has `VK_EXT_metal_objects` to hand it textures.
 pub fn is_supported(device: &Device) -> bool {
+    if device
+        .get_extension::<ash::ext::metal_objects::Meta>()
+        .is_err()
+    {
+        return false;
+    }
     let device = device.mtl_device();
     // SAFETY: `supportsMetal4FX` only inspects the device.
     unsafe { MTLFXTemporalDenoisedScalerDescriptor::supportsMetal4FX(device) }

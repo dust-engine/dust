@@ -47,7 +47,8 @@ use crate::{
     camera::Camera,
     sky::{AtmosphereLUTs, SkyAtmosphereLUTRenderSet},
     upscaler::{
-        Upscaler, UpscalerSessionState, ensure_upscaler_session, setup_upscaler, upscaler_evaluate,
+        AvailableUpscalers, UpscalerBackend, UpscalerSessionState, ensure_upscaler_session,
+        setup_upscaler, upscaler_evaluate,
     },
 };
 
@@ -634,10 +635,30 @@ pub struct ScalingFactor {
 
 /// Pure user-controlled render-quality settings. Holds intent only — the
 /// derived render resolution lives on [`HdrRenderTarget::render_extent`], since
-/// it depends on the (non-user-settable) display/swapchain resolution.
-#[derive(Resource, Debug, Clone, Copy, Default)]
+/// it depends on the (non-user-settable) display/swapchain resolution, and the
+/// backend that runs on [`UpscalerSessionState::active_backend`], since the
+/// device may not run the one picked here.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderQualitySettings {
+    /// Render scale of the backends that upscale.
     pub quality: UpscalerQualityMode,
+    /// The denoising / upscaling backend.
+    pub upscaler: UpscalerBackend,
+}
+
+impl Default for RenderQualitySettings {
+    /// The blit, or the backend `DUST_UPSCALER=blit|metalfx|dlss` names, for
+    /// headless captures.
+    fn default() -> Self {
+        let upscaler = std::env::var("DUST_UPSCALER")
+            .ok()
+            .and_then(|value| UpscalerBackend::from_env_value(&value))
+            .unwrap_or_default();
+        Self {
+            quality: UpscalerQualityMode::default(),
+            upscaler,
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -649,10 +670,6 @@ pub struct PbrRenderState {
     pub sbt: Option<ShaderBindingTable>,
     pub shadow_sbt: Option<ShaderBindingTable>,
 }
-
-#[derive(Default)]
-struct FrameCounter(u32);
-
 /// Sub-pixel jitter for the current frame, in texels. Refreshed once per frame
 /// by [`advance_jitter`] and read by `render`, `shadow_pass`,
 /// `screen_trace_pass`, and `upscaler_evaluate`. All passes that sample the
@@ -727,17 +744,22 @@ fn ensure_hdr_target(
     allocator: Res<Allocator>,
     swapchain: If<Res<Swapchain>>,
     quality_settings: Res<RenderQualitySettings>,
-    upscaler: Option<Res<Upscaler>>,
+    upscalers: Option<Res<AvailableUpscalers>>,
 ) {
     // The swapchain's, not its current image's: this runs before the image is
     // acquired.
     let extent = swapchain.extent();
 
-    // Reallocate when the display resolution changes or the user picks a new
-    // quality mode. Both alter the internal render resolution; otherwise the
-    // (relatively expensive) optimal-settings query is skipped entirely.
+    // Reallocate when the display resolution changes, the user picks a new
+    // quality mode or backend, or the backends become known. Each can alter
+    // the internal render resolution; otherwise the (relatively expensive)
+    // optimal-settings query is skipped entirely.
     let needs_realloc = match hdr_target.as_ref() {
-        Some(hdr) => hdr.display_extent != extent || quality_settings.is_changed(),
+        Some(hdr) => {
+            hdr.display_extent != extent
+                || quality_settings.is_changed()
+                || upscalers.as_ref().is_some_and(|u| u.is_added())
+        }
         None => true,
     };
     if !needs_realloc {
@@ -754,23 +776,26 @@ fn ensure_hdr_target(
         return;
     }
 
-    // Resolve the internal render resolution for the active quality mode. Falls
-    // back to native (no upscaling) when no reconstructing upscaler is available
-    // (the blit only filters); DLAA also yields render == display (1:1 factor).
+    // Resolve the internal render resolution for the active quality mode.
+    // Native (no upscaling) for the backends that don't reconstruct (the blit
+    // only filters); DLAA also yields render == display (1:1 factor).
     let quality = quality_settings.quality;
-    let render_extent = match upscaler.as_deref() {
-        Some(Upscaler::Blit) | None => extent,
-        Some(_) => {
-            let factor = quality.scaling_factor();
-            // Round-to-nearest of value * denominator / numerator, clamped to
-            // >= 1 — the vendor's optimal render size for this quality mode.
-            let scale = |value: u32| -> u32 {
-                (((value as u64 * factor.denominator as u64) + factor.numerator as u64 / 2)
-                    / factor.numerator as u64)
-                    .max(1) as u32
-            };
-            UVec2::new(scale(extent.x), scale(extent.y))
-        }
+    // The blit until `setup_upscaler` has found the available backends.
+    let backend = upscalers.map_or(UpscalerBackend::Blit, |upscalers| {
+        upscalers.resolve(quality_settings.upscaler)
+    });
+    let render_extent = if backend.upscales() {
+        let factor = quality.scaling_factor();
+        // Round-to-nearest of value * denominator / numerator, clamped to
+        // >= 1 — the vendor's optimal render size for this quality mode.
+        let scale = |value: u32| -> u32 {
+            (((value as u64 * factor.denominator as u64) + factor.numerator as u64 / 2)
+                / factor.numerator as u64)
+                .max(1) as u32
+        };
+        UVec2::new(scale(extent.x), scale(extent.y))
+    } else {
+        extent
     };
 
     // Shared image parameters; only `extent` (and per-image format/usage/flags)

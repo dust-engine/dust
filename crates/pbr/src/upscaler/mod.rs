@@ -1,15 +1,17 @@
 //! Turns the noisy render-resolution radiance (`hdr_output`) into the
 //! display-resolution image the tonemap pass reads (`hdr_denoised_output`).
 //!
-//! The backend is picked once at startup, in this order:
-//! 1. DLSS Ray Reconstruction (`dlss`): Bazel builds on Windows/Linux, on the
-//!    NVIDIA driver. Denoises and upscales.
-//! 2. MetalFX temporal denoised scaler (`metalfx`): Apple GPUs. Denoises and
-//!    upscales.
-//! 3. A linear-filtered `vkCmdBlitImage`: everywhere else. Upscales only, so the
-//!    output keeps the path tracer's noise.
+//! The backends ([`UpscalerBackend`]):
+//! - A linear-filtered `vkCmdBlitImage`: everywhere. Upscales only, so the
+//!   output keeps the renderer's noise.
+//! - MetalFX temporal denoised scaler (`metalfx`): Apple GPUs. Denoises and
+//!   upscales.
+//! - DLSS Ray Reconstruction (`dlss`): Bazel builds on Windows/Linux, on the
+//!   NVIDIA driver. Denoises and upscales.
 //!
-//! [`DENOISING_BACKENDS_ENABLED`] currently turns 1 and 2 off.
+//! [`setup_upscaler`] finds which of them this device runs, once after device
+//! creation ([`AvailableUpscalers`]). [`RenderQualitySettings::upscaler`]
+//! picks one at any time; an unavailable pick runs the blit.
 
 #[cfg(feature = "dlss")]
 mod dlss;
@@ -28,16 +30,10 @@ use pumicite::image::{ImageLike, ImageViewLike};
 use pumicite::tracking::Access;
 
 use crate::camera::Camera;
-use crate::{HdrRenderTarget, HdrRenderTargetViewsExt};
-
-/// Whether DLSS Ray Reconstruction and MetalFX may be picked. Off for the
-/// radiance cascade experiment, so the lighting reaches the screen as traced:
-/// every platform takes the blit, at native resolution. Their code stays
-/// compiled; set this to `true` to bring them back.
-const DENOISING_BACKENDS_ENABLED: bool = false;
+use crate::{HdrRenderTarget, HdrRenderTargetViewsExt, RenderQualitySettings};
 
 /// Enables the Vulkan instance and device extensions the upscaler backends
-/// need.
+/// need, where the device has them.
 ///
 /// **Ordering:** add before [`bevy_pumicite::PumicitePlugin`], which creates
 /// the `VkInstance` when it is added.
@@ -46,45 +42,122 @@ pub struct UpscalerSetupPlugin;
 impl Plugin for UpscalerSetupPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "dlss")]
-        if DENOISING_BACKENDS_ENABLED {
-            dlss::add_vulkan_extensions(app);
-        }
+        dlss::add_vulkan_extensions(app);
         #[cfg(target_vendor = "apple")]
-        if DENOISING_BACKENDS_ENABLED {
-            app.add_systems(
-                Startup,
-                (|mut device_builder: ResMut<pumicite::device::DeviceBuilder>| {
-                    device_builder
-                        .enable_extension::<pumicite::ash::ext::metal_objects::Meta>()
-                        .expect("MetalFX needs VK_EXT_metal_objects");
-                })
-                .before(CreateDevice),
-            );
-        }
+        app.add_systems(
+            Startup,
+            (|mut device_builder: ResMut<pumicite::device::DeviceBuilder>| {
+                // Without it MetalFX is unavailable; `metalfx::is_supported`
+                // checks.
+                device_builder
+                    .enable_extension::<pumicite::ash::ext::metal_objects::Meta>()
+                    .ok();
+            })
+            .before(CreateDevice),
+        );
         #[cfg(not(any(feature = "dlss", target_vendor = "apple")))]
         let _ = app;
     }
 }
 
-/// The upscaler backend in use, chosen once after device creation by
-/// [`setup_upscaler`].
-#[derive(Resource)]
-pub enum Upscaler {
-    #[cfg(feature = "dlss")]
-    Dlss(dlss::Ngx),
-    #[cfg(target_vendor = "apple")]
-    MetalFx,
+/// A way to turn `hdr_output` into `hdr_denoised_output`. Every variant exists
+/// on every platform; [`AvailableUpscalers`] says which this device runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UpscalerBackend {
+    /// Linear-filtered blit at native resolution: no denoising.
+    #[default]
     Blit,
+    /// MetalFX temporal denoised scaler.
+    MetalFx,
+    /// DLSS Ray Reconstruction.
+    Dlss,
 }
 
-impl Upscaler {
-    fn name(&self) -> &'static str {
+impl UpscalerBackend {
+    pub const ALL: [Self; 3] = [Self::Blit, Self::MetalFx, Self::Dlss];
+
+    pub fn name(self) -> &'static str {
         match self {
-            #[cfg(feature = "dlss")]
-            Self::Dlss(_) => "DLSS Ray Reconstruction",
-            #[cfg(target_vendor = "apple")]
+            Self::Blit => "Blit (no denoising)",
             Self::MetalFx => "MetalFX temporal denoised scaler",
-            Self::Blit => "blit (no denoising)",
+            Self::Dlss => "DLSS Ray Reconstruction",
+        }
+    }
+
+    /// Whether the backend renders below display resolution, at the scale of
+    /// [`RenderQualitySettings::quality`]. The others render at display
+    /// resolution.
+    pub fn upscales(self) -> bool {
+        match self {
+            Self::Blit => false,
+            Self::MetalFx | Self::Dlss => true,
+        }
+    }
+
+    /// Parses `DUST_UPSCALER`'s value: `blit`, `metalfx` or `dlss`.
+    pub(crate) fn from_env_value(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "blit" => Some(Self::Blit),
+            "metalfx" => Some(Self::MetalFx),
+            "dlss" => Some(Self::Dlss),
+            _ => None,
+        }
+    }
+}
+
+/// The backends this device runs, found once after device creation by
+/// [`setup_upscaler`]. The blit always runs.
+#[derive(Resource)]
+pub struct AvailableUpscalers {
+    #[cfg(feature = "dlss")]
+    ngx: Option<dlss::Ngx>,
+    #[cfg(target_vendor = "apple")]
+    metalfx: bool,
+}
+
+impl AvailableUpscalers {
+    /// Finds which backends `device` runs.
+    fn new(device: &Device, settings: &ApplicationSettings) -> Self {
+        let _ = (device, settings);
+        Self {
+            #[cfg(feature = "dlss")]
+            ngx: match dlss::Ngx::new(device, settings) {
+                Ok(ngx) => Some(ngx),
+                Err(reason) => {
+                    tracing::info!("DLSS Ray Reconstruction unavailable: {reason}");
+                    None
+                }
+            },
+            #[cfg(target_vendor = "apple")]
+            metalfx: {
+                let supported = metalfx::is_supported(device);
+                if !supported {
+                    tracing::info!("MetalFX temporal denoised scaler unsupported on this device");
+                }
+                supported
+            },
+        }
+    }
+
+    pub fn contains(&self, backend: UpscalerBackend) -> bool {
+        match backend {
+            UpscalerBackend::Blit => true,
+            #[cfg(target_vendor = "apple")]
+            UpscalerBackend::MetalFx => self.metalfx,
+            #[cfg(feature = "dlss")]
+            UpscalerBackend::Dlss => self.ngx.is_some(),
+            #[allow(unreachable_patterns)]
+            _ => false,
+        }
+    }
+
+    /// The backend that runs when `requested` is picked: `requested` if this
+    /// device runs it, otherwise the blit.
+    pub fn resolve(&self, requested: UpscalerBackend) -> UpscalerBackend {
+        if self.contains(requested) {
+            requested
+        } else {
+            UpscalerBackend::Blit
         }
     }
 }
@@ -94,42 +167,42 @@ pub(crate) fn setup_upscaler(
     device: Res<Device>,
     settings: Res<ApplicationSettings>,
 ) {
-    let upscaler = select_upscaler(&device, &settings);
-    tracing::info!("Upscaler: {}", upscaler.name());
-    commands.insert_resource(upscaler);
-}
-
-fn select_upscaler(device: &Device, settings: &ApplicationSettings) -> Upscaler {
-    if !DENOISING_BACKENDS_ENABLED {
-        return Upscaler::Blit;
-    }
-    #[cfg(feature = "dlss")]
-    match dlss::Ngx::new(device, settings) {
-        Ok(ngx) => return Upscaler::Dlss(ngx),
-        Err(reason) => tracing::info!("DLSS Ray Reconstruction unavailable: {reason}"),
-    }
-    #[cfg(target_vendor = "apple")]
-    if metalfx::is_supported(device) {
-        return Upscaler::MetalFx;
-    } else {
-        tracing::info!("MetalFX temporal denoised scaler unsupported on this GPU");
-    }
-    let _ = (device, settings);
-    Upscaler::Blit
+    let available = AvailableUpscalers::new(&device, &settings);
+    let names: Vec<&str> = UpscalerBackend::ALL
+        .into_iter()
+        .filter(|&backend| available.contains(backend))
+        .map(UpscalerBackend::name)
+        .collect();
+    tracing::info!("Upscalers available: {}", names.join(", "));
+    commands.insert_resource(available);
 }
 
 /// The backend's per-resolution state, created by [`ensure_upscaler_session`].
 enum UpscalerSession {
+    /// In an `Arc` so each frame's commands keep the NGX feature alive after a
+    /// switch or resize drops the session.
     #[cfg(feature = "dlss")]
-    Dlss(dlss::RayReconstruction),
+    Dlss(std::sync::Arc<dlss::RayReconstruction>),
     #[cfg(target_vendor = "apple")]
     MetalFx(metalfx::DenoisedScaler),
     Blit,
 }
 
-/// Holds the active upscaler session and the resolutions it was created for.
-/// The session is recreated whenever the render or display extent changes,
-/// i.e. on a swapchain resize or a quality-mode switch.
+impl UpscalerSession {
+    fn backend(&self) -> UpscalerBackend {
+        match self {
+            #[cfg(feature = "dlss")]
+            Self::Dlss(_) => UpscalerBackend::Dlss,
+            #[cfg(target_vendor = "apple")]
+            Self::MetalFx(_) => UpscalerBackend::MetalFx,
+            Self::Blit => UpscalerBackend::Blit,
+        }
+    }
+}
+
+/// Holds the active upscaler session and what it was created for. The session
+/// is recreated whenever the backend, the render extent or the display extent
+/// changes: on a backend or quality-mode switch, or a swapchain resize.
 #[derive(Resource, Default)]
 pub struct UpscalerSessionState {
     session: Option<UpscalerSession>,
@@ -137,27 +210,46 @@ pub struct UpscalerSessionState {
     /// `advance_jitter` cycles through them. Empty (no jitter) without a
     /// session, and for the blit, which has no temporal accumulation.
     pub(crate) jitter_pattern: Vec<Vec2>,
+    /// The backend the session was created for. It runs the blit instead if
+    /// creating that backend's session failed.
+    configured_backend: UpscalerBackend,
     configured_render_extent: UVec2,
     configured_display_extent: UVec2,
+}
+
+impl UpscalerSessionState {
+    /// The backend running this frame; `None` before the first session.
+    pub fn active_backend(&self) -> Option<UpscalerBackend> {
+        self.session.as_ref().map(UpscalerSession::backend)
+    }
+
+    /// How many sub-pixel jitter offsets the active backend cycles through.
+    pub fn jitter_phase_count(&self) -> usize {
+        self.jitter_pattern.len()
+    }
 }
 
 pub(crate) fn ensure_upscaler_session(
     // Only DLSS records work when a session is created.
     #[cfg(feature = "dlss")] mut ctx: SubmissionState,
-    upscaler: Option<Res<Upscaler>>,
+    available: Option<Res<AvailableUpscalers>>,
+    settings: Res<RenderQualitySettings>,
     mut state: ResMut<UpscalerSessionState>,
     hdr_target: Option<Res<HdrRenderTarget>>,
-    device: Res<Device>,
+    // Only MetalFX needs the device to create a session.
+    #[cfg_attr(not(target_vendor = "apple"), allow(unused_variables))] device: Res<Device>,
 ) {
-    let (Some(upscaler), Some(hdr)) = (upscaler, hdr_target) else {
+    let (Some(available), Some(hdr)) = (available, hdr_target) else {
         return;
     };
+    let backend = available.resolve(settings.upscaler);
     let render_extent = hdr.render_extent;
     let display_extent = hdr.display_extent;
     if render_extent.min_element() == 0 || display_extent.min_element() == 0 {
         return;
     }
     if state.session.is_some()
+        && state.configured_backend == backend
         && state.configured_render_extent == render_extent
         && state.configured_display_extent == display_extent
     {
@@ -168,9 +260,19 @@ pub(crate) fn ensure_upscaler_session(
     state.session = None;
     state.jitter_pattern.clear();
 
-    let session: Result<UpscalerSession, String> = match &*upscaler {
+    let session: Result<UpscalerSession, String> = match backend {
+        UpscalerBackend::Blit => Ok(UpscalerSession::Blit),
+        #[cfg(target_vendor = "apple")]
+        UpscalerBackend::MetalFx => {
+            metalfx::DenoisedScaler::new(&device, render_extent, display_extent)
+                .map(UpscalerSession::MetalFx)
+        }
         #[cfg(feature = "dlss")]
-        Upscaler::Dlss(ngx) => {
+        UpscalerBackend::Dlss => {
+            let ngx = available
+                .ngx
+                .as_ref()
+                .expect("resolved to an available backend");
             let mut created = None;
             ctx.record(|encoder, _| {
                 created =
@@ -178,26 +280,23 @@ pub(crate) fn ensure_upscaler_session(
             });
             created
                 .unwrap()
-                .map(UpscalerSession::Dlss)
+                .map(|session| UpscalerSession::Dlss(std::sync::Arc::new(session)))
                 .map_err(|e| e.to_string())
         }
-        #[cfg(target_vendor = "apple")]
-        Upscaler::MetalFx => metalfx::DenoisedScaler::new(&device, render_extent, display_extent)
-            .map(UpscalerSession::MetalFx),
-        Upscaler::Blit => Ok(UpscalerSession::Blit),
+        #[allow(unreachable_patterns)]
+        _ => unreachable!("{} resolved but not compiled in", backend.name()),
     };
-    let session = match session {
-        Ok(session) => session,
-        Err(e) => {
-            tracing::error!(
-                render = ?render_extent,
-                display = ?display_extent,
-                "Creating the {} session failed: {e}",
-                upscaler.name()
-            );
-            return;
-        }
-    };
+    // A failed backend runs the blit until the backend or an extent changes,
+    // rather than leaving the frame unwritten and retrying every frame.
+    let session = session.unwrap_or_else(|e| {
+        tracing::error!(
+            render = ?render_extent,
+            display = ?display_extent,
+            "Creating the {} session failed, running the blit instead: {e}",
+            backend.name()
+        );
+        UpscalerSession::Blit
+    });
 
     // Temporal backends need the jitter to cover each display pixel with
     // several render samples. Following Apple's MetalFX guidance, the phase
@@ -221,9 +320,10 @@ pub(crate) fn ensure_upscaler_session(
         display = ?display_extent,
         jitter_phases = phase_count,
         "Created {} session",
-        upscaler.name()
+        session.backend().name()
     );
     state.session = Some(session);
+    state.configured_backend = backend;
     state.configured_render_extent = render_extent;
     state.configured_display_extent = display_extent;
 }
@@ -497,7 +597,12 @@ pub(crate) fn upscaler_evaluate(
             "super-resolution",
             |encoder| match session {
                 #[cfg(feature = "dlss")]
-                UpscalerSession::Dlss(dlss) => dlss.dispatch(encoder, &inputs),
+                UpscalerSession::Dlss(dlss) => {
+                    dlss.dispatch(encoder, &inputs);
+                    // The NGX feature stays alive until this command buffer
+                    // completes, even if the session is replaced.
+                    encoder.retain(dlss.clone());
+                }
                 #[cfg(target_vendor = "apple")]
                 UpscalerSession::MetalFx(scaler) => scaler.dispatch(encoder, &inputs),
                 UpscalerSession::Blit => unreachable!(),
