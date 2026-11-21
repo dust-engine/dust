@@ -1,8 +1,8 @@
 // Voxel hit group for the SHARC Update path-tracer pipeline.
 //
 // The closest-hit ends the ray-gen's single bounce: it deposits the bounce
-// target's emission and cached radiance into the source cell (slot from the
-// payload) and pushes the target into the candidate pool for next frame's
+// target's cached radiance, and its emission unless the ray-gen samples
+// emitters, into the source cell (slot from the payload) and pushes the target into the candidate pool for next frame's
 // Update (the cascade). The intersection shader mirrors the DDA in
 // vox_pbr.slang — we keep it self-contained so this pipeline doesn't depend on
 // G-buffer outputs.
@@ -54,7 +54,13 @@ void closestHitShader(
     VoxMaterial mat = model.getMaterialForVoxel(hitAttr.voxelId);
     float4 color = mat.albedo();
 
-    float3 incoming = color.xyz * float(mat.emission); // Accumulate emission
+    // The bounce target's emission. When the Update samples emitters, the
+    // shadow ray to one already brings this light in (sharc_update.slang), so
+    // adding it here too would count it twice.
+    float3 incoming = float3(0.0, 0.0, 0.0);
+    if (!params.sharc.g_sharcConstants.samplesEmitters) {
+        incoming = color.xyz * float(mat.emission);
+    }
 
 
     float3 cached = float3(0.0, 0.0, 0.0);

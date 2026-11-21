@@ -493,4 +493,6 @@ public struct PbrPipelineParams {
 
 public struct [raypayload] SharcRayPayload {
     public uint cacheSlot : read(closesthit, miss) : write(caller);
+    // Set by the Update's shadow-ray miss: nothing blocks the ray.
+    public uint visible : read(caller) : write(caller, miss);
 }

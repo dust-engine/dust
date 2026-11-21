@@ -49,6 +49,7 @@ slang_shader(
         # pbr_common does `__exported import sharc`; the precompiled module is
         # needed on the include path to resolve that transitive import.
         "//crates/pbr/shaders:sharc_module",
+        "//crates/pbr/shaders:emitters_module",
         "//crates/pbr/shaders:hash_map_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
     ],
@@ -76,6 +77,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders:sharc_module",
+        "//crates/pbr/shaders:emitters_module",
         "//crates/pbr/shaders:hash_map_module",
     ],
     out = "vox_shadow.spv",
@@ -100,6 +102,7 @@ slang_shader(
         ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders:sharc_module",
+        "//crates/pbr/shaders:emitters_module",
         "//crates/pbr/shaders:hash_map_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",
@@ -128,6 +131,7 @@ slang_shader(
         ":vox_common_module",
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders:sharc_module",
+        "//crates/pbr/shaders:emitters_module",
         "//crates/pbr/shaders:hash_map_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",

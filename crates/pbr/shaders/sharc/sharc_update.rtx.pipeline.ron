@@ -15,7 +15,7 @@ RayTracingPipeline(
                 entry_point: "bounceMissShader",
             )
         ),
-        // Miss index 1: shadow-ray miss (sun visible).
+        // Miss index 1: shadow-ray miss (the sun or the emitter is visible).
         Miss (
             shader: (
                 path: "bazel://dust/crates/pbr/shaders/sharc/sharc_update.spv",
@@ -23,10 +23,10 @@ RayTracingPipeline(
             )
         ),
     ],
-    // SharcRayPayload is a single uint — the source candidate's cache slot
-    // MUST match the linked vox_sharc_update hit-group library's
-    // max_ray_payload_size, or RT pipeline linking crashes the driver.
-    max_ray_payload_size: 4,
+    // SharcRayPayload is two uints — the source candidate's cache slot and the
+    // shadow ray's visibility. MUST match the linked vox_sharc_update hit-group
+    // library's max_ray_payload_size, or RT pipeline linking crashes the driver.
+    max_ray_payload_size: 8,
     max_hit_attribute_size: 4,
 
     layout: Path("bazel://dust/crates/pbr/shaders/sharc/sharc.playout.bin"),

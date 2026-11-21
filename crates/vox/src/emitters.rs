@@ -5,21 +5,27 @@
 //! are exposed), the material (each voxel's palette index) and the palette
 //! (each index's emission). It is built on the CPU when the model first has all
 //! three, and again whenever its BLAS rebuilds or its material or palette
-//! changes.
+//! changes. Each frame, every instance of a model with emitters is listed in
+//! `dust_pbr`'s [`EmitterInstances`] for the SHARC Update to sample.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Instant;
 
 use bevy::asset::{AssetEvent, AssetId, Assets};
 use bevy::ecs::change_detection::Ref;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageReader;
-use bevy::ecs::system::{Commands, Query, Res};
+use bevy::ecs::system::{Commands, Query, Res, ResMut};
 use bevy::log::debug;
 use bevy::math::{IVec3, UVec3, Vec3};
-use bevy::prelude::{Component, DetectChanges};
+use bevy::prelude::{Component, DetectChanges, GlobalTransform};
 use bevy_pumicite::SubmissionState;
-use dust_pbr::emitters::{EmissiveFace, EmitterTable};
+use bevy_pumicite::rtx::tlas::TLASInstance;
+use dust_pbr::PbrInstanceData;
+use dust_pbr::emitters::{
+    EmissiveFace, EmitterInstance, EmitterInstances, EmitterTable, EmitterTableHeader,
+};
 use dust_vdb::TreeLike;
 use pumicite::Allocator;
 use pumicite::ash::vk;
@@ -43,11 +49,9 @@ const DIRECTIONS: [IVec3; 6] = [
 pub struct VoxModelEmitters {
     /// The table's buffer ([`EmitterTable`] layout), read by device address.
     /// `None` when the model has no emissive faces.
-    pub buffer: Option<ManagedBuffer>,
-    /// The table's total power: the sum of its faces' luminance times area.
-    pub power: f32,
-    pub face_count: u32,
-    pub cluster_count: u32,
+    pub buffer: Option<Arc<ManagedBuffer>>,
+    /// The table's header, as written at the start of `buffer`.
+    pub header: EmitterTableHeader,
 }
 
 /// The emissive faces among `voxels`: every face of an emissive voxel whose
@@ -164,7 +168,7 @@ pub(crate) fn build_emitter_tables(
             )
             .expect("emitter table buffer");
             table.write_to(buffer.as_slice_mut());
-            buffer
+            Arc::new(buffer)
         });
         built.push((entity, table, buffer));
     }
@@ -179,7 +183,7 @@ pub(crate) fn build_emitter_tables(
                 // holds it, as for the palettes and materials in
                 // `sync_buffers_system`.
                 unsafe {
-                    GPURefMut::new_unchecked(buffer).flush(encoder);
+                    GPURefMut::new_unchecked(&**buffer).flush(encoder);
                 }
             }
         }
@@ -192,15 +196,44 @@ pub(crate) fn build_emitter_tables(
         clusters += table.header.cluster_count;
         commands.entity(entity).insert(VoxModelEmitters {
             buffer,
-            power: table.header.power,
-            face_count: table.header.face_count,
-            cluster_count: table.header.cluster_count,
+            header: table.header,
         });
     }
     debug!(
         "Built {count} emitter tables: {faces} faces in {clusters} clusters, in {:.1} ms",
         start.elapsed().as_secs_f64() * 1000.0
     );
+}
+
+/// Lists this frame's instances of models with emitters, where they are now.
+pub(crate) fn collect_emitter_instances(
+    mut emitter_instances: ResMut<EmitterInstances>,
+    instances: Query<(&TLASInstance<PbrInstanceData>, &GlobalTransform)>,
+    models: Query<&VoxModelEmitters>,
+) {
+    let EmitterInstances { instances: list, tables } = &mut *emitter_instances;
+    list.clear();
+    tables.clear();
+    for (instance, transform) in &instances {
+        // A disabled instance isn't in the TLAS, so it isn't drawn and mustn't
+        // light anything either.
+        if instance.disabled {
+            continue;
+        }
+        let Ok(VoxModelEmitters {
+            buffer: Some(buffer),
+            header,
+        }) = models.get(instance.blas)
+        else {
+            continue;
+        };
+        list.push(EmitterInstance::new(
+            transform.affine(),
+            buffer.device_address(),
+            header,
+        ));
+        tables.push(buffer.clone());
+    }
 }
 
 fn modified_id<A: bevy::asset::Asset>(event: &AssetEvent<A>) -> Option<AssetId<A>> {

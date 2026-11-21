@@ -11,13 +11,22 @@ slang_shader(
     opts = ["-emit-ir"]
 )
 
-# The radiance cache, on hash_map. Everything that loads this module needs
-# :hash_map_module too, as Slang loads a module's imports with it.
+# Emitter tables and the light sampling over them (crates/pbr/src/emitters.rs).
+slang_shader(
+    name = "emitters_module",
+    srcs = ["emitters.slang"],
+    out = "emitters.slang-module",
+    opts = ["-emit-ir"]
+)
+
+# The radiance cache, on hash_map and emitters. Everything that loads this module
+# needs :hash_map_module and :emitters_module too, as Slang loads a module's
+# imports with it.
 slang_shader(
     name = "sharc_module",
     srcs = ["sharc.slang"],
     out = "sharc.slang-module",
-    hdrs = [":hash_map_module"],
+    hdrs = [":hash_map_module", ":emitters_module"],
     opts = ["-emit-ir"]
 )
 
@@ -28,6 +37,7 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
     ],
     opts = ["-emit-ir"]
@@ -41,6 +51,7 @@ slang_playout(
     hdrs = [
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
     ],
 )
@@ -56,6 +67,7 @@ slang_shader(
         # sharc imports) on the include path too. Without them, sandboxed
         # builds fail to resolve the transitive imports.
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
     ],
     out = "pbr.spv",
@@ -74,6 +86,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
         ":random.slang",
     ],
@@ -117,6 +130,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
         ":random.slang",
     ],
@@ -130,6 +144,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
         ":gather_module",
         ":random.slang",
@@ -157,6 +172,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
     ],
     out = "sharc_debug.spv",
@@ -203,6 +219,7 @@ slang_shader(
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         ":pbr_module",
         ":sharc_module",
+        ":emitters_module",
         ":hash_map_module",
         ":gather_module",
         ":random.slang",

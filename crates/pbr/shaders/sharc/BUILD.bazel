@@ -15,6 +15,7 @@ slang_shader(
     hdrs = [
         "//crates/pbr/shaders:pbr_module",
         "//crates/pbr/shaders:sharc_module",
+        "//crates/pbr/shaders:emitters_module",
         "//crates/pbr/shaders:hash_map_module",
         "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
         "//crates/pbr/shaders:random.slang",
@@ -44,6 +45,7 @@ ron2bin(
 # Resolve compute pass (single source, layout auto-derived).
 _RESOLVE_HDRS = [
     "//crates/pbr/shaders:sharc_module",
+    "//crates/pbr/shaders:emitters_module",
     "//crates/pbr/shaders:hash_map_module",
 ]
 

@@ -17,10 +17,10 @@ RayTracingPipeline (
     ],
 
     layout: Path("bazel://dust/crates/pbr/shaders/sharc/sharc.playout.bin"),
-    // SharcRayPayload is a single uint — the source candidate's cache slot
-    // MUST match the base sharc_update.rtx.pipeline.ron's
+    // SharcRayPayload is two uints — the source candidate's cache slot and the
+    // shadow ray's visibility. MUST match the base sharc_update.rtx.pipeline.ron's
     // max_ray_payload_size; a mismatch between linked RT pipeline libraries
     // crashes the driver's pipeline compiler.
-    max_ray_payload_size: 4,
+    max_ray_payload_size: 8,
     max_hit_attribute_size: 4,
 )

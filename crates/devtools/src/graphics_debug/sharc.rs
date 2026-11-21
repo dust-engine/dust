@@ -37,6 +37,7 @@ pub(super) struct SharcPage {
     accumulation_frames: NumberSlider,
     stale_frames: NumberSlider,
     roughness_min: NumberSlider,
+    emitter_candidates: NumberSlider,
     brightness: NumberSlider,
     /// Indices of the expanded sections.
     open: Vec<usize>,
@@ -126,6 +127,15 @@ impl SharcPage {
                 cx,
                 |this, v, cx| config(this, cx, move |c| c.roughness_min = v),
             ),
+            emitter_candidates: NumberSlider::new(
+                "Emitter candidates",
+                1.0..=64.0,
+                1.0,
+                false,
+                window,
+                cx,
+                |this, v, cx| config(this, cx, move |c| c.emitter_candidates = v as u32),
+            ),
             brightness: NumberSlider::new(
                 "Brightness",
                 0.0..=10.0,
@@ -157,6 +167,8 @@ impl SharcPage {
         self.stale_frames
             .set(config.stale_frame_num as f32, window, cx);
         self.roughness_min.set(config.roughness_min, window, cx);
+        self.emitter_candidates
+            .set(config.emitter_candidates as f32, window, cx);
         self.brightness.set(debug_state.brightness, window, cx);
         self.snapshot = Some(snapshot);
     }
@@ -175,6 +187,16 @@ impl Render for SharcPage {
             .position(|&(mode, _)| mode == debug_state.mode);
         let population = v_flex()
             .gap_1()
+            .child(
+                Checkbox::new("sharc-sample-emitters")
+                    .label("Sample emitters")
+                    .checked(sharc.sample_emitters)
+                    .on_click(cx.listener(|this, on: &bool, _, cx| {
+                        let on = *on;
+                        config(this, cx, move |c| c.sample_emitters = on);
+                    })),
+            )
+            .child(self.emitter_candidates.render(cx))
             .child(self.pool_capacity.render(cx))
             .child(self.accumulation_frames.render(cx))
             .child(self.stale_frames.render(cx))

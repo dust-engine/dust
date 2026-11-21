@@ -228,7 +228,13 @@ impl Plugin for VoxPlugin {
         }
         app.add_systems(
             PostUpdate,
-            emitters::build_emitter_tables.in_set(DefaultTransferSet),
+            (
+                emitters::build_emitter_tables.in_set(DefaultTransferSet),
+                // After this frame's transforms, before the passes that read them.
+                emitters::collect_emitter_instances
+                    .after(bevy::transform::TransformSystems::Propagate)
+                    .before(dust_pbr::PbrRenderSet),
+            ),
         );
 
         app.add_systems(

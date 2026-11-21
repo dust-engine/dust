@@ -3,10 +3,12 @@
 //!
 //! A model's builder (in `dust_vox`) finds its emissive faces, and
 //! [`EmitterTable::build`] groups them into clusters, one per 32³-voxel region
-//! of the model and face direction. A cluster keeps the bounds of its faces and
-//! their total power, so a shading point can weigh every cluster by power over
-//! distance and drop the ones facing away from it, and an alias table over its
-//! faces, so it can then pick a face in proportion to its power in O(1).
+//! of the model and face direction. Alias tables over the instances (built
+//! each frame), over each table's clusters and over each cluster's faces pick
+//! a face in proportion to its power in O(1); the SHARC Update draws several
+//! such candidates and keeps one in proportion to how much it would light the
+//! shading point (resampled importance sampling). A cluster also keeps the
+//! bounds of its faces.
 //!
 //! Each table is one GPU buffer, read by device address:
 //!
@@ -19,12 +21,20 @@
 //! Positions are in the model's object space; directions are numbered as
 //! SHARC's face ids (`SharcParams::cellKey`): +x, -x, +y, -y, +z, -z.
 //!
+//! Each frame, the owner of the models lists every instance of one with
+//! emitters in [`EmitterInstances`]: where its table is and how the instance is
+//! placed. The SHARC Update samples light from them (emitters.slang).
+//!
 //! Power here is luminance times area, without the π of a Lambertian emitter:
 //! sampling only uses ratios of it. A face's probability density over area is
 //! then `luminance(radiance) / power`, the same for every point of every face.
 
-use bevy::math::{UVec3, Vec3};
+use std::sync::Arc;
+
+use bevy::ecs::resource::Resource;
+use bevy::math::{Affine3A, UVec3, Vec3};
 use bytemuck::{Pod, Zeroable};
+use pumicite::buffer::ManagedBuffer;
 
 /// Voxels per side of a region, as a power of two: faces are clustered by 32³
 /// regions, the size of the voxel tree's second level.
@@ -74,7 +84,10 @@ pub struct EmitterCluster {
     pub power: f32,
     /// 0..6 for +x, -x, +y, -y, +z, -z.
     pub direction: u32,
-    pub _pad: [u32; 2],
+    /// Alias table over the table's clusters, by power: draw a cluster
+    /// uniformly, keep it below `alias_threshold` and take `alias` above.
+    pub alias_threshold: f32,
+    pub alias: u32,
 }
 
 /// One emissive face and its alias-table entry.
@@ -106,6 +119,96 @@ impl EmitterFace {
     }
 }
 
+/// One placed instance of a model that has emitters, for the GPU: its
+/// transforms and where its table's clusters and faces are. Layout must match
+/// `EmitterInstance` in emitters.slang; it is the same under std430 and scalar
+/// rules.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug, PartialEq)]
+pub struct EmitterInstance {
+    /// Rows of the 3×4 world-from-object matrix.
+    pub object_to_world: [[f32; 4]; 3],
+    /// Rows of the 3×4 object-from-world matrix.
+    pub world_to_object: [[f32; 4]; 3],
+    /// Device address of the table's `[EmitterCluster]`.
+    pub clusters: u64,
+    /// Device address of the table's `[EmitterFace]`.
+    pub faces: u64,
+    pub cluster_count: u32,
+    /// Object-space size of a voxel.
+    pub unit_size: f32,
+    /// World-space area per unit of object-space area: the square of the
+    /// instance's scale, which must be uniform.
+    pub area_scale: f32,
+    /// The instance's power in world units: its table's power times
+    /// `area_scale`.
+    pub power: f32,
+    /// Alias table over this frame's instances, by power
+    /// ([`EmitterInstances::alias_tables`]).
+    pub alias_threshold: f32,
+    pub alias: u32,
+    pub _pad: [u32; 2],
+}
+
+impl EmitterInstance {
+    /// The instance of the table at `table` (a device address, laid out as
+    /// [`EmitterTable::write_to`] writes it) placed by `object_to_world`.
+    pub fn new(object_to_world: Affine3A, table: u64, header: &EmitterTableHeader) -> Self {
+        let rows = |m: Affine3A| {
+            let t = m.translation;
+            let (x, y, z) = (m.matrix3.x_axis, m.matrix3.y_axis, m.matrix3.z_axis);
+            [
+                [x.x, y.x, z.x, t.x],
+                [x.y, y.y, z.y, t.y],
+                [x.z, y.z, z.z, t.z],
+            ]
+        };
+        let clusters = table + size_of::<EmitterTableHeader>() as u64;
+        let area_scale = object_to_world.matrix3.determinant().abs().powf(2.0 / 3.0);
+        Self {
+            object_to_world: rows(object_to_world),
+            world_to_object: rows(object_to_world.inverse()),
+            clusters,
+            faces: clusters + header.cluster_count as u64 * size_of::<EmitterCluster>() as u64,
+            cluster_count: header.cluster_count,
+            unit_size: header.unit_size,
+            area_scale,
+            power: header.power * area_scale,
+            alias_threshold: 1.0,
+            alias: 0,
+            _pad: [0; 2],
+        }
+    }
+}
+
+/// This frame's instances of models with emitters, which the SHARC Update
+/// samples light from. Whoever owns the models (`dust_vox`) fills it each frame
+/// before the render passes.
+#[derive(Resource, Default)]
+pub struct EmitterInstances {
+    pub instances: Vec<EmitterInstance>,
+    /// The tables `instances` point at. A pass that reads them retains these,
+    /// so a table replaced while a frame is in flight outlives it.
+    pub tables: Vec<Arc<ManagedBuffer>>,
+}
+
+impl EmitterInstances {
+    /// The instances with their alias table over power filled in, and their
+    /// total power: what the GPU reads.
+    pub fn alias_tables(&self) -> (Vec<EmitterInstance>, f32) {
+        let powers: Vec<f32> = self.instances.iter().map(|i| i.power).collect();
+        let total = powers.iter().sum();
+        let mut instances = self.instances.clone();
+        if total > 0.0 {
+            for (instance, (threshold, alias)) in instances.iter_mut().zip(alias_table(&powers)) {
+                instance.alias_threshold = threshold;
+                instance.alias = alias;
+            }
+        }
+        (instances, total)
+    }
+}
+
 /// The emitter table of one model, on the CPU.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EmitterTable {
@@ -118,6 +221,10 @@ impl EmitterTable {
     /// Groups `faces` into clusters and builds each cluster's alias table.
     /// Faces that emit no luminance are left out. The order of `faces` doesn't
     /// matter: the table depends only on the set.
+    ///
+    /// Power is computed from the radiance as stored, rounded to RGB9E5, so the
+    /// probabilities the GPU computes from the stored radiance are exactly the
+    /// ones the alias tables sample with.
     pub fn build(unit_size: f32, faces: &[EmissiveFace]) -> Self {
         let area = unit_size * unit_size;
         let mut faces: Vec<(EmissiveFace, f32)> = faces
@@ -125,7 +232,7 @@ impl EmitterTable {
             .filter_map(|&face| {
                 debug_assert!(face.coords.cmplt(UVec3::splat(256)).all());
                 debug_assert!(face.direction < 6);
-                let power = face.radiance.dot(LUMINANCE) * area;
+                let power = decode_rgb9e5(encode_rgb9e5(face.radiance)).dot(LUMINANCE) * area;
                 (power > 0.0).then_some((face, power))
             })
             .collect();
@@ -153,7 +260,8 @@ impl EmitterTable {
                 face_count: group.len() as u32,
                 power,
                 direction: direction as u32,
-                _pad: [0; 2],
+                alias_threshold: 1.0,
+                alias: 0,
             });
             let alias = alias_table(&weights);
             table_faces.extend(group.iter().zip(alias).map(|(&(face, _), (threshold, alias))| {
@@ -167,6 +275,11 @@ impl EmitterTable {
                     alias,
                 }
             }));
+        }
+        let powers: Vec<f32> = clusters.iter().map(|c| c.power).collect();
+        for (cluster, (threshold, alias)) in clusters.iter_mut().zip(alias_table(&powers)) {
+            cluster.alias_threshold = threshold;
+            cluster.alias = alias;
         }
         Self {
             header: EmitterTableHeader {
@@ -332,10 +445,12 @@ mod tests {
         let table = EmitterTable::build(1.0 / 16.0, &faces);
         assert_eq!(table.clusters.len(), 1);
         let cluster = table.clusters[0];
-        // A gray radiance's luminance is its value: the weights sum to 1.
-        let total: f64 = (0..20).map(|i| radiance(i) as f64).sum();
+        // A gray radiance's luminance is its value (the weights sum to 1), as
+        // stored in RGB9E5.
+        let stored = |i: u32| decode_rgb9e5(encode_rgb9e5(Vec3::splat(radiance(i)))).x as f64;
+        let total: f64 = (0..20).map(stored).sum();
         for (i, p) in alias_probabilities(&table.faces).iter().enumerate() {
-            let expected = radiance(i as u32) as f64 / total;
+            let expected = stored(i as u32) / total;
             assert!((p - expected).abs() < 1e-6, "face {i}: {p} vs {expected}");
         }
         assert!((cluster.power as f64 - total / 256.0).abs() < 1e-5);
@@ -343,6 +458,50 @@ mod tests {
             assert!((0.0..=1.0).contains(&face.alias_threshold));
             assert!(face.alias < cluster.face_count);
         }
+    }
+
+    #[test]
+    fn cluster_and_instance_alias_tables() {
+        // Clusters of 1, 2 and 3 faces of equal power.
+        let faces: Vec<_> = (0..6u32)
+            .map(|i| {
+                let region = [0, 1, 1, 2, 2, 2][i as usize];
+                face(region * 32, i, 0, 0, 1.0)
+            })
+            .collect();
+        let table = EmitterTable::build(1.0, &faces);
+        let n = table.clusters.len() as f64;
+        let mut p = vec![0.0; table.clusters.len()];
+        for (i, c) in table.clusters.iter().enumerate() {
+            p[i] += c.alias_threshold as f64 / n;
+            p[c.alias as usize] += (1.0 - c.alias_threshold as f64) / n;
+        }
+        for (p, expected) in p.iter().zip([1.0 / 6.0, 2.0 / 6.0, 3.0 / 6.0]) {
+            assert!((p - expected).abs() < 1e-6, "{p} vs {expected}");
+        }
+
+        let header = |power| EmitterTableHeader {
+            cluster_count: 1,
+            face_count: 1,
+            power,
+            unit_size: 1.0,
+        };
+        let instances = EmitterInstances {
+            instances: vec![
+                EmitterInstance::new(Affine3A::IDENTITY, 0, &header(1.0)),
+                // Twice the scale: four times the area, so four times the power.
+                EmitterInstance::new(Affine3A::from_scale(Vec3::splat(2.0)), 0, &header(1.0)),
+            ],
+            tables: Vec::new(),
+        };
+        let (instances, total) = instances.alias_tables();
+        assert!((total - 5.0).abs() < 1e-5);
+        let mut p = [0.0; 2];
+        for (i, instance) in instances.iter().enumerate() {
+            p[i] += instance.alias_threshold as f64 / 2.0;
+            p[instance.alias as usize] += (1.0 - instance.alias_threshold as f64) / 2.0;
+        }
+        assert!((p[0] - 0.2).abs() < 1e-6 && (p[1] - 0.8).abs() < 1e-6, "{p:?}");
     }
 
     #[test]
@@ -390,10 +549,38 @@ mod tests {
     }
 
     #[test]
+    fn instance_transforms() {
+        use bevy::math::Quat;
+        let header = EmitterTableHeader {
+            cluster_count: 3,
+            face_count: 7,
+            power: 1.0,
+            unit_size: 0.0625,
+        };
+        let placement = Affine3A::from_scale_rotation_translation(
+            Vec3::splat(2.0),
+            Quat::from_rotation_y(0.7),
+            Vec3::new(1.0, 2.0, 3.0),
+        );
+        let instance = EmitterInstance::new(placement, 0x1000, &header);
+        assert_eq!(instance.clusters, 0x1000 + 16);
+        assert_eq!(instance.faces, 0x1000 + 16 + 3 * 48);
+        assert!((instance.area_scale - 4.0).abs() < 1e-5);
+        let apply = |rows: &[[f32; 4]; 3], p: Vec3| {
+            Vec3::from_array(rows.map(|r| r[0] * p.x + r[1] * p.y + r[2] * p.z + r[3]))
+        };
+        let p = Vec3::new(0.3, -1.0, 4.0);
+        let world = apply(&instance.object_to_world, p);
+        assert!((world - placement.transform_point3(p)).length() < 1e-5);
+        assert!((apply(&instance.world_to_object, world) - p).length() < 1e-5);
+    }
+
+    #[test]
     fn gpu_layout() {
         assert_eq!(size_of::<EmitterTableHeader>(), 16);
         assert_eq!(size_of::<EmitterCluster>(), 48);
         assert_eq!(size_of::<EmitterFace>(), 16);
+        assert_eq!(size_of::<EmitterInstance>(), 144);
         let table = EmitterTable::build(1.0, &[face(1, 2, 3, 5, 2.0)]);
         let mut bytes = vec![0u8; table.byte_size()];
         table.write_to(&mut bytes);

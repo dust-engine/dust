@@ -16,7 +16,7 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 use pumicite::ash::vk;
-use pumicite::buffer::Buffer;
+use pumicite::buffer::{Buffer, BufferLike, RingBufferSuballocation};
 use pumicite::sync::GPUMutex;
 use pumicite::tracking::{Access, ResourceState};
 use pumicite::utils::AsVkHandle;
@@ -25,7 +25,7 @@ use pumicite::{Allocator, HasDevice};
 use bevy_pumicite::prelude::ComputePipeline;
 use bevy_pumicite::rtx::{RayTracingPipeline, RtxPipelineManager, tlas::TLAS};
 use bevy_pumicite::shader::RayTracingPipelineLibrary;
-use bevy_pumicite::staging::{BufferInitializer, UniformRingBuffer};
+use bevy_pumicite::staging::{BufferInitializer, ReadbackRingBuffer, UniformRingBuffer};
 use bevy_pumicite::{CreateDevice, DefaultRenderSet, SubmissionState};
 use dust_profiler::{GpuProfiler, GpuTimerCommands};
 use std::ops::Deref;
@@ -147,19 +147,43 @@ pub struct SharcConfig {
     /// invocation. The Update cascade runs a per-slot WRS-of-1, so this is
     /// also the effective Update ray-count budget.
     pub pool_capacity: u32,
+    /// Whether the Update samples emissive voxels directly, with a shadow ray
+    /// to a point on one ([`crate::emitters`]). When off, emitters reach the
+    /// cache only when a bounce ray happens to hit one.
+    pub sample_emitters: bool,
+    /// How many points on emissive faces the Update draws, by power, to keep
+    /// the one that would light the cell most (resampled importance sampling).
+    /// Each costs a few memory reads; the shadow ray is traced to one.
+    pub emitter_candidates: u32,
+    /// Whether Resolve measures the cache each frame and logs it about once a
+    /// second ([`SharcStats`]).
+    pub log_stats: bool,
 }
 
 impl Default for SharcConfig {
+    /// The defaults, with `DUST_SHARC_EMITTERS=0|1`,
+    /// `DUST_SHARC_EMITTER_CANDIDATES`, `DUST_SHARC_ACCUMULATION` and
+    /// `DUST_SHARC_STATS=0|1` honored, for comparing runs.
     fn default() -> Self {
+        let env_flag = |name: &str| std::env::var(name).ok().map(|v| v != "0");
         Self {
             enabled: true,
             reset_pending: true,
             entries_num: 1 << 20, // 32 MiB total (32 B per entry)
-            accumulation_frame_num: 32,
+            accumulation_frame_num: std::env::var("DUST_SHARC_ACCUMULATION")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(32),
             stale_frame_num: 64,
             scene_scale: 1.0,
             roughness_min: 0.4,
             pool_capacity: 1 << 16, // 64K candidates × 64 B = 4 MiB per pool
+            sample_emitters: env_flag("DUST_SHARC_EMITTERS").unwrap_or(true),
+            emitter_candidates: std::env::var("DUST_SHARC_EMITTER_CANDIDATES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(32),
+            log_stats: env_flag("DUST_SHARC_STATS").unwrap_or(false),
         }
     }
 }
@@ -182,6 +206,45 @@ pub(crate) struct SharcConstantsRaw {
     /// debug shaders; the other passes leave it 0.
     pub debug_mode: u32,
     pub debug_brightness: f32,
+    /// `SHARC_FLAG_*` in sharc.slang.
+    pub flags: u32,
+    /// Device address of this frame's `[EmitterInstance]`
+    /// ([`crate::emitters::EmitterInstances`]). Only the Update sets it; it is 0
+    /// with a count of 0 elsewhere.
+    pub emitter_instances: u64,
+    pub emitter_instance_count: u32,
+    /// The instances' total power in world units.
+    pub emitter_power: f32,
+    pub emitter_candidates: u32,
+    pub _pad: [u32; 3],
+}
+
+/// `SHARC_FLAG_SAMPLE_EMITTERS` in sharc.slang.
+const SHARC_FLAG_SAMPLE_EMITTERS: u32 = 1;
+/// `SHARC_FLAG_STATS` in sharc.slang.
+const SHARC_FLAG_STATS: u32 = 2;
+
+/// What Resolve measured over the cells that took samples in one frame. Layout
+/// matches `SharcStats` in sharc/sharc_resolve.slang.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default, Debug)]
+pub struct SharcStats {
+    /// Sum of the cells' resolved luminance.
+    pub luminance_sum: f32,
+    /// Sum of how much each cell's resolved luminance changed this frame.
+    pub change_sum: f32,
+    /// How many cells took samples.
+    pub cell_count: u32,
+    pub _pad: u32,
+}
+
+/// Resolve's measurements, summed over frames until they're logged.
+#[derive(Default)]
+struct SharcStatsLog {
+    luminance_sum: f64,
+    change_sum: f64,
+    cell_count: u64,
+    frames: u32,
 }
 
 #[derive(Resource, Default)]
@@ -223,6 +286,9 @@ pub struct SharcResources {
     pub accumulation_state: ResourceState,
     pub resolved_hot_state: ResourceState,
     pub resolved_cold_state: ResourceState,
+    /// Resolve's per-frame measurements ([`SharcStats`]), zeroed before it runs.
+    pub stats: GPUMutex<Buffer>,
+    pub stats_state: ResourceState,
     pub pool_capacity: u32,
     /// Ping-ponged. `frame_index & 1 == 0` ⇒ pool[0] = read, pool[1] = write.
     pub pool: [CandidatePool; 2],
@@ -288,6 +354,13 @@ fn create_sharc_resources(
         usage,
     )
     .expect("SHARC resolved cold buffer");
+    let stats = Buffer::new_device(
+        allocator.clone(),
+        size_of::<SharcStats>() as u64,
+        16,
+        usage | vk::BufferUsageFlags::TRANSFER_SRC,
+    )
+    .expect("SHARC stats buffer");
     let pool = [(); 2].map(|_| {
         let cap = pool_capacity as u64;
         let candidates = Buffer::new_device(
@@ -321,6 +394,8 @@ fn create_sharc_resources(
         accumulation_state: ResourceState::default(),
         resolved_hot_state: ResourceState::default(),
         resolved_cold_state: ResourceState::default(),
+        stats: GPUMutex::new(stats),
+        stats_state: ResourceState::default(),
         pool_capacity,
         pool,
         needs_clear: true,
@@ -350,6 +425,7 @@ impl Plugin for SharcDebugPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SharcDebugState>();
         app.init_resource::<SharcConfig>();
+        app.init_resource::<crate::emitters::EmitterInstances>();
         app.init_resource::<SharcFrameState>();
 
         app.add_systems(Startup, setup_sharc.after(CreateDevice).after(crate::setup));
@@ -571,6 +647,14 @@ pub(crate) fn build_sharc_constants(
         // Debug-off by default; `render` and `sharc_debug_overlay_pass` override these.
         debug_mode: 0,
         debug_brightness: 1.0,
+        flags: if config.sample_emitters { SHARC_FLAG_SAMPLE_EMITTERS } else { 0 }
+            | if config.log_stats { SHARC_FLAG_STATS } else { 0 },
+        // `record_sharc_rt` fills in the instances for the Update.
+        emitter_instances: 0,
+        emitter_instance_count: 0,
+        emitter_power: 0.0,
+        emitter_candidates: config.emitter_candidates.max(1),
+        _pad: [0; 3],
     }
 }
 
@@ -590,6 +674,7 @@ fn sharc_update_pass(
     mut atmosphere_luts: ResMut<AtmosphereLUTs>,
     mut hdr_target: Option<ResMut<HdrRenderTarget>>,
     jitter: Res<crate::JitterState>,
+    emitters: Res<crate::emitters::EmitterInstances>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     if !config.enabled {
@@ -659,6 +744,7 @@ fn sharc_update_pass(
         atmosphere_luts.as_mut(),
         &mut uploader,
         &mut uniform_ring_buffer,
+        &emitters,
         frame_index,
         dispatch,
         profiler.as_deref_mut(),
@@ -679,15 +765,41 @@ fn record_sharc_rt(
     atmosphere_luts: &mut AtmosphereLUTs,
     uploader: &mut BufferInitializer,
     uniform_ring_buffer: &mut UniformRingBuffer,
+    emitters: &crate::emitters::EmitterInstances,
     frame_index: u32,
     dispatch: UVec3,
     mut profiler: Option<&mut GpuProfiler>,
 ) {
+    let mut sharc_constants = sharc_constants;
     ctx.record(|encoder, _| {
         let sbt_buffer =
             uploader.create_preinitialized_buffer_retained(encoder, sbt.layout(), |slice| {
                 sbt.write_buffer(slice);
             });
+        // This frame's emitter instances, read by address. The tables they point
+        // at stay alive until the frame completes.
+        let (instances, power) = emitters.alias_tables();
+        if power > 0.0 {
+            let buffer = uploader.create_preinitialized_buffer_retained(
+                encoder,
+                std::alloc::Layout::from_size_align(size_of_val(instances.as_slice()), 16)
+                    .unwrap(),
+                |slice| slice.copy_from_slice(bytemuck::cast_slice(&instances)),
+            );
+            sharc_constants.emitter_instances = buffer.device_address();
+            sharc_constants.emitter_instance_count = instances.len() as u32;
+            sharc_constants.emitter_power = power;
+            for table in &emitters.tables {
+                encoder.retain(table.clone());
+            }
+            encoder.memory_barrier(
+                Access::COPY_WRITE,
+                Access {
+                    stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    access: vk::AccessFlags2::SHADER_STORAGE_READ,
+                },
+            );
+        }
         let cam_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&cam_uniform));
         let constants_buffer =
@@ -918,13 +1030,15 @@ fn record_sharc_rt(
 // ─── Resolve (compute) ─────────────────────────────────────────────────────
 
 fn sharc_resolve_pass(
-    mut ctx: SubmissionState,
+    mut ctx: SubmissionState<RingBufferSuballocation>,
     sharc_pipelines: Res<SharcPipelines>,
     compute_pipelines: Res<Assets<ComputePipeline>>,
     config: Res<SharcConfig>,
     frame_state: Res<SharcFrameState>,
     mut sharc_resources: Option<ResMut<SharcResources>>,
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
+    mut readback_ring_buffer: ResMut<ReadbackRingBuffer>,
+    mut stats_log: Local<SharcStatsLog>,
     swapchain_images: Query<&GlobalTransform, With<Camera>>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
@@ -946,9 +1060,34 @@ fn sharc_resolve_pass(
     let constants = build_sharc_constants(&config, &frame_state, camera_origin);
     let entries_num = config.entries_num;
 
-    ctx.record(|encoder, _| {
+    // The stats of the frame that last used this readback buffer, now done.
+    let copy = readback_ring_buffer.allocate_buffer(size_of::<SharcStats>() as u64, 16);
+    if let Some(bytes) = ctx
+        .set_frame_state(copy)
+        .as_ref()
+        .and_then(|copy| copy.as_slice())
+        && config.log_stats
+    {
+        stats_log.add(*bytemuck::from_bytes(&bytes[..size_of::<SharcStats>()]));
+    }
+
+    ctx.record(|encoder, copy| {
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
+
+        // Zero the stats for Resolve's atomic sums.
+        let stats_buf = encoder.lock(&resources.stats, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        encoder.use_buffer_resource(stats_buf, &mut resources.stats_state, Access::CLEAR);
+        encoder.emit_barriers();
+        unsafe {
+            encoder.device().cmd_fill_buffer(
+                encoder.buffer().vk_handle(),
+                stats_buf.vk_handle(),
+                0,
+                stats_buf.size(),
+                0,
+            );
+        }
 
         let hash_buf = encoder.lock(
             &resources.hash_entries,
@@ -975,6 +1114,7 @@ fn sharc_resolve_pass(
         encoder.use_buffer_resource(accum_buf, &mut resources.accumulation_state, rw);
         encoder.use_buffer_resource(resolved_hot_buf, &mut resources.resolved_hot_state, rw);
         encoder.use_buffer_resource(resolved_cold_buf, &mut resources.resolved_cold_state, rw);
+        encoder.use_buffer_resource(stats_buf, &mut resources.stats_state, rw);
         encoder.emit_barriers();
 
         let pipeline = encoder.retain(pipeline.clone()).deref_inner();
@@ -1043,13 +1183,51 @@ fn sharc_resolve_pass(
                     offset: 0,
                     range: resolved_cold_buf.size(),
                 }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 5,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: stats_buf.vk_handle(),
+                    offset: 0,
+                    range: stats_buf.size(),
+                }]),
             ],
         );
 
         encoder.timing_scope(profiler.as_deref_mut(), "SHARC resolve", |encoder| {
             encoder.dispatch(UVec3::new(entries_num.div_ceil(256), 1, 1));
         });
+
+        encoder.use_buffer_resource(stats_buf, &mut resources.stats_state, Access::COPY_READ);
+        encoder.emit_barriers();
+        ReadbackRingBuffer::read_back(encoder, stats_buf, copy);
     });
+}
+
+impl SharcStatsLog {
+    /// Adds a frame's stats, and logs the sums about once a second.
+    fn add(&mut self, stats: SharcStats) {
+        self.luminance_sum += stats.luminance_sum as f64;
+        self.change_sum += stats.change_sum as f64;
+        self.cell_count += stats.cell_count as u64;
+        self.frames += 1;
+        if self.frames < 60 {
+            return;
+        }
+        let cells = self.cell_count.max(1) as f64;
+        info!(
+            "SHARC: {:.0} cells sampled per frame, mean luminance {:.4}, \
+             mean change {:.5} per frame ({:.2}% of the luminance)",
+            cells / self.frames as f64,
+            self.luminance_sum / cells,
+            self.change_sum / cells,
+            100.0 * self.change_sum / self.luminance_sum.max(1e-12),
+        );
+        *self = Self::default();
+    }
 }
 
 // ─── Debug overlay (compute) ─────────────────────────────────────────────────

@@ -5,12 +5,26 @@
 // next frame. A cell that goes `staleFrameNum` frames without a sample is
 // evicted, which frees its slot for another key.
 //
-// Has its own playout (set 0 binds the constants and the four cache buffers),
-// auto-derived by slang_playout from this source. `sharc_resolve_pass` in
+// With SHARC_FLAG_STATS it also sums `SharcStats` over the cells that took
+// samples, which `sharc_resolve_pass` reads back and logs.
+//
+// Has its own playout (set 0 binds the constants, the four cache buffers and
+// the stats), auto-derived by slang_playout from this source. `sharc_resolve_pass` in
 // crates/pbr/src/sharc.rs writes the bindings by number, in parameter order.
 
 import hash_map;
 import sharc;
+
+// What this frame's Resolve measured, over the cells that took samples. Mirrors
+// `SharcStats` in crates/pbr/src/sharc.rs.
+struct SharcStats {
+    // Sum of the cells' resolved luminance.
+    float luminanceSum;
+    // Sum of how much each cell's resolved luminance changed.
+    float changeSum;
+    uint cellCount;
+    uint _pad;
+}
 
 [shader("compute")]
 [numthreads(256, 1, 1)]
@@ -21,6 +35,7 @@ void main(
     uniform RWStructuredBuffer<SharcAccumulation> accumulation,
     uniform RWStructuredBuffer<SharcResolvedHot> resolvedHot,
     uniform RWStructuredBuffer<SharcResolvedCold> resolvedCold,
+    uniform RWStructuredBuffer<SharcStats> stats,
 ) {
     uint slot = dispatchThreadId.x;
     HashMap map = HashMap(hashEntries, cb.entriesNum);
@@ -63,8 +78,19 @@ void main(
 
     float totalSampleNum = prevSampleNum + sampleNum;
     float3 radiance = (prevHot.radiance * prevSampleNum + current.radiance) / totalSampleNum;
-    resolvedHot[slot] = SharcResolvedHot(radiance, totalSampleNum);
+    SharcResolvedHot hot = SharcResolvedHot(radiance, totalSampleNum);
+    resolvedHot[slot] = hot;
     resolvedCold[slot] = SharcResolvedCold(accumulatedFrameNum, 0);
+
+    if ((cb.flags & SHARC_FLAG_STATS) != 0) {
+        // As stored, in half precision. A cell new this frame has no change.
+        float luminance = dot(hot.radiance, kRec709Luminance);
+        float prevLuminance =
+            prevHot.sampleNum > 0.0 ? dot(prevHot.radiance, kRec709Luminance) : luminance;
+        InterlockedAdd(stats[0].luminanceSum, luminance);
+        InterlockedAdd(stats[0].changeSum, abs(luminance - prevLuminance));
+        InterlockedAdd(stats[0].cellCount, 1u);
+    }
 
     SharcAccumulation empty = {};
     accumulation[slot] = empty;

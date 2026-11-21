@@ -9,6 +9,7 @@ module sharc;
 // samples; `SharcResolvedHot`, their average over recent frames, which every
 // cache query reads; and `SharcResolvedCold`, the bookkeeping only Resolve reads.
 import hash_map;
+__exported import emitters;
 
 // Bounds on SharcShaderConstants::accumulationFrameNum and ::staleFrameNum.
 public static const uint kSharcAccumulationFrameNumMin = 1;
@@ -84,12 +85,38 @@ public struct SharcShaderConstants {
     public uint poolCapacity;
     private uint _debugMode;
     public float debugBrightness;
+    // SHARC_FLAG_*.
+    public uint flags;
+    // This frame's instances of models with emitters. Only the Update gets
+    // them; elsewhere the count is 0.
+    public EmitterInstance *emitterInstances;
+    public uint emitterInstanceCount;
+    // The instances' total power in world units.
+    public float emitterPower;
+    // Candidates `sampleEmitter` draws to keep one of.
+    public uint emitterCandidates;
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
     public property SharcDebugMode debugMode {
         get {
             return SharcDebugMode(_debugMode);
         }
     }
+    // Whether the Update samples emissive faces directly. When it does, a
+    // bounce ray that hits one leaves out its emission, which the shadow ray
+    // to an emitter already brings in.
+    public property bool samplesEmitters {
+        get {
+            return (flags & SHARC_FLAG_SAMPLE_EMITTERS) != 0 && emitterInstanceCount > 0;
+        }
+    }
 }
+
+// SharcShaderConstants::flags, set from SharcConfig.
+public static const uint SHARC_FLAG_SAMPLE_EMITTERS = 1;
+// Resolve sums `SharcStats` for SharcConfig::log_stats.
+public static const uint SHARC_FLAG_STATS = 2;
 public enum SharcDebugMode
 {
     None = 0,
