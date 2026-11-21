@@ -1,6 +1,7 @@
 pub mod camera;
 pub mod hzb;
 pub mod screen_trace;
+pub mod screenshot;
 pub mod sky;
 pub mod tonemap;
 pub mod upscaler;
@@ -164,6 +165,7 @@ impl Plugin for PbrRenderPlugin {
         app.init_resource::<JitterState>();
         app.init_resource::<RenderQualitySettings>();
         app.init_resource::<UpscalerSessionState>();
+        app.init_resource::<screenshot::Screenshots>();
         app.add_systems(
             PostUpdate,
             (
@@ -219,6 +221,9 @@ impl Plugin for PbrRenderPlugin {
                     .after(render)
                     .after(shadow_pass)
                     .after(upscaler_evaluate),
+                screenshot::screenshot_pass
+                    .in_set(SwapchainSet)
+                    .after(tonemap_pass),
             ),
         );
         app.add_plugins(bevy_pumicite::rtx::RtxPipelinePlugin);
@@ -848,7 +853,9 @@ fn ensure_hdr_target(
         allocator.clone(),
         &vk::ImageCreateInfo {
             format: vk::Format::R16G16B16A16_SFLOAT,
-            usage: display_create_info.usage | vk::ImageUsageFlags::TRANSFER_DST,
+            usage: display_create_info.usage
+                | vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC, // for screenshots
             ..display_create_info
         },
     )

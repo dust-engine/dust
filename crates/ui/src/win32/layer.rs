@@ -2,16 +2,16 @@
 //! beneath GPUI's visuals, along with the cursor lock and the runner that updates
 //! the Bevy app once per compositor frame.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use bevy::math::UVec2;
 use gpui::{Bounds, Pixels, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use windows::Win32::Foundation::{CloseHandle, HWND, POINT, RECT};
 use windows::Win32::Graphics::DirectComposition::{
     COMPOSITIONOBJECT_READ, COMPOSITIONOBJECT_WRITE, DCompositionCreateDevice2,
-    DCompositionCreateSurfaceHandle,
-    IDCompositionDesktopDevice, IDCompositionTarget, IDCompositionVisual2,
+    DCompositionCreateSurfaceHandle, IDCompositionDesktopDevice, IDCompositionTarget,
+    IDCompositionVisual2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     ClipCursor, GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, ShowCursor, WS_EX_NOREDIRECTIONBITMAP,

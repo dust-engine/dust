@@ -2,16 +2,15 @@
 //!
 //! The dock is a GPUI view on the UI thread, drawn over the game by
 //! [`overlay`], or, detached, in a window of its own. Its tabs are GPUI views
-//! too, drawn in whichever window the dock is in: the dock creates its own, and
+//! too, drawn in whichever window the dock is in; a tab's view exists only
+//! while the tab is shown. The dock has tabs of its own, and
 //! [`DevTools::add_tab`] adds more. A view shows the world with [`watch`] or
 //! [`read`], called from its `render`, or [`fetch`], called when the user
 //! asks for something else, and edits it through `dust_ui`'s `BevyChannel`:
 //!
 //! ```ignore
 //! let devtools = dust_devtools::overlay(console_log, window, cx);
-//! devtools.update(cx, |devtools, cx| {
-//!     devtools.add_tab("Physics", cx.new(|cx| PhysicsTab::new(window, cx)), cx)
-//! });
+//! devtools.update(cx, |devtools, cx| devtools.add_tab("Physics", PhysicsTab::new, cx));
 //!
 //! impl Render for PhysicsTab {
 //!     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -34,10 +33,10 @@ use bevy::prelude::{DetectChanges as _, In, IntoSystem, Res, World, warn, warn_o
 use dust_profiler::GpuProfiler;
 use dust_ui::{BevyChannel, GPUIChannel};
 use gpui::{
-    AnyView, AnyWindowHandle, App, AppContext as _, Bounds, Context, ElementId, Entity,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
-    Styled as _, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions,
-    actions, div, prelude::FluentBuilder as _, px, size,
+    AnyView, App, AppContext as _, Bounds, Context, ElementId, Entity, InteractiveElement as _,
+    IntoElement, KeyBinding, ParentElement as _, Render, SharedString, Styled as _, Task,
+    TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions, actions, div,
+    prelude::FluentBuilder as _, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -108,8 +107,14 @@ pub struct DevTools {
     window_bounds: Option<WindowBounds>,
     /// Index of the shown tab in `tabs`.
     selected: usize,
-    /// Title and view of each tab, in the order they show.
-    tabs: Vec<(SharedString, AnyView)>,
+    /// Each tab's title, and what makes its view, in the order they show.
+    tabs: Vec<(SharedString, Box<dyn Fn(&mut Window, &mut App) -> AnyView>)>,
+    /// The shown tab's view, made when it's first drawn, and dropped when
+    /// another tab is shown or DevTools closes. Only the shown tab has a view:
+    /// a view holds what it shows, such as the Entities tab's snapshot of the
+    /// entities, and the console's subscribes to the log. A tab shown again
+    /// starts afresh.
+    shown: Option<AnyView>,
     performance: Entity<PerformanceOverlay>,
     performance_open: bool,
     player: Entity<PlayerOverlay>,
@@ -119,6 +124,13 @@ pub struct DevTools {
     /// Whether the device supports GPU timings, and whether they are measured;
     /// shown in the ⋮ menu.
     gpu_timings: Option<(bool, bool)>,
+}
+
+/// Makes a tab's view with `make`, such as a view's `new`.
+fn tab<V: Render>(
+    make: impl Fn(&mut Window, &mut Context<V>) -> V + 'static,
+) -> Box<dyn Fn(&mut Window, &mut App) -> AnyView> {
+    Box::new(move |window, cx| cx.new(|cx| make(window, cx)).into())
 }
 
 /// The average frame rate, each frame.
@@ -134,10 +146,6 @@ fn gpu_timings(profiler: Option<Res<GpuProfiler>>) -> Option<(bool, bool)> {
 
 impl DevTools {
     fn new(console_log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let graphics_debug = cx.new(|cx| GraphicsDebugView::new(window, cx));
-        let entities = cx.new(|cx| EntitiesView::new(window, cx));
-        let schedules = cx.new(|cx| SchedulesView::new(window, cx));
-        let console = cx.new(|cx| ConsoleView::new(console_log, window, cx));
         DevTools {
             open: true,
             dock: DockSide::Right,
@@ -145,11 +153,15 @@ impl DevTools {
             window_bounds: None,
             selected: 0,
             tabs: vec![
-                ("Graphics Debug".into(), graphics_debug.into()),
-                ("Entities".into(), entities.into()),
-                ("Schedules".into(), schedules.into()),
-                ("Console".into(), console.into()),
+                ("Graphics Debug".into(), tab(GraphicsDebugView::new)),
+                ("Entities".into(), tab(EntitiesView::new)),
+                ("Schedules".into(), tab(SchedulesView::new)),
+                (
+                    "Console".into(),
+                    tab(move |window, cx| ConsoleView::new(&console_log, window, cx)),
+                ),
             ],
+            shown: None,
             performance: cx.new(|cx| PerformanceOverlay::new(window, cx)),
             performance_open: true,
             player: cx.new(|cx| PlayerOverlay::new(window, cx)),
@@ -159,20 +171,24 @@ impl DevTools {
         }
     }
 
-    /// Adds a tab titled `title` showing `view`, after the tabs already there.
-    pub fn add_tab(
+    /// Adds a tab titled `title`, after the tabs already there, whose view
+    /// `make` makes when the tab is shown, such as the view's `new`.
+    pub fn add_tab<V: Render>(
         &mut self,
         title: impl Into<SharedString>,
-        view: impl Into<AnyView>,
+        make: impl Fn(&mut Window, &mut Context<V>) -> V + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.tabs.push((title.into(), view.into()));
+        self.tabs.push((title.into(), tab(make)));
         cx.notify();
     }
 
     /// Shows or hides DevTools.
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
         self.open = open;
+        if !open {
+            self.shown = None;
+        }
         self.sync_window(cx);
     }
 
@@ -243,7 +259,11 @@ impl DevTools {
 
     /// Tab strip, then the selected tab's contents; drawn in `window`, the
     /// game's or the detached one.
-    fn panel(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let shown = match self.tabs.get(self.selected) {
+            Some((_, make)) => Some(self.shown.get_or_insert_with(|| make(window, cx)).clone()),
+            None => None,
+        };
         watch(window, cx, average_fps, |this, fps, _, _| {
             this.average_fps = fps
         });
@@ -261,8 +281,11 @@ impl DevTools {
             .children(self.tabs.iter().map(|(title, _)| title.clone()))
             .selected_index(self.selected)
             .on_click(cx.listener(|this, index: &usize, _, cx| {
-                this.selected = *index;
-                cx.notify();
+                if this.selected != *index {
+                    this.selected = *index;
+                    this.shown = None;
+                    cx.notify();
+                }
             }))
             .suffix(
                 h_flex()
@@ -289,8 +312,8 @@ impl DevTools {
                         )
                     }),
             );
-        let contents = match self.tabs.get(self.selected) {
-            Some((_, view)) => div().flex_1().min_h_0().child(view.clone()),
+        let contents = match shown {
+            Some(view) => div().flex_1().min_h_0().child(view),
             None => div()
                 .p_2()
                 .text_color(theme.muted_foreground)
@@ -485,8 +508,8 @@ fn open_detached(
     .ok()
 }
 
-/// What [`watch`] and [`read`] do with a value from the Bevy thread, on the UI
-/// thread.
+/// What [`watch`], [`read`] and [`fetch`] do with a value from the Bevy
+/// thread, on the UI thread.
 type Apply<V, T> = fn(&mut V, T, &mut Window, &mut Context<V>);
 
 /// Runs `system` on the Bevy thread at the end of every Bevy frame, for as long
@@ -510,10 +533,23 @@ pub fn watch<V: 'static, T: Send + 'static, M>(
     let handle = window.window_handle();
     let key = ElementId::CodeLocation(*Location::caller());
     window.use_keyed_state(key, cx, move |_, cx| {
+        // Nothing on the UI thread waits for the system, which runs every
+        // frame, so it queues each value for the UI thread itself.
         let send = move |In(value): In<Option<T>>, ui: Res<GPUIChannel>| {
-            if let Some(value) = value {
-                send_to_view(&ui, view.clone(), handle, apply, value);
-            }
+            let Some(value) = value else {
+                return;
+            };
+            let view = view.clone();
+            ui.update(move |cx| {
+                handle
+                    .update(cx, |_, window, cx| {
+                        view.update(cx, |view, cx| {
+                            apply(view, value, window, cx);
+                            cx.notify();
+                        })
+                    })
+                    .ok();
+            });
         };
         let slot = cx.weak_entity();
         cx.global::<BevyChannel>()
@@ -529,7 +565,9 @@ pub fn watch<V: 'static, T: Send + 'static, M>(
 /// Runs `system` on the Bevy thread once, when the view calling this starts
 /// being drawn, and passes what it returns to `apply`. Call it from the view's
 /// `render`, each time it renders: it runs `system` again only after the view
-/// was hidden and shown again.
+/// was hidden and shown again. The task waiting for the value is kept in
+/// GPUI's keyed state for this call site, as [`watch`]'s system is: if the
+/// view stops being drawn before the value comes, `apply` doesn't run.
 #[track_caller]
 pub fn read<V: 'static, T: Send + 'static, M>(
     window: &mut Window,
@@ -538,10 +576,9 @@ pub fn read<V: 'static, T: Send + 'static, M>(
     apply: Apply<V, T>,
 ) {
     let view = cx.weak_entity();
-    let handle = window.window_handle();
     let key = ElementId::CodeLocation(*Location::caller());
-    window.use_keyed_state(key, cx, move |_, cx| {
-        run_once(view, handle, system, apply, cx)
+    window.use_keyed_state(key, cx, move |window, cx| {
+        run_once(view, window, system, apply, cx)
     });
 }
 
@@ -555,39 +592,34 @@ pub fn fetch<V: 'static, T: Send + 'static, M>(
     system: impl IntoSystem<(), T, M> + Send + 'static,
     apply: Apply<V, T>,
 ) {
-    run_once(cx.weak_entity(), window.window_handle(), system, apply, cx);
+    run_once(cx.weak_entity(), window, system, apply, cx).detach();
 }
 
+/// Runs `system` on the Bevy thread at the end of the next Bevy frame, and
+/// returns the task that then passes what it returns to `apply` on `view`, in
+/// `window`, and redraws the view. Dropping the task drops the value.
 fn run_once<V: 'static, T: Send + 'static, M>(
     view: WeakEntity<V>,
-    window: AnyWindowHandle,
+    window: &Window,
     system: impl IntoSystem<(), T, M> + Send + 'static,
     apply: Apply<V, T>,
     cx: &App,
-) {
-    cx.global::<BevyChannel>()
-        .update(move |world| match world.run_system_once(system) {
-            Ok(value) => send_to_view(world.resource::<GPUIChannel>(), view, window, apply, value),
-            Err(error) => warn_once!("DevTools read failed: {error}"),
-        });
-}
-
-/// Has the UI thread pass `value` to `apply` on `view`, then redraw the view.
-fn send_to_view<V: 'static, T: Send + 'static>(
-    ui: &GPUIChannel,
-    view: WeakEntity<V>,
-    window: AnyWindowHandle,
-    apply: Apply<V, T>,
-    value: T,
-) {
-    ui.update(move |cx| {
-        window
-            .update(cx, |_, window, cx| {
-                view.update(cx, |view, cx| {
-                    apply(view, value, window, cx);
-                    cx.notify();
-                })
+) -> Task<()> {
+    let running = cx.global::<BevyChannel>().run(move |world| {
+        world
+            .run_system_once(system)
+            .map_err(|error| error.to_string())
+    });
+    window.spawn(cx, async move |cx| match running.await {
+        Some(Ok(value)) => {
+            view.update_in(cx, |view, window, cx| {
+                apply(view, value, window, cx);
+                cx.notify();
             })
             .ok();
-    });
+        }
+        Some(Err(error)) => warn_once!("DevTools read failed: {error}"),
+        // The game has exited.
+        None => {}
+    })
 }

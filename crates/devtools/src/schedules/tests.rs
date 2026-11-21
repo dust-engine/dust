@@ -121,6 +121,14 @@ fn graph(world: &World) -> GraphSnapshot {
         .expect("the world has `Update`")
 }
 
+/// A tree of `nodes` nodes, with no sets.
+fn flat_tree(nodes: usize) -> Tree {
+    Tree {
+        homes: vec![None; nodes],
+        parents: Vec::new(),
+    }
+}
+
 /// Index of the system named `name`.
 fn find(graph: &GraphSnapshot, name: &str) -> usize {
     graph
@@ -507,7 +515,7 @@ fn layout_draws_each_system_after_the_systems_it_waits_for() {
     // nothing orders.
     let edges = [(0, 1), (0, 2), (1, 3), (2, 3), (0, 3), (3, 4), (5, 6)];
     let sizes = sizes(9);
-    let tree = Tree::flat(9);
+    let tree = flat_tree(9);
     let layout = layout(&sizes, &edges, &tree, &[]);
     check_drawing(&layout, &tree, &sizes, &edges, "flat");
 
@@ -551,7 +559,7 @@ fn layout_keeps_columns_apart_at_any_width() {
     let mut edges: Vec<(usize, usize)> = (1..20).map(|i| (0, i)).collect();
     edges.extend((1..20).map(|i| (i, 20)));
     let sizes = sizes(21);
-    let layout = layout(&sizes, &edges, &Tree::flat(21), &[]);
+    let layout = layout(&sizes, &edges, &flat_tree(21), &[]);
     assert_eq!(overlapping(&layout.nodes, &sizes), None);
     // The fan stays centered on the system it leaves.
     let middle = |node: usize| layout.nodes[node].y + sizes[node].height / 2.0;
@@ -561,7 +569,7 @@ fn layout_keeps_columns_apart_at_any_width() {
 
 #[test]
 fn layout_of_nothing() {
-    let layout = layout(&[], &[], &Tree::flat(0), &[]);
+    let layout = layout(&[], &[], &flat_tree(0), &[]);
     assert!(layout.nodes.is_empty());
     assert!(layout.grid.is_none());
 }

@@ -23,7 +23,7 @@ mod player;
 mod schedules;
 mod widgets;
 
-pub use console::{ConsoleLayer, ConsoleLog, console_layer};
+pub use console::{ConsoleLayer, ConsoleLog, console_layer, serve_console_socket};
 pub use devtools::{DevTools, DockSide, ToggleDevTools, fetch, overlay, read, watch};
 pub use entities::{EntitiesPlugin, EntityInspector};
 pub use performance::{PerformancePanel, PerformancePanelPlugin};

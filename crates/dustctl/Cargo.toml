@@ -1,0 +1,11 @@
+[package]
+name = "dustctl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "env"] }
+shlex = "2"
+
+[target.'cfg(windows)'.dependencies]
+uds_windows = "1.2"

@@ -72,13 +72,13 @@ pub use view::{BevyExited, BevyView};
 #[cfg(target_vendor = "apple")]
 pub use apple::drawable::{
     DrawableImage as SwapchainImage, DrawableImageMetadata as SwapchainImageMetadata,
-    MetalDrawable as Swapchain, SwapchainSet,
+    DrawableImageViews as SwapchainImageViews, MetalDrawable as Swapchain, SwapchainSet,
 };
 
 #[cfg(windows)]
 pub use win32::swapchain::{
     PresentationImage as SwapchainImage, PresentationImageMetadata as SwapchainImageMetadata,
-    Swapchain, SwapchainSet,
+    PresentationImageViews as SwapchainImageViews, Swapchain, SwapchainSet,
 };
 
 #[cfg(not(any(target_vendor = "apple", windows)))]

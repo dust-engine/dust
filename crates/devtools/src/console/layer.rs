@@ -3,7 +3,6 @@
 use std::fmt::{self, Write as _};
 
 use bevy::platform::time::Instant;
-use futures_channel::mpsc::UnboundedSender;
 use tracing::field::{self as tracing_field, Visit};
 use tracing::{Event, Subscriber, span};
 use tracing_log::NormalizeEvent;
@@ -11,15 +10,18 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
-use super::{ConsoleEvent, ConsoleMessage, Field, MessageKind, Source, SpanContext, ValueKind};
+use super::{ConsoleMessage, Field, MessageKind, Source, SpanContext, ValueKind};
 
 /// The `tracing` layer that copies log messages into the DevTools console;
 /// made by [`console_layer`](super::console_layer).
 ///
-/// It sends each message on from whichever thread logged it, to the
-/// [`ConsoleLog`](super::ConsoleLog) made with it.
+/// It broadcasts each message from whichever thread logged it, to the
+/// [`ConsoleLog`](super::ConsoleLog) made with it and to the connections to
+/// the console's socket.
 pub struct ConsoleLayer {
-    pub(super) events: UnboundedSender<ConsoleEvent>,
+    pub(super) messages: async_broadcast::Sender<ConsoleMessage>,
+    /// When logging started; message times count from it.
+    pub(super) startup: Instant,
 }
 
 /// A span's fields, kept in the span's extensions for the events logged in
@@ -102,12 +104,11 @@ where
                 line: metadata.line(),
                 thread: std::thread::current().name().map(str::to_owned),
             }),
-            time: Instant::now(),
+            time: self.startup.elapsed(),
         };
-        // Fails only once the console is gone.
-        self.events
-            .unbounded_send(ConsoleEvent::Message(message))
-            .ok();
+        // Full, the channel drops its oldest message instead. Fails only once
+        // the console is gone.
+        self.messages.try_broadcast(message).ok();
     }
 }
 

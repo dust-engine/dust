@@ -117,15 +117,6 @@ pub(super) struct Tree {
 }
 
 impl Tree {
-    /// No sets.
-    #[cfg(test)]
-    pub fn flat(nodes: usize) -> Self {
-        Tree {
-            homes: vec![None; nodes],
-            parents: Vec::new(),
-        }
-    }
-
     /// Whether `node` is drawn in `set`, or in a set drawn in it.
     pub fn holds(&self, set: usize, node: usize) -> bool {
         self.homes[node].is_some_and(|home| self.within(home, set))

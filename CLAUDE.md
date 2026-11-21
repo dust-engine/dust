@@ -26,6 +26,27 @@ pumicite_types = { path = "../pumicite/crates/types" }
 
 Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without it. While the `[patch]` is in, build and test with cargo only, not Bazel: a Bazel repin against the local path rewrites `MODULE.bazel.lock` and writes generated `BUILD.bazel` files into `../pumicite`. Before committing dust, push the pumicite commit, bump the three `rev`s, and remove the `[patch]`.
 
+## Driving a running game
+
+```bash
+mkdir -p .claude
+DUST_CONSOLE_SOCKET=.claude/dust.sock cargo run --release > .claude/dust.log 2>&1   # in the background
+cargo run --package dustctl -- --socket .claude/dust.sock help
+```
+
+Or if building with Bazel:
+```bash
+mkdir -p .claude
+DUST_CONSOLE_SOCKET=.claude/dust.sock bazel run -c opt //:dust > .claude/dust.log 2>&1   # in the background
+
+bazel build -c opt //crates/dustctl
+bazel-bin/crates/dustctl/dustctl --socket .claude/dust.sock frame
+```
+
+Put the socket in your own checkout's `.claude/`, so each worktree's game has its own. The game logs everything to its standard error, here `.claude/dust.log`; dustctl also prints the messages logged while it's connected, on its own standard error.
+
+To see the game, `screenshot .claude/shot.png` saves its next frame, tone-mapped for SDR, as a PNG you can read. For exact values rather than viewing, `.ktx2` saves the frame as presented (10-bit PQ with BT.2020 primaries on macOS), and `--scene` the HDR scene before tone mapping (16-bit floats).
+
 ## Architecture
 
 ### Workspace Crates
@@ -40,7 +61,9 @@ Keep `pumicite_types` in the list; Bazel's crate_universe splice fails without i
 
 - **`crates/input/`** (`dust_input`) — The game's keyboard and mouse, read on the Bevy thread from the platform (GameController on macOS, GameInput on Windows) and written as `bevy_input` messages, only while the `CursorMode` state is attached (for gameplay); while it is detached (for the UI) the backend writes nothing, and keys held at detach are released. GameInput reports each device's state rather than its changes, so the Windows backend keeps comparing readings while detached and drops the changes; it needs the GameInput redistributable (`winget install Microsoft.GameInput`). `BevyView` sets it: a click on the game attaches the cursor, Escape and window deactivation detach it.
 
-- **`crates/devtools/`** (`dust_devtools`) — DevTools dock and overlays as GPUI views. A view shows the world with `watch` (a system run every Bevy frame while the view is drawn), `read` (once, when it is shown) or `fetch` (once, each time it's called, as when the user picks something), and edits it through `dust_ui`'s `BevyChannel` (see `devtools.rs`).
+- **`crates/devtools/`** (`dust_devtools`) — DevTools dock and overlays as GPUI views. A view shows the world with `watch` (a system run every Bevy frame while the view is drawn), `read` (once, when it is shown) or `fetch` (once, each time it's called, as when the user picks something), and edits it through `dust_ui`'s `BevyChannel` (see `devtools.rs`). The Console tab runs commands (clap subcommands in `console/command.rs`) from its prompt and, when the game is started with `DUST_CONSOLE_SOCKET`, from a socket (`console/remote.rs`, which also describes the plain-text protocol); see "Driving a running game".
+
+- **`crates/dustctl/`** (`dustctl`) — Command-line client that runs console commands in a running game.
 
 - **`src/main.rs`** — Application entry point.
 

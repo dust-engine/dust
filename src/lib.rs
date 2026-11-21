@@ -57,14 +57,16 @@ struct RainbowDemo {
 }
 
 /// Runs the game: the window, with the game's `BevyView` and the DevTools
-/// overlay over it. The Bevy app runs on a thread of its own, and the UI on this
-/// one, the main thread.
+/// overlay over it, and the console's socket if `DUST_CONSOLE_SOCKET` asks for
+/// one. The Bevy app runs on a thread of its own, and the UI on this one, the
+/// main thread.
 pub fn run() {
     let console_log = init_logging();
     gpui_platform::application()
         .with_assets(gpui_kit_assets::Assets)
         .run(move |cx: &mut gpui::App| {
             gpui_component::init(cx);
+            dust_devtools::serve_console_socket(&console_log, cx);
             let window_options = gpui::WindowOptions {
                 window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
                     None,

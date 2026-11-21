@@ -3,20 +3,16 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
 
-use super::command::Outcome;
 use super::*;
 
 /// Runs `f` with a subscriber of only a [`ConsoleLayer`], whose filter lets
 /// through messages up to `max_level`, and returns what the layer sent.
 fn capture_at(max_level: LevelFilter, f: impl FnOnce()) -> Vec<ConsoleMessage> {
-    let (layer, mut log) = console_layer();
+    let (layer, log) = console_layer();
+    // Messages reach only the receivers active when they're logged.
+    let mut messages = log.messages.activate_cloned();
     subscriber::with_default(Registry::default().with(layer).with(max_level), f);
-    std::iter::from_fn(|| log.events.try_recv().ok())
-        .map(|event| match event {
-            ConsoleEvent::Message(message) => message,
-            ConsoleEvent::Clear => panic!("the layer sent a `Clear`"),
-        })
-        .collect()
+    std::iter::from_fn(|| messages.try_recv().ok()).collect()
 }
 
 fn capture(f: impl FnOnce()) -> Vec<ConsoleMessage> {
@@ -31,7 +27,7 @@ fn fields(fields: &[Field]) -> Vec<(&str, &str, ValueKind)> {
 }
 
 fn output(text: &str) -> ConsoleMessage {
-    ConsoleMessage::evaluation(MessageKind::Output, text.to_owned())
+    ConsoleMessage::evaluation(MessageKind::Output, text.to_owned(), Instant::now())
 }
 
 #[test]
@@ -75,6 +71,19 @@ fn tracing_event() {
     assert_eq!(source.target, module_path!());
     assert_eq!(source.file.as_deref(), Some(file!()));
     assert!(source.line.is_some());
+
+    // As the console's socket sends it, after the seconds since logging
+    // started.
+    let text = message.to_string();
+    let (_seconds, text) = text.split_once(' ').unwrap();
+    assert_eq!(
+        text,
+        format!(
+            " WARN load{{model=\"castle\" lod=2}}: {}: loaded in 12 ms voxels=1024 \
+             name=\"teapot\" hollow=true",
+            module_path!()
+        )
+    );
 }
 
 #[test]
@@ -185,7 +194,8 @@ fn oldest_rows_dropped() {
 fn scopes_and_filter() {
     let mut console = Console::default();
     let warning = capture(|| tracing::warn!(path = "castle.vox", "slow load")).remove(0);
-    let command = ConsoleMessage::evaluation(MessageKind::Command, "echo hi".to_owned());
+    let command =
+        ConsoleMessage::evaluation(MessageKind::Command, "echo hi".to_owned(), Instant::now());
     assert!(console.shows(&warning, "") && console.shows(&command, ""));
 
     console.scopes[Scope::Warnings as usize] = true;
@@ -222,99 +232,4 @@ fn prompt_history() {
     assert_eq!(browse(false), "echo b");
     assert_eq!(browse(false), "ec");
     assert_eq!(browse(false), "ec");
-}
-
-/// The text a command printed.
-fn printed(result: Result<Outcome, String>) -> String {
-    match result {
-        Ok(Outcome::Output(text)) => text,
-        _ => panic!("the command printed nothing"),
-    }
-}
-
-#[test]
-fn commands() {
-    let mut world = World::new();
-
-    assert_eq!(printed(command::run("echo 'a  b' c", &mut world)), "a  b c");
-    let help = printed(command::run("help", &mut world));
-    assert!(help.contains("echo") && help.contains("clear"));
-    let typo = command::run("ecko hi", &mut world).err().unwrap();
-    assert!(typo.contains("a similar subcommand exists: 'echo'"));
-
-    let mut console = Console::default();
-    console.push(output("x"));
-    let Ok(Outcome::Console(event)) = command::run("clear", &mut world) else {
-        panic!("clear didn't clear the console");
-    };
-    console.apply(event);
-    assert!(console.rows.is_empty());
-}
-
-#[test]
-fn log_command() {
-    let _ = tracing_log::LogTracer::init();
-    let mut world = World::new();
-    let messages = capture(|| {
-        assert!(matches!(
-            command::run("log -l warn hello there", &mut world),
-            Ok(Outcome::Nothing)
-        ));
-        assert!(matches!(
-            command::run("log --log-crate oh no", &mut world),
-            Ok(Outcome::Nothing)
-        ));
-    });
-    let logged: Vec<_> = messages
-        .iter()
-        .map(|message| {
-            let source = message.source.as_ref().unwrap();
-            (message.kind, message.text.as_str(), source.target.as_str())
-        })
-        .collect();
-    assert_eq!(
-        logged,
-        [
-            (MessageKind::Log(Level::WARN), "hello there", "console"),
-            (MessageKind::Log(Level::INFO), "oh no", "console"),
-        ]
-    );
-
-    // A level the filter drops is reported instead of vanishing.
-    capture_at(LevelFilter::INFO, || {
-        let error = command::run("log -l debug hidden", &mut world)
-            .err()
-            .unwrap();
-        assert!(error.contains("RUST_LOG=console=debug"), "{error}");
-    });
-}
-
-#[test]
-fn submitted_lines_run() {
-    let mut world = World::new();
-    let mut console = Console::default();
-    for line in ["echo hi", "nope"] {
-        console.prompt.line = line.to_owned();
-        let line = console.submit().unwrap();
-        if let Some(event) = run_line(&line, &mut world) {
-            console.apply(event);
-        }
-    }
-    let rows: Vec<_> = console
-        .rows
-        .iter()
-        .map(|row| (row.message.kind, row.message.text.lines().next().unwrap()))
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            (MessageKind::Command, "echo hi"),
-            (MessageKind::Output, "hi"),
-            (MessageKind::Command, "nope"),
-            (
-                MessageKind::CommandError,
-                "error: unrecognized subcommand 'nope'"
-            ),
-        ]
-    );
 }

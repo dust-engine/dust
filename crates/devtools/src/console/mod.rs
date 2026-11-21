@@ -1,34 +1,47 @@
 //! The "Console" DevTools tab, modeled on Safari's: the messages logged through
 //! `tracing` and `log`, a scope bar filtering them by severity, and a prompt
-//! that runs commands.
+//! that runs commands; and the console's socket, which runs commands sent to
+//! it.
 //!
-//! The console's rows live with its view on the UI thread. Changes reach them
-//! through a channel, the [`ConsoleLog`], which the view drains: log messages,
-//! sent by the [`ConsoleLayer`] from whichever thread logged them, and what
-//! the commands submitted at the prompt did. A command runs on the Bevy
-//! thread, with the world. The commands live in [`command`].
+//! The [`ConsoleLayer`] broadcasts each message from whichever thread logged
+//! it, to whoever listens then: the console's view while it's shown, and the
+//! connections to the console's socket. Nothing keeps messages for later; the
+//! game's own log on stderr has them all.
+//!
+//! The rest is in three parts:
+//! - [`command`]: running a command line, the same for the prompt and the
+//!   socket. It runs on the UI thread, and awaits the Bevy thread for what it
+//!   needs of the world.
+//! - [`ui`]: the view's state, which exists only while the view is shown: its
+//!   rows, the filter and scope bar, and the prompt.
+//! - [`remote`]: the socket and its connections, from when the app starts if
+//!   `DUST_CONSOLE_SOCKET` is set, whether or not the view is shown.
 
 mod command;
+mod format;
 mod layer;
+mod remote;
+mod screenshot;
 #[cfg(test)]
 mod tests;
 mod ui;
 
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use async_broadcast::InactiveReceiver;
 use bevy::platform::time::Instant;
-use bevy::prelude::World;
-use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::Level;
 
-use dust_ui::BevyChannel;
 pub use layer::ConsoleLayer;
+pub use remote::serve_console_socket;
 pub(crate) use ui::ConsoleView;
 
 /// Makes the `tracing` layer that copies log messages into the DevTools
-/// console, and the [`ConsoleLog`] they wait in until the console takes them.
-/// Add the layer to the global subscriber before anything logs, and pass the
-/// log to [`overlay`](crate::overlay):
+/// console, and the [`ConsoleLog`] to listen to it with. Add the layer to the
+/// global subscriber before anything logs, and pass the log to
+/// [`overlay`](crate::overlay) and [`serve_console_socket`]:
 ///
 /// ```ignore
 /// let (console_layer, console_log) = dust_devtools::console_layer();
@@ -43,37 +56,49 @@ pub(crate) use ui::ConsoleView;
 /// events, and `log` records, which the subscriber's `init` has turned into
 /// `tracing` events.
 pub fn console_layer() -> (ConsoleLayer, ConsoleLog) {
-    let (sender, events) = futures_channel::mpsc::unbounded();
+    let (mut sender, messages) = async_broadcast::broadcast(MAX_ROWS);
+    // A receiver that falls behind, such as a connection to the socket that
+    // stopped reading, loses the oldest messages, rather than the layer
+    // waiting for it on whichever thread logged. The view keeps no more than
+    // this anyway.
+    sender.set_overflow(true);
+    let startup = Instant::now();
     let layer = ConsoleLayer {
-        events: sender.clone(),
+        messages: sender,
+        startup,
     };
     let log = ConsoleLog {
-        sender,
-        events,
-        startup: Instant::now(),
+        messages: messages.deactivate(),
+        startup,
     };
     (layer, log)
 }
 
-/// The changes on their way to the console view: the messages its
-/// [`ConsoleLayer`] copies, and what the commands run at its prompt did.
+/// What listens to the [`ConsoleLayer`]'s messages starts from this: the view
+/// when it's shown, and each connection to the console's socket. A message
+/// reaches only the receivers active when it's logged.
+#[derive(Clone)]
 pub struct ConsoleLog {
-    /// Where the commands send what they did.
-    sender: UnboundedSender<ConsoleEvent>,
-    events: UnboundedReceiver<ConsoleEvent>,
-    /// When logging started; the console shows message times from it.
+    /// Inactive, so that it keeps no messages itself.
+    messages: InactiveReceiver<ConsoleMessage>,
+    /// When logging started; message times count from it.
     startup: Instant,
 }
 
-/// A change to the console, sent to its view from another thread.
-pub(crate) enum ConsoleEvent {
-    Message(ConsoleMessage),
-    /// Removes all rows.
-    Clear,
-}
-
-/// The most rows the console keeps; the oldest are dropped first.
+/// The most rows the view keeps, the oldest dropped first, and the most
+/// messages a receiver falls behind by before it loses the oldest.
 const MAX_ROWS: usize = 10_000;
+
+/// `path` as the user meant it, made absolute. Under `bazel run`, which runs
+/// the game in its runfiles, a relative path is from the directory `bazel run`
+/// was started in.
+fn user_path(path: PathBuf) -> PathBuf {
+    let path = match std::env::var_os("BUILD_WORKING_DIRECTORY") {
+        Some(directory) if path.is_relative() => Path::new(&directory).join(path),
+        _ => path,
+    };
+    std::path::absolute(&path).unwrap_or(path)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum MessageKind {
@@ -88,6 +113,7 @@ enum MessageKind {
     CommandError,
 }
 
+#[derive(Clone)]
 pub(crate) struct ConsoleMessage {
     kind: MessageKind,
     /// The formatted message, the submitted line, or the command's output.
@@ -99,7 +125,8 @@ pub(crate) struct ConsoleMessage {
     spans: Vec<SpanContext>,
     /// Where a log message was logged; `None` for commands and their output.
     source: Option<Source>,
-    time: Instant,
+    /// When the message arrived, since logging started.
+    time: Duration,
 }
 
 /// A field of an event or span, such as `count = 3` in
@@ -131,6 +158,7 @@ struct SpanContext {
 }
 
 /// Where a log message was logged.
+#[derive(Clone)]
 struct Source {
     target: String,
     module_path: Option<String>,
@@ -141,15 +169,15 @@ struct Source {
 }
 
 impl ConsoleMessage {
-    /// A command line, or what it printed.
-    fn evaluation(kind: MessageKind, text: String) -> Self {
+    /// A command line, or what it printed. `startup` is when logging started.
+    fn evaluation(kind: MessageKind, text: String, startup: Instant) -> Self {
         Self {
             kind,
             text,
             fields: Vec::new(),
             spans: Vec::new(),
             source: None,
-            time: Instant::now(),
+            time: startup.elapsed(),
         }
     }
 
@@ -248,8 +276,9 @@ impl Scope {
 #[derive(Default)]
 struct Console {
     rows: VecDeque<Row>,
-    /// The `serial` of the next row.
-    next_serial: u64,
+    /// How many messages have been pushed, repeats included, which numbers
+    /// the rows.
+    pushed: u64,
     /// The scopes picked in the scope bar, indexed by `Scope as usize`. With
     /// none picked, every row shows ("All").
     scopes: [bool; Scope::ALL.len()],
@@ -267,8 +296,9 @@ struct Row {
     message: ConsoleMessage,
     /// How many times in a row the message arrived.
     count: u32,
-    /// Unique among rows: the view tracks the rows its list shows by it, and
-    /// keys their elements with it.
+    /// The number of the row's first message, counting from 1. Unique among
+    /// rows: the view tracks the rows its list shows by it, and keys their
+    /// elements with it.
     serial: u64,
     /// Whether the row shows the message's fields, spans and source.
     expanded: bool,
@@ -277,6 +307,7 @@ struct Row {
 impl Console {
     fn push(&mut self, message: ConsoleMessage) {
         self.received[Scope::of(message.kind) as usize] = true;
+        self.pushed += 1;
         if let Some(last) = self.rows.back_mut()
             && message.repeats(&last.message)
         {
@@ -289,10 +320,9 @@ impl Console {
         self.rows.push_back(Row {
             message,
             count: 1,
-            serial: self.next_serial,
+            serial: self.pushed,
             expanded: false,
         });
-        self.next_serial += 1;
     }
 
     /// Whether the scope bar and the filter field let `message` through.
@@ -302,7 +332,7 @@ impl Console {
         picked && (filter.is_empty() || message.contains(filter))
     }
 
-    /// Takes the prompt's line, to be run by [`run_line`].
+    /// Takes the prompt's line, for the view to run.
     fn submit(&mut self) -> Option<String> {
         let line = std::mem::take(&mut self.prompt.line);
         self.prompt.browsing = None;
@@ -312,19 +342,8 @@ impl Console {
         if self.prompt.history.last() != Some(&line) {
             self.prompt.history.push(line.clone());
         }
-        self.push(ConsoleMessage::evaluation(
-            MessageKind::Command,
-            line.clone(),
-        ));
         self.scroll_to_bottom = true;
         Some(line)
-    }
-
-    fn apply(&mut self, event: ConsoleEvent) {
-        match event {
-            ConsoleEvent::Message(message) => self.push(message),
-            ConsoleEvent::Clear => self.rows.clear(),
-        }
     }
 }
 
@@ -383,31 +402,4 @@ fn filter_default_allows(level: Level) -> bool {
         Level::DEBUG => tracing::enabled!(target: "", Level::DEBUG),
         _ => tracing::enabled!(target: "", Level::TRACE),
     }
-}
-
-/// Runs a line submitted at the prompt in a `command` span, and returns what
-/// it did to the console.
-fn run_line(line: &str, world: &mut World) -> Option<ConsoleEvent> {
-    let result = tracing::info_span!(target: "console", "command", line = line)
-        .in_scope(|| command::run(line, world));
-    let (kind, text) = match result {
-        Ok(command::Outcome::Nothing) => return None,
-        Ok(command::Outcome::Console(event)) => return Some(event),
-        Ok(command::Outcome::Output(output)) => (MessageKind::Output, output),
-        Err(error) => (MessageKind::CommandError, error),
-    };
-    let text = text.trim_end().to_owned();
-    Some(ConsoleEvent::Message(ConsoleMessage::evaluation(
-        kind, text,
-    )))
-}
-
-/// Runs `line` on the Bevy thread, sending what it did back to the console
-/// through `console`.
-fn submit_line(cx: &gpui::App, console: UnboundedSender<ConsoleEvent>, line: String) {
-    cx.global::<BevyChannel>().update(move |world| {
-        if let Some(event) = run_line(&line, world) {
-            console.unbounded_send(event).ok();
-        }
-    });
 }

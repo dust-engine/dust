@@ -1,7 +1,11 @@
-//! The console tab's view: the toolbar, the message list and the prompt.
+//! The console tab's view: the toolbar, the message list and the prompt. It
+//! exists only while the tab is shown, and has the messages logged from when
+//! it was made.
 
+use std::task::Poll;
+
+use async_broadcast::{Receiver, TryRecvError};
 use bevy::platform::time::Instant;
-use futures_channel::mpsc::UnboundedSender;
 use futures_util::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FollowMode, HighlightStyle,
@@ -20,9 +24,10 @@ use gpui_component::{
 
 use tracing::Level;
 
+use super::command::{self, Outcome};
 use super::{
-    Console, ConsoleEvent, ConsoleLog, ConsoleMessage, Field, MessageKind, Scope, ValueKind,
-    filter_default_allows, submit_line,
+    Console, ConsoleLog, ConsoleMessage, Field, MessageKind, Scope, ValueKind,
+    filter_default_allows,
 };
 
 actions!(dust_devtools_console, [ClearConsole]);
@@ -53,17 +58,20 @@ pub(crate) struct ConsoleView {
     last_count: u32,
     /// The rows changed since the list was last updated.
     dirty: bool,
-    /// Where the commands run at the prompt send what they did.
-    commands: UnboundedSender<ConsoleEvent>,
+    /// The log messages broadcast to the console. The view keeps its
+    /// receiver, rather than the task, so that it can take the ones sent
+    /// before what it shows next.
+    messages: Receiver<ConsoleMessage>,
     /// When logging started.
     startup: Instant,
-    /// Applies the changes sent to the console.
+    /// Shows the messages logged as they arrive.
     _receive: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl ConsoleView {
-    pub fn new(log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// A view of the messages logged to `log` from now on.
+    pub fn new(log: &ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.bind_keys([KeyBinding::new("cmd-k", ClearConsole, Some("Console"))]);
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
         let prompt =
@@ -83,7 +91,7 @@ impl ConsoleView {
                     if let InputEvent::PressEnter { .. } = event {
                         this.console.prompt.line = prompt.read(cx).value().to_string();
                         if let Some(line) = this.console.submit() {
-                            submit_line(cx, this.commands.clone(), line);
+                            this.run_line(&line, cx);
                         }
                         prompt.update(cx, |prompt, cx| prompt.set_value("", window, cx));
                         this.list.scroll_to_end();
@@ -94,22 +102,34 @@ impl ConsoleView {
             ),
         ];
 
-        let ConsoleLog {
-            sender,
-            mut events,
-            startup,
-        } = log;
+        let messages = log.messages.activate_cloned();
+        // Polls the view's receiver, which then wakes the task when more
+        // changes arrive.
         let receive = cx.spawn(async move |view, cx| {
-            while let Some(event) = events.next().await {
-                let applied = view.update(cx, |view, cx| {
-                    view.console.apply(event);
-                    view.dirty = true;
-                    cx.notify();
+            std::future::poll_fn(|task| {
+                let polled = view.update(cx, |view, cx| {
+                    let mut changed = false;
+                    let poll = loop {
+                        // Skips past messages dropped while it was behind.
+                        match view.messages.poll_next_unpin(task) {
+                            Poll::Ready(Some(message)) => {
+                                view.console.push(message);
+                                changed = true;
+                            }
+                            Poll::Ready(None) => break Poll::Ready(()),
+                            Poll::Pending => break Poll::Pending,
+                        }
+                    };
+                    if changed {
+                        view.dirty = true;
+                        cx.notify();
+                    }
+                    poll
                 });
-                if applied.is_err() {
-                    break;
-                }
-            }
+                // The view is gone.
+                polled.unwrap_or(Poll::Ready(()))
+            })
+            .await
         });
 
         let list = ListState::new(0, ListAlignment::Top, px(200.));
@@ -122,11 +142,58 @@ impl ConsoleView {
             shown: Vec::new(),
             last_count: 0,
             dirty: false,
-            commands: sender,
-            startup,
+            messages,
+            startup: log.startup,
             _receive: receive,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Shows `message` in the console, after the log messages sent to it
+    /// before, such as those of the line before, so that rows keep the order
+    /// things happened in.
+    fn show(&mut self, message: ConsoleMessage, cx: &mut Context<Self>) {
+        loop {
+            match self.messages.try_recv() {
+                Ok(message) => self.console.push(message),
+                // Some were dropped while the view was behind; the rest
+                // follow.
+                Err(TryRecvError::Overflowed(_)) => {}
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+            }
+        }
+        self.console.push(message);
+        self.dirty = true;
+        cx.notify();
+    }
+
+    /// Runs `line`, typed at the prompt, and shows it and what it printed, or
+    /// why it failed.
+    fn run_line(&mut self, line: &str, cx: &mut Context<Self>) {
+        let command =
+            ConsoleMessage::evaluation(MessageKind::Command, line.to_owned(), self.startup);
+        self.show(command, cx);
+        let line = line.to_owned();
+        cx.spawn(async move |view, cx| {
+            let result = command::run(&line, cx).await;
+            view.update(cx, |view, cx| {
+                let (kind, text) = match result {
+                    Ok(Outcome::Nothing) => return,
+                    Ok(Outcome::Clear) => {
+                        view.console.rows.clear();
+                        view.dirty = true;
+                        cx.notify();
+                        return;
+                    }
+                    Ok(Outcome::Output(output)) => (MessageKind::Output, output),
+                    Err(error) => (MessageKind::CommandError, error),
+                };
+                let message = ConsoleMessage::evaluation(kind, text, view.startup);
+                view.show(message, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Brings the list up to date with the rows the scope bar and the filter
@@ -336,7 +403,7 @@ impl ConsoleView {
         let expandable = message.source.is_some();
         let mut summary = v_flex().flex_1().min_w_0().child(summary(message, theme));
         if row.expanded {
-            summary = summary.children(details(message, self.startup, theme));
+            summary = summary.children(details(message, theme));
         }
         h_flex()
             .id(("console-row", row.serial as usize))
@@ -448,7 +515,7 @@ fn summary(message: &ConsoleMessage, theme: &Theme) -> StyledText {
 
 /// The fields one per line, the spans the message was logged in, where it
 /// was logged, and when.
-fn details(message: &ConsoleMessage, startup: Instant, theme: &Theme) -> Vec<StyledText> {
+fn details(message: &ConsoleMessage, theme: &Theme) -> Vec<StyledText> {
     let weak = theme.muted_foreground;
     let normal = theme.foreground;
     let line = |name: &str| {
@@ -498,10 +565,7 @@ fn details(message: &ConsoleMessage, startup: Instant, theme: &Theme) -> Vec<Sty
             plain.push(("thread", thread.clone()));
         }
     }
-    let seconds = message
-        .time
-        .saturating_duration_since(startup)
-        .as_secs_f64();
+    let seconds = message.time.as_secs_f64();
     plain.push(("time", format!("{seconds:.3} s after startup")));
     for (name, value) in plain {
         let mut text = line(name);

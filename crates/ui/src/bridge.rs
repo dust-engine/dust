@@ -56,6 +56,20 @@ impl BevyChannel {
         self.0.send(Box::new(call)).ok();
     }
 
+    /// Runs `call` with the Bevy world, after the calls queued before it, and
+    /// finishes with what it returns; with `None` if the Bevy app exits first.
+    pub fn run<T, F>(&self, call: F) -> impl Future<Output = Option<T>> + use<T, F>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut World) -> T + Send + 'static,
+    {
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        self.update(move |world| {
+            sender.send(call(world)).ok();
+        });
+        async move { receiver.await.ok() }
+    }
+
     /// Runs `system` at the end of every Bevy frame, in `Last`, and passes its
     /// [`SystemHandle`] to `then` on the UI thread.
     ///

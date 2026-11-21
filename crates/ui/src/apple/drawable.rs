@@ -18,8 +18,8 @@ use bevy_pumicite::{
         Device,
         ash::{ext, vk, vk::TaggedStructure as _},
         device::DeviceBuilder,
-        image::ImageLike,
-        project_host_metadata,
+        image::{ImageLike, ImageViewLike},
+        project_fields, project_host_metadata,
         sync::GPUMutex,
         tracking::ResourceState,
         utils::AsVkHandle,
@@ -207,7 +207,7 @@ fn present(
 pub struct DrawableImage {
     device: Device,
     image: vk::Image,
-    view: DrawableImageView,
+    linear_view: DrawableImageView,
     extent: UVec2,
 }
 
@@ -233,7 +233,11 @@ impl DrawableImage {
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .usage(
+                vk::ImageUsageFlags::STORAGE
+                    | vk::ImageUsageFlags::COLOR_ATTACHMENT
+                    | vk::ImageUsageFlags::TRANSFER_SRC, // for screenshots
+            )
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .push(&mut import);
         // The texture is the image's storage: kosmickrisp binds no memory to an
@@ -261,14 +265,9 @@ impl DrawableImage {
         DrawableImage {
             device,
             image,
-            view: DrawableImageView(view),
+            linear_view: DrawableImageView { view, image },
             extent,
         }
-    }
-
-    /// A view of the whole image, in its own format.
-    pub fn linear_view(&self) -> &DrawableImageView {
-        &self.view
     }
 
     /// The color space the layer shows the image in.
@@ -281,8 +280,6 @@ project_host_metadata! {
     /// [`DrawableImage`]'s accessors on a `GPUMutex` holding it, and on the tokens
     /// locking it.
     pub trait DrawableImageMetadata for impl[] DrawableImage {
-        /// A view of the whole image, in its own format.
-        fn linear_view(&self) -> &DrawableImageView;
         /// The color space the layer shows the image in.
         fn color_space(&self) -> vk::ColorSpaceKHR;
     }
@@ -327,19 +324,59 @@ unsafe impl ImageLike for DrawableImage {
 impl Drop for DrawableImage {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_image_view(self.view.0, None);
+            self.device.destroy_image_view(self.linear_view.view, None);
             self.device.destroy_image(self.image, None);
         }
     }
 }
 
-/// The view [`DrawableImage::linear_view`] returns.
-pub struct DrawableImageView(vk::ImageView);
+project_fields! {
+    /// [`DrawableImage`]'s view of the whole image, in its own format, from a token
+    /// to the image.
+    pub trait DrawableImageViews for impl[] DrawableImage {
+        linear_view: DrawableImageView,
+    }
+}
+
+/// A view of all of a [`DrawableImage`], in its own format.
+pub struct DrawableImageView {
+    view: vk::ImageView,
+    image: vk::Image,
+}
 
 impl AsVkHandle for DrawableImageView {
     type Handle = vk::ImageView;
 
     fn vk_handle(&self) -> Self::Handle {
-        self.0
+        self.view
+    }
+}
+
+// SAFETY: a `DrawableImageView` only exists inside the `DrawableImage` that owns its image,
+// which destroys it on drop. Its fields are private and it isn't `Clone`, so it's
+// only reachable through that image.
+unsafe impl ImageViewLike for DrawableImageView {
+    fn image_handle(&self) -> vk::Image {
+        self.image
+    }
+
+    fn aspects(&self) -> vk::ImageAspectFlags {
+        vk::ImageAspectFlags::COLOR
+    }
+
+    fn ty(&self) -> vk::ImageViewType {
+        vk::ImageViewType::TYPE_2D
+    }
+
+    fn array_layers(&self) -> std::ops::Range<u32> {
+        0..1
+    }
+
+    fn mip_levels(&self) -> std::ops::Range<u32> {
+        0..1
+    }
+
+    fn format(&self) -> vk::Format {
+        vk::Format::A2B10G10R10_UNORM_PACK32
     }
 }

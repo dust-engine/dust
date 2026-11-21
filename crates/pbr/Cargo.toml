@@ -11,6 +11,7 @@ dust_app.workspace = true
 dust_profiler.workspace = true
 dust_ui.workspace = true
 tracing = "0.1"
+futures-channel = "0.3"
 bytemuck = "1.25"
 glam = "0.33"
 

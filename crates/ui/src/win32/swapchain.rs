@@ -21,8 +21,8 @@ use bevy_pumicite::{
         Device,
         ash::{khr, vk, vk::TaggedStructure as _},
         device::DeviceBuilder,
-        image::ImageLike,
-        project_host_metadata,
+        image::{ImageLike, ImageViewLike},
+        project_fields, project_host_metadata,
         sync::GPUMutex,
         tracking::{Access, ResourceState},
         utils::AsVkHandle,
@@ -68,7 +68,6 @@ use crate::win32::layer::GameLayerSharedState;
 /// How many buffers the game renders into in turn: one being written, one queued
 /// for the compositor, and one on screen.
 const BUFFER_COUNT: usize = 3;
-
 
 /// Where systems using the [`Swapchain`]'s current image run: in a submission of
 /// their own on the render queue, after the submission of `DefaultRenderSet`, and
@@ -726,7 +725,7 @@ pub struct PresentationImage {
     device: Device,
     image: vk::Image,
     memory: vk::DeviceMemory,
-    view: PresentationImageView,
+    linear_view: PresentationImageView,
     extent: UVec2,
     color_space: vk::ColorSpaceKHR,
 }
@@ -759,7 +758,11 @@ impl PresentationImage {
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .usage(
+                vk::ImageUsageFlags::STORAGE
+                    | vk::ImageUsageFlags::COLOR_ATTACHMENT
+                    | vk::ImageUsageFlags::TRANSFER_SRC, // for screenshots
+            )
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .push(&mut external);
         let image = unsafe { device.create_image(&info, None) }.unwrap();
@@ -819,15 +822,10 @@ impl PresentationImage {
             device,
             image,
             memory,
-            view: PresentationImageView(view),
+            linear_view: PresentationImageView { view, image },
             extent,
             color_space,
         }
-    }
-
-    /// A view of the whole image, in its own format.
-    pub fn linear_view(&self) -> &PresentationImageView {
-        &self.view
     }
 
     /// The color space the visual shows the image in: HDR10 while the display
@@ -841,8 +839,6 @@ project_host_metadata! {
     /// [`PresentationImage`]'s accessors on a `GPUMutex` holding it, and on the
     /// tokens locking it.
     pub trait PresentationImageMetadata for impl[] PresentationImage {
-        /// A view of the whole image, in its own format.
-        fn linear_view(&self) -> &PresentationImageView;
         /// The color space the visual shows the image in.
         fn color_space(&self) -> vk::ColorSpaceKHR;
     }
@@ -887,20 +883,60 @@ unsafe impl ImageLike for PresentationImage {
 impl Drop for PresentationImage {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_image_view(self.view.0, None);
+            self.device.destroy_image_view(self.linear_view.view, None);
             self.device.destroy_image(self.image, None);
             self.device.free_memory(self.memory, None);
         }
     }
 }
 
-/// The view [`PresentationImage::linear_view`] returns.
-pub struct PresentationImageView(vk::ImageView);
+project_fields! {
+    /// [`PresentationImage`]'s view of the whole image, in its own format, from a token
+    /// to the image.
+    pub trait PresentationImageViews for impl[] PresentationImage {
+        linear_view: PresentationImageView,
+    }
+}
+
+/// A view of all of a [`PresentationImage`], in its own format.
+pub struct PresentationImageView {
+    view: vk::ImageView,
+    image: vk::Image,
+}
 
 impl AsVkHandle for PresentationImageView {
     type Handle = vk::ImageView;
 
     fn vk_handle(&self) -> Self::Handle {
-        self.0
+        self.view
+    }
+}
+
+// SAFETY: a `PresentationImageView` only exists inside the `PresentationImage` that owns its image,
+// which destroys it on drop. Its fields are private and it isn't `Clone`, so it's
+// only reachable through that image.
+unsafe impl ImageViewLike for PresentationImageView {
+    fn image_handle(&self) -> vk::Image {
+        self.image
+    }
+
+    fn aspects(&self) -> vk::ImageAspectFlags {
+        vk::ImageAspectFlags::COLOR
+    }
+
+    fn ty(&self) -> vk::ImageViewType {
+        vk::ImageViewType::TYPE_2D
+    }
+
+    fn array_layers(&self) -> std::ops::Range<u32> {
+        0..1
+    }
+
+    fn mip_levels(&self) -> std::ops::Range<u32> {
+        0..1
+    }
+
+    fn format(&self) -> vk::Format {
+        FORMAT
     }
 }

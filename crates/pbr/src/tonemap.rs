@@ -1,13 +1,18 @@
+use std::sync::Arc;
+
 use bevy::prelude::*;
 use bevy_pumicite::{SubmissionState, prelude::ComputePipeline, staging::UniformRingBuffer};
 use bytemuck::NoUninit;
 use dust_ui::Swapchain;
 // `bevy_pumicite`'s swapchain image has these methods without a trait.
 #[cfg(any(target_vendor = "apple", windows))]
-use dust_ui::SwapchainImageMetadata as _;
+use dust_ui::{SwapchainImageMetadata as _, SwapchainImageViews as _};
 use pumicite::{
     ash::vk,
-    tracking::Access,
+    command::{CommandEncoder, GPURefMut},
+    image::ImageViewLike,
+    pipeline::Pipeline,
+    tracking::{Access, ResourceState},
     types::format::{ColorSpace, ColorSpacePrimaries},
     utils::AsVkHandle,
 };
@@ -427,7 +432,44 @@ pub(crate) fn tonemap_pass(
     let Some(hdr) = hdr_target.as_mut() else {
         return;
     };
-    let swapchain_current_image = swapchain.current_image().unwrap();
+    let color_space = swapchain.current_image().unwrap().color_space();
+    let pipeline = pipeline.clone().into_inner();
+
+    ctx.record(move |encoder, _| {
+        let swapchain_target = encoder.lock(
+            swapchain.current_image().as_ref().unwrap(),
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+        record_tonemap(
+            encoder,
+            pipeline,
+            hdr,
+            color_space,
+            swapchain_target.linear_view(),
+            swapchain.state_mut(),
+            &mut uniform_ring_buffer,
+            profiler.as_deref_mut(),
+            "tonemap",
+        );
+    });
+}
+
+/// Records tone-mapping `hdr`'s scene, with its debug overlay over it, into
+/// `output`, a view of all of an image the size of the display, which shows it
+/// in `color_space`, and whose access `output_state` tracks: the barriers, and
+/// the dispatch, timed as `label`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_tonemap<'a, V: ImageViewLike + 'a>(
+    encoder: &mut CommandEncoder<'a>,
+    pipeline: Arc<Pipeline>,
+    hdr: &mut HdrRenderTarget,
+    color_space: vk::ColorSpaceKHR,
+    output: GPURefMut<'a, V>,
+    output_state: &mut ResourceState,
+    uniform_ring_buffer: &mut UniformRingBuffer,
+    profiler: Option<&mut GpuProfiler>,
+    label: &'static str,
+) {
     // The shader pre-multiplies the HDR input by the auto-exposure scale (see
     // `autoexposure_pass`), so its mid-gray already sits at 0.18. Run LPM at
     // its neutral exposure — `midIn = hdrMax · 0.18 · 2^-exposure = 0.18` ⇔
@@ -435,12 +477,9 @@ pub(crate) fn tonemap_pass(
     // shapes the shoulder / gamut. Exposure intent lives in the auto-exposure
     // pass (and `Camera::exposure` EV compensation), keeping the value the
     // upscaler was told consistent with what is displayed.
-    let mut lpm_ctl = LpmConfig::new_for_colorspace(swapchain_current_image.color_space());
+    let mut lpm_ctl = LpmConfig::new_for_colorspace(color_space);
     lpm_ctl.exposure = lpm_ctl.hdr_max.log2();
-    let pipeline = pipeline.clone().into_inner();
-    let swapchain_colorspace =
-        pumicite::types::format::ColorSpace::from(swapchain_current_image.color_space());
-    let gamma_mode = swapchain_colorspace.transfer_function;
+    let gamma_mode = ColorSpace::from(color_space).transfer_function;
     let lpm_filter_flags = lpm_ctl.preset.filter_flags()
         | if lpm_ctl.shoulder {
             lpm_flags::SHOULDER
@@ -448,135 +487,126 @@ pub(crate) fn tonemap_pass(
             0
         };
     let sdr_transform_matrix = lpm_ctl.sdr_transform_matrix();
+    let lpm_ctl_buffer = uniform_ring_buffer.create_uniform(
+        encoder,
+        bytemuck::bytes_of(&TonemapPassUniforms {
+            lpm_ctl: lpm_ctl.ctl_words(),
+            sdr_mapping_col0: sdr_transform_matrix.col(0).to_array(),
+            sdr_mapping_col1: sdr_transform_matrix.col(1).to_array(),
+            sdr_mapping_col2: sdr_transform_matrix.col(2).to_array(),
+            gamma_mode: gamma_mode as u32,
+            lpm_flags: lpm_filter_flags,
+            _pad: 0,
+        }),
+    );
+    let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
 
-    ctx.record(move |encoder, _| {
-        let lpm_ctl_buffer = uniform_ring_buffer.create_uniform(
-            encoder,
-            bytemuck::bytes_of(&TonemapPassUniforms {
-                lpm_ctl: lpm_ctl.ctl_words(),
-                sdr_mapping_col0: sdr_transform_matrix.col(0).to_array(),
-                sdr_mapping_col1: sdr_transform_matrix.col(1).to_array(),
-                sdr_mapping_col2: sdr_transform_matrix.col(2).to_array(),
-                gamma_mode: gamma_mode as u32,
-                lpm_flags: lpm_filter_flags,
-                _pad: 0,
-            }),
-        );
-        let render_target_views = encoder.lock(&hdr.view, vk::PipelineStageFlags2::COMPUTE_SHADER);
-        let swapchain_target = encoder.lock(
-            swapchain.current_image().as_ref().unwrap(),
-            vk::PipelineStageFlags2::COMPUTE_SHADER,
-        );
+    // HDR intermediary: read
+    encoder.use_image_resource(
+        render_target_views.hdr_denoised_output(),
+        &mut hdr.hdr_denoised_target_state,
+        Access::COMPUTE_READ,
+        vk::ImageLayout::GENERAL,
+        0..1,
+        0..1,
+        false,
+    );
+    // Debug overlay: read
+    encoder.use_image_resource(
+        render_target_views.debug_overlay(),
+        &mut hdr.debug_overlay_state,
+        Access::COMPUTE_READ,
+        vk::ImageLayout::GENERAL,
+        0..1,
+        0..1,
+        false,
+    );
+    // Auto-exposure scale: read
+    encoder.use_image_resource(
+        render_target_views.exposure(),
+        &mut hdr.exposure_state,
+        Access::COMPUTE_READ,
+        vk::ImageLayout::GENERAL,
+        0..1,
+        0..1,
+        false,
+    );
+    // Output: write (final composited output)
+    encoder.use_image_view_resource(
+        output,
+        output_state,
+        Access::COMPUTE_WRITE,
+        vk::ImageLayout::GENERAL,
+        false,
+    );
+    encoder.emit_barriers();
 
-        // HDR intermediary: read
-        encoder.use_image_resource(
-            render_target_views.hdr_denoised_output(),
-            &mut hdr.hdr_denoised_target_state,
-            Access::COMPUTE_READ,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        // Debug overlay: read
-        encoder.use_image_resource(
-            render_target_views.debug_overlay(),
-            &mut hdr.debug_overlay_state,
-            Access::COMPUTE_READ,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        // Auto-exposure scale: read
-        encoder.use_image_resource(
-            render_target_views.exposure(),
-            &mut hdr.exposure_state,
-            Access::COMPUTE_READ,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        // Swapchain: write (final composited output)
-        encoder.use_image_resource(
-            swapchain_target,
-            swapchain.state_mut(),
-            Access::COMPUTE_WRITE,
-            vk::ImageLayout::GENERAL,
-            0..1,
-            0..1,
-            false,
-        );
-        encoder.emit_barriers();
+    let pipeline = encoder.retain(pipeline).deref_inner();
+    encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
 
-        let pipeline = encoder.retain(pipeline).deref_inner();
-        encoder.bind_pipeline(vk::PipelineBindPoint::COMPUTE, pipeline);
-
-        encoder.push_descriptor_set(
-            vk::PipelineBindPoint::COMPUTE,
-            pipeline.layout(),
-            0,
-            &[
-                vk::WriteDescriptorSet {
-                    dst_binding: 0,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[
-                    vk::DescriptorImageInfo {
-                        sampler: vk::Sampler::null(),
-                        image_view: render_target_views
-                            .hdr_denoised_output()
-                            .full_view()
-                            .vk_handle(),
-                        image_layout: vk::ImageLayout::GENERAL,
-                    },
-                    vk::DescriptorImageInfo {
-                        sampler: vk::Sampler::null(),
-                        image_view: swapchain_target.linear_view().vk_handle(),
-                        image_layout: vk::ImageLayout::GENERAL,
-                    },
-                ]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 2,
-                    descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
+    encoder.push_descriptor_set(
+        vk::PipelineBindPoint::COMPUTE,
+        pipeline.layout(),
+        0,
+        &[
+            vk::WriteDescriptorSet {
+                dst_binding: 0,
+                descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                ..Default::default()
+            }
+            .image_info(&[
+                vk::DescriptorImageInfo {
                     sampler: vk::Sampler::null(),
-                    image_view: render_target_views.debug_overlay().srgb_view().vk_handle(),
+                    image_view: render_target_views
+                        .hdr_denoised_output()
+                        .full_view()
+                        .vk_handle(),
                     image_layout: vk::ImageLayout::GENERAL,
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 3,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    ..Default::default()
-                }
-                .buffer_info(&[vk::DescriptorBufferInfo {
-                    buffer: lpm_ctl_buffer.vk_handle(),
-                    offset: lpm_ctl_buffer.offset(),
-                    range: lpm_ctl_buffer.size(),
-                }]),
-                vk::WriteDescriptorSet {
-                    dst_binding: 4,
-                    descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
-                    ..Default::default()
-                }
-                .image_info(&[vk::DescriptorImageInfo {
+                },
+                vk::DescriptorImageInfo {
                     sampler: vk::Sampler::null(),
-                    image_view: render_target_views.exposure().full_view().vk_handle(),
+                    image_view: output.vk_handle(),
                     image_layout: vk::ImageLayout::GENERAL,
-                }]),
-            ],
-        );
+                },
+            ]),
+            vk::WriteDescriptorSet {
+                dst_binding: 2,
+                descriptor_type: vk::DescriptorType::SAMPLED_IMAGE,
+                ..Default::default()
+            }
+            .image_info(&[vk::DescriptorImageInfo {
+                sampler: vk::Sampler::null(),
+                image_view: render_target_views.debug_overlay().srgb_view().vk_handle(),
+                image_layout: vk::ImageLayout::GENERAL,
+            }]),
+            vk::WriteDescriptorSet {
+                dst_binding: 3,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                ..Default::default()
+            }
+            .buffer_info(&[vk::DescriptorBufferInfo {
+                buffer: lpm_ctl_buffer.vk_handle(),
+                offset: lpm_ctl_buffer.offset(),
+                range: lpm_ctl_buffer.size(),
+            }]),
+            vk::WriteDescriptorSet {
+                dst_binding: 4,
+                descriptor_type: vk::DescriptorType::STORAGE_IMAGE,
+                ..Default::default()
+            }
+            .image_info(&[vk::DescriptorImageInfo {
+                sampler: vk::Sampler::null(),
+                image_view: render_target_views.exposure().full_view().vk_handle(),
+                image_layout: vk::ImageLayout::GENERAL,
+            }]),
+        ],
+    );
 
-        encoder.timing_scope(profiler.as_deref_mut(), "tonemap", |encoder| {
-            encoder.dispatch(UVec3::new(
-                hdr.display_extent.x.div_ceil(8),
-                hdr.display_extent.y.div_ceil(8),
-                1,
-            ));
-        });
+    encoder.timing_scope(profiler, label, |encoder| {
+        encoder.dispatch(UVec3::new(
+            hdr.display_extent.x.div_ceil(8),
+            hdr.display_extent.y.div_ceil(8),
+            1,
+        ));
     });
 }
