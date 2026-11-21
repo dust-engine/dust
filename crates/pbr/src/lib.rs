@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod emitters;
 pub mod hzb;
 pub mod screen_trace;
 pub mod sharc;

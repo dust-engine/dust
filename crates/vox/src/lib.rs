@@ -28,6 +28,7 @@ use pumicite::buffer::ManagedBuffer;
 use pumicite::command::GPURefMut;
 use pumicite::device::DeviceBuilder;
 
+pub mod emitters;
 mod geometry;
 mod loader;
 mod material;
@@ -42,6 +43,7 @@ type Tree = dust_vdb::Tree<TreeRoot>;
 
 pub use loader::*;
 
+pub use emitters::VoxModelEmitters;
 pub use geometry::VoxGeometry;
 pub use physics::VoxModelCollider;
 
@@ -104,6 +106,12 @@ impl VoxPalette {
             .as_slice_mut()
             .copy_from_slice(bytemuck::cast_slice(entries));
         Ok(Self(buffer))
+    }
+
+    /// The 256 entries, as the GPU reads them.
+    pub fn entries(&self) -> &[VoxGpuMaterial; 256] {
+        let entries: &[VoxGpuMaterial] = bytemuck::cast_slice(self.0.as_slice());
+        entries[..256].try_into().unwrap()
     }
 
     pub fn colorful(allocator: pumicite::Allocator) -> VkResult<Self> {
@@ -218,6 +226,10 @@ impl Plugin for VoxPlugin {
         {
             app.add_systems(PostUpdate, sync_buffers_system.in_set(DefaultTransferSet));
         }
+        app.add_systems(
+            PostUpdate,
+            emitters::build_emitter_tables.in_set(DefaultTransferSet),
+        );
 
         app.add_systems(
             Startup,
