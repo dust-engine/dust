@@ -5,8 +5,9 @@ module sharc;
 // (sharc/sharc_resolve.slang) averages over frames, and the final gather reads.
 //
 // A `HashMap` maps each cell's key (`SharcParams::cellKey`) to a slot. The cell's
-// radiance is at that slot in two buffers: `SharcAccumulation`, this frame's
-// samples, and `SharcResolved`, their average over recent frames.
+// state is at that slot in three buffers: `SharcAccumulation`, this frame's
+// samples; `SharcResolvedHot`, their average over recent frames, which every
+// cache query reads; and `SharcResolvedCold`, the bookkeeping only Resolve reads.
 import hash_map;
 
 // Bounds on SharcShaderConstants::accumulationFrameNum and ::staleFrameNum.
@@ -19,31 +20,24 @@ public static const uint kSharcStaleFrameNumMax = 1024;
 public static const uint kSharcInvalidSlot = 0xFFFFFFFFu;
 
 // A cell's samples this frame: their radiance, summed with atomic adds, and how
-// many there are. Resolve folds them into the cell's `SharcResolved` and zeroes
-// this. std430 stride 16 B (`SharcResources::STRIDE_ACCUMULATION`).
+// many there are. Resolve folds them into the cell's `SharcResolvedHot` and
+// zeroes this. std430 stride 16 B (`SharcResources::STRIDE_ACCUMULATION`).
 public struct SharcAccumulation {
     public float3 radiance;
     public uint sampleNum;
 }
 
-// A cell's radiance averaged over recent frames. std430 stride 16 B
-// (`SharcResources::STRIDE_RESOLVED`).
-public struct SharcResolved {
+// A cell's radiance averaged over recent frames: what every cache query reads
+// (`getCachedRadianceByKey`), kept apart from `SharcResolvedCold` so the final
+// gather's random lookups fetch 8 B per cell. std430 stride 8 B
+// (`SharcResources::STRIDE_RESOLVED_HOT`).
+public struct SharcResolvedHot {
     // The average radiance and the (frame-weighted) number of samples in it.
     float16_t4 radianceAndSampleNum;
-    // Frames accumulated in the low 16 bits; frames since the last sample in the
-    // high 16. Both stay under 2^16: a cell is evicted after at most
-    // kSharcStaleFrameNumMax frames without a sample, and every sample caps the
-    // count at the accumulation window.
-    uint frameNums;
-    uint _pad;
 
-    public __init(float3 radiance, float sampleNum, uint accumulatedFrameNum,
-                  uint staleFrameNum) {
+    public __init(float3 radiance, float sampleNum) {
         const float kFloat16Max = 65504.0;
         radianceAndSampleNum = float16_t4(min(float4(radiance, sampleNum), kFloat16Max));
-        frameNums = accumulatedFrameNum | (staleFrameNum << 16);
-        _pad = 0;
     }
 
     public property float3 radiance {
@@ -52,6 +46,21 @@ public struct SharcResolved {
     public property float sampleNum {
         get { return float(radianceAndSampleNum.w); }
     }
+}
+
+// A cell's bookkeeping, which only Resolve reads. std430 stride 4 B
+// (`SharcResources::STRIDE_RESOLVED_COLD`).
+public struct SharcResolvedCold {
+    // Frames accumulated in the low 16 bits; frames since the last sample in the
+    // high 16. Both stay under 2^16: a cell is evicted after at most
+    // kSharcStaleFrameNumMax frames without a sample, and every sample caps the
+    // count at the accumulation window.
+    uint frameNums;
+
+    public __init(uint accumulatedFrameNum, uint staleFrameNum) {
+        frameNums = accumulatedFrameNum | (staleFrameNum << 16);
+    }
+
     public property uint accumulatedFrameNum {
         get { return frameNums & 0xFFFFu; }
     }
@@ -148,7 +157,8 @@ public struct SharcParams {
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT)]
     RWStructuredBuffer<SharcAccumulation> g_sharcAccumulation;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
-    RWStructuredBuffer<SharcResolved> g_sharcResolved;
+    // Only the hot half: `SharcResolvedCold` is bound to Resolve alone.
+    RWStructuredBuffer<SharcResolvedHot> g_sharcResolvedHot;
     [Stages(STAGE_RAYGEN | STAGE_MISS | STAGE_CLOSEST_HIT | STAGE_COMPUTE)]
     public ConstantBuffer<SharcShaderConstants> g_sharcConstants;
     // Candidate pool — read side feeds Update's primary vertices, write side
@@ -214,7 +224,7 @@ public struct SharcParams {
         radiance = float3(0.0, 0.0, 0.0);
         sampleNum = 0.0;
         if (let slot = map.find(key)) {
-            SharcResolved cell = g_sharcResolved[slot];
+            SharcResolvedHot cell = g_sharcResolvedHot[slot];
             sampleNum = cell.sampleNum;
             if (sampleNum > 0.0) {
                 radiance = cell.radiance;

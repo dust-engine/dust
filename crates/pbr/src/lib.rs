@@ -266,7 +266,7 @@ impl Plugin for PbrRenderPlugin {
                     .ok();
 
                 // SHARC requirements: shaderFloat16 + 16-bit storage for the
-                // resolved buffer (`SharcResolved`, float16x4 per entry).
+                // resolved buffer (`SharcResolvedHot`, float16x4 per entry).
                 device_builder
                     .enable_feature::<vk::PhysicalDeviceFloat16Int8FeaturesKHR>(|feature| {
                         &mut feature.shader_float16
@@ -277,7 +277,7 @@ impl Plugin for PbrRenderPlugin {
                         &mut feature.storage_buffer16_bit_access
                     })
                     .ok();
-                // Slang lowers `RWStructuredBuffer<SharcResolved>` (which
+                // Slang lowers `RWStructuredBuffer<SharcResolvedHot>` (which
                 // contains `float16_t4`) through the older Uniform-Block
                 // SPIR-V form, so storageBuffer16BitAccess alone is not
                 // enough — the validator demands
@@ -516,7 +516,7 @@ fn render(
                 vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             );
             let sharc_resolved_buf = encoder.lock(
-                &sharc_resources.resolved,
+                &sharc_resources.resolved_hot,
                 vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
             );
             let sharc_rt_read = Access {
@@ -535,7 +535,7 @@ fn render(
             );
             encoder.use_buffer_resource(
                 sharc_resolved_buf,
-                &mut sharc_resources.resolved_state,
+                &mut sharc_resources.resolved_hot_state,
                 sharc_rt_read,
             );
             (sharc_hash_buf, sharc_accum_buf, sharc_resolved_buf)
@@ -579,12 +579,12 @@ fn render(
             params
                 .sharc_g_sharc_hash_entries(sharc_hash_buf)
                 .sharc_g_sharc_accumulation(sharc_accum_buf)
-                .sharc_g_sharc_resolved(sharc_resolved_buf);
+                .sharc_g_sharc_resolved_hot(sharc_resolved_buf);
         } else {
             params
                 .sharc_g_sharc_hash_entries_null()
                 .sharc_g_sharc_accumulation_null()
-                .sharc_g_sharc_resolved_null();
+                .sharc_g_sharc_resolved_hot_null();
         }
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::RAY_TRACING_KHR,
@@ -1583,7 +1583,7 @@ pub(crate) fn final_gather_pass(
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         let sharc_resolved_buf = encoder.lock(
-            &sharc_resources.resolved,
+            &sharc_resources.resolved_hot,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         let sharc_constants_buf =
@@ -1631,7 +1631,7 @@ pub(crate) fn final_gather_pass(
         );
         encoder.use_buffer_resource(
             sharc_resolved_buf,
-            &mut sharc_resources.resolved_state,
+            &mut sharc_resources.resolved_hot_state,
             sharc_rt_read,
         );
         // Split pool[0]/pool[1] mutably without violating borrow rules.
@@ -1741,7 +1741,7 @@ pub(crate) fn final_gather_pass(
             // their binding numbers track the shader reflection automatically.
             .sharc_g_sharc_hash_entries(sharc_hash_buf)
             .sharc_g_sharc_accumulation(sharc_accum_buf)
-            .sharc_g_sharc_resolved(sharc_resolved_buf)
+            .sharc_g_sharc_resolved_hot(sharc_resolved_buf)
             .sharc_g_sharc_constants(sharc_constants_buf)
             .sharc_g_sharc_candidates_read(pool_read_candidates_buf)
             .sharc_g_sharc_keys_read(pool_read_keys_buf)

@@ -154,7 +154,7 @@ impl Default for SharcConfig {
         Self {
             enabled: true,
             reset_pending: true,
-            entries_num: 1 << 20, // 36 MiB total (36 B per entry)
+            entries_num: 1 << 20, // 32 MiB total (32 B per entry)
             accumulation_frame_num: 32,
             stale_frame_num: 64,
             scene_scale: 1.0,
@@ -214,10 +214,15 @@ pub struct SharcResources {
     /// (`u32`, 0 for an empty slot).
     pub hash_entries: GPUMutex<Buffer>,
     pub accumulation: GPUMutex<Buffer>,
-    pub resolved: GPUMutex<Buffer>,
+    /// Each cell's averaged radiance (`SharcResolvedHot`), what every cache
+    /// query reads.
+    pub resolved_hot: GPUMutex<Buffer>,
+    /// Each cell's bookkeeping (`SharcResolvedCold`), bound to Resolve alone.
+    pub resolved_cold: GPUMutex<Buffer>,
     pub hash_entries_state: ResourceState,
     pub accumulation_state: ResourceState,
-    pub resolved_state: ResourceState,
+    pub resolved_hot_state: ResourceState,
+    pub resolved_cold_state: ResourceState,
     pub pool_capacity: u32,
     /// Ping-ponged. `frame_index & 1 == 0` ⇒ pool[0] = read, pool[1] = write.
     pub pool: [CandidatePool; 2],
@@ -227,7 +232,8 @@ pub struct SharcResources {
 impl SharcResources {
     const STRIDE_HASH_ENTRIES: u64 = 4;
     const STRIDE_ACCUMULATION: u64 = 16;
-    const STRIDE_RESOLVED: u64 = 16;
+    const STRIDE_RESOLVED_HOT: u64 = 8;
+    const STRIDE_RESOLVED_COLD: u64 = 4;
     /// Std430 stride for
     /// `Candidate { vec3 worldPos; vec3 normal; vec3 albedo; uint64_t key; }`.
     /// Each vec3 is 16-aligned in std430 (12 B payload + 4 B pad) = 48 B; the
@@ -268,13 +274,20 @@ fn create_sharc_resources(
         usage,
     )
     .expect("SHARC accumulation buffer");
-    let resolved = Buffer::new_device(
+    let resolved_hot = Buffer::new_device(
         allocator.clone(),
-        n * SharcResources::STRIDE_RESOLVED,
+        n * SharcResources::STRIDE_RESOLVED_HOT,
         16,
         usage,
     )
-    .expect("SHARC resolved buffer");
+    .expect("SHARC resolved hot buffer");
+    let resolved_cold = Buffer::new_device(
+        allocator.clone(),
+        n * SharcResources::STRIDE_RESOLVED_COLD,
+        16,
+        usage,
+    )
+    .expect("SHARC resolved cold buffer");
     let pool = [(); 2].map(|_| {
         let cap = pool_capacity as u64;
         let candidates = Buffer::new_device(
@@ -302,10 +315,12 @@ fn create_sharc_resources(
         entries_num,
         hash_entries: GPUMutex::new(hash_entries),
         accumulation: GPUMutex::new(accumulation),
-        resolved: GPUMutex::new(resolved),
+        resolved_hot: GPUMutex::new(resolved_hot),
+        resolved_cold: GPUMutex::new(resolved_cold),
         hash_entries_state: ResourceState::default(),
         accumulation_state: ResourceState::default(),
-        resolved_state: ResourceState::default(),
+        resolved_hot_state: ResourceState::default(),
+        resolved_cold_state: ResourceState::default(),
         pool_capacity,
         pool,
         needs_clear: true,
@@ -460,7 +475,10 @@ pub(crate) fn clear_sharc_buffers(
         if full_reset {
             let hash_buf = encoder.lock(&resources.hash_entries, vk::PipelineStageFlags2::COPY);
             let accum_buf = encoder.lock(&resources.accumulation, vk::PipelineStageFlags2::COPY);
-            let resolved_buf = encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COPY);
+            let resolved_hot_buf =
+                encoder.lock(&resources.resolved_hot, vk::PipelineStageFlags2::COPY);
+            let resolved_cold_buf =
+                encoder.lock(&resources.resolved_cold, vk::PipelineStageFlags2::COPY);
             let keys_bufs = [
                 encoder.lock(&resources.pool[0].keys, vk::PipelineStageFlags2::COPY),
                 encoder.lock(&resources.pool[1].keys, vk::PipelineStageFlags2::COPY),
@@ -471,7 +489,16 @@ pub(crate) fn clear_sharc_buffers(
                 &mut resources.accumulation_state,
                 Access::CLEAR,
             );
-            encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, Access::CLEAR);
+            encoder.use_buffer_resource(
+                resolved_hot_buf,
+                &mut resources.resolved_hot_state,
+                Access::CLEAR,
+            );
+            encoder.use_buffer_resource(
+                resolved_cold_buf,
+                &mut resources.resolved_cold_state,
+                Access::CLEAR,
+            );
             // Clear both pools' keys on reset (the read side might still
             // carry stale candidates from a previous run).
             let [pool0, pool1] = &mut resources.pool;
@@ -482,13 +509,15 @@ pub(crate) fn clear_sharc_buffers(
             unsafe {
                 device.cmd_fill_buffer(cmd_buffer, hash_buf.vk_handle(), 0, hash_buf.size(), 0);
                 device.cmd_fill_buffer(cmd_buffer, accum_buf.vk_handle(), 0, accum_buf.size(), 0);
-                device.cmd_fill_buffer(
-                    cmd_buffer,
-                    resolved_buf.vk_handle(),
-                    0,
-                    resolved_buf.size(),
-                    0,
-                );
+                for resolved_buf in [&resolved_hot_buf, &resolved_cold_buf] {
+                    device.cmd_fill_buffer(
+                        cmd_buffer,
+                        resolved_buf.vk_handle(),
+                        0,
+                        resolved_buf.size(),
+                        0,
+                    );
+                }
                 for kb in &keys_bufs {
                     device.cmd_fill_buffer(cmd_buffer, kb.vk_handle(), 0, kb.size(), 0);
                 }
@@ -679,8 +708,8 @@ fn record_sharc_rt(
             &resources.accumulation,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
-        let resolved_buf = encoder.lock(
-            &resources.resolved,
+        let resolved_hot_buf = encoder.lock(
+            &resources.resolved_hot,
             vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
         );
         // Pool ping-pong: pick which physical buffers go to read vs write
@@ -797,7 +826,7 @@ fn record_sharc_rt(
         };
         encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, rt_rw);
         encoder.use_buffer_resource(accum_buf, &mut resources.accumulation_state, rt_rw);
-        encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, rt_rw);
+        encoder.use_buffer_resource(resolved_hot_buf, &mut resources.resolved_hot_state, rt_rw);
         // Split pool[0]/pool[1] mutably without violating borrow rules.
         let [pool_a, pool_b] = &mut resources.pool;
         let (pool_read, pool_write) = if pool_read_idx == 0 {
@@ -860,7 +889,7 @@ fn record_sharc_rt(
             // their binding numbers track the shader reflection automatically.
             .sharc_g_sharc_hash_entries(hash_buf)
             .sharc_g_sharc_accumulation(accum_buf)
-            .sharc_g_sharc_resolved(resolved_buf)
+            .sharc_g_sharc_resolved_hot(resolved_hot_buf)
             .sharc_g_sharc_constants(constants_buffer)
             .sharc_g_sharc_candidates_read(pool_read_candidates_buf)
             .sharc_g_sharc_keys_read(pool_read_keys_buf)
@@ -929,8 +958,14 @@ fn sharc_resolve_pass(
             &resources.accumulation,
             vk::PipelineStageFlags2::COMPUTE_SHADER,
         );
-        let resolved_buf =
-            encoder.lock(&resources.resolved, vk::PipelineStageFlags2::COMPUTE_SHADER);
+        let resolved_hot_buf = encoder.lock(
+            &resources.resolved_hot,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
+        let resolved_cold_buf = encoder.lock(
+            &resources.resolved_cold,
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+        );
 
         let rw = Access {
             stage: vk::PipelineStageFlags2::COMPUTE_SHADER,
@@ -938,7 +973,8 @@ fn sharc_resolve_pass(
         };
         encoder.use_buffer_resource(hash_buf, &mut resources.hash_entries_state, rw);
         encoder.use_buffer_resource(accum_buf, &mut resources.accumulation_state, rw);
-        encoder.use_buffer_resource(resolved_buf, &mut resources.resolved_state, rw);
+        encoder.use_buffer_resource(resolved_hot_buf, &mut resources.resolved_hot_state, rw);
+        encoder.use_buffer_resource(resolved_cold_buf, &mut resources.resolved_cold_state, rw);
         encoder.emit_barriers();
 
         let pipeline = encoder.retain(pipeline.clone()).deref_inner();
@@ -958,11 +994,6 @@ fn sharc_resolve_pass(
             buffer: accum_buf.vk_handle(),
             offset: 0,
             range: accum_buf.size(),
-        }];
-        let resolved_info = [vk::DescriptorBufferInfo {
-            buffer: resolved_buf.vk_handle(),
-            offset: 0,
-            range: resolved_buf.size(),
         }];
         encoder.push_descriptor_set(
             vk::PipelineBindPoint::COMPUTE,
@@ -996,7 +1027,22 @@ fn sharc_resolve_pass(
                     descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
                     ..Default::default()
                 }
-                .buffer_info(&resolved_info),
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: resolved_hot_buf.vk_handle(),
+                    offset: 0,
+                    range: resolved_hot_buf.size(),
+                }]),
+                vk::WriteDescriptorSet {
+                    dst_binding: 4,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    ..Default::default()
+                }
+                .buffer_info(&[vk::DescriptorBufferInfo {
+                    buffer: resolved_cold_buf.vk_handle(),
+                    offset: 0,
+                    range: resolved_cold_buf.size(),
+                }]),
             ],
         );
 
