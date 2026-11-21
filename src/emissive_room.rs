@@ -167,6 +167,11 @@ const MATERIALS: &[(u8, u32, Surface)] = &[
 ];
 
 fn palette(allocator: Allocator) -> pumicite::ash::VkResult<VoxPalette> {
+    VoxPalette::new(allocator, &palette_entries())
+}
+
+/// The palette's entries, indexed by `value - 1`.
+fn palette_entries() -> Box<[VoxGpuMaterial; 256]> {
     let unorm = |x: f32| (x.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
     let mut entries = Box::new([VoxGpuMaterial::default(); 256]);
     for &(value, rgb, surface) in MATERIALS {
@@ -181,7 +186,7 @@ fn palette(allocator: Allocator) -> pumicite::ash::VkResult<VoxPalette> {
         entry.packed = packed;
         entry.emission = emission as f16;
     }
-    VoxPalette::new(allocator, &entries)
+    entries
 }
 
 /// The room's palette values, one byte per voxel.
@@ -840,6 +845,20 @@ fn build_model(
     (!empty).then_some((geometry, material))
 }
 
+/// The room voxel coordinates of each chunk's minimum corner: the room is split
+/// into models of at most `CHUNK`³ voxels.
+fn chunk_origins() -> Vec<IVec3> {
+    let mut origins = Vec::new();
+    for z in (0..ROOM.z).step_by(CHUNK as usize) {
+        for y in (0..ROOM.y).step_by(CHUNK as usize) {
+            for x in (0..ROOM.x).step_by(CHUNK as usize) {
+                origins.push(ivec3(x, y, z));
+            }
+        }
+    }
+    origins
+}
+
 /// World position of a point in room voxel coordinates. The room is centered on
 /// the origin horizontally, with its floor at y = 0.
 fn room_to_world(p: Vec3) -> Vec3 {
@@ -863,14 +882,7 @@ fn setup_emissive_room(
     let palette = palettes.add(palette(allocator.clone()).expect("emissive room palette"));
 
     // One model per chunk, built in parallel.
-    let mut origins = Vec::new();
-    for z in (0..ROOM.z).step_by(CHUNK as usize) {
-        for y in (0..ROOM.y).step_by(CHUNK as usize) {
-            for x in (0..ROOM.x).step_by(CHUNK as usize) {
-                origins.push(ivec3(x, y, z));
-            }
-        }
-    }
+    let origins = chunk_origins();
     let chunks: Vec<_> = std::thread::scope(|scope| {
         let grid = &grid;
         let allocator = &*allocator;
@@ -1037,5 +1049,92 @@ mod tests {
             .sum();
         println!("{emitters} emissive voxels");
         assert!(emitters > 0);
+    }
+
+    /// The chunks' emitter tables hold every emissive face the room exposes.
+    /// The only faces they add are on a chunk's boundary, where a chunk can't
+    /// see that a voxel of the next chunk covers them.
+    #[test]
+    fn emitter_tables_cover_the_room() {
+        use std::collections::HashSet;
+
+        use dust_pbr::emitters::{EmitterTable, LUMINANCE};
+        use dust_vox::emitters::emissive_faces;
+
+        let grid = build_room();
+        let entries = palette_entries();
+        let emits = |value: u8| value != 0 && entries[value as usize - 1].emission > 0.0;
+        let directions = [
+            IVec3::X,
+            IVec3::NEG_X,
+            IVec3::Y,
+            IVec3::NEG_Y,
+            IVec3::Z,
+            IVec3::NEG_Z,
+        ];
+
+        // The faces the whole room exposes, by room coordinate and direction.
+        let mut emitters = Vec::new();
+        let mut exposed = HashSet::new();
+        for z in 0..ROOM.z {
+            for y in 0..ROOM.y {
+                for x in 0..ROOM.x {
+                    let p = ivec3(x, y, z);
+                    if !emits(grid.get(p)) {
+                        continue;
+                    }
+                    emitters.push(p);
+                    for (direction, step) in directions.iter().enumerate() {
+                        let q = p + step;
+                        if Grid::index(q).is_some() && grid.get(q) == 0 {
+                            exposed.insert((p, direction as u8));
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut found = HashSet::new();
+        let (mut table_power, mut face_power) = (0.0f64, 0.0f64);
+        for origin in chunk_origins() {
+            // The chunk's model, as `build_model` makes it: the chunk's voxels,
+            // in a tree `CHUNK` voxels on a side.
+            let extent = (ROOM - origin).min(IVec3::splat(CHUNK));
+            let inside = |p: IVec3| p.cmpge(IVec3::ZERO).all() && p.cmplt(extent).all();
+            let faces = emissive_faces(
+                emitters
+                    .iter()
+                    .map(|&p| p - origin)
+                    .filter(|&p| inside(p))
+                    .map(|p| p.as_uvec3()),
+                |p| {
+                    let p = p.as_ivec3();
+                    let value = if inside(p) { grid.get(origin + p) } else { 0 };
+                    (value != 0).then(|| value - 1)
+                },
+                &entries,
+                UVec3::splat(CHUNK as u32),
+            );
+            let table = EmitterTable::build(UNIT, &faces);
+            assert_eq!(table.faces.len(), faces.len(), "an emitter without luminance");
+            table_power += table.header.power as f64;
+            for face in &faces {
+                face_power += (face.radiance.dot(LUMINANCE) * UNIT * UNIT) as f64;
+                let p = origin + face.coords.as_ivec3();
+                if !exposed.contains(&(p, face.direction)) {
+                    let across = face.coords.as_ivec3() + directions[face.direction as usize];
+                    assert!(!inside(across), "face {} of {p} is covered in its chunk", face.direction);
+                }
+                found.insert((p, face.direction));
+            }
+        }
+        let missing = exposed.difference(&found).count();
+        assert_eq!(missing, 0, "exposed faces missing from the tables");
+        assert!((table_power - face_power).abs() < 1e-3 * face_power);
+        println!(
+            "{} faces exposed in the room, {} in the chunks' tables",
+            exposed.len(),
+            found.len()
+        );
     }
 }

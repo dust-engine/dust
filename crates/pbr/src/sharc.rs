@@ -155,6 +155,11 @@ pub struct SharcConfig {
     /// the one that would light the cell most (resampled importance sampling).
     /// Each costs a few memory reads; the shadow ray is traced to one.
     pub emitter_candidates: u32,
+    /// Whether each cell keeps the emitter sample its Updates chose from frame
+    /// to frame and resamples it against the new candidates (ReSTIR's temporal
+    /// reuse, without its visibility reuse, which biases the cache; see
+    /// sharc_update.slang).
+    pub reuse_emitter_samples: bool,
     /// Whether Resolve measures the cache each frame and logs it about once a
     /// second ([`SharcStats`]).
     pub log_stats: bool,
@@ -162,14 +167,15 @@ pub struct SharcConfig {
 
 impl Default for SharcConfig {
     /// The defaults, with `DUST_SHARC_EMITTERS=0|1`,
-    /// `DUST_SHARC_EMITTER_CANDIDATES`, `DUST_SHARC_ACCUMULATION` and
-    /// `DUST_SHARC_STATS=0|1` honored, for comparing runs.
+    /// `DUST_SHARC_EMITTER_CANDIDATES`, `DUST_SHARC_EMITTER_REUSE=0|1`,
+    /// `DUST_SHARC_ACCUMULATION` and `DUST_SHARC_STATS=0|1` honored, for
+    /// comparing runs.
     fn default() -> Self {
         let env_flag = |name: &str| std::env::var(name).ok().map(|v| v != "0");
         Self {
             enabled: true,
             reset_pending: true,
-            entries_num: 1 << 20, // 32 MiB total (32 B per entry)
+            entries_num: 1 << 20, // 68 MiB total (68 B per entry)
             accumulation_frame_num: std::env::var("DUST_SHARC_ACCUMULATION")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -183,6 +189,7 @@ impl Default for SharcConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(32),
+            reuse_emitter_samples: env_flag("DUST_SHARC_EMITTER_REUSE").unwrap_or(true),
             log_stats: env_flag("DUST_SHARC_STATS").unwrap_or(false),
         }
     }
@@ -216,34 +223,54 @@ pub(crate) struct SharcConstantsRaw {
     /// The instances' total power in world units.
     pub emitter_power: f32,
     pub emitter_candidates: u32,
-    pub _pad: [u32; 3],
+    pub _pad: u32,
+    /// Device address of [`SharcResources::stats`] for the Update to add its
+    /// counts to, when `log_stats` is on; 0 otherwise.
+    pub stats: u64,
+    /// Device address of [`SharcResources::resolved_cold`], for the Update to
+    /// read the cells' emitter reservoirs from. Only the Update sets it.
+    pub resolved_cold: u64,
+    pub _pad1: [u32; 2],
 }
 
 /// `SHARC_FLAG_SAMPLE_EMITTERS` in sharc.slang.
 const SHARC_FLAG_SAMPLE_EMITTERS: u32 = 1;
 /// `SHARC_FLAG_STATS` in sharc.slang.
 const SHARC_FLAG_STATS: u32 = 2;
+/// `SHARC_FLAG_REUSE_EMITTER_SAMPLES` in sharc.slang.
+const SHARC_FLAG_REUSE_EMITTER_SAMPLES: u32 = 4;
 
-/// What Resolve measured over the cells that took samples in one frame. Layout
-/// matches `SharcStats` in sharc/sharc_resolve.slang.
+/// What the Update and Resolve measured in one frame. Layout matches
+/// `SharcStats` in sharc.slang.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Default, Debug)]
 pub struct SharcStats {
-    /// Sum of the cells' resolved luminance.
+    /// Sum of the resolved luminance of the cells that took samples.
     pub luminance_sum: f32,
-    /// Sum of how much each cell's resolved luminance changed this frame.
+    /// Sum of how much each of those cells' resolved luminance changed.
     pub change_sum: f32,
     /// How many cells took samples.
     pub cell_count: u32,
+    /// Emitter shadow rays the Update traced, and how many were blocked.
+    pub emitter_rays: u32,
+    pub emitter_rays_blocked: u32,
+    /// The luminance those rays would add to their cells unblocked, in all and
+    /// for the blocked ones.
+    pub emitter_light: f32,
+    pub emitter_light_blocked: f32,
     pub _pad: u32,
 }
 
-/// Resolve's measurements, summed over frames until they're logged.
+/// The measurements, summed over frames until they're logged.
 #[derive(Default)]
 struct SharcStatsLog {
     luminance_sum: f64,
     change_sum: f64,
     cell_count: u64,
+    emitter_rays: u64,
+    emitter_rays_blocked: u64,
+    emitter_light: f64,
+    emitter_light_blocked: f64,
     frames: u32,
 }
 
@@ -297,9 +324,9 @@ pub struct SharcResources {
 
 impl SharcResources {
     const STRIDE_HASH_ENTRIES: u64 = 4;
-    const STRIDE_ACCUMULATION: u64 = 16;
+    const STRIDE_ACCUMULATION: u64 = 32;
     const STRIDE_RESOLVED_HOT: u64 = 8;
-    const STRIDE_RESOLVED_COLD: u64 = 4;
+    const STRIDE_RESOLVED_COLD: u64 = 24;
     /// Std430 stride for
     /// `Candidate { vec3 worldPos; vec3 normal; vec3 albedo; uint64_t key; }`.
     /// Each vec3 is 16-aligned in std430 (12 B payload + 4 B pad) = 48 B; the
@@ -555,6 +582,9 @@ pub(crate) fn clear_sharc_buffers(
                 encoder.lock(&resources.resolved_hot, vk::PipelineStageFlags2::COPY);
             let resolved_cold_buf =
                 encoder.lock(&resources.resolved_cold, vk::PipelineStageFlags2::COPY);
+            // Resolve zeroes the stats after reading them back, but the Update
+            // adds to them first.
+            let stats_buf = encoder.lock(&resources.stats, vk::PipelineStageFlags2::COPY);
             let keys_bufs = [
                 encoder.lock(&resources.pool[0].keys, vk::PipelineStageFlags2::COPY),
                 encoder.lock(&resources.pool[1].keys, vk::PipelineStageFlags2::COPY),
@@ -575,6 +605,7 @@ pub(crate) fn clear_sharc_buffers(
                 &mut resources.resolved_cold_state,
                 Access::CLEAR,
             );
+            encoder.use_buffer_resource(stats_buf, &mut resources.stats_state, Access::CLEAR);
             // Clear both pools' keys on reset (the read side might still
             // carry stale candidates from a previous run).
             let [pool0, pool1] = &mut resources.pool;
@@ -585,7 +616,7 @@ pub(crate) fn clear_sharc_buffers(
             unsafe {
                 device.cmd_fill_buffer(cmd_buffer, hash_buf.vk_handle(), 0, hash_buf.size(), 0);
                 device.cmd_fill_buffer(cmd_buffer, accum_buf.vk_handle(), 0, accum_buf.size(), 0);
-                for resolved_buf in [&resolved_hot_buf, &resolved_cold_buf] {
+                for resolved_buf in [&resolved_hot_buf, &resolved_cold_buf, &stats_buf] {
                     device.cmd_fill_buffer(
                         cmd_buffer,
                         resolved_buf.vk_handle(),
@@ -648,13 +679,17 @@ pub(crate) fn build_sharc_constants(
         debug_mode: 0,
         debug_brightness: 1.0,
         flags: if config.sample_emitters { SHARC_FLAG_SAMPLE_EMITTERS } else { 0 }
-            | if config.log_stats { SHARC_FLAG_STATS } else { 0 },
+            | if config.log_stats { SHARC_FLAG_STATS } else { 0 }
+            | if config.reuse_emitter_samples { SHARC_FLAG_REUSE_EMITTER_SAMPLES } else { 0 },
         // `record_sharc_rt` fills in the instances for the Update.
         emitter_instances: 0,
         emitter_instance_count: 0,
         emitter_power: 0.0,
         emitter_candidates: config.emitter_candidates.max(1),
-        _pad: [0; 3],
+        _pad: 0,
+        stats: 0,
+        resolved_cold: 0,
+        _pad1: [0; 2],
     }
 }
 
@@ -799,6 +834,39 @@ fn record_sharc_rt(
                     access: vk::AccessFlags2::SHADER_STORAGE_READ,
                 },
             );
+        }
+        // The Update reads the cells' emitter reservoirs, which the last Resolve
+        // wrote.
+        let resolved_cold_buf = encoder.lock(
+            &resources.resolved_cold,
+            vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+        );
+        encoder.use_buffer_resource(
+            resolved_cold_buf,
+            &mut resources.resolved_cold_state,
+            Access {
+                stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                access: vk::AccessFlags2::SHADER_STORAGE_READ,
+            },
+        );
+        sharc_constants.resolved_cold = resolved_cold_buf.device_address();
+
+        // The Update adds its emitter counts to the stats Resolve reads back.
+        if sharc_constants.flags & SHARC_FLAG_STATS != 0 {
+            let stats_buf = encoder.lock(
+                &resources.stats,
+                vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+            );
+            encoder.use_buffer_resource(
+                stats_buf,
+                &mut resources.stats_state,
+                Access {
+                    stage: vk::PipelineStageFlags2::RAY_TRACING_SHADER_KHR,
+                    access: vk::AccessFlags2::SHADER_STORAGE_READ
+                        | vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                },
+            );
+            sharc_constants.stats = stats_buf.device_address();
         }
         let cam_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&cam_uniform));
@@ -1075,19 +1143,8 @@ fn sharc_resolve_pass(
         let constants_buffer =
             uniform_ring_buffer.create_uniform(encoder, bytemuck::bytes_of(&constants));
 
-        // Zero the stats for Resolve's atomic sums.
+        // Holds the Update's counts for this frame; Resolve adds its sums.
         let stats_buf = encoder.lock(&resources.stats, vk::PipelineStageFlags2::COMPUTE_SHADER);
-        encoder.use_buffer_resource(stats_buf, &mut resources.stats_state, Access::CLEAR);
-        encoder.emit_barriers();
-        unsafe {
-            encoder.device().cmd_fill_buffer(
-                encoder.buffer().vk_handle(),
-                stats_buf.vk_handle(),
-                0,
-                stats_buf.size(),
-                0,
-            );
-        }
 
         let hash_buf = encoder.lock(
             &resources.hash_entries,
@@ -1204,6 +1261,19 @@ fn sharc_resolve_pass(
         encoder.use_buffer_resource(stats_buf, &mut resources.stats_state, Access::COPY_READ);
         encoder.emit_barriers();
         ReadbackRingBuffer::read_back(encoder, stats_buf, copy);
+
+        // Zero the stats for next frame's Update and Resolve.
+        encoder.use_buffer_resource(stats_buf, &mut resources.stats_state, Access::CLEAR);
+        encoder.emit_barriers();
+        unsafe {
+            encoder.device().cmd_fill_buffer(
+                encoder.buffer().vk_handle(),
+                stats_buf.vk_handle(),
+                0,
+                stats_buf.size(),
+                0,
+            );
+        }
     });
 }
 
@@ -1213,6 +1283,10 @@ impl SharcStatsLog {
         self.luminance_sum += stats.luminance_sum as f64;
         self.change_sum += stats.change_sum as f64;
         self.cell_count += stats.cell_count as u64;
+        self.emitter_rays += stats.emitter_rays as u64;
+        self.emitter_rays_blocked += stats.emitter_rays_blocked as u64;
+        self.emitter_light += stats.emitter_light as f64;
+        self.emitter_light_blocked += stats.emitter_light_blocked as f64;
         self.frames += 1;
         if self.frames < 60 {
             return;
@@ -1226,6 +1300,15 @@ impl SharcStatsLog {
             self.change_sum / cells,
             100.0 * self.change_sum / self.luminance_sum.max(1e-12),
         );
+        if self.emitter_rays > 0 {
+            info!(
+                "SHARC: {:.0} emitter shadow rays per frame, {:.1}% blocked, \
+                 carrying {:.1}% of the light they'd bring unblocked",
+                self.emitter_rays as f64 / self.frames as f64,
+                100.0 * self.emitter_rays_blocked as f64 / self.emitter_rays as f64,
+                100.0 * self.emitter_light_blocked / self.emitter_light.max(1e-12),
+            );
+        }
         *self = Self::default();
     }
 }

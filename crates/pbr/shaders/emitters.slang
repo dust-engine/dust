@@ -2,8 +2,9 @@ module emitters;
 
 // Emitter tables (crates/pbr/src/emitters.rs): each model's emissive voxel
 // faces, grouped into clusters by 32³ region and face direction, and this
-// frame's instances of those models. `sampleEmitter` picks a point on one face
-// to light a shading point with.
+// frame's instances of those models. `EmitterReservoir` resamples a point on
+// one face to light a shading point with, from candidates drawn by power and a
+// reservoir kept from earlier frames (ReSTIR).
 //
 // Every struct here is laid out the same under std430 and scalar rules, so it
 // reads the bytes emitters.rs writes whichever the pointers use.
@@ -93,7 +94,7 @@ float3 directionNormal(uint direction) {
 
 // A small PCG generator, so this module needs no imports: uniform in [0, 1)
 // with 24 bits.
-float nextUniform(inout uint state) {
+public float nextUniform(inout uint state) {
     state = state * 747796405u + 2891336453u;
     uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
     word = (word >> 22u) ^ word;
@@ -110,16 +111,46 @@ uint drawAliasEntry(float u, uint count, out float leftover) {
     return entry;
 }
 
-// A point on an emissive face.
+// A point on an emissive face. `id` names it across frames; the rest is where
+// it is this frame (`decodeEmitterSample`).
 public struct EmitterSample {
+    // instance (8 bits, into this frame's instance list) | face (24, into the
+    // instance's table) | u (10) | v (10): the point's position across the
+    // face, at the center of a 1024² grid.
+    public uint64_t id;
     // World space.
     public float3 position;
     // World space, unit length, pointing out of the face.
     public float3 normal;
     public float3 radiance;
-    // The resampling weight W: the point's contribution estimate is its
-    // integrand f times W, as if W were 1 / pdf.
-    public float weight;
+}
+
+// The sample `id` names, placed by this frame's instances. False when the id
+// names an instance the list no longer has.
+public bool decodeEmitterSample(EmitterInstance *instances, uint instanceCount, uint64_t id,
+                                out EmitterSample s) {
+    s.id = id;
+    s.position = float3(0.0, 0.0, 0.0);
+    s.normal = float3(0.0, 0.0, 1.0);
+    s.radiance = float3(0.0, 0.0, 0.0);
+    uint instanceIndex = uint(id >> 56);
+    if (instanceIndex >= instanceCount) {
+        return false;
+    }
+    EmitterInstance instance = instances[instanceIndex];
+    EmitterFace face = instance.faces[uint(id >> 32) & 0xFFFFFF];
+    float u = (float(uint(id >> 10) & 0x3FF) + 0.5) / 1024.0;
+    float v = (float(uint(id) & 0x3FF) + 0.5) / 1024.0;
+
+    uint axis = face.direction >> 1;
+    float3 corner = float3(face.coords);
+    corner[axis] += (face.direction & 1) == 0 ? 1.0 : 0.0;
+    corner[(axis + 1) % 3] += u;
+    corner[(axis + 2) % 3] += v;
+    s.position = transformPoint(instance.objectToWorld, corner * instance.unitSize);
+    s.normal = normalize(transformVector(instance.objectToWorld, directionNormal(face.direction)));
+    s.radiance = decodeRGB9E5(face.radiance);
+    return true;
 }
 
 // A point on an emissive face drawn in proportion to its power: an instance by
@@ -129,71 +160,127 @@ public struct EmitterSample {
 EmitterSample drawByPower(EmitterInstance *instances, uint instanceCount, inout uint rng) {
     float leftover;
     uint i = drawAliasEntry(nextUniform(rng), instanceCount, leftover);
-    EmitterInstance instance = instances[i];
-    if (leftover >= instance.aliasThreshold) {
-        instance = instances[instance.alias];
+    if (leftover >= instances[i].aliasThreshold) {
+        i = instances[i].alias;
     }
+    EmitterInstance instance = instances[i];
     uint c = drawAliasEntry(nextUniform(rng), instance.clusterCount, leftover);
     EmitterCluster cluster = instance.clusters[c];
     if (leftover >= cluster.aliasThreshold) {
         cluster = instance.clusters[cluster.alias];
     }
     uint f = drawAliasEntry(nextUniform(rng), cluster.faceCount, leftover);
-    EmitterFace face = instance.faces[cluster.faceOffset + f];
-    if (leftover >= face.aliasThreshold) {
-        face = instance.faces[cluster.faceOffset + face.alias];
+    if (leftover >= instance.faces[cluster.faceOffset + f].aliasThreshold) {
+        f = instance.faces[cluster.faceOffset + f].alias;
     }
-
-    uint axis = face.direction >> 1;
-    float3 corner = float3(face.coords);
-    corner[axis] += (face.direction & 1) == 0 ? 1.0 : 0.0;
-    corner[(axis + 1) % 3] += nextUniform(rng);
-    corner[(axis + 2) % 3] += nextUniform(rng);
-
+    uint u = min(uint(nextUniform(rng) * 1024.0), 1023);
+    uint v = min(uint(nextUniform(rng) * 1024.0), 1023);
+    uint64_t id = (uint64_t(i) << 56) | (uint64_t(cluster.faceOffset + f) << 32)
+        | uint64_t(u << 10) | uint64_t(v);
     EmitterSample s;
-    s.position = transformPoint(instance.objectToWorld, corner * instance.unitSize);
-    s.normal = normalize(transformVector(instance.objectToWorld, directionNormal(face.direction)));
-    s.radiance = decodeRGB9E5(face.radiance);
-    s.weight = 0.0;
+    decodeEmitterSample(instances, instanceCount, id, s);
     return s;
 }
 
-// Picks a point on an emissive face to light a point at `x` (world space) on a
-// surface facing `n`, by resampled importance sampling (ReSTIR's Alg. 3): draws
-// `candidates` points in proportion to their power, and keeps one in
-// proportion to the light it would bring `x` if nothing blocked it,
-// luminance(L_e) · cosθ · cosθ' / d². `totalPower` is the instances' total
-// power. `seed` seeds the draws. False when no candidate can light `x`.
-public bool sampleEmitter(EmitterInstance *instances, uint instanceCount, float totalPower,
-                          uint candidates, float3 x, float3 n, uint seed,
-                          out EmitterSample s) {
-    uint rng = seed;
-    float weightSum = 0.0;
-    float keptTarget = 0.0;
-    s = drawByPower(instances, instanceCount, rng);
-    for (uint k = 0; k < candidates; k++) {
-        EmitterSample candidate = k == 0 ? s : drawByPower(instances, instanceCount, rng);
-        float3 toCandidate = candidate.position - x;
-        float distanceSquared = dot(toCandidate, toCandidate);
-        float3 w = toCandidate * rsqrt(distanceSquared);
-        float cosSource = dot(n, w);
-        float cosEmitter = -dot(candidate.normal, w);
-        if (cosSource <= 0.0 || cosEmitter <= 0.0) {
-            continue;
+// The floor under both cosines of `emitterTarget`.
+static const float kEmitterTargetCosFloor = 0.05;
+
+// What the samples are resampled toward: about the light `s` would bring a
+// point at `x` on a surface facing `n` if nothing blocked it, up to the
+// receiver's albedo / π, luminance(L_e) · cosθ · cosθ' / d², but with both
+// cosines held at least kEmitterTargetCosFloor.
+//
+// The floor gives every point the same support: a cell's Updates shade
+// different points of it and resample each other's samples, and with exact
+// cosines a sample one point sees may face away from another. ReSTIR's 1/M
+// weights then count candidates that couldn't have been picked, which darkened
+// the emissive room's cache by 23%. With the floor that can't happen, at the
+// cost of sometimes picking a face that faces away, which lights nothing.
+public float emitterTarget(EmitterSample s, float3 x, float3 n) {
+    float3 toSample = s.position - x;
+    float distanceSquared = dot(toSample, toSample);
+    if (!(distanceSquared > 0.0)) {
+        return 0.0;
+    }
+    float3 w = toSample * rsqrt(distanceSquared);
+    float cosSource = max(dot(n, w), kEmitterTargetCosFloor);
+    float cosEmitter = max(-dot(s.normal, w), kEmitterTargetCosFloor);
+    return dot(s.radiance, kRec709Luminance) * cosSource * cosEmitter / distanceSquared;
+}
+
+// A weighted reservoir of one emitter sample (ReSTIR's Alg. 2), streamed into
+// from fresh candidates (`addCandidates`) and from a reservoir kept from an
+// earlier frame (`merge`).
+public struct EmitterReservoir {
+    public EmitterSample sample;
+    // The kept sample's target at the point the reservoir is for.
+    public float target;
+    public float weightSum;
+    // How many candidates the reservoir has seen.
+    public float count;
+
+    public __init() {
+        sample.id = 0;
+        sample.position = float3(0.0, 0.0, 0.0);
+        sample.normal = float3(0.0, 0.0, 1.0);
+        sample.radiance = float3(0.0, 0.0, 0.0);
+        target = 0.0;
+        weightSum = 0.0;
+        count = 0.0;
+    }
+
+    // Streams in one sample with resampling weight `weight`, standing for
+    // `count` candidates.
+    [mutating]
+    public void update(EmitterSample candidate, float candidateTarget, float weight,
+                       float candidateCount, float u) {
+        count += candidateCount;
+        if (!(weight > 0.0)) {
+            return;
         }
-        float luminance = dot(candidate.radiance, kRec709Luminance);
-        float target = luminance * cosSource * cosEmitter / distanceSquared;
-        // target / pdf, with pdf = luminance / totalPower.
-        float weight = totalPower * cosSource * cosEmitter / distanceSquared;
         weightSum += weight;
-        if (nextUniform(rng) * weightSum < weight) {
-            s = candidate;
-            keptTarget = target;
+        if (u * weightSum < weight) {
+            sample = candidate;
+            target = candidateTarget;
         }
     }
-    if (weightSum <= 0.0 || keptTarget <= 0.0) {
-        return false;
+
+    // Draws `candidates` points in proportion to their power and streams them
+    // in, each weighted by its target over its density (Alg. 3).
+    [mutating]
+    public void addCandidates(EmitterInstance *instances, uint instanceCount, float totalPower,
+                              uint candidates, float3 x, float3 n, inout uint rng) {
+        for (uint k = 0; k < candidates; k++) {
+            EmitterSample candidate = drawByPower(instances, instanceCount, rng);
+            float candidateTarget = emitterTarget(candidate, x, n);
+            float luminance = dot(candidate.radiance, kRec709Luminance);
+            // target / density, with density = luminance / totalPower.
+            float weight = luminance > 0.0 ? candidateTarget * totalPower / luminance : 0.0;
+            update(candidate, candidateTarget, weight, 1.0, nextUniform(rng));
+        }
     }
-    s.weight = weightSum / (float(candidates) * keptTarget);
-    return true;
+
+    // Streams in a reservoir kept from an earlier frame, given by its sample's
+    // id, its weight W and how many candidates it saw (Alg. 4): its sample is
+    // re-evaluated at `x`, where the instances are now. `maxCount` caps how
+    // many candidates it stands for, so old samples fade out.
+    [mutating]
+    public void merge(EmitterInstance *instances, uint instanceCount, uint64_t id, float W,
+                      float previousCount, float maxCount, float3 x, float3 n, inout uint rng) {
+        EmitterSample previous;
+        if (previousCount <= 0.0 || !decodeEmitterSample(instances, instanceCount, id, previous)) {
+            return;
+        }
+        float previousTarget = emitterTarget(previous, x, n);
+        float capped = min(previousCount, maxCount);
+        update(previous, previousTarget, previousTarget * W * capped, capped, nextUniform(rng));
+    }
+
+    // The kept sample's weight W: its light estimate is its integrand times W,
+    // as if W were 1 / density. 0 when it has no sample worth keeping.
+    public property float W {
+        get {
+            return target > 0.0 && count > 0.0 ? weightSum / (count * target) : 0.0;
+        }
+    }
 }

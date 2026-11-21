@@ -1,8 +1,8 @@
 // SHARC resolve compute pass, one thread per cache slot.
 //
 // Folds the samples a cell took this frame into its resolved radiance, a running
-// average over the last `accumulationFrameNum` frames, and clears them for the
-// next frame. A cell that goes `staleFrameNum` frames without a sample is
+// average over the last `accumulationFrameNum` frames, moves in the emitter
+// reservoir its first Update left, and clears them for the next frame. A cell that goes `staleFrameNum` frames without a sample is
 // evicted, which frees its slot for another key.
 //
 // With SHARC_FLAG_STATS it also sums `SharcStats` over the cells that took
@@ -14,17 +14,6 @@
 
 import hash_map;
 import sharc;
-
-// What this frame's Resolve measured, over the cells that took samples. Mirrors
-// `SharcStats` in crates/pbr/src/sharc.rs.
-struct SharcStats {
-    // Sum of the cells' resolved luminance.
-    float luminanceSum;
-    // Sum of how much each cell's resolved luminance changed.
-    float changeSum;
-    uint cellCount;
-    uint _pad;
-}
 
 [shader("compute")]
 [numthreads(256, 1, 1)]
@@ -53,15 +42,18 @@ void main(
         SharcAccumulation empty = {};
         accumulation[slot] = empty;
         resolvedHot[slot] = SharcResolvedHot(float3(0.0, 0.0, 0.0), 0.0);
-        resolvedCold[slot] = SharcResolvedCold(0, 0);
+        SharcReservoir noReservoir = {};
+        resolvedCold[slot] = SharcResolvedCold(0, noReservoir);
         return;
     }
 
     uint accumulatedFrameNum = prevCold.accumulatedFrameNum + 1;
     if (sampleNum == 0.0) {
         // No samples to fold in (and none to clear): only age the cell. Its
-        // radiance stays as it is, so the hot buffer isn't touched.
-        resolvedCold[slot] = SharcResolvedCold(accumulatedFrameNum, staleFrameNum);
+        // radiance and reservoir stay as they are, so only the frame counts are
+        // written.
+        resolvedCold[slot].frameNums =
+            SharcResolvedCold::packFrameNums(accumulatedFrameNum, staleFrameNum);
         return;
     }
 
@@ -80,7 +72,10 @@ void main(
     float3 radiance = (prevHot.radiance * prevSampleNum + current.radiance) / totalSampleNum;
     SharcResolvedHot hot = SharcResolvedHot(radiance, totalSampleNum);
     resolvedHot[slot] = hot;
-    resolvedCold[slot] = SharcResolvedCold(accumulatedFrameNum, 0);
+    // The reservoir the cell's first Update left (none when the Update doesn't
+    // sample emitters).
+    resolvedCold[slot] = SharcResolvedCold(
+        SharcResolvedCold::packFrameNums(accumulatedFrameNum, 0), current.reservoir);
 
     if ((cb.flags & SHARC_FLAG_STATS) != 0) {
         // As stored, in half precision. A cell new this frame has no change.

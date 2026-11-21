@@ -196,6 +196,15 @@ impl Render for SharcPage {
                         config(this, cx, move |c| c.sample_emitters = on);
                     })),
             )
+            .child(
+                Checkbox::new("sharc-reuse-emitter-samples")
+                    .label("Reuse emitter samples across frames")
+                    .checked(sharc.reuse_emitter_samples)
+                    .on_click(cx.listener(|this, on: &bool, _, cx| {
+                        let on = *on;
+                        config(this, cx, move |c| c.reuse_emitter_samples = on);
+                    })),
+            )
             .child(self.emitter_candidates.render(cx))
             .child(self.pool_capacity.render(cx))
             .child(self.accumulation_frames.render(cx))

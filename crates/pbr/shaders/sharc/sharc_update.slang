@@ -28,9 +28,10 @@
 // only the slot, costly to recompute, rides it. See openCellForUpdate /
 // addRadianceToSlot in sharc.slang.
 //
-// Emissive voxels light the cell through `sampleEmitter` (emitters.slang): one
-// point on an emissive face, resampled from candidates drawn by power, with a
-// shadow ray to it. When that's on (`SharcShaderConstants::samplesEmitters`), the bounce
+// Emissive voxels light the cell through its emitter reservoir
+// (`EmitterReservoir` in emitters.slang, `SharcReservoir` in sharc.slang): one
+// point on an emissive face, resampled from the point the cell kept and fresh
+// candidates drawn by power, with a shadow ray to it. When that's on (`SharcShaderConstants::samplesEmitters`), the bounce
 // ray's closest-hit leaves out the emission of what it hits, so it isn't
 // counted twice; when it's off, emitters light the cell only when the bounce
 // ray happens to hit one.
@@ -92,7 +93,8 @@ void rayGenShader() {
     // Open the cell once. If the probe bucket is full there's nowhere to
     // deposit — drop the candidate.
     SharcRayPayload pl;
-    if (!params.sharc.openCellForUpdate(cand.key, pl.cacheSlot)) return;
+    bool first;
+    if (!params.sharc.openCellForUpdate(cand.key, pl.cacheSlot, first)) return;
 
     uint seed = xxhash32(uint3(slot, pc.frameIndex,
                                params.sharc.g_sharcConstants.frameIndex));
@@ -119,38 +121,78 @@ void rayGenShader() {
     }
 
     // ── Emissive voxels ──────────────────────────────────────────────────
-    // One point on one emissive face: the Lambertian outgoing radiance it
-    // gives, (albedo / π) · L_e · cosθ · cosθ' / d², times its resampling
-    // weight, when nothing blocks it.
+    // ReSTIR on the cell's reservoir. Stream in the reservoir the cell kept
+    // from earlier frames, re-evaluated here, and fresh candidates drawn by
+    // power; keep one sample and trace a shadow ray to it. When nothing blocks
+    // it, deposit the Lambertian outgoing radiance it gives,
+    // (albedo / π) · L_e · cosθ · cosθ' / d² · W. The cell's first Update this
+    // frame keeps the reservoir for the next frame; its other Updates read the
+    // same kept reservoir and keep nothing.
+    //
+    // The reservoir is kept whether or not the ray got through. Visibility
+    // reuse biases the cache either way: keeping a blocked sample with W = 0
+    // makes it stand for up to 20 × candidates of nothing, darkening the next
+    // frames by up to 21×; dropping it keeps only samples that got through,
+    // whose W still counts the light of the blocked ones, brightening the
+    // cache (by 24% in the emissive room).
     SharcShaderConstants constants = params.sharc.g_sharcConstants;
     if (constants.samplesEmitters) {
-        EmitterSample emitter;
-        if (sampleEmitter(constants.emitterInstances, constants.emitterInstanceCount,
-                          constants.emitterPower, constants.emitterCandidates,
-                          candPos, candNormal, xxhash32(uint3(seed, slot, 0x9e3779b9u)),
-                          emitter)) {
-            float3 toEmitter = emitter.position - candPos;
-            float distanceSquared = dot(toEmitter, toEmitter);
-            float3 w = toEmitter * rsqrt(distanceSquared);
-            float cosSource = dot(candNormal, w);
-            float cosEmitter = -dot(emitter.normal, w);
-            if (cosSource > 0.0 && cosEmitter > 0.0) {
-                float3 radiance = cand.albedo / kPi * emitter.radiance
-                    * (cosSource * cosEmitter / distanceSquared * emitter.weight);
-                // From just off the source to just off the emitter's face, so
-                // neither voxel blocks its own ray.
-                float3 from = candPos + candNormal * 0.001;
-                float3 to = emitter.position + emitter.normal * 0.001;
-                RayDesc shadow;
-                shadow.Origin = from;
-                shadow.TMin = 0.0;
-                shadow.TMax = length(to - from);
-                shadow.Direction = (to - from) / shadow.TMax;
-                if (traceShadowRay(shadow, pl)) {
-                    params.sharc.addRadianceToSlot(pl.cacheSlot, radiance,
-                                                   float3(1.0, 1.0, 1.0));
+        uint rng = xxhash32(uint3(seed, slot, 0x9e3779b9u));
+        EmitterReservoir reservoir = EmitterReservoir();
+        bool reuse = (constants.flags & SHARC_FLAG_REUSE_EMITTER_SAMPLES) != 0;
+        if (reuse) {
+            SharcReservoir kept = params.sharc.keptReservoir(pl.cacheSlot);
+            // ReSTIR caps the history at 20 times the fresh candidates.
+            float maxCount = 20.0 * float(constants.emitterCandidates);
+            reservoir.merge(constants.emitterInstances, constants.emitterInstanceCount,
+                            kept.sample, kept.W, kept.count, maxCount, candPos, candNormal, rng);
+        }
+        reservoir.addCandidates(constants.emitterInstances, constants.emitterInstanceCount,
+                                constants.emitterPower, constants.emitterCandidates, candPos,
+                                candNormal, rng);
+
+        float W = reservoir.W;
+        EmitterSample emitter = reservoir.sample;
+        float3 toEmitter = emitter.position - candPos;
+        float distanceSquared = dot(toEmitter, toEmitter);
+        float3 w = toEmitter * rsqrt(distanceSquared);
+        float cosSource = dot(candNormal, w);
+        float cosEmitter = -dot(emitter.normal, w);
+        bool visible = false;
+        // The target floors the cosines (`emitterTarget`), so the kept sample
+        // can face away; it then lights nothing and needs no ray.
+        if (W > 0.0 && cosSource > 0.0 && cosEmitter > 0.0) {
+            float3 radiance = cand.albedo / kPi * emitter.radiance
+                * (cosSource * cosEmitter / distanceSquared * W);
+            // From just off the source to just off the emitter's face, so
+            // neither voxel blocks its own ray.
+            float3 from = candPos + candNormal * 0.001;
+            float3 to = emitter.position + emitter.normal * 0.001;
+            RayDesc shadow;
+            shadow.Origin = from;
+            shadow.TMin = 0.0;
+            shadow.TMax = length(to - from);
+            shadow.Direction = (to - from) / shadow.TMax;
+            visible = traceShadowRay(shadow, pl);
+            if (visible) {
+                params.sharc.addRadianceToSlot(pl.cacheSlot, radiance, float3(1.0, 1.0, 1.0));
+            }
+            if ((constants.flags & SHARC_FLAG_STATS) != 0) {
+                float light = dot(radiance, kRec709Luminance);
+                InterlockedAdd(constants.stats->emitterRays, 1u);
+                InterlockedAdd(constants.stats->emitterLight, light);
+                if (!visible) {
+                    InterlockedAdd(constants.stats->emitterRaysBlocked, 1u);
+                    InterlockedAdd(constants.stats->emitterLightBlocked, light);
                 }
             }
+        }
+        if (first && reuse) {
+            SharcReservoir next;
+            next.sample = reservoir.sample.id;
+            next.W = W;
+            next.count = reservoir.count;
+            params.sharc.keepReservoir(pl.cacheSlot, next);
         }
     }
 

@@ -20,12 +20,24 @@ public static const uint kSharcStaleFrameNumMax = 1024;
 // The slot of a cell that couldn't be opened (`openCellForUpdate`).
 public static const uint kSharcInvalidSlot = 0xFFFFFFFFu;
 
-// A cell's samples this frame: their radiance, summed with atomic adds, and how
-// many there are. Resolve folds them into the cell's `SharcResolvedHot` and
-// zeroes this. std430 stride 16 B (`SharcResources::STRIDE_ACCUMULATION`).
+// A cell's emitter reservoir (ReSTIR's): the emitter sample its Updates keep
+// from frame to frame, its weight W and how many candidates it stands for.
+// The sample is `EmitterSample::id`; 0 candidates means none. 16 B.
+public struct SharcReservoir {
+    public uint64_t sample;
+    public float W;
+    public float count;
+}
+
+// A cell's samples this frame: their radiance, summed with atomic adds, how
+// many there are, and the reservoir the cell's first Update this frame left
+// for the next. Resolve folds them into the cell's `SharcResolvedHot` and
+// `SharcResolvedCold` and zeroes this. std430 stride 32 B
+// (`SharcResources::STRIDE_ACCUMULATION`).
 public struct SharcAccumulation {
     public float3 radiance;
     public uint sampleNum;
+    public SharcReservoir reservoir;
 }
 
 // A cell's radiance averaged over recent frames: what every cache query reads
@@ -49,17 +61,26 @@ public struct SharcResolvedHot {
     }
 }
 
-// A cell's bookkeeping, which only Resolve reads. std430 stride 4 B
-// (`SharcResources::STRIDE_RESOLVED_COLD`).
+// A cell's state across frames besides its radiance: what Resolve keeps, and
+// the reservoir the Update reads (by address, `SharcShaderConstants::
+// resolvedCold`). std430 stride 24 B (`SharcResources::STRIDE_RESOLVED_COLD`).
 public struct SharcResolvedCold {
     // Frames accumulated in the low 16 bits; frames since the last sample in the
     // high 16. Both stay under 2^16: a cell is evicted after at most
     // kSharcStaleFrameNumMax frames without a sample, and every sample caps the
     // count at the accumulation window.
-    uint frameNums;
+    public uint frameNums;
+    uint _pad;
+    public SharcReservoir reservoir;
 
-    public __init(uint accumulatedFrameNum, uint staleFrameNum) {
-        frameNums = accumulatedFrameNum | (staleFrameNum << 16);
+    public __init(uint frameNums, SharcReservoir reservoir) {
+        this.frameNums = frameNums;
+        this._pad = 0;
+        this.reservoir = reservoir;
+    }
+
+    public static uint packFrameNums(uint accumulatedFrameNum, uint staleFrameNum) {
+        return accumulatedFrameNum | (staleFrameNum << 16);
     }
 
     public property uint accumulatedFrameNum {
@@ -93,9 +114,14 @@ public struct SharcShaderConstants {
     public uint emitterInstanceCount;
     // The instances' total power in world units.
     public float emitterPower;
-    // Candidates `sampleEmitter` draws to keep one of.
+    // Fresh candidates each Update draws for its emitter reservoir.
     public uint emitterCandidates;
     uint _pad0;
+    // Where the Update adds its counts with SHARC_FLAG_STATS, or null.
+    public SharcStats *stats;
+    // The cells' kept state, for the Update to read their reservoirs from.
+    // Only the Update gets it.
+    public SharcResolvedCold *resolvedCold;
     uint _pad1;
     uint _pad2;
     public property SharcDebugMode debugMode {
@@ -113,10 +139,33 @@ public struct SharcShaderConstants {
     }
 }
 
+// What the Update and Resolve measured in one frame, for SharcConfig::log_stats
+// (SHARC_FLAG_STATS). Mirrors `SharcStats` in crates/pbr/src/sharc.rs. Resolve
+// sums over the cells that took samples; the Update over its emitter shadow
+// rays.
+public struct SharcStats {
+    // Sum of the cells' resolved luminance.
+    public float luminanceSum;
+    // Sum of how much each cell's resolved luminance changed.
+    public float changeSum;
+    public uint cellCount;
+    // Emitter shadow rays traced, and how many something blocked.
+    public uint emitterRays;
+    public uint emitterRaysBlocked;
+    // The luminance those rays would add to their cells if nothing blocked
+    // them, in all and for the blocked ones.
+    public float emitterLight;
+    public float emitterLightBlocked;
+    uint _pad;
+}
+
 // SharcShaderConstants::flags, set from SharcConfig.
 public static const uint SHARC_FLAG_SAMPLE_EMITTERS = 1;
 // Resolve sums `SharcStats` for SharcConfig::log_stats.
 public static const uint SHARC_FLAG_STATS = 2;
+// Cells keep their emitter reservoir from frame to frame
+// (SharcConfig::reuse_emitter_samples).
+public static const uint SHARC_FLAG_REUSE_EMITTER_SAMPLES = 4;
 public enum SharcDebugMode
 {
     None = 0,
@@ -263,15 +312,32 @@ public struct SharcParams {
 
     // Open the cell for this frame — find it or insert it — and count one
     // sample in it. Returns false, with `kSharcInvalidSlot`, when the cell's
-    // bucket is full.
-    public bool openCellForUpdate(uint64_t key, out uint slot) {
+    // bucket is full. `first` is true for the first Update to open the cell
+    // this frame, which owns its reservoir for the frame (`keepReservoir`).
+    public bool openCellForUpdate(uint64_t key, out uint slot, out bool first) {
+        first = false;
         if (let opened = map.findOrInsert(key)) {
             slot = opened;
-            InterlockedAdd(g_sharcAccumulation[slot].sampleNum, 1u);
+            uint previous;
+            InterlockedAdd(g_sharcAccumulation[slot].sampleNum, 1u, previous);
+            first = previous == 0;
             return true;
         }
         slot = kSharcInvalidSlot;
         return false;
+    }
+
+    // The reservoir the cell kept from earlier frames. Every Update on the cell
+    // this frame reads the same one: the new one goes elsewhere
+    // (`keepReservoir`) until Resolve moves it in.
+    public SharcReservoir keptReservoir(uint slot) {
+        return g_sharcConstants.resolvedCold[slot].reservoir;
+    }
+
+    // Leaves the cell's reservoir for the next frame. Only the cell's first
+    // Update this frame calls this.
+    public void keepReservoir(uint slot, SharcReservoir reservoir) {
+        g_sharcAccumulation[slot].reservoir = reservoir;
     }
 
     // Fold a lighting contribution into a cell already opened by

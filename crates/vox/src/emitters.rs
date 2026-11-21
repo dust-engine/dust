@@ -208,13 +208,18 @@ pub(crate) fn build_emitter_tables(
 /// Lists this frame's instances of models with emitters, where they are now.
 pub(crate) fn collect_emitter_instances(
     mut emitter_instances: ResMut<EmitterInstances>,
-    instances: Query<(&TLASInstance<PbrInstanceData>, &GlobalTransform)>,
+    instances: Query<(Entity, &TLASInstance<PbrInstanceData>, &GlobalTransform)>,
     models: Query<&VoxModelEmitters>,
 ) {
     let EmitterInstances { instances: list, tables } = &mut *emitter_instances;
     list.clear();
     tables.clear();
-    for (instance, transform) in &instances {
+    // In entity order, so an instance keeps its index from frame to frame while
+    // the set doesn't change: the SHARC cells' reservoirs name their samples by
+    // it.
+    let mut ordered: Vec<_> = instances.iter().collect();
+    ordered.sort_by_key(|&(entity, ..)| entity);
+    for (_, instance, transform) in ordered {
         // A disabled instance isn't in the TLAS, so it isn't drawn and mustn't
         // light anything either.
         if instance.disabled {
