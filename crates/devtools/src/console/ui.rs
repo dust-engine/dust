@@ -1,18 +1,14 @@
-//! The console tab's view: the toolbar, the message list and the prompt. It
-//! exists only while the tab is shown, and has the messages logged from when
-//! it was made.
+//! The console tab's view of the [`Console`]: the toolbar, the message list
+//! and the prompt. It exists only while the tab is shown; the console keeps
+//! the rows and the prompt's history from one view to the next.
 
-use std::task::Poll;
+use std::collections::HashSet;
 
-use async_broadcast::{Receiver, TryRecvError};
-use bevy::platform::time::Instant;
-use futures_util::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FollowMode, HighlightStyle,
-    Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListAlignment, ListState,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    StyledText, Subscription, Task, WeakEntity, Window, actions, div, list,
-    prelude::FluentBuilder as _, px, rems, rgb,
+    Hsla, InteractiveElement as _, IntoElement, ListAlignment, ListState, ParentElement as _,
+    Render, SharedString, StatefulInteractiveElement as _, Styled as _, StyledText, Subscription,
+    WeakEntity, Window, actions, div, list, prelude::FluentBuilder as _, px, rems, rgb,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, MoveDown, MoveUp};
@@ -24,12 +20,12 @@ use gpui_component::{
 
 use tracing::Level;
 
-use super::command::{self, Outcome};
 use super::{
-    Console, ConsoleLog, ConsoleMessage, Field, MessageKind, Scope, ValueKind,
-    filter_default_allows,
+    Console, ConsoleMessage, Field, MessageKind, Recall, Scope, ValueKind, filter_default_allows,
+    shows,
 };
 
+// Bound to ⌘K in the "Console" key context.
 actions!(dust_devtools_console, [ClearConsole]);
 
 /// Width of the column of icons at the start of each row and of the prompt.
@@ -48,38 +44,43 @@ fn first_line() -> gpui::Div {
 }
 
 pub(crate) struct ConsoleView {
-    console: Console,
+    console: Entity<Console>,
     filter: Entity<InputState>,
     prompt: Entity<InputState>,
+    /// The scopes picked in the scope bar, indexed by `Scope as usize`. With
+    /// none picked, every row shows ("All").
+    scopes: [bool; Scope::ALL.len()],
+    recall: Recall,
+    /// The `serial`s of the rows showing the message's fields, spans and
+    /// source.
+    expanded: HashSet<u64>,
     list: ListState,
     /// The `serial`s of the rows the list shows, in order.
     shown: Vec<u64>,
     /// The count of the last shown row when the list was last updated.
     last_count: u32,
-    /// The rows changed since the list was last updated.
+    /// The rows, or which of them show, changed since the list was last
+    /// updated.
     dirty: bool,
-    /// The log messages broadcast to the console. The view keeps its
-    /// receiver, rather than the task, so that it can take the ones sent
-    /// before what it shows next.
-    messages: Receiver<ConsoleMessage>,
-    /// When logging started.
-    startup: Instant,
-    /// Shows the messages logged as they arrive.
-    _receive: Task<()>,
+    /// Makes the list jump to its end once it's updated; set when the view
+    /// is made and when a line is submitted.
+    scroll_to_bottom: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl ConsoleView {
-    /// A view of the messages logged to `log` from now on.
-    pub fn new(log: &ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        cx.bind_keys([KeyBinding::new("cmd-k", ClearConsole, Some("Console"))]);
+    /// A view of `console`, from its rows so far.
+    pub fn new(console: Entity<Console>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
         let prompt =
             cx.new(|cx| InputState::new(window, cx).placeholder("help lists the commands"));
         let subscriptions = vec![
-            cx.subscribe(&filter, |this, filter, event: &InputEvent, cx| {
+            cx.observe(&console, |this, _, cx| {
+                this.dirty = true;
+                cx.notify();
+            }),
+            cx.subscribe(&filter, |this, _, event: &InputEvent, cx| {
                 if let InputEvent::Change = event {
-                    this.console.filter = filter.read(cx).value().to_string();
                     this.dirty = true;
                     cx.notify();
                 }
@@ -89,12 +90,13 @@ impl ConsoleView {
                 window,
                 |this, prompt, event: &InputEvent, window, cx| {
                     if let InputEvent::PressEnter { .. } = event {
-                        this.console.prompt.line = prompt.read(cx).value().to_string();
-                        if let Some(line) = this.console.submit() {
-                            this.run_line(&line, cx);
+                        let line = prompt.read(cx).value().to_string();
+                        if !line.trim().is_empty() {
+                            this.console.update(cx, |console, cx| console.run(line, cx));
                         }
                         prompt.update(cx, |prompt, cx| prompt.set_value("", window, cx));
-                        this.list.scroll_to_end();
+                        this.recall = Recall::default();
+                        this.scroll_to_bottom = true;
                         this.dirty = true;
                         cx.notify();
                     }
@@ -102,115 +104,42 @@ impl ConsoleView {
             ),
         ];
 
-        let messages = log.messages.activate_cloned();
-        // Polls the view's receiver, which then wakes the task when more
-        // changes arrive.
-        let receive = cx.spawn(async move |view, cx| {
-            std::future::poll_fn(|task| {
-                let polled = view.update(cx, |view, cx| {
-                    let mut changed = false;
-                    let poll = loop {
-                        // Skips past messages dropped while it was behind.
-                        match view.messages.poll_next_unpin(task) {
-                            Poll::Ready(Some(message)) => {
-                                view.console.push(message);
-                                changed = true;
-                            }
-                            Poll::Ready(None) => break Poll::Ready(()),
-                            Poll::Pending => break Poll::Pending,
-                        }
-                    };
-                    if changed {
-                        view.dirty = true;
-                        cx.notify();
-                    }
-                    poll
-                });
-                // The view is gone.
-                polled.unwrap_or(Poll::Ready(()))
-            })
-            .await
-        });
-
         let list = ListState::new(0, ListAlignment::Top, px(200.));
         list.set_follow_mode(FollowMode::Tail);
         ConsoleView {
-            console: Console::default(),
+            console,
             filter,
             prompt,
+            scopes: Default::default(),
+            recall: Recall::default(),
+            expanded: HashSet::new(),
             list,
             shown: Vec::new(),
             last_count: 0,
-            dirty: false,
-            messages,
-            startup: log.startup,
-            _receive: receive,
+            // Fills the list with the console's rows so far.
+            dirty: true,
+            scroll_to_bottom: true,
             _subscriptions: subscriptions,
         }
-    }
-
-    /// Shows `message` in the console, after the log messages sent to it
-    /// before, such as those of the line before, so that rows keep the order
-    /// things happened in.
-    fn show(&mut self, message: ConsoleMessage, cx: &mut Context<Self>) {
-        loop {
-            match self.messages.try_recv() {
-                Ok(message) => self.console.push(message),
-                // Some were dropped while the view was behind; the rest
-                // follow.
-                Err(TryRecvError::Overflowed(_)) => {}
-                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
-            }
-        }
-        self.console.push(message);
-        self.dirty = true;
-        cx.notify();
-    }
-
-    /// Runs `line`, typed at the prompt, and shows it and what it printed, or
-    /// why it failed.
-    fn run_line(&mut self, line: &str, cx: &mut Context<Self>) {
-        let command =
-            ConsoleMessage::evaluation(MessageKind::Command, line.to_owned(), self.startup);
-        self.show(command, cx);
-        let line = line.to_owned();
-        cx.spawn(async move |view, cx| {
-            let result = command::run(&line, cx).await;
-            view.update(cx, |view, cx| {
-                let (kind, text) = match result {
-                    Ok(Outcome::Nothing) => return,
-                    Ok(Outcome::Clear) => {
-                        view.console.rows.clear();
-                        view.dirty = true;
-                        cx.notify();
-                        return;
-                    }
-                    Ok(Outcome::Output(output)) => (MessageKind::Output, output),
-                    Err(error) => (MessageKind::CommandError, error),
-                };
-                let message = ConsoleMessage::evaluation(kind, text, view.startup);
-                view.show(message, cx);
-            })
-            .ok();
-        })
-        .detach();
     }
 
     /// Brings the list up to date with the rows the scope bar and the filter
     /// field let through. Rows only come and go at the ends while nothing else
     /// changes, which keeps the measured heights of the others.
-    fn update_list(&mut self) {
+    fn update_list(&mut self, cx: &App) {
         if !std::mem::take(&mut self.dirty) {
             return;
         }
-        let filter = self.console.filter.trim();
-        let shown: Vec<u64> = self
-            .console
+        let transcript = &self.console.read(cx).transcript;
+        let filter = self.filter.read(cx).value();
+        let filter = filter.trim();
+        let shown: Vec<u64> = transcript
             .rows
             .iter()
-            .filter(|row| self.console.shows(&row.message, filter))
+            .filter(|row| shows(&self.scopes, filter, &row.message))
             .map(|row| row.serial)
             .collect();
+        let count = |serial: u64| transcript.row(serial).map_or(0, |row| row.count);
         let dropped = match shown.first() {
             Some(&first) => self
                 .shown
@@ -224,33 +153,36 @@ impl ConsoleView {
             self.list.splice(0..dropped, 0);
             self.list
                 .splice(kept.len()..kept.len(), shown.len() - kept.len());
-            // A repeat only increments the last row's count.
-            let last_count = self.console.rows.back().map_or(0, |row| row.count);
-            if !kept.is_empty() && last_count != self.last_count {
+            // A repeat only increments the last row's count, which may be the
+            // last row kept.
+            if let Some(&last) = kept.last()
+                && count(last) != self.last_count
+            {
                 self.list.remeasure_items(kept.len() - 1..kept.len());
             }
         } else {
             self.list.reset(shown.len());
         }
-        self.last_count = self.console.rows.back().map_or(0, |row| row.count);
+        self.last_count = shown.last().map_or(0, |&serial| count(serial));
         self.shown = shown;
-        if std::mem::take(&mut self.console.scroll_to_bottom) {
+        // Forgets the rows the console no longer has.
+        match transcript.rows.front() {
+            Some(first) => self.expanded.retain(|&serial| serial >= first.serial),
+            None => self.expanded.clear(),
+        }
+        if std::mem::take(&mut self.scroll_to_bottom) {
             self.list.scroll_to_end();
         }
     }
 
-    fn toggle_expanded(&mut self, ix: usize, cx: &mut Context<Self>) {
-        let serial = self.shown[ix];
-        if let Some(row) = self
-            .console
-            .rows
-            .iter_mut()
-            .find(|row| row.serial == serial)
-        {
-            row.expanded = !row.expanded;
-            self.list.remeasure_items(ix..ix + 1);
-            cx.notify();
+    fn toggle_expanded(&mut self, serial: u64, cx: &mut Context<Self>) {
+        if !self.expanded.remove(&serial) {
+            self.expanded.insert(serial);
         }
+        if let Ok(ix) = self.shown.binary_search(&serial) {
+            self.list.remeasure_items(ix..ix + 1);
+        }
+        cx.notify();
     }
 
     /// The filter field, the scope bar, and the button clearing the console.
@@ -282,9 +214,7 @@ impl ConsoleView {
     }
 
     fn clear(&mut self, _: &ClearConsole, _: &mut Window, cx: &mut Context<Self>) {
-        self.console.rows.clear();
-        self.dirty = true;
-        cx.notify();
+        self.console.update(cx, |console, cx| console.clear(cx));
     }
 
     /// Safari's scope bar: "All", or only the picked scopes. A click picks one
@@ -294,7 +224,8 @@ impl ConsoleView {
     /// tooltip saying how to let the level through, until a message of that
     /// level arrives anyway, from a target with a directive of its own.
     fn scope_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let picked = self.console.scopes;
+        let picked = self.scopes;
+        let received = self.console.read(cx).transcript.received;
         let all = !picked.contains(&true);
         let mut bar = h_flex().gap_0p5().child(
             Button::new("console-scope-all")
@@ -303,7 +234,7 @@ impl ConsoleView {
                 .xsmall()
                 .selected(all)
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.console.scopes = Default::default();
+                    this.scopes = Default::default();
                     this.dirty = true;
                     cx.notify();
                 })),
@@ -312,7 +243,7 @@ impl ConsoleView {
             let index = scope as usize;
             let filtered_out = scope
                 .level()
-                .filter(|&level| !self.console.received[index] && !filter_default_allows(level));
+                .filter(|&level| !received[index] && !filter_default_allows(level));
             let tooltip = match filtered_out {
                 Some(level) => {
                     let level = level.as_str().to_lowercase();
@@ -332,7 +263,7 @@ impl ConsoleView {
                     .disabled(filtered_out.is_some())
                     .tooltip(tooltip)
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                        let scopes = &mut this.console.scopes;
+                        let scopes = &mut this.scopes;
                         if event.modifiers().platform {
                             scopes[index] = !scopes[index];
                         } else {
@@ -372,10 +303,9 @@ impl ConsoleView {
     }
 
     fn browse(&mut self, older: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let prompt = &mut self.console.prompt;
-        prompt.line = self.prompt.read(cx).value().to_string();
-        prompt.browse(older);
-        let line = prompt.line.clone();
+        let line = self.prompt.read(cx).value().to_string();
+        let history = &self.console.read(cx).transcript.history;
+        let line = self.recall.browse(history, line, older);
         self.prompt
             .update(cx, |prompt, cx| prompt.set_value(line, window, cx));
     }
@@ -384,13 +314,16 @@ impl ConsoleView {
     /// a triangle expanding the details, the message with its fields, and the
     /// target it was logged to on the right.
     fn row(&self, ix: usize, view: WeakEntity<Self>, cx: &App) -> AnyElement {
+        let transcript = &self.console.read(cx).transcript;
         let Some(row) = self
             .shown
             .get(ix)
-            .and_then(|&serial| self.console.rows.iter().find(|row| row.serial == serial))
+            .and_then(|&serial| transcript.row(serial))
         else {
             return div().into_any_element();
         };
+        let serial = row.serial;
+        let expanded = self.expanded.contains(&serial);
         let theme = cx.theme();
         let message = &row.message;
         let fill = match message.kind {
@@ -402,11 +335,11 @@ impl ConsoleView {
         };
         let expandable = message.source.is_some();
         let mut summary = v_flex().flex_1().min_w_0().child(summary(message, theme));
-        if row.expanded {
+        if expanded {
             summary = summary.children(details(message, theme));
         }
         h_flex()
-            .id(("console-row", row.serial as usize))
+            .id(("console-row", serial as usize))
             // A list item is only as wide as its contents unless told to fill
             // the list.
             .w_full()
@@ -435,14 +368,14 @@ impl ConsoleView {
             .when(expandable, |this| {
                 this.child(
                     first_line()
-                        .id(("console-disclosure", row.serial as usize))
+                        .id(("console-disclosure", serial as usize))
                         .cursor_pointer()
                         .on_click(move |_, _, cx| {
-                            view.update(cx, |view, cx| view.toggle_expanded(ix, cx))
+                            view.update(cx, |view, cx| view.toggle_expanded(serial, cx))
                                 .ok();
                         })
                         .child(
-                            Icon::new(if row.expanded {
+                            Icon::new(if expanded {
                                 IconName::ChevronDown
                             } else {
                                 IconName::ChevronRight
@@ -466,7 +399,7 @@ impl ConsoleView {
 
 impl Render for ConsoleView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.update_list();
+        self.update_list(cx);
         let view = cx.weak_entity();
         let rows = list(self.list.clone(), move |ix, _, cx| {
             let Some(entity) = view.upgrade() else {

@@ -166,65 +166,69 @@ fn filter_default_level() {
 
 #[test]
 fn repeats_count_on_one_row() {
-    let mut console = Console::default();
+    let mut transcript = Transcript::default();
     for _ in 0..3 {
-        console.push(output("same"));
+        transcript.push(output("same"));
     }
-    console.push(output("other"));
-    console.push(output("same"));
-    let counts: Vec<_> = console
+    transcript.push(output("other"));
+    transcript.push(output("same"));
+    let counts: Vec<_> = transcript
         .rows
         .iter()
         .map(|row| (row.message.text.as_str(), row.count))
         .collect();
     assert_eq!(counts, [("same", 3), ("other", 1), ("same", 1)]);
+    // Rows are numbered by their first message, repeats included.
+    let serials: Vec<_> = transcript.rows.iter().map(|row| row.serial).collect();
+    assert_eq!(serials, [1, 4, 5]);
+    assert_eq!(transcript.row(4).unwrap().message.text, "other");
+    assert!(transcript.row(2).is_none());
 }
 
 #[test]
 fn oldest_rows_dropped() {
-    let mut console = Console::default();
+    let mut transcript = Transcript::default();
     for i in 0..MAX_ROWS + 5 {
-        console.push(output(&i.to_string()));
+        transcript.push(output(&i.to_string()));
     }
-    assert_eq!(console.rows.len(), MAX_ROWS);
-    assert_eq!(console.rows[0].message.text, "5");
+    assert_eq!(transcript.rows.len(), MAX_ROWS);
+    assert_eq!(transcript.rows[0].message.text, "5");
+    assert!(transcript.row(5).is_none());
+    assert_eq!(transcript.row(6).unwrap().message.text, "5");
 }
 
 #[test]
 fn scopes_and_filter() {
-    let mut console = Console::default();
+    let mut scopes = [false; Scope::ALL.len()];
     let warning = capture(|| tracing::warn!(path = "castle.vox", "slow load")).remove(0);
     let command =
         ConsoleMessage::evaluation(MessageKind::Command, "echo hi".to_owned(), Instant::now());
-    assert!(console.shows(&warning, "") && console.shows(&command, ""));
+    assert!(shows(&scopes, "", &warning) && shows(&scopes, "", &command));
 
-    console.scopes[Scope::Warnings as usize] = true;
-    assert!(console.shows(&warning, "") && !console.shows(&command, ""));
+    scopes[Scope::Warnings as usize] = true;
+    assert!(shows(&scopes, "", &warning) && !shows(&scopes, "", &command));
 
     // Matches the text, field values and target, ignoring case.
-    console.scopes = Default::default();
-    assert!(console.shows(&warning, "SLOW") && console.shows(&warning, "castle"));
-    assert!(console.shows(&warning, "console::tests"));
-    assert!(!console.shows(&warning, "teapot") && !console.shows(&command, "slow"));
+    scopes = Default::default();
+    assert!(shows(&scopes, "SLOW", &warning) && shows(&scopes, "castle", &warning));
+    assert!(shows(&scopes, "console::tests", &warning));
+    assert!(!shows(&scopes, "teapot", &warning) && !shows(&scopes, "slow", &command));
 }
 
 #[test]
 fn prompt_history() {
-    let mut console = Console::default();
-    let mut submitted = Vec::new();
-    for line in ["echo a", "  ", "echo b", "echo b"] {
-        console.prompt.line = line.to_owned();
-        submitted.extend(console.submit());
+    let mut transcript = Transcript::default();
+    for line in ["echo a", "echo b", "echo b"] {
+        transcript.remember(line);
     }
-    // Blank lines are dropped, and a repeated line is kept once.
-    assert_eq!(console.prompt.history, ["echo a", "echo b"]);
-    assert_eq!(submitted, ["echo a", "echo b", "echo b"]);
+    // A repeated line is kept once.
+    assert_eq!(transcript.history, ["echo a", "echo b"]);
 
-    let prompt = &mut console.prompt;
-    prompt.line = "ec".to_owned();
+    let mut recall = Recall::default();
+    let mut line = "ec".to_owned();
     let mut browse = |older| {
-        prompt.browse(older);
-        prompt.line.clone()
+        line = recall.browse(&transcript.history, std::mem::take(&mut line), older);
+        line.clone()
     };
     assert_eq!(browse(true), "echo b");
     assert_eq!(browse(true), "echo a");

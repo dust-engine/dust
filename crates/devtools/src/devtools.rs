@@ -46,7 +46,7 @@ use gpui_component::{
     resizable_panel, v_flex, v_resizable,
 };
 
-use crate::console::{ConsoleLog, ConsoleView};
+use crate::console::{ClearConsole, Console, ConsoleLog, ConsoleView};
 use crate::entities::EntitiesView;
 use crate::graphics_debug::GraphicsDebugView;
 use crate::performance::{PerformanceOverlay, PerformancePanel};
@@ -70,7 +70,7 @@ pub enum DockSide {
 /// its Graphics Debug, Entities, Schedules and Console tabs, and the
 /// performance and player overlays. [`DevTools::add_tab`] adds more tabs.
 ///
-/// The console shows the messages logged to `console_log`; see
+/// The console shows the messages logged to `console_log` from now on; see
 /// [`console_layer`](crate::console_layer).
 pub fn overlay(console_log: ConsoleLog, window: &mut Window, cx: &mut App) -> Entity<DevTools> {
     Theme::change(ThemeMode::Dark, Some(window), cx);
@@ -79,6 +79,7 @@ pub fn overlay(console_log: ConsoleLog, window: &mut Window, cx: &mut App) -> En
     cx.bind_keys([
         KeyBinding::new("f12", ToggleDevTools, None),
         KeyBinding::new("cmd-alt-i", ToggleDevTools, None),
+        KeyBinding::new("cmd-k", ClearConsole, Some("Console")),
     ]);
     cx.on_action({
         let devtools = devtools.downgrade();
@@ -110,10 +111,7 @@ pub struct DevTools {
     /// Each tab's title, and what makes its view, in the order they show.
     tabs: Vec<(SharedString, Box<dyn Fn(&mut Window, &mut App) -> AnyView>)>,
     /// The shown tab's view, made when it's first drawn, and dropped when
-    /// another tab is shown or DevTools closes. Only the shown tab has a view:
-    /// a view holds what it shows, such as the Entities tab's snapshot of the
-    /// entities, and the console's subscribes to the log. A tab shown again
-    /// starts afresh.
+    /// another tab is shown or DevTools closes.
     shown: Option<AnyView>,
     performance: Entity<PerformanceOverlay>,
     performance_open: bool,
@@ -146,6 +144,7 @@ fn gpu_timings(profiler: Option<Res<GpuProfiler>>) -> Option<(bool, bool)> {
 
 impl DevTools {
     fn new(console_log: ConsoleLog, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let console = cx.new(|cx| Console::new(&console_log, cx));
         DevTools {
             open: true,
             dock: DockSide::Right,
@@ -158,7 +157,7 @@ impl DevTools {
                 ("Schedules".into(), tab(SchedulesView::new)),
                 (
                     "Console".into(),
-                    tab(move |window, cx| ConsoleView::new(&console_log, window, cx)),
+                    tab(move |window, cx| ConsoleView::new(console.clone(), window, cx)),
                 ),
             ],
             shown: None,

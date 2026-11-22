@@ -4,16 +4,18 @@
 //! it.
 //!
 //! The [`ConsoleLayer`] broadcasts each message from whichever thread logged
-//! it, to whoever listens then: the console's view while it's shown, and the
-//! connections to the console's socket. Nothing keeps messages for later; the
-//! game's own log on stderr has them all.
+//! it, to whoever listens then: the [`Console`], from when DevTools is made,
+//! and the connections to the console's socket. The console keeps the last
+//! [`MAX_ROWS`] rows; the game's own log on stderr has them all.
 //!
-//! The rest is in three parts:
+//! The rest is in four parts:
+//! - [`Console`]: the console's rows and the prompt's history, kept for as
+//!   long as the app runs, whether or not the console's tab is shown.
 //! - [`command`]: running a command line, the same for the prompt and the
 //!   socket. It runs on the UI thread, and awaits the Bevy thread for what it
 //!   needs of the world.
-//! - [`ui`]: the view's state, which exists only while the view is shown: its
-//!   rows, the filter and scope bar, and the prompt.
+//! - [`ui`]: the view of the console, which exists only while its tab is
+//!   shown: the list of rows, the filter and scope bar, and the prompt.
 //! - [`remote`]: the socket and its connections, from when the app starts if
 //!   `DUST_CONSOLE_SOCKET` is set, whether or not the view is shown.
 
@@ -28,15 +30,19 @@ mod ui;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::task::Poll;
 use std::time::Duration;
 
-use async_broadcast::InactiveReceiver;
+use async_broadcast::{InactiveReceiver, Receiver, TryRecvError};
 use bevy::platform::time::Instant;
+use futures_util::StreamExt as _;
+use gpui::{Context, Task};
 use tracing::Level;
 
+use command::Outcome;
 pub use layer::ConsoleLayer;
 pub use remote::serve_console_socket;
-pub(crate) use ui::ConsoleView;
+pub(crate) use ui::{ClearConsole, ConsoleView};
 
 /// Makes the `tracing` layer that copies log messages into the DevTools
 /// console, and the [`ConsoleLog`] to listen to it with. Add the layer to the
@@ -59,8 +65,8 @@ pub fn console_layer() -> (ConsoleLayer, ConsoleLog) {
     let (mut sender, messages) = async_broadcast::broadcast(MAX_ROWS);
     // A receiver that falls behind, such as a connection to the socket that
     // stopped reading, loses the oldest messages, rather than the layer
-    // waiting for it on whichever thread logged. The view keeps no more than
-    // this anyway.
+    // waiting for it on whichever thread logged. The console keeps no more
+    // than this anyway.
     sender.set_overflow(true);
     let startup = Instant::now();
     let layer = ConsoleLayer {
@@ -74,9 +80,9 @@ pub fn console_layer() -> (ConsoleLayer, ConsoleLog) {
     (layer, log)
 }
 
-/// What listens to the [`ConsoleLayer`]'s messages starts from this: the view
-/// when it's shown, and each connection to the console's socket. A message
-/// reaches only the receivers active when it's logged.
+/// What listens to the [`ConsoleLayer`]'s messages starts from this: the
+/// [`Console`], and each connection to the console's socket. A message reaches
+/// only the receivers active when it's logged.
 #[derive(Clone)]
 pub struct ConsoleLog {
     /// Inactive, so that it keeps no messages itself.
@@ -85,7 +91,7 @@ pub struct ConsoleLog {
     startup: Instant,
 }
 
-/// The most rows the view keeps, the oldest dropped first, and the most
+/// The most rows the console keeps, the oldest dropped first, and the most
 /// messages a receiver falls behind by before it loses the oldest.
 const MAX_ROWS: usize = 10_000;
 
@@ -273,23 +279,124 @@ impl Scope {
     }
 }
 
+/// What the console has received, for as long as the app runs: the rows of
+/// the messages logged and the lines run at the prompt, and the prompt's
+/// history. Made with DevTools, it receives messages whether or not its tab
+/// is shown. A [`ConsoleView`] shows it while the tab is, and observes it:
+/// the console notifies when its rows change.
+pub(crate) struct Console {
+    transcript: Transcript,
+    /// The log messages broadcast to the console. The console keeps its
+    /// receiver, rather than the task, so that it can take the ones sent
+    /// before a line it shows.
+    messages: Receiver<ConsoleMessage>,
+    /// When logging started.
+    startup: Instant,
+    /// Shows the messages logged as they arrive.
+    _receive: Task<()>,
+}
+
+impl Console {
+    /// A console of the messages logged to `log` from now on.
+    pub(crate) fn new(log: &ConsoleLog, cx: &mut Context<Self>) -> Self {
+        let messages = log.messages.activate_cloned();
+        // Polls the console's receiver, which then wakes the task when more
+        // messages arrive.
+        let receive = cx.spawn(async move |console, cx| {
+            std::future::poll_fn(|task| {
+                let polled = console.update(cx, |console, cx| {
+                    let mut changed = false;
+                    let poll = loop {
+                        // Skips past messages dropped while it was behind.
+                        match console.messages.poll_next_unpin(task) {
+                            Poll::Ready(Some(message)) => {
+                                console.transcript.push(message);
+                                changed = true;
+                            }
+                            Poll::Ready(None) => break Poll::Ready(()),
+                            Poll::Pending => break Poll::Pending,
+                        }
+                    };
+                    if changed {
+                        cx.notify();
+                    }
+                    poll
+                });
+                // The console is gone.
+                polled.unwrap_or(Poll::Ready(()))
+            })
+            .await
+        });
+        Console {
+            transcript: Transcript::default(),
+            messages,
+            startup: log.startup,
+            _receive: receive,
+        }
+    }
+
+    /// Runs `line`, submitted at the prompt: adds it to the history, and shows
+    /// it and what it printed, or why it failed. What it printed shows even if
+    /// the view is gone by the time the command finishes.
+    fn run(&mut self, line: String, cx: &mut Context<Self>) {
+        self.transcript.remember(&line);
+        let submitted =
+            ConsoleMessage::evaluation(MessageKind::Command, line.clone(), self.startup);
+        self.show(submitted, cx);
+        cx.spawn(async move |console, cx| {
+            let result = command::run(&line, cx).await;
+            console
+                .update(cx, |console, cx| {
+                    let (kind, text) = match result {
+                        Ok(Outcome::Nothing) => return,
+                        Ok(Outcome::Clear) => return console.clear(cx),
+                        Ok(Outcome::Output(output)) => (MessageKind::Output, output),
+                        Err(error) => (MessageKind::CommandError, error),
+                    };
+                    let message = ConsoleMessage::evaluation(kind, text, console.startup);
+                    console.show(message, cx);
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Shows `message`, after the log messages sent to the console before,
+    /// such as those of the line before, so that rows keep the order things
+    /// happened in.
+    fn show(&mut self, message: ConsoleMessage, cx: &mut Context<Self>) {
+        loop {
+            match self.messages.try_recv() {
+                Ok(message) => self.transcript.push(message),
+                // Some were dropped while the console was behind; the rest
+                // follow.
+                Err(TryRecvError::Overflowed(_)) => {}
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+            }
+        }
+        self.transcript.push(message);
+        cx.notify();
+    }
+
+    fn clear(&mut self, cx: &mut Context<Self>) {
+        self.transcript.rows.clear();
+        cx.notify();
+    }
+}
+
+/// The console's rows, and the prompt's history.
 #[derive(Default)]
-struct Console {
+struct Transcript {
+    /// Oldest first, which is also in the order of their `serial`s.
     rows: VecDeque<Row>,
     /// How many messages have been pushed, repeats included, which numbers
     /// the rows.
     pushed: u64,
-    /// The scopes picked in the scope bar, indexed by `Scope as usize`. With
-    /// none picked, every row shows ("All").
-    scopes: [bool; Scope::ALL.len()],
-    /// Only rows containing this text show.
-    filter: String,
-    prompt: Prompt,
-    /// Makes the list jump to its end; set when a line is submitted.
-    scroll_to_bottom: bool,
-    /// The scopes a message has arrived in, indexed like `scopes`; kept when
-    /// the console is cleared.
+    /// The scopes a message has arrived in, indexed by `Scope as usize`; kept
+    /// when the console is cleared.
     received: [bool; Scope::ALL.len()],
+    /// The lines submitted at the prompt, oldest first.
+    history: Vec<String>,
 }
 
 struct Row {
@@ -297,14 +404,12 @@ struct Row {
     /// How many times in a row the message arrived.
     count: u32,
     /// The number of the row's first message, counting from 1. Unique among
-    /// rows: the view tracks the rows its list shows by it, and keys their
-    /// elements with it.
+    /// rows, even those cleared: the view tracks the rows its list shows by
+    /// it, and keys their elements with it.
     serial: u64,
-    /// Whether the row shows the message's fields, spans and source.
-    expanded: bool,
 }
 
-impl Console {
+impl Transcript {
     fn push(&mut self, message: ConsoleMessage) {
         self.received[Scope::of(message.kind) as usize] = true;
         self.pushed += 1;
@@ -321,68 +426,71 @@ impl Console {
             message,
             count: 1,
             serial: self.pushed,
-            expanded: false,
         });
     }
 
-    /// Whether the scope bar and the filter field let `message` through.
-    /// `filter` is [`Self::filter`], trimmed.
-    fn shows(&self, message: &ConsoleMessage, filter: &str) -> bool {
-        let picked = !self.scopes.contains(&true) || self.scopes[Scope::of(message.kind) as usize];
-        picked && (filter.is_empty() || message.contains(filter))
+    /// The row numbered `serial`, if the console still has it.
+    fn row(&self, serial: u64) -> Option<&Row> {
+        let index = self
+            .rows
+            .binary_search_by_key(&serial, |row| row.serial)
+            .ok()?;
+        Some(&self.rows[index])
     }
 
-    /// Takes the prompt's line, for the view to run.
-    fn submit(&mut self) -> Option<String> {
-        let line = std::mem::take(&mut self.prompt.line);
-        self.prompt.browsing = None;
-        if line.trim().is_empty() {
-            return None;
+    /// Adds `line`, submitted at the prompt, to the history, unless it
+    /// repeats the last line there.
+    fn remember(&mut self, line: &str) {
+        if self.history.last().map(String::as_str) != Some(line) {
+            self.history.push(line.to_owned());
         }
-        if self.prompt.history.last() != Some(&line) {
-            self.prompt.history.push(line.clone());
-        }
-        self.scroll_to_bottom = true;
-        Some(line)
     }
 }
 
+/// Whether the scope bar and the filter field let `message` through. `scopes`
+/// are the scopes picked in the bar, indexed by `Scope as usize`, with none
+/// picked letting every scope through ("All"); `filter` is the field's text,
+/// trimmed.
+fn shows(scopes: &[bool; Scope::ALL.len()], filter: &str, message: &ConsoleMessage) -> bool {
+    let picked = !scopes.contains(&true) || scopes[Scope::of(message.kind) as usize];
+    picked && (filter.is_empty() || message.contains(filter))
+}
+
+/// Recalling the prompt's earlier lines with ↑ and ↓, as in a shell.
 #[derive(Default)]
-struct Prompt {
-    /// The line being typed.
-    line: String,
-    /// The lines submitted, oldest first.
-    history: Vec<String>,
-    /// While ↑ and ↓ browse `history`: the index of the entry in `line`, and
+struct Recall {
+    /// While ↑ and ↓ browse the history: the index of the entry shown, and
     /// the line that was being typed before browsing started.
     browsing: Option<(usize, String)>,
 }
 
-impl Prompt {
-    /// Replaces the line with the history entry before (`older`) or after the
-    /// one shown, as ↑ and ↓ do in a shell. Going past the newest entry brings
-    /// back the line typed before browsing.
-    fn browse(&mut self, older: bool) {
+impl Recall {
+    /// The line to show at the prompt in place of `line`: the entry of
+    /// `history` before (`older`) or after the one shown. Going past the
+    /// newest entry brings back the line typed before browsing.
+    fn browse(&mut self, history: &[String], line: String, older: bool) -> String {
         let shown = self
             .browsing
             .as_ref()
-            .map_or(self.history.len(), |(index, _)| *index);
-        let Some(next) = (if older {
+            .map_or(history.len(), |(index, _)| *index);
+        let next = if older {
             shown.checked_sub(1)
         } else {
             Some(shown + 1)
-        }) else {
-            return;
         };
-        if next < self.history.len() {
-            let typed = match self.browsing.take() {
-                Some((_, typed)) => typed,
-                None => std::mem::take(&mut self.line),
-            };
-            self.line = self.history[next].clone();
-            self.browsing = Some((next, typed));
-        } else if let Some((_, typed)) = self.browsing.take() {
-            self.line = typed;
+        match next {
+            Some(next) if next < history.len() => {
+                let typed = match self.browsing.take() {
+                    Some((_, typed)) => typed,
+                    None => line,
+                };
+                self.browsing = Some((next, typed));
+                history[next].clone()
+            }
+            // Past the newest entry.
+            Some(_) => self.browsing.take().map_or(line, |(_, typed)| typed),
+            // Before the oldest.
+            None => line,
         }
     }
 }
