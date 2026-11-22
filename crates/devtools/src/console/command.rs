@@ -10,6 +10,8 @@ use bevy::diagnostic::FrameCount;
 use clap::error::ErrorKind;
 use clap::{Parser, Subcommand, ValueEnum};
 use dust_pbr::screenshot::{ScreenshotKind, Screenshots};
+use dust_pbr::upscaler::{AvailableUpscalers, UpscalerBackend, UpscalerSessionState};
+use dust_pbr::{HdrRenderTarget, RenderQualitySettings, UpscalerQualityMode};
 use dust_ui::BevyChannel;
 use gpui::AsyncApp;
 use tracing::{Instrument as _, Level, event};
@@ -20,6 +22,9 @@ use super::screenshot;
 /// Why a command that needed the world failed when the Bevy app dropped its
 /// call.
 const GAME_EXITED: &str = "error: the game has exited";
+
+/// Why the `upscaler` command failed in a game without the PBR renderer.
+const NO_UPSCALER: &str = "error: the game has no upscaler";
 
 // A line typed at the prompt. As in a shell, its first word names the
 // command: `multicall` has clap match it against the subcommands instead of
@@ -70,8 +75,98 @@ enum Command {
         #[arg(long)]
         scene: bool,
     },
+    /// Print the denoising / upscaling backend and its render scale, or pick
+    /// them
+    ///
+    /// Given neither, prints the backend picked, the one running, those the
+    /// device runs, the render scale, and the render and display resolutions.
+    /// A backend the device doesn't run can't be picked; before the game has
+    /// found which it runs, any can, and one it doesn't run runs the blit
+    /// instead. The blit renders at display resolution, whatever the render
+    /// scale.
+    Upscaler {
+        /// The backend to run
+        #[arg(value_enum)]
+        backend: Option<Upscaler>,
+        /// The render scale of the backends that upscale
+        #[arg(short, long, value_enum)]
+        quality: Option<Quality>,
+    },
     /// Remove all messages from the console tab, when typed there
     Clear,
+}
+
+/// The [`UpscalerBackend`]s, as the `upscaler` command names them.
+#[derive(Clone, Copy, ValueEnum)]
+enum Upscaler {
+    /// A linear-filtered blit at display resolution, without denoising
+    Blit,
+    /// The MetalFX temporal denoised scaler, on Apple GPUs
+    #[value(name = "metalfx")]
+    MetalFx,
+    /// DLSS Ray Reconstruction, on NVIDIA GPUs
+    Dlss,
+}
+
+impl From<Upscaler> for UpscalerBackend {
+    fn from(upscaler: Upscaler) -> Self {
+        match upscaler {
+            Upscaler::Blit => Self::Blit,
+            Upscaler::MetalFx => Self::MetalFx,
+            Upscaler::Dlss => Self::Dlss,
+        }
+    }
+}
+
+/// `backend`'s name, as the `upscaler` command takes it.
+fn upscaler_name(backend: UpscalerBackend) -> &'static str {
+    match backend {
+        UpscalerBackend::Blit => "blit",
+        UpscalerBackend::MetalFx => "metalfx",
+        UpscalerBackend::Dlss => "dlss",
+    }
+}
+
+/// The [`UpscalerQualityMode`]s, as the `upscaler` command names them.
+#[derive(Clone, Copy, ValueEnum)]
+enum Quality {
+    /// 33% of the display resolution
+    UltraPerformance,
+    /// 50% of the display resolution
+    Performance,
+    /// 58% of the display resolution
+    Balanced,
+    /// 67% of the display resolution
+    Quality,
+    /// 77% of the display resolution
+    UltraQuality,
+    /// The display resolution: antialiasing and denoising only
+    Native,
+}
+
+impl From<Quality> for UpscalerQualityMode {
+    fn from(quality: Quality) -> Self {
+        match quality {
+            Quality::UltraPerformance => Self::UltraPerformance,
+            Quality::Performance => Self::Performance,
+            Quality::Balanced => Self::Balanced,
+            Quality::Quality => Self::Quality,
+            Quality::UltraQuality => Self::UltraQuality,
+            Quality::Native => Self::Dlaa,
+        }
+    }
+}
+
+/// `quality`'s name, as the `upscaler` command takes it.
+fn quality_name(quality: UpscalerQualityMode) -> &'static str {
+    match quality {
+        UpscalerQualityMode::UltraPerformance => "ultra-performance",
+        UpscalerQualityMode::Performance => "performance",
+        UpscalerQualityMode::Balanced => "balanced",
+        UpscalerQualityMode::Quality => "quality",
+        UpscalerQualityMode::UltraQuality => "ultra-quality",
+        UpscalerQualityMode::Dlaa => "native",
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -135,8 +230,86 @@ async fn execute(line: &str, cx: &AsyncApp) -> Result<Outcome, String> {
             Ok(Outcome::Output(frames.to_string()))
         }
         Command::Screenshot { path, scene } => take_screenshot(path, scene, cx).await,
+        Command::Upscaler {
+            backend: None,
+            quality: None,
+        } => print_upscaler(cx).await,
+        Command::Upscaler { backend, quality } => {
+            set_upscaler(backend.map(Into::into), quality.map(Into::into), cx).await
+        }
         Command::Clear => Ok(Outcome::Clear),
     }
+}
+
+/// Prints the upscaler backend picked, the one running, those the device
+/// runs, the render scale, and the render and display resolutions.
+async fn print_upscaler(cx: &AsyncApp) -> Result<Outcome, String> {
+    let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
+    let (settings, running, available, extents) = bevy
+        .run(|world| {
+            let settings = *world.get_resource::<RenderQualitySettings>()?;
+            let running = world
+                .get_resource::<UpscalerSessionState>()
+                .and_then(UpscalerSessionState::active_backend);
+            let available = world.get_resource::<AvailableUpscalers>().map(|available| {
+                UpscalerBackend::ALL
+                    .into_iter()
+                    .filter(|&backend| available.contains(backend))
+                    .map(upscaler_name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            });
+            let extents = world
+                .get_resource::<HdrRenderTarget>()
+                .map(|target| (target.render_extent, target.display_extent));
+            Some((settings, running, available, extents))
+        })
+        .await
+        .ok_or(GAME_EXITED)?
+        .ok_or(NO_UPSCALER)?;
+    let resolution = extents.map_or("not known yet".to_owned(), |(render, display)| {
+        format!("{}×{} → {}×{}", render.x, render.y, display.x, display.y)
+    });
+    Ok(Outcome::Output(format!(
+        "backend: {}\nrunning: {}\navailable: {}\nquality: {}\nresolution: {resolution}",
+        upscaler_name(settings.upscaler),
+        running.map_or("none yet", upscaler_name),
+        available.as_deref().unwrap_or("not found yet"),
+        quality_name(settings.quality),
+    )))
+}
+
+/// Picks `backend` to run, unless the device is known not to run it, and the
+/// render scale `quality`; keeps the setting of each that's `None`.
+async fn set_upscaler(
+    backend: Option<UpscalerBackend>,
+    quality: Option<UpscalerQualityMode>,
+    cx: &AsyncApp,
+) -> Result<Outcome, String> {
+    let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
+    bevy.run(move |world| {
+        let available = world.get_resource::<AvailableUpscalers>();
+        if let Some(backend) =
+            backend.filter(|&backend| available.is_some_and(|a| !a.contains(backend)))
+        {
+            return Err(format!("error: this device doesn't run {}", backend.name()));
+        }
+        let mut settings = world
+            .get_resource_mut::<RenderQualitySettings>()
+            .ok_or(NO_UPSCALER)?;
+        let next = RenderQualitySettings {
+            upscaler: backend.unwrap_or(settings.upscaler),
+            quality: quality.unwrap_or(settings.quality),
+        };
+        // Only a change, which reallocates the render targets, marks the
+        // settings changed.
+        if *settings != next {
+            *settings = next;
+        }
+        Ok(Outcome::Nothing)
+    })
+    .await
+    .ok_or(GAME_EXITED)?
 }
 
 /// Saves a screenshot of the next frame the game draws at `path`, of the HDR
@@ -159,7 +332,7 @@ async fn take_screenshot(path: PathBuf, scene: bool, cx: &AsyncApp) -> Result<Ou
     };
     let path = super::user_path(path);
     let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
-    let taking = bevy
+    let screenshot = bevy
         .run(move |world| {
             world
                 .get_resource_mut::<Screenshots>()
@@ -167,8 +340,9 @@ async fn take_screenshot(path: PathBuf, scene: bool, cx: &AsyncApp) -> Result<Ou
         })
         .await
         .ok_or(GAME_EXITED)?
-        .ok_or("error: the game takes no screenshots")?;
-    let screenshot = taking.await.map_err(|error| format!("error: {error}"))?;
+        .ok_or("error: the game takes no screenshots")?
+        .await
+        .map_err(|error| format!("error: {error}"))?;
     // Encoding an image takes too long for the UI thread.
     cx.background_executor()
         .spawn(async move {

@@ -93,16 +93,6 @@ impl UpscalerBackend {
             Self::MetalFx | Self::Dlss => true,
         }
     }
-
-    /// Parses `DUST_UPSCALER`'s value: `blit`, `metalfx` or `dlss`.
-    pub(crate) fn from_env_value(value: &str) -> Option<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "blit" => Some(Self::Blit),
-            "metalfx" => Some(Self::MetalFx),
-            "dlss" => Some(Self::Dlss),
-            _ => None,
-        }
-    }
 }
 
 /// The backends this device runs, found once after device creation by

@@ -652,13 +652,21 @@ pub struct RenderQualitySettings {
 }
 
 impl Default for RenderQualitySettings {
-    /// The blit, or the backend `DUST_UPSCALER=blit|metalfx|dlss` names, for
-    /// headless captures.
+    /// MetalFX on Apple platforms, DLSS on Windows, otherwise the blit.
     fn default() -> Self {
-        let upscaler = std::env::var("DUST_UPSCALER")
-            .ok()
-            .and_then(|value| UpscalerBackend::from_env_value(&value))
-            .unwrap_or_default();
+        #[allow(unused_assignments)]
+        let mut upscaler = UpscalerBackend::Blit;
+
+        #[cfg(target_vendor = "apple")]
+        {
+            upscaler = UpscalerBackend::MetalFx;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            upscaler = UpscalerBackend::Dlss;
+        }
+
         Self {
             quality: UpscalerQualityMode::default(),
             upscaler,
