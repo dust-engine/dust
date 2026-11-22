@@ -35,7 +35,7 @@ const NO_UPSCALER: &str = "error: the game has no upscaler";
     multicall = true,
     about = "The DevTools console's commands. `help <command>` describes one."
 )]
-struct CommandLine {
+pub(super) struct CommandLine {
     #[command(subcommand)]
     command: Command,
 }

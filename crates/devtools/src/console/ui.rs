@@ -6,12 +6,15 @@ use std::collections::HashSet;
 
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FollowMode, HighlightStyle,
-    Hsla, InteractiveElement as _, IntoElement, ListAlignment, ListState, ParentElement as _,
-    Render, SharedString, StatefulInteractiveElement as _, Styled as _, StyledText, Subscription,
-    WeakEntity, Window, actions, div, list, prelude::FluentBuilder as _, px, rems, rgb,
+    Hsla, InteractiveElement as _, IntoElement, ListAlignment, ListState, MouseButton,
+    ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
+    Styled as _, StyledText, Subscription, UniformListScrollHandle, WeakEntity, Window, actions,
+    div, list, prelude::FluentBuilder as _, px, rems, rgb, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_component::input::{
+    Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp, OutdentInline,
+};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _, Theme,
@@ -20,9 +23,10 @@ use gpui_component::{
 
 use tracing::Level;
 
+use super::complete::{self, Completion, Edit};
 use super::{
     Console, ConsoleMessage, Field, MessageKind, Recall, Scope, ValueKind, filter_default_allows,
-    shows,
+    shows, working_directory,
 };
 
 // Bound to ⌘K in the "Console" key context.
@@ -33,6 +37,14 @@ const ICON_WIDTH: f32 = 14.0;
 
 /// Line height of the rows, in rems.
 const LINE_HEIGHT: f32 = 1.25;
+
+/// The most candidates the completion list shows at once; it scrolls through
+/// the rest.
+const COMPLETIONS_SHOWN: usize = 8;
+
+/// The widest the completion list's column of candidates gets, in characters,
+/// before their help; a longer candidate pushes its help further.
+const CANDIDATE_COLUMN: usize = 32;
 
 /// A box as tall as a row's first line of text, centering what it holds on
 /// that line, for the icons before the message.
@@ -51,6 +63,9 @@ pub(crate) struct ConsoleView {
     /// none picked, every row shows ("All").
     scopes: [bool; Scope::ALL.len()],
     recall: Recall,
+    /// The candidates Tab listed above the prompt, while the list is open.
+    completion: Option<Completion>,
+    completion_scroll: UniformListScrollHandle,
     /// The `serial`s of the rows showing the message's fields, spans and
     /// source.
     expanded: HashSet<u64>,
@@ -88,8 +103,14 @@ impl ConsoleView {
             cx.subscribe_in(
                 &prompt,
                 window,
-                |this, prompt, event: &InputEvent, window, cx| {
-                    if let InputEvent::PressEnter { .. } = event {
+                |this, prompt, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter { .. } => {
+                        // Enter keeps the candidate selected rather than run
+                        // the line.
+                        if let Some(edit) = this.end_completion(cx).and_then(Completion::accept) {
+                            this.edit_prompt(edit, window, cx);
+                            return;
+                        }
                         let line = prompt.read(cx).value().to_string();
                         if !line.trim().is_empty() {
                             this.console.update(cx, |console, cx| console.run(line, cx));
@@ -100,6 +121,14 @@ impl ConsoleView {
                         this.dirty = true;
                         cx.notify();
                     }
+                    // Any change but the completion's own ends it.
+                    InputEvent::Change => {
+                        this.completion(cx);
+                    }
+                    InputEvent::Blur => {
+                        this.end_completion(cx);
+                    }
+                    InputEvent::Focus => {}
                 },
             ),
         ];
@@ -112,6 +141,8 @@ impl ConsoleView {
             prompt,
             scopes: Default::default(),
             recall: Recall::default(),
+            completion: None,
+            completion_scroll: UniformListScrollHandle::new(),
             expanded: HashSet::new(),
             list,
             shown: Vec::new(),
@@ -278,7 +309,8 @@ impl ConsoleView {
         bar
     }
 
-    /// The command line: Enter submits it, ↑ and ↓ recall earlier lines.
+    /// The command line: Enter submits it, ↑ and ↓ recall earlier lines, and
+    /// Tab completes the word before the cursor (see [`complete`]).
     fn prompt(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let theme = cx.theme();
         h_flex()
@@ -286,9 +318,15 @@ impl ConsoleView {
             .px_1()
             .border_t_1()
             .border_color(theme.border)
-            // A single-line input leaves ↑ and ↓ to its ancestors.
+            // A single-line input leaves ↑, ↓, Tab and Shift-Tab to its
+            // ancestors, and Escape when it has nothing to dismiss.
             .on_action(cx.listener(|this, _: &MoveUp, window, cx| this.browse(true, window, cx)))
             .on_action(cx.listener(|this, _: &MoveDown, window, cx| this.browse(false, window, cx)))
+            .on_action(cx.listener(|this, _: &IndentInline, window, cx| this.tab(true, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &OutdentInline, window, cx| this.tab(false, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &Escape, window, cx| this.escape(window, cx)))
             .child(
                 Icon::new(IconName::ChevronRight)
                     .xsmall()
@@ -302,12 +340,193 @@ impl ConsoleView {
             )
     }
 
+    /// ↑ or ↓: selects the candidate before or after while the completion
+    /// list is open, and recalls an earlier or later line otherwise.
     fn browse(&mut self, older: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.completion(cx).is_some() {
+            return self.select_candidate(!older, window, cx);
+        }
         let line = self.prompt.read(cx).value().to_string();
         let history = &self.console.read(cx).transcript.history;
         let line = self.recall.browse(history, line, older);
         self.prompt
             .update(cx, |prompt, cx| prompt.set_value(line, window, cx));
+    }
+
+    /// Tab, or Shift-Tab if not `forward`: selects the candidate after, or
+    /// before, while the completion list is open, and completes the word
+    /// before the cursor otherwise. Even with nothing to complete, Tab stays
+    /// at the prompt rather than move the focus.
+    fn tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.completion(cx).is_some() {
+            return self.select_candidate(forward, window, cx);
+        }
+        let prompt = self.prompt.read(cx);
+        let (edit, completion) = complete::complete(
+            &prompt.value(),
+            prompt.cursor(),
+            working_directory().as_deref(),
+        );
+        if let Some(edit) = edit {
+            self.edit_prompt(edit, window, cx);
+        }
+        if completion.is_some() {
+            self.completion_scroll
+                .scroll_to_item(0, ScrollStrategy::Top);
+            self.completion = completion;
+            cx.notify();
+        }
+    }
+
+    fn select_candidate(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(completion) = self.completion(cx) else {
+            return;
+        };
+        let edit = completion.select_next(forward);
+        let selected = completion.selected().unwrap_or(0);
+        self.completion_scroll
+            .scroll_to_item(selected, ScrollStrategy::Nearest);
+        self.edit_prompt(edit, window, cx);
+        cx.notify();
+    }
+
+    /// Picks candidate `index`, clicked in the completion list.
+    fn pick_candidate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(completion) = self.end_completion(cx) {
+            self.edit_prompt(completion.pick(index), window, cx);
+        }
+        self.prompt
+            .update(cx, |prompt, cx| prompt.focus(window, cx));
+    }
+
+    /// Escape: closes the completion list, putting back the word as it was;
+    /// leaves Escape to the ancestors without one.
+    fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.end_completion(cx) {
+            Some(completion) => {
+                if let Some(edit) = completion.cancel() {
+                    self.edit_prompt(edit, window, cx);
+                }
+            }
+            None => cx.propagate(),
+        }
+    }
+
+    /// The completion listed, unless the prompt changed since the completion
+    /// last edited it, which ends it.
+    fn completion(&mut self, cx: &mut Context<Self>) -> Option<&mut Completion> {
+        let prompt = self.prompt.read(cx);
+        let changed = self
+            .completion
+            .as_ref()
+            .is_some_and(|completion| !completion.is_current(&prompt.value(), prompt.cursor()));
+        if changed {
+            self.completion = None;
+            cx.notify();
+        }
+        self.completion.as_mut()
+    }
+
+    /// Ends the completion, closing its list, and returns it unless the prompt
+    /// changed since it last edited it.
+    fn end_completion(&mut self, cx: &mut Context<Self>) -> Option<Completion> {
+        self.completion(cx)?;
+        cx.notify();
+        self.completion.take()
+    }
+
+    /// Replaces part of the prompt's line as the completion does, leaving the
+    /// cursor after the new text.
+    fn edit_prompt(&self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
+        self.prompt.update(cx, |prompt, cx| {
+            prompt.set_selected_range(edit.range, cx);
+            prompt.replace(edit.text, window, cx);
+        });
+    }
+
+    /// The completion list, for the message list's box: it floats over the
+    /// bottom of the messages, just above the prompt. The candidates, each
+    /// followed by its help, with the one selected highlighted; a click picks
+    /// one.
+    fn completion_list(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let completion = self.completion.as_ref()?;
+        let theme = cx.theme();
+        let count = completion.candidates().len();
+        // Lines up the help, in the monospace font.
+        let column = completion
+            .candidates()
+            .iter()
+            .map(|candidate| candidate.text.chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(CANDIDATE_COLUMN);
+        let rows = cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+            let Some(completion) = &this.completion else {
+                return Vec::new();
+            };
+            let theme = cx.theme();
+            let candidates = &completion.candidates()[range.clone()];
+            range
+                .zip(candidates)
+                .map(|(index, candidate)| {
+                    let selected = completion.selected() == Some(index);
+                    h_flex()
+                        .id(("console-completion", index))
+                        .h(rems(LINE_HEIGHT))
+                        .px_1p5()
+                        .gap_3()
+                        .cursor_pointer()
+                        .when(selected, |row| row.bg(theme.list_active))
+                        .when(!selected, |row| row.hover(|row| row.bg(theme.list_hover)))
+                        // On mouse down, before anything else can take the
+                        // prompt's focus, which would close the list.
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.pick_candidate(index, window, cx);
+                            }),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .whitespace_nowrap()
+                                .child(format!("{:column$}", candidate.text)),
+                        )
+                        .children(candidate.help.clone().map(|help| {
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(theme.muted_foreground)
+                                .child(help)
+                        }))
+                })
+                .collect()
+        });
+        let list = uniform_list("console-completions", count, rows)
+            .track_scroll(&self.completion_scroll)
+            .h(rems(LINE_HEIGHT * count.min(COMPLETIONS_SHOWN) as f32));
+        Some(
+            div()
+                .absolute()
+                .left_1()
+                .right_1()
+                .bottom_1()
+                // Keeps the rows beneath from being hovered, clicked or
+                // scrolled through it.
+                .occlude()
+                .overflow_hidden()
+                .rounded(theme.radius)
+                .border_1()
+                .border_color(theme.border)
+                .shadow_md()
+                .bg(theme.popover)
+                .text_color(theme.popover_foreground)
+                .text_sm()
+                .line_height(rems(LINE_HEIGHT))
+                .font_family(theme.mono_font_family.clone())
+                .child(list),
+        )
     }
 
     /// A row as in Safari: an icon for the kind of message, the repeat count,
@@ -419,7 +638,8 @@ impl Render for ConsoleView {
                     .flex_1()
                     .min_h_0()
                     .child(rows)
-                    .vertical_scrollbar(&self.list),
+                    .vertical_scrollbar(&self.list)
+                    .children(self.completion_list(cx)),
             )
             .child(self.prompt(cx))
     }

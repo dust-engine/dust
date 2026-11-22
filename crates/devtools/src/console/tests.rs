@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use tracing::subscriber;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -236,4 +238,136 @@ fn prompt_history() {
     assert_eq!(browse(false), "echo b");
     assert_eq!(browse(false), "ec");
     assert_eq!(browse(false), "ec");
+}
+
+/// Replaces part of `line` as `edit` says.
+fn apply(line: &mut String, edit: complete::Edit) {
+    line.replace_range(edit.range, &edit.text);
+}
+
+/// Tab at the end of `line`, completing paths from `directory`: the line
+/// after, and the candidates listed, as the line would have them.
+fn tab_in(line: &str, directory: Option<&Path>) -> (String, Vec<String>) {
+    let (edit, completion) = complete::complete(line, line.len(), directory);
+    let mut line = line.to_owned();
+    if let Some(edit) = edit {
+        apply(&mut line, edit);
+    }
+    let listed = completion.map_or_else(Vec::new, |completion| {
+        let candidates = completion.candidates().iter();
+        candidates.map(|candidate| candidate.text.clone()).collect()
+    });
+    (line, listed)
+}
+
+fn tab(line: &str) -> (String, Vec<String>) {
+    tab_in(line, None)
+}
+
+#[test]
+fn complete_commands() {
+    // One candidate replaces the word, and a space follows it.
+    assert_eq!(tab("scr"), ("screenshot ".to_owned(), vec![]));
+    assert_eq!(tab("  fr").0, "  frame ");
+    let (line, listed) = tab("");
+    assert_eq!(line, "");
+    assert_eq!(
+        listed,
+        [
+            "echo",
+            "log",
+            "frame",
+            "screenshot",
+            "upscaler",
+            "clear",
+            "help"
+        ]
+    );
+
+    // Options, and their values.
+    assert_eq!(tab("log --le").0, "log --level ");
+    assert_eq!(tab("log --level w").0, "log --level warn ");
+    assert_eq!(tab("log --level 'w").0, "log --level warn ");
+    assert_eq!(tab("upscaler m").0, "upscaler metalfx ");
+    assert_eq!(tab("help up").0, "help upscaler ");
+
+    // Several extend the word by what they all start with.
+    let (line, listed) = tab("upscaler -q ultra");
+    assert_eq!(line, "upscaler -q ultra-");
+    assert_eq!(listed, ["ultra-performance", "ultra-quality"]);
+
+    // Nothing to complete.
+    assert_eq!(tab("frob"), ("frob".to_owned(), vec![]));
+    assert_eq!(tab("echo #fr"), ("echo #fr".to_owned(), vec![]));
+}
+
+#[test]
+fn complete_paths() {
+    let directory =
+        std::env::temp_dir().join(format!("dust-console-complete-{}", std::process::id()));
+    std::fs::create_dir_all(directory.join("shots")).unwrap();
+    std::fs::write(directory.join("shot one.png"), b"").unwrap();
+    let tab = |line| tab_in(line, Some(&directory));
+
+    // Quoted as the line needs it.
+    assert_eq!(
+        tab("screenshot sh"),
+        (
+            "screenshot shot".to_owned(),
+            vec!["'shot one.png'".to_owned(), "shots/".to_owned()]
+        )
+    );
+    assert_eq!(tab("screenshot 'shot o").0, "screenshot 'shot one.png' ");
+    // A directory's files may follow it, so no space does.
+    assert_eq!(tab("screenshot shots").0, "screenshot shots/");
+
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn completion_list() {
+    let open = || {
+        let line = "upscaler -q ultra";
+        let (edit, completion) = complete::complete(line, line.len(), None);
+        let mut line = line.to_owned();
+        apply(&mut line, edit.unwrap());
+        (line, completion.unwrap())
+    };
+
+    // Tab selects the next candidate, putting it in the line; Shift-Tab the
+    // one before. Both go around.
+    let (mut line, mut completion) = open();
+    assert!(completion.is_current(&line, line.len()));
+    let mut select = |forward| {
+        apply(&mut line, completion.select_next(forward));
+        line.clone()
+    };
+    assert_eq!(select(true), "upscaler -q ultra-performance");
+    assert_eq!(select(true), "upscaler -q ultra-quality");
+    assert_eq!(select(true), "upscaler -q ultra-performance");
+    assert_eq!(select(false), "upscaler -q ultra-quality");
+    assert_eq!(completion.selected(), Some(1));
+    assert!(completion.is_current(&line, line.len()));
+    // An edit of the user's, or moving the cursor, ends the completion.
+    assert!(!completion.is_current("upscaler -q ultra-qualit", 24));
+    assert!(!completion.is_current(&line, 0));
+
+    // Enter keeps the candidate selected.
+    apply(&mut line, completion.accept().unwrap());
+    assert_eq!(line, "upscaler -q ultra-quality ");
+
+    // Escape puts back the word as it was.
+    let (mut line, mut completion) = open();
+    apply(&mut line, completion.select_next(false));
+    apply(&mut line, completion.cancel().unwrap());
+    assert_eq!(line, "upscaler -q ultra-");
+
+    // With none selected, neither changes the line.
+    assert!(open().1.accept().is_none());
+    assert!(open().1.cancel().is_none());
+
+    // A click picks a candidate.
+    let (mut line, completion) = open();
+    apply(&mut line, completion.pick(0));
+    assert_eq!(line, "upscaler -q ultra-performance ");
 }

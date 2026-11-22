@@ -13,6 +13,9 @@ dust_pbr.workspace = true
 dust_profiler.workspace = true
 dust_character.workspace = true
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+# Completes the prompt's commands on Tab, with the shell-agnostic engine that
+# `unstable-dynamic` adds.
+clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
 shlex = "2"
 tracing = "0.1"
 tracing-log = "0.2"

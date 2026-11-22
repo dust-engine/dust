@@ -8,18 +8,22 @@
 //! and the connections to the console's socket. The console keeps the last
 //! [`MAX_ROWS`] rows; the game's own log on stderr has them all.
 //!
-//! The rest is in four parts:
+//! The rest is in five parts:
 //! - [`Console`]: the console's rows and the prompt's history, kept for as
 //!   long as the app runs, whether or not the console's tab is shown.
 //! - [`command`]: running a command line, the same for the prompt and the
 //!   socket. It runs on the UI thread, and awaits the Bevy thread for what it
 //!   needs of the world.
+//! - [`complete`]: completing the word before the prompt's cursor on Tab, from
+//!   the commands as clap describes them.
 //! - [`ui`]: the view of the console, which exists only while its tab is
-//!   shown: the list of rows, the filter and scope bar, and the prompt.
+//!   shown: the list of rows, the filter and scope bar, the prompt, and the
+//!   list of completions above it.
 //! - [`remote`]: the socket and its connections, from when the app starts if
 //!   `DUST_CONSOLE_SOCKET` is set, whether or not the view is shown.
 
 mod command;
+mod complete;
 mod format;
 mod layer;
 mod remote;
@@ -29,7 +33,7 @@ mod tests;
 mod ui;
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -95,15 +99,24 @@ pub struct ConsoleLog {
 /// messages a receiver falls behind by before it loses the oldest.
 const MAX_ROWS: usize = 10_000;
 
-/// `path` as the user meant it, made absolute. Under `bazel run`, which runs
-/// the game in its runfiles, a relative path is from the directory `bazel run`
-/// was started in.
+/// `path` as the user meant it, made absolute: a relative path is from the
+/// [`working_directory`].
 fn user_path(path: PathBuf) -> PathBuf {
-    let path = match std::env::var_os("BUILD_WORKING_DIRECTORY") {
-        Some(directory) if path.is_relative() => Path::new(&directory).join(path),
-        _ => path,
+    let path = match working_directory() {
+        Some(directory) => directory.join(path),
+        None => path,
     };
     std::path::absolute(&path).unwrap_or(path)
+}
+
+/// The directory a relative path the user types is from: the one the game was
+/// started from, or under `bazel run`, which runs the game in its runfiles, the
+/// one `bazel run` was started in.
+fn working_directory() -> Option<PathBuf> {
+    match std::env::var_os("BUILD_WORKING_DIRECTORY") {
+        Some(directory) => Some(directory.into()),
+        None => std::env::current_dir().ok(),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
