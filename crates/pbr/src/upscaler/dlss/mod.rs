@@ -498,6 +498,7 @@ impl RayReconstruction {
         eval.InMVScaleY = 1.0;
         eval.InJitterOffsetX = inputs.jitter.x;
         eval.InJitterOffsetY = inputs.jitter.y;
+        eval.InReset = inputs.reset_history.into();
 
         let params = match ParameterMap::new() {
             Ok(params) => params,

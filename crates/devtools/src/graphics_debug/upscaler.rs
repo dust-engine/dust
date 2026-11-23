@@ -1,13 +1,16 @@
 //! Toggles of the "Super-resolution" stage: the denoising / upscaling backend
-//! and its render scale.
+//! and its render scale, and the reference accumulator's controls.
 
 use bevy::prelude::*;
-use dust_pbr::upscaler::{AvailableUpscalers, UpscalerBackend, UpscalerSessionState};
+use dust_pbr::upscaler::reference::ReferenceAccumulator;
+use dust_pbr::upscaler::{AvailableUpscalers, ResetHistory, UpscalerBackend, UpscalerSessionState};
 use dust_pbr::{HdrRenderTarget, RenderQualitySettings, UpscalerQualityMode};
 use dust_ui::BevyChannel;
 use gpui::{Context, IntoElement, ParentElement as _, Render, Styled as _, Window, div, px};
+use gpui_component::button::Button;
+use gpui_component::checkbox::Checkbox;
 use gpui_component::radio::{Radio, RadioGroup};
-use gpui_component::{ActiveTheme as _, v_flex};
+use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 
 use crate::watch;
 use crate::widgets::{RADIO_LABEL_OVERHANG, heading};
@@ -24,6 +27,11 @@ pub(super) struct UpscalerSnapshot {
     jitter_phases: usize,
     /// Render and display extents.
     extents: Option<(UVec2, UVec2)>,
+    /// Frames the reference accumulator has averaged; `None` while another
+    /// backend runs.
+    reference_frames: Option<u32>,
+    /// Whether `Time<Virtual>` is paused.
+    paused: bool,
 }
 
 /// The page's [`UpscalerSnapshot`], sent when it differs from the last one
@@ -33,6 +41,7 @@ pub(super) fn upscaler_snapshot(
     available: Option<Res<AvailableUpscalers>>,
     state: Res<UpscalerSessionState>,
     hdr_target: Option<Res<HdrRenderTarget>>,
+    time: Res<Time<Virtual>>,
     mut last: Local<Option<UpscalerSnapshot>>,
 ) -> Option<UpscalerSnapshot> {
     let snapshot = UpscalerSnapshot {
@@ -41,6 +50,8 @@ pub(super) fn upscaler_snapshot(
         active: state.active_backend(),
         jitter_phases: state.jitter_phase_count(),
         extents: hdr_target.map(|hdr| (hdr.render_extent, hdr.display_extent)),
+        reference_frames: ReferenceAccumulator::running(&state).map(ReferenceAccumulator::frames),
+        paused: time.is_paused(),
     };
     if last.as_ref() == Some(&snapshot) {
         return None;
@@ -55,6 +66,7 @@ fn label(backend: UpscalerBackend) -> &'static str {
         UpscalerBackend::Blit => "Blit (no denoising)",
         UpscalerBackend::MetalFx => "MetalFX denoised scaler",
         UpscalerBackend::Dlss => "DLSS Ray Reconstruction",
+        UpscalerBackend::Reference => "Reference (accumulate)",
     }
 }
 
@@ -91,6 +103,23 @@ fn settings(
         let mut next = *settings;
         edit(&mut next);
         settings.set_if_neq(next);
+    });
+}
+
+/// Pauses or resumes `Time<Virtual>`, which stops or restarts the animation
+/// and physics, and shows it on the page's copy.
+fn set_paused(this: &mut UpscalerPage, cx: &mut Context<UpscalerPage>, paused: bool) {
+    if let Some(snapshot) = &mut this.snapshot {
+        snapshot.paused = paused;
+        cx.notify();
+    }
+    cx.global::<BevyChannel>().update(move |world| {
+        let mut time = world.resource_mut::<Time<Virtual>>();
+        if paused {
+            time.pause();
+        } else {
+            time.unpause();
+        }
     });
 }
 
@@ -132,6 +161,45 @@ impl Render for UpscalerPage {
                     .child(format!("Running: {}", label(active)))
             });
 
+        let reference = snapshot.reference_frames.map(|frames| {
+            v_flex()
+                .gap_1()
+                .child(heading("Reference accumulator"))
+                .child(format!("Frames averaged: {frames}"))
+                .child(
+                    div()
+                        .text_color(muted)
+                        .child("Restart after the view or scene changes."),
+                )
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            Button::new("reference-restart")
+                                .label("Restart")
+                                .small()
+                                .on_click(cx.listener(|_, _, _, cx| {
+                                    cx.global::<BevyChannel>().update(|world| {
+                                        world.write_message(ResetHistory);
+                                    });
+                                })),
+                        )
+                        .child(
+                            Checkbox::new("reference-pause")
+                                .label("Pause simulation")
+                                .checked(snapshot.paused)
+                                .on_click(cx.listener(|this, paused: &bool, _, cx| {
+                                    set_paused(this, cx, *paused);
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_color(muted)
+                        .child("Pausing lets a moving scene converge."),
+                )
+        });
+
         let upscales = snapshot.active.is_some_and(UpscalerBackend::upscales);
         let quality = QUALITY_MODES
             .iter()
@@ -160,6 +228,7 @@ impl Render for UpscalerPage {
                     })),
             )
             .children(fallback)
+            .children(reference)
             .child(heading("Render scale"))
             .child(
                 RadioGroup::vertical("upscaler-quality")

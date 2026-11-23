@@ -7,10 +7,12 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 
 use bevy::diagnostic::FrameCount;
+use bevy::time::{Time, Virtual};
 use clap::error::ErrorKind;
 use clap::{Parser, Subcommand, ValueEnum};
 use dust_pbr::screenshot::{ScreenshotKind, Screenshots};
-use dust_pbr::upscaler::{AvailableUpscalers, UpscalerBackend, UpscalerSessionState};
+use dust_pbr::upscaler::reference::ReferenceAccumulator;
+use dust_pbr::upscaler::{AvailableUpscalers, ResetHistory, UpscalerBackend, UpscalerSessionState};
 use dust_pbr::{HdrRenderTarget, RenderQualitySettings, UpscalerQualityMode};
 use dust_ui::BevyChannel;
 use gpui::AsyncApp;
@@ -79,11 +81,13 @@ enum Command {
     /// them
     ///
     /// Given neither, prints the backend picked, the one running, those the
-    /// device runs, the render scale, and the render and display resolutions.
+    /// device runs, the render scale, the render and display resolutions, and,
+    /// while the reference accumulator runs, how many frames it has averaged.
     /// A backend the device doesn't run can't be picked; before the game has
     /// found which it runs, any can, and one it doesn't run runs the blit
-    /// instead. The blit renders at display resolution, whatever the render
-    /// scale.
+    /// instead. The blit and the reference accumulator render at display
+    /// resolution, whatever the render scale.
+    #[command(args_conflicts_with_subcommands = true)]
     Upscaler {
         /// The backend to run
         #[arg(value_enum)]
@@ -91,6 +95,8 @@ enum Command {
         /// The render scale of the backends that upscale
         #[arg(short, long, value_enum)]
         quality: Option<Quality>,
+        #[command(subcommand)]
+        command: Option<UpscalerCommand>,
     },
     /// Print whether the game's simulation is paused, or pause or resume it
     ///
@@ -115,6 +121,21 @@ enum Upscaler {
     MetalFx,
     /// DLSS Ray Reconstruction, on NVIDIA GPUs
     Dlss,
+    /// The reference accumulator: the mean of every frame since its history was
+    /// last reset, at display resolution
+    Reference,
+}
+
+/// The commands nested under `upscaler`.
+#[derive(Subcommand)]
+enum UpscalerCommand {
+    /// Have the running backend discard the history it keeps of earlier frames
+    ///
+    /// The reference accumulator then starts a new mean. The blit keeps no
+    /// history.
+    ResetHistory,
+}
+
 /// What the `time` command does to the game's virtual clock.
 #[derive(Clone, Copy, ValueEnum)]
 enum TimeAction {
@@ -130,6 +151,7 @@ impl From<Upscaler> for UpscalerBackend {
             Upscaler::Blit => Self::Blit,
             Upscaler::MetalFx => Self::MetalFx,
             Upscaler::Dlss => Self::Dlss,
+            Upscaler::Reference => Self::Reference,
         }
     }
 }
@@ -140,6 +162,7 @@ fn upscaler_name(backend: UpscalerBackend) -> &'static str {
         UpscalerBackend::Blit => "blit",
         UpscalerBackend::MetalFx => "metalfx",
         UpscalerBackend::Dlss => "dlss",
+        UpscalerBackend::Reference => "reference",
     }
 }
 
@@ -247,16 +270,32 @@ async fn execute(line: &str, cx: &AsyncApp) -> Result<Outcome, String> {
         }
         Command::Screenshot { path, scene } => take_screenshot(path, scene, cx).await,
         Command::Upscaler {
+            command: Some(UpscalerCommand::ResetHistory),
+            ..
+        } => reset_history(cx).await,
+        Command::Upscaler {
             backend: None,
             quality: None,
+            command: None,
         } => print_upscaler(cx).await,
-        Command::Upscaler { backend, quality } => {
-            set_upscaler(backend.map(Into::into), quality.map(Into::into), cx).await
-        }
+        Command::Upscaler {
+            backend, quality, ..
+        } => set_upscaler(backend.map(Into::into), quality.map(Into::into), cx).await,
         Command::Time { action } => time(action, cx).await,
         Command::Clear => Ok(Outcome::Clear),
     }
 }
+
+/// Has the running upscaler backend discard its history with the next frame.
+async fn reset_history(cx: &AsyncApp) -> Result<Outcome, String> {
+    let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
+    bevy.run(|world| world.write_message(ResetHistory))
+        .await
+        .ok_or(GAME_EXITED)?
+        .ok_or(NO_UPSCALER)?;
+    Ok(Outcome::Nothing)
+}
+
 /// Pauses or resumes the game's virtual clock as `action` says, and prints
 /// whether it's paused.
 async fn time(action: Option<TimeAction>, cx: &AsyncApp) -> Result<Outcome, String> {
@@ -283,12 +322,14 @@ async fn time(action: Option<TimeAction>, cx: &AsyncApp) -> Result<Outcome, Stri
 /// runs, the render scale, and the render and display resolutions.
 async fn print_upscaler(cx: &AsyncApp) -> Result<Outcome, String> {
     let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
-    let (settings, running, available, extents) = bevy
+    let (settings, running, frames, available, extents) = bevy
         .run(|world| {
             let settings = *world.get_resource::<RenderQualitySettings>()?;
-            let running = world
-                .get_resource::<UpscalerSessionState>()
-                .and_then(UpscalerSessionState::active_backend);
+            let session = world.get_resource::<UpscalerSessionState>();
+            let running = session.and_then(UpscalerSessionState::active_backend);
+            let frames = session
+                .and_then(ReferenceAccumulator::running)
+                .map(ReferenceAccumulator::frames);
             let available = world.get_resource::<AvailableUpscalers>().map(|available| {
                 UpscalerBackend::ALL
                     .into_iter()
@@ -300,7 +341,7 @@ async fn print_upscaler(cx: &AsyncApp) -> Result<Outcome, String> {
             let extents = world
                 .get_resource::<HdrRenderTarget>()
                 .map(|target| (target.render_extent, target.display_extent));
-            Some((settings, running, available, extents))
+            Some((settings, running, frames, available, extents))
         })
         .await
         .ok_or(GAME_EXITED)?
@@ -308,8 +349,11 @@ async fn print_upscaler(cx: &AsyncApp) -> Result<Outcome, String> {
     let resolution = extents.map_or("not known yet".to_owned(), |(render, display)| {
         format!("{}×{} → {}×{}", render.x, render.y, display.x, display.y)
     });
+    let frames = frames.map_or(String::new(), |frames| {
+        format!("\nframes averaged: {frames}")
+    });
     Ok(Outcome::Output(format!(
-        "backend: {}\nrunning: {}\navailable: {}\nquality: {}\nresolution: {resolution}",
+        "backend: {}\nrunning: {}\navailable: {}\nquality: {}\nresolution: {resolution}{frames}",
         upscaler_name(settings.upscaler),
         running.map_or("none yet", upscaler_name),
         available.as_deref().unwrap_or("not found yet"),

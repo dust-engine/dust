@@ -169,6 +169,35 @@ ron2bin(
     type = "compute-pipeline",
 )
 
+# The reference accumulator, the `Reference` upscaler backend: the running mean
+# of every frame since the last reset. Own layout, auto-derived from the
+# shader's bindings.
+slang_shader(
+    name = "reference_accumulate",
+    srcs = ["reference_accumulate.slang"],
+    out = "reference_accumulate.spv",
+    profile = "cs_6_6",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
+slang_playout(
+    name = "reference_accumulate_layout",
+    srcs = ["reference_accumulate.slang"],
+    out = "reference_accumulate.playout.bin",
+    set_attrs = ["0:push_descriptor"],
+)
+
+ron2bin(
+    name = "reference_accumulate_comp_pipeline",
+    src = "reference_accumulate.comp.pipeline.ron",
+    out = "reference_accumulate.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+
 glsl_shader(
     name = "tonemap",
     src = "tonemap.glsl",
@@ -225,6 +254,9 @@ filegroup(
         ":hzb_build",
         ":hzb_build_layout",
         ":hzb_build_comp_pipeline",
+        ":reference_accumulate",
+        ":reference_accumulate_layout",
+        ":reference_accumulate_comp_pipeline",
         ":screen_trace",
         ":screen_trace_comp_pipeline",
         ":screen_trace_compact_comp_pipeline",

@@ -251,7 +251,9 @@ fn on_view_changed(
     event: On<ViewChanged>,
     bodies: Query<(Entity, &ChildOf), With<CharacterBody>>,
     mut commands: Commands,
+    mut reset_history: MessageWriter<dust_pbr::upscaler::ResetHistory>,
 ) {
+    reset_history.write(dust_pbr::upscaler::ResetHistory);
     match event.view {
         View::FirstPerson => {
             for (body, child_of) in &bodies {

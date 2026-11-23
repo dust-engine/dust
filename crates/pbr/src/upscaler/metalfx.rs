@@ -114,7 +114,7 @@ impl DenoisedScaler {
                 inputs.world_to_view.to_cols_array_2d(),
                 inputs.view_to_clip.to_cols_array_2d(),
             );
-            scaler.setShouldResetHistory(false);
+            scaler.setShouldResetHistory(inputs.reset_history);
             // Reverse-Z depth: 1 = near, 0 = far.
             scaler.setDepthReversed(true);
             scaler.encodeToCommandBuffer(encoder.buffer().mtl_command_buffer());

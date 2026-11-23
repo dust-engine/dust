@@ -165,6 +165,7 @@ impl Plugin for PbrRenderPlugin {
         app.init_resource::<JitterState>();
         app.init_resource::<RenderQualitySettings>();
         app.init_resource::<UpscalerSessionState>();
+        app.add_message::<upscaler::ResetHistory>();
         app.init_resource::<screenshot::Screenshots>();
         app.add_systems(
             PostUpdate,

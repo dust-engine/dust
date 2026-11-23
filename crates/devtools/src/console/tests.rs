@@ -290,6 +290,7 @@ fn complete_commands() {
     assert_eq!(tab("log --level w").0, "log --level warn ");
     assert_eq!(tab("log --level 'w").0, "log --level warn ");
     assert_eq!(tab("upscaler m").0, "upscaler metalfx ");
+    assert_eq!(tab("upscaler res").0, "upscaler reset-history ");
     assert_eq!(tab("help up").0, "help upscaler ");
 
     // Several extend the word by what they all start with.

@@ -1,0 +1,8 @@
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/reference_accumulate.spv",
+        entry_point: "main",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/reference_accumulate.playout.bin"),
+    disable_optimization: false,
+)
