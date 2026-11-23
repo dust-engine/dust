@@ -92,6 +92,15 @@ enum Command {
         #[arg(short, long, value_enum)]
         quality: Option<Quality>,
     },
+    /// Print whether the game's simulation is paused, or pause or resume it
+    ///
+    /// Pausing stops the game's virtual clock, so animation and physics hold
+    /// still while the game keeps rendering: the reference accumulator then
+    /// converges on a scene that would otherwise keep moving.
+    Time {
+        #[arg(value_enum)]
+        action: Option<TimeAction>,
+    },
     /// Remove all messages from the console tab, when typed there
     Clear,
 }
@@ -106,6 +115,13 @@ enum Upscaler {
     MetalFx,
     /// DLSS Ray Reconstruction, on NVIDIA GPUs
     Dlss,
+/// What the `time` command does to the game's virtual clock.
+#[derive(Clone, Copy, ValueEnum)]
+enum TimeAction {
+    /// Stop it
+    Pause,
+    /// Start it again
+    Resume,
 }
 
 impl From<Upscaler> for UpscalerBackend {
@@ -237,8 +253,30 @@ async fn execute(line: &str, cx: &AsyncApp) -> Result<Outcome, String> {
         Command::Upscaler { backend, quality } => {
             set_upscaler(backend.map(Into::into), quality.map(Into::into), cx).await
         }
+        Command::Time { action } => time(action, cx).await,
         Command::Clear => Ok(Outcome::Clear),
     }
+}
+/// Pauses or resumes the game's virtual clock as `action` says, and prints
+/// whether it's paused.
+async fn time(action: Option<TimeAction>, cx: &AsyncApp) -> Result<Outcome, String> {
+    let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
+    let paused = bevy
+        .run(move |world| {
+            let mut time = world.get_resource_mut::<Time<Virtual>>()?;
+            match action {
+                Some(TimeAction::Pause) => time.pause(),
+                Some(TimeAction::Resume) => time.unpause(),
+                None => {}
+            }
+            Some(time.is_paused())
+        })
+        .await
+        .ok_or(GAME_EXITED)?
+        .ok_or("error: the game has no virtual clock")?;
+    Ok(Outcome::Output(
+        if paused { "paused" } else { "running" }.to_owned(),
+    ))
 }
 
 /// Prints the upscaler backend picked, the one running, those the device

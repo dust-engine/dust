@@ -313,7 +313,9 @@ pub(crate) fn autoexposure_pass(
     mut uniform_ring_buffer: ResMut<UniformRingBuffer>,
     cameras: Query<&Camera>,
     hdr_target: Option<ResMut<HdrRenderTarget>>,
-    time: Res<Time>,
+    // Real time, not virtual, so the exposure keeps adapting while the
+    // simulation is paused (to let the reference accumulator converge).
+    time: Res<Time<Real>>,
     mut profiler: Option<ResMut<GpuProfiler>>,
 ) {
     let Ok(camera) = cameras.single() else {

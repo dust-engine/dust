@@ -279,6 +279,7 @@ fn complete_commands() {
             "frame",
             "screenshot",
             "upscaler",
+            "time",
             "clear",
             "help"
         ]
