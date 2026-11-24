@@ -430,6 +430,9 @@ public struct PbrPipelineParams {
     [Stages(STAGE_COMPUTE)]
     public RWStructuredBuffer<uint> compactedTraceArgs;
 
+    // The auto-exposure scale (autoexposure.glsl), 1x1.
+    [Stages(STAGE_COMPUTE)]
+    public RWTexture2D<float> exposureTexture;
 
     // Ray-length `t` from the camera origin to the surface stored at `position`.
     // The depth gbuffer holds reverse-infinite-Z hardware depth: `near /

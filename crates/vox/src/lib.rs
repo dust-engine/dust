@@ -294,6 +294,7 @@ pub struct VoxRenderState {
     shadow_pipeline: Handle<RayTracingPipelineLibrary>,
     primary_library_index: u16,
     shadow_library_index: u16,
+    /// The same in each of the path tracer's passes.
     path_tracer_library_index: u16,
 }
 
@@ -302,7 +303,7 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut pipeline_manager: ResMut<RtxPipelineManager>,
     pbr_render_state: Res<PbrRenderState>,
-    path_tracer: Res<PathTracer>,
+    mut path_tracer: ResMut<PathTracer>,
 ) {
     let primary_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_pbr.rtx.pipeline.bin");
@@ -314,10 +315,15 @@ fn setup(
     let shadow_library_index = pipeline_manager
         .add_library_for_pipeline(&pbr_render_state.shadow_pipeline, shadow_pipeline.clone());
 
-    let path_tracer_library_index = pipeline_manager.add_library_for_pipeline(
-        &path_tracer.pipeline,
-        asset_server.load("bazel://dust/crates/vox/shaders/vox_path_tracer.rtx.pipeline.bin"),
-    );
+    let library_indices = path_tracer.passes_mut().map(|pass| {
+        pipeline_manager.add_library_for_pipeline(
+            &pass.pipeline,
+            asset_server.load("bazel://dust/crates/vox/shaders/vox_path_tracer.rtx.pipeline.bin"),
+        )
+    });
+    // Every crate adds its libraries to all passes, so an index is the same in each.
+    let path_tracer_library_index = library_indices[0];
+    assert_eq!(library_indices, [path_tracer_library_index; 3]);
 
     commands.insert_resource(VoxRenderState {
         primary_pipeline,
@@ -363,6 +369,9 @@ fn write_sbt_entries(
     };
     let miss_index = shadow_sbt.push_miss(vox_render_state.shadow_library_index, 1, |_| {});
     assert_eq!(miss_index, 0); // Miss SBT index assumed to be 0 in the shader. If this assumption no longer holds true, update the shader.
+    // Only the passes that run this frame have a table. While path tracing is off,
+    // all of these are `None`.
+    let mut path_tracer_sbts = path_tracer.passes_mut().map(|pass| pass.sbt.as_mut());
     for (mut model, source) in models.iter_mut() {
         model.sbt_index = u32::MAX;
         // The TLAS traces the entity's BLAS, which lags the `VoxModel` while a rebuild is
@@ -400,7 +409,7 @@ fn write_sbt_entries(
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
-        if let Some(path_tracer_sbt) = path_tracer.sbt.as_mut() {
+        for path_tracer_sbt in path_tracer_sbts.iter_mut().flatten() {
             let path_tracer_sbt_index = path_tracer_sbt.push_hitgroup(
                 vox_render_state.path_tracer_library_index,
                 0,

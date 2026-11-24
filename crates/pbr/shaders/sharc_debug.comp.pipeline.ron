@@ -1,0 +1,9 @@
+// The radiance cache's debug views (sharc_debug.slang).
+ComputePipeline(
+    shader: (
+        path: "bazel://dust/crates/pbr/shaders/sharc_debug.spv",
+        entry_point: "main",
+    ),
+    layout: Path("bazel://dust/crates/pbr/shaders/sharc_debug.playout.bin"),
+    disable_optimization: false,
+)

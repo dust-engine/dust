@@ -1,0 +1,11 @@
+// As pbr.playout.ron, but pushing the radiance cache's constants to a compute
+// shader.
+PipelineLayout(
+    sets: [
+        Path("bazel://dust/crates/pbr/shaders/pbr.desc.bin"),
+    ],
+    push_constants: {
+        // The parameters of `main` (sharc_debug.slang).
+        Compute: (0, 96),
+    }
+)

@@ -160,3 +160,14 @@ new_git_repository(
     commit = "a291cc7d2cc642a51566f3dfd5376f635cd1b284",
     build_file = "//third_party:dlss.BUILD.bazel",
 )
+
+# -----------------------------------------------------------------------------
+# NVIDIA SHaRC: the headers of the path tracer's radiance cache (see
+# crates/pbr/shaders/sharc.slang).
+# -----------------------------------------------------------------------------
+new_git_repository(
+    name = "sharc",
+    remote = "https://github.com/NVIDIA-RTX/SHARC.git",
+    commit = "4e21b585c33c83d723ca9a1e11bbb1090d145793",  # v1.8.3
+    build_file = "//third_party:SHARC.BUILD.bazel",
+)

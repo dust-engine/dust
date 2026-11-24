@@ -3,6 +3,7 @@ pub mod hzb;
 pub mod path_tracer;
 pub mod screen_trace;
 pub mod screenshot;
+pub mod sharc;
 pub mod sky;
 pub mod tonemap;
 pub mod upscaler;
@@ -659,8 +660,8 @@ pub struct RenderQualitySettings {
     pub quality: UpscalerQualityMode,
     /// The denoising / upscaling backend.
     pub upscaler: UpscalerBackend,
-    /// Whether the reference path tracer ([`path_tracer`]) lights the scene,
-    /// instead of the shadow rays and the screen trace.
+    /// Whether the path tracer ([`path_tracer`]) lights the scene, instead of
+    /// the shadow rays and the screen trace.
     pub path_tracing: bool,
     /// Bounces the path tracer's paths take after the camera ray's hit; 0
     /// leaves only direct light.

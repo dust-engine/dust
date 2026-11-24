@@ -64,6 +64,13 @@ ron2bin(
 )
 
 ron2bin(
+    name = "pbr_desc",
+    src = "pbr.desc.ron",
+    out = "pbr.desc.bin",
+    type = "descriptor-set-layout",
+)
+
+ron2bin(
     name = "pbr_playout",
     src = "pbr.playout.ron",
     out = "pbr.playout.bin",
@@ -177,29 +184,124 @@ slang_shader(
     opts = ["-emit-ir"],
 )
 
+# The SDK returns false without setting an out parameter in two places.
+_SHARC_OPTS = [
+    "-warnings-disable",
+    "41018",
+]
+
+# path_tracer.slang's three permutations.
+[
+    slang_shader(
+        name = name,
+        srcs = ["path_tracer.slang"],
+        hdrs = [
+            "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+            ":path_tracer_module",
+            ":pbr_module",
+            ":random.slang",
+            ":sharc.slang",
+            "@sharc//:sharc_headers",
+        ],
+        out = name + ".spv",
+        profile = "lib_6_3",
+        target = "spirv",
+        defines = [
+            "SHARC_UPDATE=" + update,
+            "SHARC_QUERY=" + query,
+        ],
+        opts = [
+            "-O3",
+            "-matrix-layout-row-major",
+        ] + _SHARC_OPTS,
+    )
+    for name, update, query in [
+        ("path_tracer", "0", "0"),
+        ("path_tracer_sharc_update", "1", "0"),
+        ("path_tracer_sharc_query", "0", "1"),
+    ]
+]
+
+[
+    ron2bin(
+        name = name + "_rtx_pipeline",
+        src = name + ".rtx.pipeline.ron",
+        out = name + ".rtx.pipeline.bin",
+        type = "raytracing-pipeline",
+    )
+    for name in [
+        "path_tracer",
+        "path_tracer_sharc_update",
+        "path_tracer_sharc_query",
+    ]
+]
+
+# The radiance cache's resolve pass. Own layout, auto-derived from the shader's
+# push constants.
 slang_shader(
-    name = "path_tracer",
-    srcs = ["path_tracer.slang"],
+    name = "sharc_resolve",
+    srcs = ["sharc_resolve.slang"],
     hdrs = [
-        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
-        ":path_tracer_module",
-        ":pbr_module",
-        ":random.slang",
+        ":sharc.slang",
+        "@sharc//:sharc_headers",
     ],
-    out = "path_tracer.spv",
-    profile = "lib_6_3",
+    out = "sharc_resolve.spv",
+    profile = "cs_6_6",
     target = "spirv",
     opts = [
         "-O3",
         "-matrix-layout-row-major",
+    ] + _SHARC_OPTS,
+)
+
+slang_playout(
+    name = "sharc_resolve_layout",
+    srcs = ["sharc_resolve.slang"],
+    hdrs = [
+        ":sharc.slang",
+        "@sharc//:sharc_headers",
     ],
+    out = "sharc_resolve.playout.bin",
 )
 
 ron2bin(
-    name = "path_tracer_rtx_pipeline",
-    src = "path_tracer.rtx.pipeline.ron",
-    out = "path_tracer.rtx.pipeline.bin",
-    type = "raytracing-pipeline",
+    name = "sharc_resolve_comp_pipeline",
+    src = "sharc_resolve.comp.pipeline.ron",
+    out = "sharc_resolve.comp.pipeline.bin",
+    type = "compute-pipeline",
+)
+
+# The radiance cache's debug views.
+slang_shader(
+    name = "sharc_debug",
+    srcs = ["sharc_debug.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        ":pbr_module",
+        ":sharc.slang",
+        "@sharc//:sharc_headers",
+    ],
+    out = "sharc_debug.spv",
+    profile = "cs_6_6",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ] + _SHARC_OPTS,
+)
+
+ron2bin(
+    name = "sharc_debug_playout",
+    src = "sharc_debug.playout.ron",
+    out = "sharc_debug.playout.bin",
+    type = "pipeline-layout",
+)
+
+ron2bin(
+    name = "sharc_debug_comp_pipeline",
+    src = "sharc_debug.comp.pipeline.ron",
+    out = "sharc_debug.comp.pipeline.bin",
+    type = "compute-pipeline",
 )
 
 # The reference accumulator, the `Reference` upscaler backend: the running mean
@@ -280,12 +382,23 @@ filegroup(
     name = "runtime",
     srcs = [
         ":pbr",
+        ":pbr_desc",
         ":pbr_playout",
         ":pbr_rtx_pipeline",
         ":shadow",
         ":shadow_rtx_pipeline",
         ":path_tracer",
         ":path_tracer_rtx_pipeline",
+        ":path_tracer_sharc_update",
+        ":path_tracer_sharc_update_rtx_pipeline",
+        ":path_tracer_sharc_query",
+        ":path_tracer_sharc_query_rtx_pipeline",
+        ":sharc_resolve",
+        ":sharc_resolve_layout",
+        ":sharc_resolve_comp_pipeline",
+        ":sharc_debug",
+        ":sharc_debug_playout",
+        ":sharc_debug_comp_pipeline",
         ":hzb_build",
         ":hzb_build_layout",
         ":hzb_build_comp_pipeline",

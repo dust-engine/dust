@@ -1,0 +1,13 @@
+package(default_visibility = ["//visibility:public"])
+
+# SHaRC is header-only: HLSL that Slang compiles as part of the shaders that
+# include it.
+filegroup(
+    name = "sharc_headers",
+    srcs = [
+        "include/HashGridCommon.h",
+        "include/HashGridTypes.h",
+        "include/SharcCommon.h",
+        "include/SharcTypes.h",
+    ],
+)

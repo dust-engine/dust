@@ -11,6 +11,7 @@ use bevy::time::{Time, Virtual};
 use clap::error::ErrorKind;
 use clap::{Parser, Subcommand, ValueEnum};
 use dust_pbr::screenshot::{ScreenshotKind, Screenshots};
+use dust_pbr::sharc::{SharcSettings, SharcView};
 use dust_pbr::upscaler::reference::ReferenceAccumulator;
 use dust_pbr::upscaler::{AvailableUpscalers, ResetHistory, UpscalerBackend, UpscalerSessionState};
 use dust_pbr::{HdrRenderTarget, RenderQualitySettings, UpscalerQualityMode};
@@ -98,12 +99,13 @@ enum Command {
         #[command(subcommand)]
         command: Option<UpscalerCommand>,
     },
-    /// Print whether the reference path tracer lights the scene, and how many
-    /// bounces its paths take, or set them
+    /// Print whether the path tracer lights the scene, how many bounces its
+    /// paths take, and whether they end in the radiance cache, or set them
     ///
-    /// It replaces the hybrid renderer's lighting. Its paths are noisy; the
-    /// `reference` upscaler backend averages them. Setting it resets the
-    /// running backend's history.
+    /// It replaces the hybrid renderer's lighting. Without the cache it's the
+    /// reference: its paths are noisy, and the `reference` upscaler backend
+    /// averages them. Setting it, but for the debug view, resets the running
+    /// backend's history.
     PathTracer {
         /// Turn it on or off
         #[arg(value_enum)]
@@ -111,6 +113,13 @@ enum Command {
         /// Bounces after the camera ray's hit; 0 leaves only direct light
         #[arg(short, long)]
         bounces: Option<u32>,
+        /// Turn the radiance cache, SHaRC, on or off. Turning it on starts with
+        /// an empty cache
+        #[arg(long, value_enum)]
+        sharc: Option<Switch>,
+        /// Draw a debug view of the cache over the frame
+        #[arg(long, value_enum)]
+        sharc_view: Option<CacheView>,
     },
     /// Print whether the game's simulation is paused, or pause or resume it
     ///
@@ -154,6 +163,22 @@ enum UpscalerCommand {
 enum Switch {
     On,
     Off,
+}
+
+/// The [`SharcView`]s, as the `path-tracer` command names them.
+#[derive(Clone, Copy, ValueEnum)]
+enum CacheView {
+    /// None
+    Off,
+    /// The cell each pixel's surface is in, as a color
+    Grid,
+    /// What the cache holds for each pixel's surface
+    Radiance,
+    /// The entries of the hash map, green if taken
+    Occupancy,
+    /// Green where a path's first bounce ended in the cache or the sky, red
+    /// where it went on
+    Bounces,
 }
 
 /// What the `time` command does to the game's virtual clock.
@@ -301,7 +326,12 @@ async fn execute(line: &str, cx: &AsyncApp) -> Result<Outcome, String> {
         Command::Upscaler {
             backend, quality, ..
         } => set_upscaler(backend.map(Into::into), quality.map(Into::into), cx).await,
-        Command::PathTracer { state, bounces } => path_tracer(state, bounces, cx).await,
+        Command::PathTracer {
+            state,
+            bounces,
+            sharc,
+            sharc_view,
+        } => path_tracer(state, bounces, sharc, sharc_view, cx).await,
         Command::Time { action } => time(action, cx).await,
         Command::Clear => Ok(Outcome::Clear),
     }
@@ -317,15 +347,16 @@ async fn reset_history(cx: &AsyncApp) -> Result<Outcome, String> {
     Ok(Outcome::Nothing)
 }
 
-/// Sets whether the path tracer is on and its bounces, keeping each that's
-/// `None`, and prints them.
+/// Sets the path tracer's settings, keeping each that's `None`, and prints them.
 async fn path_tracer(
     state: Option<Switch>,
     bounces: Option<u32>,
+    sharc: Option<Switch>,
+    sharc_view: Option<CacheView>,
     cx: &AsyncApp,
 ) -> Result<Outcome, String> {
     let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
-    let settings = bevy
+    let (settings, cache) = bevy
         .run(move |world| {
             let mut settings = world.get_resource_mut::<RenderQualitySettings>()?;
             if let Some(state) = state {
@@ -335,18 +366,33 @@ async fn path_tracer(
                 settings.max_bounces = bounces;
             }
             let settings = *settings;
-            if state.is_some() || bounces.is_some() {
+            let mut cache = world.get_resource_mut::<SharcSettings>()?;
+            if let Some(sharc) = sharc {
+                cache.enabled = matches!(sharc, Switch::On);
+            }
+            if let Some(view) = sharc_view {
+                cache.view = match view {
+                    CacheView::Off => SharcView::Off,
+                    CacheView::Grid => SharcView::Grid,
+                    CacheView::Radiance => SharcView::Radiance,
+                    CacheView::Occupancy => SharcView::Occupancy,
+                    CacheView::Bounces => SharcView::Bounces,
+                };
+            }
+            let cache = *cache;
+            if state.is_some() || bounces.is_some() || sharc.is_some() {
                 world.write_message(ResetHistory);
             }
-            Some(settings)
+            Some((settings, cache))
         })
         .await
         .ok_or(GAME_EXITED)?
         .ok_or("error: the game has no path tracer")?;
     Ok(Outcome::Output(format!(
-        "{}, {} bounces",
+        "{}, {} bounces, SHaRC {}",
         if settings.path_tracing { "on" } else { "off" },
-        settings.max_bounces
+        settings.max_bounces,
+        if cache.enabled { "on" } else { "off" },
     )))
 }
 

@@ -1,0 +1,21 @@
+RayTracingPipeline(
+    stages: [
+        RayGen (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/path_tracer_sharc_query.spv",
+                entry_point: "main"
+            )
+        ),
+        Miss (
+            shader: (
+                path: "bazel://dust/crates/pbr/shaders/path_tracer_sharc_query.spv",
+                entry_point: "missShader",
+            )
+        ),
+    ],
+    // Every library in the pipeline has to give the same sizes.
+    max_ray_payload_size: 64,
+    max_hit_attribute_size: 4,
+
+    layout: Path("bazel://dust/crates/pbr/shaders/pbr.playout.bin"),
+)
