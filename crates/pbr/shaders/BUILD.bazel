@@ -169,6 +169,39 @@ ron2bin(
     type = "compute-pipeline",
 )
 
+# The payload the path tracer's hit groups fill in.
+slang_shader(
+    name = "path_tracer_module",
+    srcs = ["path_tracer_common.slang"],
+    out = "path_tracer_common.slang-module",
+    opts = ["-emit-ir"],
+)
+
+slang_shader(
+    name = "path_tracer",
+    srcs = ["path_tracer.slang"],
+    hdrs = [
+        "//crates/pbr/shaders/sky_atmosphere:sky_atmosphere_module",
+        ":path_tracer_module",
+        ":pbr_module",
+        ":random.slang",
+    ],
+    out = "path_tracer.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+    ],
+)
+
+ron2bin(
+    name = "path_tracer_rtx_pipeline",
+    src = "path_tracer.rtx.pipeline.ron",
+    out = "path_tracer.rtx.pipeline.bin",
+    type = "raytracing-pipeline",
+)
+
 # The reference accumulator, the `Reference` upscaler backend: the running mean
 # of every frame since the last reset. Own layout, auto-derived from the
 # shader's bindings.
@@ -251,6 +284,8 @@ filegroup(
         ":pbr_rtx_pipeline",
         ":shadow",
         ":shadow_rtx_pipeline",
+        ":path_tracer",
+        ":path_tracer_rtx_pipeline",
         ":hzb_build",
         ":hzb_build_layout",
         ":hzb_build_comp_pipeline",

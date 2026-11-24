@@ -87,8 +87,7 @@ pub(super) struct UpscalerPage {
 }
 
 /// Applies an edit of the [`RenderQualitySettings`] to the page's copy, and
-/// sends it, marking the settings changed only if the edit changed them: a
-/// change reallocates the render targets.
+/// sends it, marking the settings changed only if the edit changed them.
 fn settings(
     this: &mut UpscalerPage,
     cx: &mut Context<UpscalerPage>,

@@ -20,6 +20,7 @@ use bevy_pumicite::shader::RayTracingPipelineLibrary;
 use bevy_pumicite::{CreateDevice, DefaultTransferSet, SubmissionState};
 use bytemuck::{Pod, Zeroable};
 use dust_pbr::PbrRenderState;
+use dust_pbr::path_tracer::PathTracer;
 use dust_vdb::hierarchy;
 use pumicite::Allocator;
 use pumicite::ash::{VkResult, vk};
@@ -271,7 +272,12 @@ impl Plugin for VoxPlugin {
             .after(CreateDevice),
         );
 
-        app.add_systems(Startup, setup.after(dust_pbr::setup));
+        app.add_systems(
+            Startup,
+            setup
+                .after(dust_pbr::setup)
+                .after(dust_pbr::path_tracer::setup),
+        );
 
         app.add_systems(
             PostUpdate,
@@ -288,6 +294,7 @@ pub struct VoxRenderState {
     shadow_pipeline: Handle<RayTracingPipelineLibrary>,
     primary_library_index: u16,
     shadow_library_index: u16,
+    path_tracer_library_index: u16,
 }
 
 fn setup(
@@ -295,6 +302,7 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut pipeline_manager: ResMut<RtxPipelineManager>,
     pbr_render_state: Res<PbrRenderState>,
+    path_tracer: Res<PathTracer>,
 ) {
     let primary_pipeline: Handle<RayTracingPipelineLibrary> =
         asset_server.load("bazel://dust/crates/vox/shaders/vox_pbr.rtx.pipeline.bin");
@@ -306,11 +314,17 @@ fn setup(
     let shadow_library_index = pipeline_manager
         .add_library_for_pipeline(&pbr_render_state.shadow_pipeline, shadow_pipeline.clone());
 
+    let path_tracer_library_index = pipeline_manager.add_library_for_pipeline(
+        &path_tracer.pipeline,
+        asset_server.load("bazel://dust/crates/vox/shaders/vox_path_tracer.rtx.pipeline.bin"),
+    );
+
     commands.insert_resource(VoxRenderState {
         primary_pipeline,
         primary_library_index,
         shadow_pipeline,
         shadow_library_index,
+        path_tracer_library_index,
     });
 }
 
@@ -328,6 +342,7 @@ fn write_sbt_entries(
     mut models: Query<(&mut VoxModel, Option<&geometry::VoxModelBLASSource>)>,
     mut instances: Query<(Entity, &mut TLASInstance<dust_pbr::PbrInstanceData>), With<VoxInstance>>,
     mut pbr_state: ResMut<PbrRenderState>,
+    mut path_tracer: ResMut<PathTracer>,
     vox_render_state: Res<VoxRenderState>,
 
     geometry_assets: Res<Assets<VoxGeometry>>,
@@ -385,6 +400,16 @@ fn write_sbt_entries(
                 param_dst.copy_from_slice(bytemuck::bytes_of(&params));
             });
         assert_eq!(shadow_sbt_index, model.sbt_index);
+        if let Some(path_tracer_sbt) = path_tracer.sbt.as_mut() {
+            let path_tracer_sbt_index = path_tracer_sbt.push_hitgroup(
+                vox_render_state.path_tracer_library_index,
+                0,
+                |param_dst| {
+                    param_dst.copy_from_slice(bytemuck::bytes_of(&params));
+                },
+            );
+            assert_eq!(path_tracer_sbt_index, model.sbt_index);
+        }
     }
     for (entity, mut instance) in instances.iter_mut() {
         instance.disabled = true;

@@ -98,6 +98,20 @@ enum Command {
         #[command(subcommand)]
         command: Option<UpscalerCommand>,
     },
+    /// Print whether the reference path tracer lights the scene, and how many
+    /// bounces its paths take, or set them
+    ///
+    /// It replaces the hybrid renderer's lighting. Its paths are noisy; the
+    /// `reference` upscaler backend averages them. Setting it resets the
+    /// running backend's history.
+    PathTracer {
+        /// Turn it on or off
+        #[arg(value_enum)]
+        state: Option<Switch>,
+        /// Bounces after the camera ray's hit; 0 leaves only direct light
+        #[arg(short, long)]
+        bounces: Option<u32>,
+    },
     /// Print whether the game's simulation is paused, or pause or resume it
     ///
     /// Pausing stops the game's virtual clock, so animation and physics hold
@@ -134,6 +148,12 @@ enum UpscalerCommand {
     /// The reference accumulator then starts a new mean. The blit keeps no
     /// history.
     ResetHistory,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Switch {
+    On,
+    Off,
 }
 
 /// What the `time` command does to the game's virtual clock.
@@ -281,6 +301,7 @@ async fn execute(line: &str, cx: &AsyncApp) -> Result<Outcome, String> {
         Command::Upscaler {
             backend, quality, ..
         } => set_upscaler(backend.map(Into::into), quality.map(Into::into), cx).await,
+        Command::PathTracer { state, bounces } => path_tracer(state, bounces, cx).await,
         Command::Time { action } => time(action, cx).await,
         Command::Clear => Ok(Outcome::Clear),
     }
@@ -294,6 +315,39 @@ async fn reset_history(cx: &AsyncApp) -> Result<Outcome, String> {
         .ok_or(GAME_EXITED)?
         .ok_or(NO_UPSCALER)?;
     Ok(Outcome::Nothing)
+}
+
+/// Sets whether the path tracer is on and its bounces, keeping each that's
+/// `None`, and prints them.
+async fn path_tracer(
+    state: Option<Switch>,
+    bounces: Option<u32>,
+    cx: &AsyncApp,
+) -> Result<Outcome, String> {
+    let bevy = cx.update(|cx| cx.global::<BevyChannel>().clone());
+    let settings = bevy
+        .run(move |world| {
+            let mut settings = world.get_resource_mut::<RenderQualitySettings>()?;
+            if let Some(state) = state {
+                settings.path_tracing = matches!(state, Switch::On);
+            }
+            if let Some(bounces) = bounces {
+                settings.max_bounces = bounces;
+            }
+            let settings = *settings;
+            if state.is_some() || bounces.is_some() {
+                world.write_message(ResetHistory);
+            }
+            Some(settings)
+        })
+        .await
+        .ok_or(GAME_EXITED)?
+        .ok_or("error: the game has no path tracer")?;
+    Ok(Outcome::Output(format!(
+        "{}, {} bounces",
+        if settings.path_tracing { "on" } else { "off" },
+        settings.max_bounces
+    )))
 }
 
 /// Pauses or resumes the game's virtual clock as `action` says, and prints
@@ -382,9 +436,9 @@ async fn set_upscaler(
         let next = RenderQualitySettings {
             upscaler: backend.unwrap_or(settings.upscaler),
             quality: quality.unwrap_or(settings.quality),
+            ..*settings
         };
-        // Only a change, which reallocates the render targets, marks the
-        // settings changed.
+        // Only a change marks the settings changed.
         if *settings != next {
             *settings = next;
         }

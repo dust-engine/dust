@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod hzb;
+pub mod path_tracer;
 pub mod screen_trace;
 pub mod screenshot;
 pub mod sky;
@@ -203,10 +204,12 @@ impl Plugin for PbrRenderPlugin {
                     .after(ensure_hdr_target),
                 hzb::hzb_build_pass
                     .in_set(DefaultRenderSet)
+                    .in_set(HybridLightingSet)
                     .after(render)
                     .after(hzb::ensure_hzb_resources),
                 shadow_pass
                     .in_set(DefaultRenderSet)
+                    .in_set(HybridLightingSet)
                     .after(PbrRenderSet)
                     .after(render)
                     .after(create_sbt),
@@ -234,6 +237,7 @@ impl Plugin for PbrRenderPlugin {
 
         app.add_plugins(sky::SkyPlugin);
         app.add_plugins(screen_trace::ScreenTracePlugin);
+        app.add_plugins(path_tracer::PathTracerPlugin);
         app.configure_sets(
             PostUpdate,
             SkyAtmosphereLUTRenderSet
@@ -262,6 +266,11 @@ impl Plugin for PbrRenderPlugin {
         );
     }
 }
+
+/// The passes that light the surfaces the primary rays hit: the shadow rays,
+/// the HZB and the screen trace.
+#[derive(SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone)]
+pub(crate) struct HybridLightingSet;
 
 /// All the systems preparing for PBR raytracing render must go into this set.
 #[derive(SystemSet, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone)]
@@ -650,6 +659,12 @@ pub struct RenderQualitySettings {
     pub quality: UpscalerQualityMode,
     /// The denoising / upscaling backend.
     pub upscaler: UpscalerBackend,
+    /// Whether the reference path tracer ([`path_tracer`]) lights the scene,
+    /// instead of the shadow rays and the screen trace.
+    pub path_tracing: bool,
+    /// Bounces the path tracer's paths take after the camera ray's hit; 0
+    /// leaves only direct light.
+    pub max_bounces: u32,
 }
 
 impl Default for RenderQualitySettings {
@@ -671,6 +686,8 @@ impl Default for RenderQualitySettings {
         Self {
             quality: UpscalerQualityMode::default(),
             upscaler,
+            path_tracing: false,
+            max_bounces: 8,
         }
     }
 }
@@ -764,32 +781,6 @@ fn ensure_hdr_target(
     // acquired.
     let extent = swapchain.extent();
 
-    // Reallocate when the display resolution changes, the user picks a new
-    // quality mode or backend, or the backends become known. Each can alter
-    // the internal render resolution; otherwise the (relatively expensive)
-    // optimal-settings query is skipped entirely.
-    let needs_realloc = match hdr_target.as_ref() {
-        Some(hdr) => {
-            hdr.display_extent != extent
-                || quality_settings.is_changed()
-                || upscalers.as_ref().is_some_and(|u| u.is_added())
-        }
-        None => true,
-    };
-    if !needs_realloc {
-        let mut hdr = hdr_target.unwrap();
-        let hdr = &mut *hdr;
-        // Swap the states
-        std::mem::swap(&mut hdr.depth_state, &mut hdr.depth_prev_state);
-        // SAFETY: only image handles move between fields; nothing is freed.
-        let views = unsafe { hdr.view.get_mut_unchecked() };
-        std::mem::swap(&mut views.depth, &mut views.depth_prev);
-        hdr.history_valid = hdr.depth_written && hdr.denoised_written;
-        hdr.depth_written = false;
-        hdr.denoised_written = false;
-        return;
-    }
-
     // Resolve the internal render resolution for the active quality mode.
     // Native (no upscaling) for the backends that don't reconstruct (the blit
     // only filters); DLAA also yields render == display (1:1 factor).
@@ -811,6 +802,25 @@ fn ensure_hdr_target(
     } else {
         extent
     };
+
+    // Reallocate when either resolution changes.
+    let needs_realloc = match hdr_target.as_ref() {
+        Some(hdr) => hdr.display_extent != extent || hdr.render_extent != render_extent,
+        None => true,
+    };
+    if !needs_realloc {
+        let mut hdr = hdr_target.unwrap();
+        let hdr = &mut *hdr;
+        // Swap the states
+        std::mem::swap(&mut hdr.depth_state, &mut hdr.depth_prev_state);
+        // SAFETY: only image handles move between fields; nothing is freed.
+        let views = unsafe { hdr.view.get_mut_unchecked() };
+        std::mem::swap(&mut views.depth, &mut views.depth_prev);
+        hdr.history_valid = hdr.depth_written && hdr.denoised_written;
+        hdr.depth_written = false;
+        hdr.denoised_written = false;
+        return;
+    }
 
     // Shared image parameters; only `extent` (and per-image format/usage/flags)
     // differ between the display-resolution and render-resolution targets.

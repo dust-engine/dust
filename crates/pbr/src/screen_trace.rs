@@ -207,6 +207,7 @@ impl Plugin for ScreenTracePlugin {
                     .before(screen_trace_pass),
                 screen_trace_pass
                     .in_set(DefaultRenderSet)
+                    .in_set(crate::HybridLightingSet)
                     .after(crate::hzb::hzb_build_pass)
                     // Adds to the HDR output the shadow miss shader also
                     // read-modify-writes.
@@ -217,9 +218,11 @@ impl Plugin for ScreenTracePlugin {
                     .before(crate::tonemap::autoexposure_pass),
                 compact_traces_pass
                     .in_set(DefaultRenderSet)
+                    .in_set(crate::HybridLightingSet)
                     .after(screen_trace_pass),
                 screen_trace_debug_pass
                     .in_set(DefaultRenderSet)
+                    .in_set(crate::HybridLightingSet)
                     .after(crate::clear_debug_overlay)
                     .after(screen_trace_pass)
                     // Before the upscaler overwrites the denoised image, so

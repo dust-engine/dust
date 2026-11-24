@@ -87,6 +87,30 @@ ron2bin(
     type = "raytracing-pipeline"
 )
 
+slang_shader(
+    name = "vox_path_tracer",
+    srcs = ["vox_path_tracer.slang"],
+    hdrs = [
+        ":vox_common_module",
+        "//crates/pbr/shaders:path_tracer_module",
+    ],
+    out = "vox_path_tracer.spv",
+    profile = "lib_6_3",
+    target = "spirv",
+    opts = [
+        "-O3",
+        "-matrix-layout-row-major",
+        # A module's only entry point is otherwise named "main".
+        "-fvk-use-entrypoint-name",
+    ],
+)
+ron2bin(
+    name = "vox_path_tracer_pipeline_library",
+    src = "vox_path_tracer.rtx.pipeline.ron",
+    out = "vox_path_tracer.rtx.pipeline.bin",
+    type = "raytracing-pipeline"
+)
+
 filegroup(
     name = "runtime",
     srcs = [
@@ -96,6 +120,8 @@ filegroup(
         ":vox_pbr",
         ":vox_pbr_rtx_pipeline_library",
         ":vox_pbr_shadow_pipeline_library",
+        ":vox_path_tracer",
+        ":vox_path_tracer_pipeline_library",
         ":vox_shadow",
     ],
 )

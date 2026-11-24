@@ -279,6 +279,7 @@ fn complete_commands() {
             "frame",
             "screenshot",
             "upscaler",
+            "path-tracer",
             "time",
             "clear",
             "help"

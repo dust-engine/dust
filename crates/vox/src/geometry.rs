@@ -157,9 +157,11 @@ impl bevy_pumicite::rtx::blas::BLASBuilder for BlasBuilder {
         if model.enable_compaction {
             flags |= vk::BuildAccelerationStructureFlagsKHR::ALLOW_COMPACTION;
         }
-        if model.prefer_fast_build {
-            flags |= vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD;
-        }
+        flags |= if model.prefer_fast_build {
+            vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD
+        } else {
+            vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE
+        };
         flags
     }
 

@@ -5,6 +5,7 @@
 //! debug toggles.
 
 mod gpu;
+mod path_tracer;
 mod screen_trace;
 mod sky;
 mod upscaler;
@@ -49,6 +50,13 @@ impl GraphicsDebugView {
                 "Screen trace",
                 Some(
                     cx.new(|cx| screen_trace::ScreenTracePage::new(window, cx))
+                        .into(),
+                ),
+            ),
+            page(
+                "Path tracer",
+                Some(
+                    cx.new(|cx| path_tracer::PathTracerPage::new(window, cx))
                         .into(),
                 ),
             ),

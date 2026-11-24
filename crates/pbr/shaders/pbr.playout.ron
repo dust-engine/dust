@@ -40,9 +40,9 @@ PipelineLayout(
         ),
     ],
     push_constants: {
-        // A per-frame frameIndex sampling seed. Pushed by the shadow pass
-        // (ShadowPush, shadow.slang); the primary pipeline shares this layout
-        // but declares no push constants of its own.
-        RayGen: (0, 4),
+        // Pushed by the shadow pass (ShadowPush, shadow.slang) and the path
+        // tracer (PathTracerPush, path_tracer.slang); the primary pipeline
+        // shares this layout but declares no push constants of its own.
+        RayGen: (0, 8),
     }
 )
