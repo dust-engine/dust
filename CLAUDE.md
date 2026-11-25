@@ -11,6 +11,7 @@ Hybrid Bazel + Cargo build. Bazel is the primary build system.
 - **Cargo build:** `cargo build` (alternative, but Bazel handles shader compilation and asset bundling)
   - Build rust dependencies with bazel first
     `bazel build //third_party/ffx:ffx_lpm_cpu //crates/pbr/shaders:pbr_module_layout_macro //:runtime_assets`
+    On macOS, add `//third_party:kosmickrisp` to the same command.
 - **Run tests:** `cargo test` (vdb crate has dev-dependency on rand for tests)
 
 ### pumicite

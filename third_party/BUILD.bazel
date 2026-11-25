@@ -15,3 +15,27 @@ cc_library(
         "@vulkan_sdk//:vulkan_headers",
     ],
 )
+
+# The Vulkan SDK's loader and KosmicKrisp, for running the game outside the app bundle. The
+# game opens the loader by its path, and points the loader to KosmicKrisp by this manifest
+# (see `run()` in src/lib.rs). Under `bazel run` they're in runfiles, and under cargo in
+# bazel-bin/third_party/kosmickrisp. The SDK's manifest finds KosmicKrisp in the SDK's `lib`
+# directory, so the copy finds it next to itself instead.
+genrule(
+    name = "kosmickrisp",
+    srcs = [
+        "@vulkan_sdk//:sdk/lib/libvulkan.1.dylib",
+        "@vulkan_sdk//:sdk/lib/libvulkan_kosmickrisp.dylib",
+        "@vulkan_sdk//:sdk/share/vulkan/icd.d/libkosmickrisp_icd.json",
+    ],
+    outs = [
+        "kosmickrisp/libvulkan.1.dylib",
+        "kosmickrisp/libvulkan_kosmickrisp.dylib",
+        "kosmickrisp/libkosmickrisp_icd.json",
+    ],
+    cmd = " && ".join([
+        "cp $(location @vulkan_sdk//:sdk/lib/libvulkan.1.dylib) $(location @vulkan_sdk//:sdk/lib/libvulkan_kosmickrisp.dylib) $(RULEDIR)/kosmickrisp",
+        "sed 's#\"library_path\": \"[^\"]*\"#\"library_path\": \"./libvulkan_kosmickrisp.dylib\"#' $(location @vulkan_sdk//:sdk/share/vulkan/icd.d/libkosmickrisp_icd.json) > $(location kosmickrisp/libkosmickrisp_icd.json)",
+    ]),
+    target_compatible_with = ["@platforms//os:macos"],
+)

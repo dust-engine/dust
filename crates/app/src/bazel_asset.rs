@@ -61,7 +61,7 @@ impl BazelAssetReader {
     }
 
     /// Resolves a runfile-style path to a real file, or `None` if it doesn't exist.
-    fn resolve(&self, path: &Path) -> Option<PathBuf> {
+    pub fn resolve(&self, path: &Path) -> Option<PathBuf> {
         match self {
             Self::Runfiles(runfiles) => rlocation!(runfiles, path),
             Self::DevTree { workspace, bin } => {

@@ -1,4 +1,5 @@
 mod bazel_asset;
+pub use bazel_asset::BazelAssetReader;
 
 use bevy::prelude::*;
 

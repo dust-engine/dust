@@ -4,6 +4,10 @@ package(default_visibility = ["//visibility:public"])
 
 macos_application(
     name = "Dust",
+    additional_contents = {
+        ":kosmickrisp_icd": "Resources/vulkan/icd.d",
+        ":vulkan_libraries": "Frameworks",
+    },
     bundle_id = "rs.dust.viewer",
     bundle_name = "Dust",
     infoplists = ["Info.plist"],
@@ -52,4 +56,34 @@ macos_application(
         "UserNotifications",
     ],
     deps = ["//:dust_entry"],
+)
+
+# The manifest by which the Vulkan loader finds the Vulkan SDK's KosmicKrisp in the bundle,
+# where it's in `Contents/Frameworks`. The loader looks for manifests in
+# `Contents/Resources/vulkan/icd.d`, and finds the library by its path relative to the
+# manifest.
+genrule(
+    name = "kosmickrisp_icd",
+    srcs = ["@vulkan_sdk//:sdk/share/vulkan/icd.d/libkosmickrisp_icd.json"],
+    outs = ["libkosmickrisp_icd.json"],
+    cmd = "sed 's#\"library_path\": \"[^\"]*\"#\"library_path\": \"../../../Frameworks/libvulkan_kosmickrisp.dylib\"#' $< > $@",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The Vulkan loader and KosmicKrisp. The game doesn't link with them in the bundle, so
+# they're copied into it. pumicite opens the loader by this name. They're copied into this
+# package first because `additional_contents` keeps a file's path in its package, which
+# for the SDK's files would put them in `Contents/Frameworks/sdk/lib`.
+genrule(
+    name = "vulkan_libraries",
+    srcs = [
+        "@vulkan_sdk//:sdk/lib/libvulkan.dylib",
+        "@vulkan_sdk//:sdk/lib/libvulkan_kosmickrisp.dylib",
+    ],
+    outs = [
+        "libvulkan.dylib",
+        "libvulkan_kosmickrisp.dylib",
+    ],
+    cmd = "cp $(SRCS) $(RULEDIR)",
+    target_compatible_with = ["@platforms//os:macos"],
 )

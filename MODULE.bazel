@@ -12,7 +12,7 @@ bazel_dep(name = "rules_cc", version = "0.2.20")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_vulkan", version = "0.7.0")
 
-VULKAN_SDK_VERSION = "1.4.341.1"
+VULKAN_SDK_VERSION = "1.4.363.1"
 
 vulkan_sdk = use_extension("@rules_vulkan//vulkan:extensions.bzl", "vulkan_sdk")
 
@@ -24,7 +24,7 @@ register_toolchains("@vulkan_sdk//:all")
 git_override(
     module_name = "rules_vulkan",
     remote = "https://github.com/mxpv/rules_vulkan.git",
-    commit = "91b9e9a26615000f86322c2798f0e06ecf11219a",
+    commit = "66e7cb8f2adce11355281fb64b9d3e7a538dc2ec",
 )
 
 # -----------------------------------------------------------------------------
@@ -130,7 +130,7 @@ use_repo(crate, "crates")
 crate.spec(
     package = "pumicite_cli",
     git = "https://github.com/dust-engine/pumicite.git",
-    rev = "838245759fd41d1d517a51503f60a3c6b8f2151f",
+    rev = "05326dd79e5609f57353a4c08fa9ffb836484db7",
     repositories = ["bindeps"],
 )
 crate.annotation(

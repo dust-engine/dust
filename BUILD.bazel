@@ -52,12 +52,7 @@ rust_library(
         "//crates/character:dust_character",
         "//crates/ui:dust_ui",
         "//crates/input:dust_input",
-    ] + select({
-        # macOS has no system Vulkan loader; link the SDK's so ash's runtime
-        # dlopen("libvulkan.dylib") resolves to the bundled, rpath-staged loader.
-        "@platforms//os:macos": ["@vulkan_sdk//:vulkan"],
-        "//conditions:default": [],
-    }),
+    ],
     rustc_env_files = [":cargo_toml_env_vars"],
     aliases = aliases(),
 )
@@ -69,7 +64,16 @@ rust_binary(
     srcs = ["src/main.rs"],
     edition = "2024",
     deps = [":dust_lib"],
-    data = [":runtime_assets"],
+    data = [":runtime_assets"] + select({
+        # The Vulkan SDK's loader and KosmicKrisp, which `run()` in src/lib.rs has the game
+        # use. The app bundle (//apple:Dust) has its own copies.
+        "@platforms//os:macos": [
+            "//third_party:kosmickrisp/libkosmickrisp_icd.json",
+            "//third_party:kosmickrisp/libvulkan.1.dylib",
+            "//third_party:kosmickrisp/libvulkan_kosmickrisp.dylib",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 rust_static_library(

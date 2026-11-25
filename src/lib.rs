@@ -61,6 +61,42 @@ struct RainbowDemo {
 /// one. The Bevy app runs on a thread of its own, and the UI on this one, the
 /// main thread.
 pub fn run() {
+    // macOS has no Vulkan loader or driver of its own, so the game uses the Vulkan SDK's
+    // loader and KosmicKrisp. In the app bundle, we open the loader with dlopen, which finds
+    // it in `Contents/Frameworks` by the executable's rpath. The loader then finds
+    // KosmicKrisp by its manifest in `Contents/Resources/vulkan`. Under `bazel run` or cargo,
+    // both are in runfiles or bazel-bin, where neither dlopen nor the loader looks. So we open
+    // the loader by its path, and point it to the manifest.
+    #[cfg(target_os = "macos")]
+    let loader = match dust_app::BazelAssetReader::new() {
+        // SAFETY: the library that dlopen finds by the Vulkan loader's name is taken to be
+        // one, which is safe to load.
+        dust_app::BazelAssetReader::Bundle { .. } => unsafe { pumicite::ash::Entry::load() },
+        assets => {
+            // VK_DRIVER_FILES makes the loader use only KosmicKrisp, and not a driver installed
+            // on the system. If it's set already, or its old name VK_ICD_FILENAMES is, it names
+            // the driver to use instead, so we leave it.
+            if std::env::var_os("VK_DRIVER_FILES").is_none()
+                && std::env::var_os("VK_ICD_FILENAMES").is_none()
+            {
+                let driver = assets
+                    .resolve("dust/third_party/kosmickrisp/libkosmickrisp_icd.json".as_ref())
+                    .unwrap();
+                // SAFETY: no other thread has been started that could read the environment.
+                unsafe { std::env::set_var("VK_DRIVER_FILES", driver) };
+            }
+            let loader = assets
+                .resolve("dust/third_party/kosmickrisp/libvulkan.1.dylib".as_ref())
+                .unwrap();
+            // SAFETY: the file is the Vulkan SDK's loader, which is safe to load.
+            unsafe { pumicite::ash::Entry::load_from(loader) }
+        }
+    }
+    .unwrap();
+    // SAFETY: the library that dlopen finds by the Vulkan loader's name is taken to be one,
+    // which is safe to load.
+    #[cfg(not(target_os = "macos"))]
+    let loader = unsafe { pumicite::ash::Entry::load() }.unwrap();
     let console_log = init_logging();
     gpui_platform::application()
         .with_assets(gpui_kit_assets::Assets)
@@ -80,7 +116,9 @@ pub fn run() {
                 ..default()
             };
             cx.open_window(window_options, |window, cx| {
-                let game = cx.new(|cx| dust_ui::BevyView::new(build_app, window, cx));
+                let game = cx.new(|cx| {
+                    dust_ui::BevyView::new(move |app| build_app(app, loader), window, cx)
+                });
                 // The app quits once the game has exited. Closing the window asks
                 // it to, and leaves the window open until then.
                 cx.subscribe(&game, |_, _: &dust_ui::BevyExited, cx| cx.quit())
@@ -141,7 +179,11 @@ fn init_logging() -> dust_devtools::ConsoleLog {
     console_log
 }
 
-fn build_app(app: &mut bevy::app::App) {
+fn build_app(app: &mut bevy::app::App, loader: pumicite::ash::Entry) {
+    app.insert_resource(pumicite::instance::InstanceBuilder::new(
+        std::sync::Arc::new(loader),
+    ));
+
     app.add_plugins(dust_app::DustApp)
         // Without `LogPlugin`: `run` has installed the global subscriber.
         .add_plugins(bevy::DefaultPlugins)
