@@ -64,9 +64,10 @@ pub fn run() {
     // macOS has no Vulkan loader or driver of its own, so the game uses the Vulkan SDK's
     // loader and KosmicKrisp. In the app bundle, we open the loader with dlopen, which finds
     // it in `Contents/Frameworks` by the executable's rpath. The loader then finds
-    // KosmicKrisp by its manifest in `Contents/Resources/vulkan`. Under `bazel run` or cargo,
-    // both are in runfiles or bazel-bin, where neither dlopen nor the loader looks. So we open
-    // the loader by its path, and point it to the manifest.
+    // KosmicKrisp and our Vulkan layer by their manifests in `Contents/Resources/vulkan`.
+    // Under `bazel run` or cargo, all of them are in runfiles or bazel-bin, where neither
+    // dlopen nor the loader looks. So we open the loader by its path, and point it to the
+    // manifests.
     #[cfg(target_os = "macos")]
     let loader = match dust_app::BazelAssetReader::new() {
         // SAFETY: the library that dlopen finds by the Vulkan loader's name is taken to be
@@ -85,6 +86,22 @@ pub fn run() {
                 // SAFETY: no other thread has been started that could read the environment.
                 unsafe { std::env::set_var("VK_DRIVER_FILES", driver) };
             }
+            // `build_app` enables our layer, so we add its directory to VK_ADD_LAYER_PATH. But
+            // if VK_LAYER_PATH is set, as it may be to use the validation layers, the loader
+            // only searches that, so then we add it there.
+            let layer = assets
+                .resolve("dust/layers/metal_objects/VkLayer_dust_metal_objects.json".as_ref())
+                .unwrap();
+            let variable = match std::env::var_os("VK_LAYER_PATH") {
+                Some(_) => "VK_LAYER_PATH",
+                None => "VK_ADD_LAYER_PATH",
+            };
+            let others = std::env::var_os(variable).unwrap_or_default();
+            let directories = std::iter::once(layer.parent().unwrap().to_owned())
+                .chain(std::env::split_paths(&others));
+            // SAFETY: no other thread has been started that could read the environment.
+            unsafe { std::env::set_var(variable, std::env::join_paths(directories).unwrap()) };
+
             let loader = assets
                 .resolve("dust/third_party/kosmickrisp/libvulkan.1.dylib".as_ref())
                 .unwrap();
@@ -183,6 +200,10 @@ fn build_app(app: &mut bevy::app::App, loader: pumicite::ash::Entry) {
     app.insert_resource(pumicite::instance::InstanceBuilder::new(
         std::sync::Arc::new(loader),
     ));
+    // The Vulkan SDK's KosmicKrisp doesn't have VK_EXT_metal_objects, so a layer implements
+    // it.
+    #[cfg(target_os = "macos")]
+    bevy_pumicite::PumiciteApp::add_instance_layer(app, c"VK_LAYER_DUST_metal_objects").unwrap();
 
     app.add_plugins(dust_app::DustApp)
         // Without `LogPlugin`: `run` has installed the global subscriber.

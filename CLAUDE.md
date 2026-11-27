@@ -68,6 +68,10 @@ To see the game, `screenshot .claude/shot.png` saves its next frame, tone-mapped
 
 - **`src/main.rs`** — Application entry point.
 
+### Vulkan Layers
+
+- **`layers/metal_objects/`** (`VK_LAYER_DUST_metal_objects`) — Implements `VK_EXT_metal_objects`, which the Vulkan SDK's KosmicKrisp doesn't have, by reading (and, to import a texture, writing) the driver's own structs. The byte offsets into them are only valid for one build of the driver, so the layer looks them up by `driverUUID` and doesn't offer the extension on a build it doesn't know. After changing `VULKAN_SDK_VERSION`, run `bazel run //layers/metal_objects:find_offsets`, add its output to `kDrivers` in `metal_objects.cc`, and run `bazel test //layers/metal_objects:metal_objects_test`. The layer is a runtime asset. In `Dust.app` it sits in `Contents/Resources/vulkan/explicit_layer.d`, where the loader looks; under `bazel run` or cargo, `run()` in `src/lib.rs` points the loader to it. `build_app` enables it.
+
 ### Rendering Pipeline
 
 1. PBR ray-tracing pass → HDR output + G-buffers (albedo, normal, depth)

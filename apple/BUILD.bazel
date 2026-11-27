@@ -7,6 +7,7 @@ macos_application(
     additional_contents = {
         ":kosmickrisp_icd": "Resources/vulkan/icd.d",
         ":vulkan_libraries": "Frameworks",
+        "//layers/metal_objects:runtime": "Resources/vulkan/explicit_layer.d",
     },
     bundle_id = "rs.dust.viewer",
     bundle_name = "Dust",

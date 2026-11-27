@@ -1,0 +1,82 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
+package(default_visibility = ["//visibility:public"])
+
+_MACOS = ["@platforms//os:macos"]
+
+cc_binary(
+    name = "libVkLayer_dust_metal_objects.dylib",
+    srcs = ["metal_objects.cc"],
+    copts = [
+        "-std=c++20",
+        "-fvisibility=hidden",
+    ],
+    linkopts = [
+        "-framework",
+        "CoreFoundation",
+        "-lobjc",
+    ],
+    linkshared = True,
+    target_compatible_with = _MACOS,
+    deps = ["@vulkan_sdk//:vulkan_headers"],
+)
+
+# The manifest names the library by its path relative to the manifest, so it's built into
+# the library's directory.
+genrule(
+    name = "manifest",
+    srcs = ["manifest.json"],
+    outs = ["VkLayer_dust_metal_objects.json"],
+    cmd = "cp $< $@",
+    target_compatible_with = _MACOS,
+)
+
+filegroup(
+    name = "runtime",
+    srcs = [
+        ":libVkLayer_dust_metal_objects.dylib",
+        ":manifest",
+    ],
+    target_compatible_with = _MACOS,
+)
+
+objc_library(
+    name = "find_offsets_lib",
+    testonly = True,
+    copts = ["-std=c++20"],
+    non_arc_srcs = ["find_offsets.mm"],
+    sdk_frameworks = ["Metal"],
+    target_compatible_with = _MACOS,
+    deps = ["@vulkan_sdk//:vulkan"],
+)
+
+cc_binary(
+    name = "find_offsets",
+    testonly = True,
+    target_compatible_with = _MACOS,
+    deps = [":find_offsets_lib"],
+)
+
+objc_library(
+    name = "metal_objects_test_lib",
+    testonly = True,
+    copts = ["-std=c++20"],
+    non_arc_srcs = ["metal_objects_test.mm"],
+    sdk_frameworks = [
+        "IOSurface",
+        "Metal",
+    ],
+    target_compatible_with = _MACOS,
+    deps = ["@vulkan_sdk//:vulkan"],
+)
+
+cc_test(
+    name = "metal_objects_test",
+    size = "small",
+    data = [":runtime"],
+    env = {"VK_ADD_LAYER_PATH": package_name()},
+    target_compatible_with = _MACOS,
+    deps = [":metal_objects_test_lib"],
+)

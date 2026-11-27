@@ -1,0 +1,18 @@
+{
+    "file_format_version": "1.2.0",
+    "layer": {
+        "name": "VK_LAYER_DUST_metal_objects",
+        "type": "GLOBAL",
+        "library_path": "./libVkLayer_dust_metal_objects.dylib",
+        "api_version": "1.4.363",
+        "implementation_version": "1",
+        "description": "VK_EXT_metal_objects for KosmicKrisp",
+        "device_extensions": [
+            {
+                "name": "VK_EXT_metal_objects",
+                "spec_version": "2",
+                "entrypoints": ["vkExportMetalObjectsEXT"]
+            }
+        ]
+    }
+}

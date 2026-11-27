@@ -12,8 +12,9 @@ filegroup(
         "//crates/pbr/shaders/sky_atmosphere:runtime",
         "//crates/vox/shaders:runtime",
     ] + select({
+        # The Vulkan layer that src/lib.rs enables.
+        "@platforms//os:macos": ["//layers/metal_objects:runtime"],
         # The DLSS Ray Reconstruction runtime library NGX loads (Windows/Linux).
-        "@platforms//os:macos": [],
         "//conditions:default": ["@dlss//:dlssd_runtime"],
     }),
 )
